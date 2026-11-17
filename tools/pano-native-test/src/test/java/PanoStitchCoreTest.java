@@ -582,4 +582,285 @@ public class PanoStitchCoreTest {
         try { c.run(p -> { if (p > .1) c.cancel(); }); } catch (PanoStitchCore.Cancelled e) { got = true; }
         assertTrue(got, "cancel throws Cancelled");
     }
+    /* ---------------------------------------------------------------- stage 21e: parallax + nadir frame ---------------------------------------------------------------- */
+
+    static double[] dirOf(double yaw, double pitch) { return new double[]{Math.cos(pitch * D) * Math.sin(yaw * D), Math.cos(pitch * D) * Math.cos(yaw * D), Math.sin(pitch * D)}; }
+
+    /** a near textured board (BW x BH, distance BD, facing the origin) in direction (yaw, 0); the background stays at infinity */
+    static final class Board {
+        double yaw, BD = 1.2, BW = .34, BH = .26; // about 16 x 12 degrees (smaller than the overlap + one frame)
+        Mat tex;      // texture, BGR
+        double[] P0, nrm, eU, eV;
+        Board(double yaw, long seed) {
+            this.yaw = yaw;
+            double[] d = dirOf(yaw, 0);
+            P0 = new double[]{d[0] * BD, d[1] * BD, d[2] * BD};
+            nrm = new double[]{-d[0], -d[1], -d[2]};
+            eU = new double[]{Math.cos(yaw * D), -Math.sin(yaw * D), 0};
+            eV = new double[]{0, 0, 1};
+            Random r = new Random(seed);
+            tex = new Mat(380, 550, CvType.CV_8UC3, new Scalar(225, 225, 230));
+            for (int k = 0; k < 70; k++) {
+                int x = r.nextInt(550), y = r.nextInt(380);
+                Imgproc.rectangle(tex, new Point(x, y), new Point(x + 15 + r.nextInt(90), y + 10 + r.nextInt(60)), col(r, 20, 200), -1);
+            }
+            for (int k = 0; k < 8; k++) Imgproc.line(tex, new Point(r.nextInt(550), 0), new Point(r.nextInt(550), 379), col(r, 10, 60), 4);
+            Imgproc.rectangle(tex, new Point(0, 0), new Point(549, 379), new Scalar(20, 20, 20), 8);
+        }
+        /** BGR of the board hit by the ray c + t dd (t > 0), or null */
+        double[] hit(double[] c, double[] dd, byte[] tx) {
+            double den = nrm[0] * dd[0] + nrm[1] * dd[1] + nrm[2] * dd[2];
+            if (den >= -1e-9) return null;
+            double t = (nrm[0] * (P0[0] - c[0]) + nrm[1] * (P0[1] - c[1]) + nrm[2] * (P0[2] - c[2])) / den;
+            if (t <= 0) return null;
+            double hx = c[0] + t * dd[0] - P0[0], hy = c[1] + t * dd[1] - P0[1], hz = c[2] + t * dd[2] - P0[2];
+            double a = eU[0] * hx + eU[1] * hy + eU[2] * hz, b = eV[0] * hx + eV[1] * hy + eV[2] * hz;
+            if (Math.abs(a) > BW / 2 || Math.abs(b) > BH / 2) return null;
+            int u = (int) Math.min(549, (a / BW + .5) * 550), v = (int) Math.min(379, (.5 - b / BH) * 380), k = (v * 550 + u) * 3;
+            return new double[]{tx[k] & 255, tx[k + 1] & 255, tx[k + 2] & 255};
+        }
+    }
+
+    /** frame seen from camera centre c (true pose m) with the board in front of the background */
+    static Mat renderBoard(double[] m, double[] c, Board bd, int w, int h) {
+        Mat img = render(m, FOV_TRUE, w, h);
+        double f = (Math.max(w, h) / 2.0) / Math.tan(FOV_TRUE * D / 2);
+        byte[] px = new byte[w * h * 3], tx = new byte[550 * 380 * 3];
+        img.get(0, 0, px);
+        bd.tex.get(0, 0, tx);
+        for (int v = 0; v < h; v++) for (int u = 0; u < w; u++) {
+            double[] col = bd.hit(c, pixDir(m, u + .5, v + .5, f, w, h), tx);
+            if (col == null) continue;
+            int k = (v * w + u) * 3;
+            px[k] = (byte) col[0]; px[k + 1] = (byte) col[1]; px[k + 2] = (byte) col[2];
+        }
+        img.put(0, 0, px);
+        return img;
+    }
+
+    static PanoStitchCore.Result stitchOpt(Scene s, int W, PanoStitchCore.Options o, String[] roles) {
+        o.W = W; o.fovL = FOV_GIVEN; o.yawRef = s.yawRef;
+        PanoStitchCore c = new PanoStitchCore(s.n, o);
+        for (int i = 0; i < s.n; i++) c.setFrame(i, s.jpeg[i], q(s.Rs[i]), roles == null ? null : roles[i]);
+        return c.run(null);
+    }
+
+    /** ghost metric in the board window vs the board as seen from ONE camera centre (best camera, best shift up to +-2.5 degrees):
+     *  {grey level ZNCC, fraction of 'wrong' pixels (|difference| > 40 grey levels after a mean / contrast fit)}. A clean single-source
+     *  result has few wrong pixels; doubled / broken edges at a seam inside the board give many */
+    static double[] boardScore(Mat pano, double yawRef, double[] G, Board bd, double[][] cs, double[][] Rt) {
+        int W = pano.cols(), H = pano.rows();
+        // window: directions whose ray from the origin hits the board scaled by 1.25
+        int x0 = W, x1 = -1, y0 = H, y1 = -1;
+        byte[] tx = new byte[550 * 380 * 3];
+        bd.tex.get(0, 0, tx);
+        Board big = new Board(bd.yaw, 1);
+        big.BW = bd.BW * 1.25; big.BH = bd.BH * 1.25;
+        double[] O = {0, 0, 0};
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            double[] d = PanoStitchCore.eqDir(x, y, W, H, yawRef);
+            double[] g = {G[0] * d[0] + G[1] * d[1] + G[2] * d[2], G[3] * d[0] + G[4] * d[1] + G[5] * d[2], G[6] * d[0] + G[7] * d[1] + G[8] * d[2]};
+            if (big.hit(O, g, tx) != null) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+        }
+        big.tex.release();
+        int S = (int) Math.round(W * 2.5 / 360), ww = x1 - x0 + 1, hh = y1 - y0 + 1, WW = ww + 2 * S, HH = hh + 2 * S;
+        byte[] pp = new byte[W * H * 3];
+        pano.get(0, 0, pp);
+        double[] a = new double[ww * hh];
+        double ma = 0;
+        for (int y = 0; y < hh; y++) for (int x = 0; x < ww; x++) {
+            int k = ((y0 + y) * W + x0 + x) * 3;
+            a[y * ww + x] = .114 * (pp[k] & 255) + .587 * (pp[k + 1] & 255) + .299 * (pp[k + 2] & 255);
+            ma += a[y * ww + x];
+        }
+        a = box(a, ww, hh, 2); // edges 1 pixel off (resampling) are not 'wrong'
+        ma = 0;
+        for (double x : a) ma += x;
+        ma /= a.length;
+        double va = 0;
+        for (int k = 0; k < a.length; k++) { a[k] -= ma; va += a[k] * a[k]; }
+        byte[] gp = new byte[gt.cols() * gt.rows() * 3];
+        gt.get(0, 0, gp);
+        double best = -1, bad = 1, sa = Math.sqrt(va / a.length);
+        for (int ci = 0; ci < cs.length; ci++) {
+            // only cameras that see the board centre
+            double[] pc = PanoStitchCore.project(Rt[ci], dirOf(bd.yaw, 0), FOV_TRUE, FW, FH);
+            if (pc == null || pc[0] < 0 || pc[1] < 0 || pc[0] > FW || pc[1] > FH) continue;
+            double[] v = new double[WW * HH];
+            for (int y = 0; y < HH; y++) for (int x = 0; x < WW; x++) {
+                double[] d = PanoStitchCore.eqDir(x0 - S + x, Math.max(0, Math.min(H - 1, y0 - S + y)), W, H, yawRef);
+                double[] g = {G[0] * d[0] + G[1] * d[1] + G[2] * d[2], G[3] * d[0] + G[4] * d[1] + G[5] * d[2], G[6] * d[0] + G[7] * d[1] + G[8] * d[2]};
+                double[] col = bd.hit(cs[ci], g, tx);
+                if (col == null) {
+                    double lon = Math.atan2(g[0], g[1]) / D, lat = Math.asin(Math.max(-1, Math.min(1, g[2]))) / D;
+                    int gx = Math.floorMod((int) ((lon / 360 + .5) * gt.cols()), gt.cols()), gy = Math.max(0, Math.min(gt.rows() - 1, (int) ((.5 - lat / 180) * gt.rows())));
+                    int k = (gy * gt.cols() + gx) * 3;
+                    col = new double[]{gp[k] & 255, gp[k + 1] & 255, gp[k + 2] & 255};
+                }
+                v[y * WW + x] = .114 * col[0] + .587 * col[1] + .299 * col[2];
+            }
+            v = box(v, WW, HH, 2);
+            for (int sy = -S; sy <= S; sy += 1) for (int sx = -S; sx <= S; sx += 1) {
+                double sb = 0, sb2 = 0, sab = 0;
+                for (int y = 0; y < hh; y++) for (int x = 0; x < ww; x++) {
+                    double b = v[(y + S + sy) * WW + x + S + sx];
+                    sb += b; sb2 += b * b; sab += a[y * ww + x] * b;
+                }
+                double vb = sb2 - sb * sb / a.length, z = vb <= 0 ? 0 : sab / Math.sqrt(va * vb);
+                best = Math.max(best, z);
+                if (z < .5) continue;
+                double mb = sb / a.length, k = Math.sqrt(Math.max(1e-9, vb / a.length)) / Math.max(1e-9, sa);
+                int nb = 0;
+                for (int y = 0; y < hh; y++) for (int x = 0; x < ww; x++) {
+                    double e = a[y * ww + x] * k + mb - v[(y + S + sy) * WW + x + S + sx];
+                    if (Math.abs(e) > 40) nb++;
+                }
+                bad = Math.min(bad, nb / (double) a.length);
+            }
+        }
+        return new double[]{best, bad};
+    }
+
+    /** box blur of radius r (clamped borders) */
+    static double[] box(double[] a, int w, int h, int r) {
+        double[] t = new double[a.length], o = new double[a.length];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+            double s = 0; int c = 0;
+            for (int k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k++) { s += a[y * w + k]; c++; }
+            t[y * w + x] = s / c;
+        }
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+            double s = 0; int c = 0;
+            for (int k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++) { s += t[k * w + x]; c++; }
+            o[y * w + x] = s / c;
+        }
+        return o;
+    }
+
+    /** 21e: a near board, camera centres moved by up to 4 cm per frame (parallax up to ~4 degrees between two frames at 1.2 m): with
+     *  smart seams + mesh warp + ghost removal the board looks like ONE view of it (no doubled edges), clearly better than before */
+    @Test
+    void parallaxGhostsRemoved() {
+        Scene s = scene(17, 0, 2, null);
+        Random r = new Random(99);
+        // the board sits on the border between two horizon frames (frames 0 and 1 of the horizon row), a bit towards frame 1
+        double y0 = Math.atan2(-s.Rt[0][2], -s.Rt[0][5]) / D, y1 = Math.atan2(-s.Rt[1][2], -s.Rt[1][5]) / D;
+        Board bd = new Board(y0 + wrap180(y1 - y0) * .6, 5);
+        double[][] cs = new double[s.n][];
+        for (int i = 0; i < s.n; i++) {
+            double ax = r.nextGaussian(), ay = r.nextGaussian(), az = r.nextGaussian() * .3, nn = Math.sqrt(ax * ax + ay * ay + az * az), L = .025 + .015 * r.nextDouble();
+            cs[i] = new double[]{ax / nn * L, ay / nn * L, az / nn * L};
+            Mat img = renderBoard(s.Rt[i], cs[i], bd, FW, FH);
+            Mat fl = new Mat();
+            img.convertTo(fl, CvType.CV_32FC3);
+            Core.multiply(fl, new Scalar(s.gain[i][0], s.gain[i][1], s.gain[i][2]), fl);
+            fl.convertTo(img, CvType.CV_8UC3);
+            s.jpeg[i] = jpg(img, 92);
+            img.release(); fl.release();
+        }
+        PanoStitchCore.Options off = new PanoStitchCore.Options();
+        off.smartSeams = false; off.meshWarp = false; off.deghost = false;
+        long t = System.currentTimeMillis();
+        PanoStitchCore.Result r0 = stitchOpt(s, 2048, off, null);
+        long ms0 = System.currentTimeMillis() - t;
+        t = System.currentTimeMillis();
+        PanoStitchCore.Result r1 = stitchOpt(s, 2048, new PanoStitchCore.Options(), null);
+        long ms1 = System.currentTimeMillis() - t;
+        double[] G0 = gauge(mats(r0), s.Rt, null), G1 = gauge(mats(r1), s.Rt, null);
+        double[] b0 = boardScore(r0.pano, s.yawRef, G0, bd, cs, s.Rt), b1 = boardScore(r1.pano, s.yawRef, G1, bd, cs, s.Rt);
+        double p0 = psnr(r0.pano, s.yawRef, G0), p1 = psnr(r1.pano, s.yawRef, G1);
+        Imgcodecs.imwrite(new File(OUT, "parallax-before-2048.jpg").getPath(), r0.pano);
+        Imgcodecs.imwrite(new File(OUT, "parallax-after-2048.jpg").getPath(), r1.pano);
+        PanoStitchCore.Stats st = r1.stats;
+        System.out.println("parallax: board vs one view: ZNCC " + f2(b0[0]) + " -> " + f2(b1[0]) + ", wrong pixels " + f2(100 * b0[1]) + "% -> " + f2(100 * b1[1]) + "%; PSNR (whole) " + f2(p0) + " -> " + f2(p1) + " dB; mesh warp "
+                + st.warpPts + " points, residual median " + f2(st.warpMedDeg) + " -> " + f2(st.warpMedAfterDeg) + " deg (p90 " + f2(st.warpP90Deg) + " -> " + f2(st.warpP90AfterDeg)
+                + "); ghost regions " + st.ghostRegions + "; " + ms0 + " -> " + ms1 + " ms (seam stage " + st.msSeam + " ms)");
+        r0.pano.release(); r1.pano.release(); bd.tex.release();
+        assertTrue(r1.stats.optimized, "optimised");
+        assertTrue(b1[1] < .6 * b0[1] && b1[0] >= b0[0] - .01, "board looks like one view: wrong pixels " + b0[1] + " -> " + b1[1] + ", ZNCC " + b0[0] + " -> " + b1[0]);
+        assertTrue(p1 > p0 - .5, "no loss elsewhere: " + p0 + " -> " + p1);
+        assertTrue(st.warpMedAfterDeg <= st.warpMedDeg + 1e-9, "warp reduces the residual");
+    }
+
+    /** PSNR of the cap below latMax (degrees), vs the ground truth seen through gauge G, after a per-channel brightness fit */
+    static double psnrCap(Mat pano, double yawRef, double[] G, double latMax) {
+        int W = pano.cols(), H = pano.rows();
+        byte[] a = new byte[W * H * 3], gp = new byte[gt.cols() * gt.rows() * 3];
+        pano.get(0, 0, a);
+        gt.get(0, 0, gp);
+        int y0 = (int) Math.ceil((.5 - latMax / 180) * H);
+        double[] sab = new double[3], saa = new double[3];
+        List<double[]> px = new ArrayList<>();
+        for (int y = y0; y < H; y++) for (int x = 0; x < W; x++) {
+            double[] d = PanoStitchCore.eqDir(x, y, W, H, yawRef);
+            double[] g = {G[0] * d[0] + G[1] * d[1] + G[2] * d[2], G[3] * d[0] + G[4] * d[1] + G[5] * d[2], G[6] * d[0] + G[7] * d[1] + G[8] * d[2]};
+            double lon = Math.atan2(g[0], g[1]) / D, lat = Math.asin(Math.max(-1, Math.min(1, g[2]))) / D;
+            int gx = Math.floorMod((int) ((lon / 360 + .5) * gt.cols()), gt.cols()), gy = Math.max(0, Math.min(gt.rows() - 1, (int) ((.5 - lat / 180) * gt.rows())));
+            int k = (y * W + x) * 3, kg = (gy * gt.cols() + gx) * 3;
+            double[] v = new double[6];
+            for (int c = 0; c < 3; c++) { v[c] = a[k + c] & 255; v[3 + c] = gp[kg + c] & 255; sab[c] += v[c] * v[3 + c]; saa[c] += v[c] * v[c]; }
+            px.add(v);
+        }
+        double se = 0;
+        for (double[] v : px) for (int c = 0; c < 3; c++) { double e = v[c] * sab[c] / saa[c] - v[3 + c]; se += e * e; }
+        return 10 * Math.log10(255.0 * 255.0 / (se / (3.0 * px.size())));
+    }
+
+    /** 21e: feet (a dark blob around the nadir) in the normal frames; an extra frame with role "nadir" (clean floor, sensor pose
+     *  2 degrees off) replaces them. Without it the feet stay */
+    @Test
+    void nadirFrameReplacesFeet() {
+        Scene s0 = scene(21, 0, 2, null);
+        int n0 = s0.n;
+        // feet: every normal frame shows a dark disc of radius 13 degrees around the nadir
+        double f = (Math.max(FW, FH) / 2.0) / Math.tan(FOV_TRUE * D / 2);
+        for (int i = 0; i < n0; i++) {
+            Mat img = Imgcodecs.imdecode(new MatOfByte(s0.jpeg[i]), Imgcodecs.IMREAD_COLOR);
+            byte[] px = new byte[FW * FH * 3];
+            img.get(0, 0, px);
+            boolean any = false;
+            for (int v = 0; v < FH; v++) for (int u = 0; u < FW; u++) {
+                double[] d = pixDir(s0.Rt[i], u + .5, v + .5, f, FW, FH);
+                if (d[2] > -Math.cos(13 * D)) continue;
+                int k = (v * FW + u) * 3;
+                px[k] = 25; px[k + 1] = 28; px[k + 2] = (byte) (35 + (((u / 40) + (v / 40)) % 2) * 20);
+                any = true;
+            }
+            if (any) { img.put(0, 0, px); s0.jpeg[i] = jpg(img, 92); }
+            img.release();
+        }
+        // the extra nadir frame: true pose straight down (yaw 30, roll 5), sensor 2 degrees off, no feet
+        Scene s = new Scene();
+        s.n = n0 + 1; s.yawRef = s0.yawRef;
+        s.Rt = java.util.Arrays.copyOf(s0.Rt, s.n); s.Rs = java.util.Arrays.copyOf(s0.Rs, s.n); s.jpeg = java.util.Arrays.copyOf(s0.jpeg, s.n);
+        s.gain = java.util.Arrays.copyOf(s0.gain, s.n);
+        s.Rt[n0] = camMat(30, -89, 5);
+        s.Rs[n0] = mul(rotVec(new double[]{1.2 * D, -1.1 * D, .9 * D}), s.Rt[n0]);
+        Mat nimg = render(s.Rt[n0], FOV_TRUE, FW, FH);
+        s.jpeg[n0] = jpg(nimg, 92);
+        nimg.release();
+        String[] roles = new String[s.n];
+        roles[n0] = "nadir";
+        PanoStitchCore.Result rA = stitchOpt(s0, 2048, new PanoStitchCore.Options(), null);
+        PanoStitchCore.Result rB = stitchOpt(s, 2048, new PanoStitchCore.Options(), roles);
+        double[][] mB = mats(rB);
+        double[] GA = gauge(mats(rA), s0.Rt, null), GB = gauge(mB, s.Rt, null);
+        double pA = psnrCap(rA.pano, s.yawRef, GA, -72), pB = psnrCap(rB.pano, s.yawRef, GB, -72);
+        double eN = PanoStitchCore.angDeg(mul(GB, mB[n0]), s.Rt[n0]), eS = PanoStitchCore.angDeg(s.Rs[n0], s.Rt[n0]);
+        double pMain = psnr(rB.pano, s.yawRef, GB), pMainA = psnr(rA.pano, s.yawRef, GA);
+        Imgcodecs.imwrite(new File(OUT, "nadir-without-2048.jpg").getPath(), rA.pano);
+        Imgcodecs.imwrite(new File(OUT, "nadir-with-2048.jpg").getPath(), rB.pano);
+        System.out.println("nadir frame: PSNR below -72 deg " + f2(pA) + " (feet) -> " + f2(pB) + " dB; nadir frame registered=" + rB.stats.nadirRegistered
+                + " change " + f2(rB.stats.nadirCorrDeg) + " deg, pose error " + f2(eN) + " deg (sensor " + f2(eS) + "); PSNR |lat|<70 " + f2(pMainA) + " -> " + f2(pMain) + " dB");
+        rA.pano.release(); rB.pano.release();
+        assertEquals(1, rB.stats.nadirFrames);
+        assertTrue(rB.stats.optimized, "optimised");
+        assertTrue(pB > pA + 5, "feet replaced: " + pA + " -> " + pB);
+        assertTrue(eN < eS, "nadir pose refined: " + eN + " vs sensor " + eS);
+        assertTrue(pMain > pMainA - .5, "rest unchanged");
+        // a bad role is refused
+        boolean thrown = false;
+        try { new PanoStitchCore(2, null).setFrame(0, s.jpeg[0], q(s.Rs[0]), "zenith"); } catch (IllegalArgumentException e) { thrown = true; }
+        assertTrue(thrown, "unknown role refused");
+    }
 }

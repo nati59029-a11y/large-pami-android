@@ -53,8 +53,21 @@ import java.util.List;
  * disagree with the rest are dropped; frames moved > 12 degrees on weak evidence are kept near the sensor.
  * Safety guard: run() throws IllegalStateException("native stitch refused: ...") if the optimisation is not applied or fewer than
  * Options.minPairFrac of the pairs overlapping >= 20% have matches (the caller then uses the JS stitching).
+ * Parallax (stage 21e, 17.11: the tablet moves between the shots -> wall AC unit doubled, wardrobe in vertical strips, smeared floor):
+ *  - smart seams: the DP seam cost = colour difference + EDGE_W x the stronger gradient of the two frames, in a wider band (10 deg),
+ *    so the seams run through flat wall / ceiling and around objects (Options.smartSeams);
+ *  - local mesh warp: the residual displacement along every overlap is measured by patch matching (ZNCC) on the seam canvas and each
+ *    frame gets a smooth displacement field (half the way each, Gaussian radius WARP_SIG_DEG, at most WARP_MAX_DEG, no fold), applied
+ *    to the seam canvas and to the final warp (Options.meshWarp);
+ *  - ghost removal: where two neighbouring frames still disagree (structure difference after gains), the whole connected region
+ *    goes to ONE frame (the one where it lies further from the frame border); the other frames are excluded there at EVERY pyramid
+ *    level (weight ramp of LOCK_RAMP_DEG outside), so two copies are never averaged (Options.deghost);
+ *  - nadir frame (setFrame(.., role "nadir"): a floor photo taken after stepping aside): not part of the pose optimisation; only its
+ *    own rotation is refined against the lower frames (else sensor pose + camera offset); it owns the area below NADIR_LAT (others
+ *    excluded there), so feet / tripod / smear disappear.
  * Frames are decoded one at a time (memory); progress callback; cancel() -> Cancelled.
- * Memory (estimate, not measured on a phone): W=4096 -> about 250MB native at the peak (blend pyramid in float). W=2048 -> about 65MB.
+ * Memory (estimate, not measured on a phone): W=4096 -> about 250MB native at the peak (blend pyramid in float; stage 21e adds one float
+ * ROI image + its pyramid per frame being blended, ~+20MB, and a few MB of Java arrays). W=2048 -> about 65MB.
  */
 public final class PanoStitchCore {
 
@@ -84,6 +97,10 @@ public final class PanoStitchCore {
         public double minPairFrac = .25;
         /** estimate a shared camera offset (the same small rotation in every frame between the camera and the orientation sensor) */
         public boolean camOffset = true;
+        /** stage 21e (parallax): seams avoid edges, local mesh warp near the seams, one source for regions that disagree */
+        public boolean smartSeams = true, meshWarp = true, deghost = true;
+        /** diagnostics: Stats.debugLab / debugLock <- the final labels / exclusive owners on the seam canvas */
+        public boolean debugMaps;
     }
 
     public static final class Stats {
@@ -95,7 +112,15 @@ public final class PanoStitchCore {
         public boolean optimized;
         public String feat = "";
         public double[][] gains;        // [frame][B,G,R]
-        public long ms, msFeat, msMatch, msOpt, msBlend;
+        public long ms, msFeat, msMatch, msOpt, msBlend, msSeam;
+        /** mesh warp: measured points, median / 90th percentile residual (deg) before and after the warp */
+        public int warpPts;
+        public double warpMedDeg, warpP90Deg, warpMedAfterDeg, warpP90AfterDeg;
+        public int ghostRegions;         // regions given to one frame (ghost removal)
+        public int nadirFrames;          // frames with role "nadir"
+        public boolean nadirRegistered;  // the (first) nadir frame was registered against the lower frames (else sensor pose)
+        public double nadirCorrDeg;      // its rotation change from the sensor pose (+ camera offset)
+        public int[] debugLab, debugLock; // Options.debugMaps: seam canvas (seamW x seamW/2) labels / exclusive owners (-1 = none)
     }
 
     public static final class Result {
@@ -112,6 +137,7 @@ public final class PanoStitchCore {
     private final Options o;
     private final byte[][] jpeg;
     private final double[][] qIn;
+    private final boolean[] nadir;
     private volatile boolean cancelled;
 
     public PanoStitchCore(int n, Options o) {
@@ -120,9 +146,14 @@ public final class PanoStitchCore {
         this.o = o == null ? new Options() : o;
         this.jpeg = new byte[n][];
         this.qIn = new double[n][];
+        this.nadir = new boolean[n];
     }
 
-    public void setFrame(int i, byte[] jpg, double[] q) {
+    public void setFrame(int i, byte[] jpg, double[] q) { setFrame(i, jpg, q, null); }
+
+    /** role: null / "" = a normal frame; "nadir" = floor photo taken after the user stepped aside, pointing at where they stood */
+    public void setFrame(int i, byte[] jpg, double[] q, String role) {
+        if (role != null && !role.isEmpty() && !"nadir".equals(role)) throw new IllegalArgumentException("frame " + i + ": role " + role);
         if (i < 0 || i >= n) throw new IllegalArgumentException("frame index");
         if (jpg == null || jpg.length < 4) throw new IllegalArgumentException("frame " + i + ": no jpeg");
         if (q == null || q.length != 4) throw new IllegalArgumentException("frame " + i + ": q");
@@ -130,6 +161,7 @@ public final class PanoStitchCore {
         if (!(s > 1e-9)) throw new IllegalArgumentException("frame " + i + ": q");
         jpeg[i] = jpg;
         qIn[i] = new double[]{q[0] / s, q[1] / s, q[2] / s, q[3] / s};
+        nadir[i] = "nadir".equals(role);
     }
 
     public void cancel() { cancelled = true; }
@@ -246,6 +278,11 @@ public final class PanoStitchCore {
         double[] gain = {1, 1, 1};
         // low resolution warp (seam canvas)
         int lx0, ly0, lw, lh; float[] lsc, lr2; byte[] lcol;
+        float[] lgr;          // gradient magnitude of the luminance on the seam canvas (smart seams)
+        float[] lal;          // weight factor 0..1 on the seam canvas (ghost / nadir exclusion), null = 1
+        float[] wE, wN;       // mesh warp field (radians, east / north tangent offset of the sampled direction), WF_W x WF_H grid, null = none
+        double wLon, wLat;    // largest shift of the field in longitude / latitude (degrees): footprint margin
+        boolean nadir;
     }
 
     private static final class Pair {
@@ -283,6 +320,8 @@ public final class PanoStitchCore {
             F[i] = new Fr();
             F[i].Rs = qToMat(qIn[i]);
             F[i].R = F[i].Rs.clone();
+            F[i].nadir = nadir[i];
+            if (nadir[i]) st.nadirFrames++;
         }
         double t = Math.tan(o.fovL * D / 2);
 
@@ -375,6 +414,10 @@ public final class PanoStitchCore {
             fovEst = st.fovL;
             nb = neighbours(F, fovEst);
         }
+        // nadir frame(s): not in the optimisation above; own rotation refined against the lower frames (else sensor pose + offset)
+        if (feat != null && st.nadirFrames > 0) {
+            for (int k = 0; k < n; k++) if (F[k].nadir) { chk(); refineNadir(F, k, sift, st); }
+        }
         if (feat != null) feat.clear();
         for (Fr f : F) { f.dF = null; f.dB = null; f.Rg = null; }
         st.msOpt = msOpt;
@@ -399,15 +442,33 @@ public final class PanoStitchCore {
 
         double fovL = st.fovL;
 
-        // 4. low resolution warps -> gains -> labels -> seams
+        // 4. low resolution warps -> gains -> mesh warp -> labels -> seams -> ghost removal / nadir ownership
+        long tsm = System.currentTimeMillis();
         int Ws = Math.min(W, Math.max(256, o.seamW)), Hs = Ws / 2;
         for (Fr f : F) lowWarp(f, t, Ws, Hs);
         if (o.gains && n > 1) gains(F, Ws, st);
         st.gains = new double[n][];
         for (int i = 0; i < n; i++) st.gains[i] = F[i].gain.clone();
+        chk();
+        if (o.meshWarp && n > 1 && meshWarp(F, Ws, Hs, st)) {
+            for (Fr f : F) if (f.wE != null) { lowWarp(f, t, Ws, Hs); devig(f); }
+            double[] after = residuals(F, Ws, Hs, null);
+            st.warpMedAfterDeg = after[0]; st.warpP90AfterDeg = after[1];
+            log("mesh warp: " + st.warpPts + " points, residual median / p90 " + r3(st.warpMedDeg) + " / " + r3(st.warpP90Deg) + " -> " + r3(st.warpMedAfterDeg) + " / " + r3(st.warpP90AfterDeg) + " deg");
+        }
+        P.on(.47);
+        chk();
+        if (o.smartSeams || o.deghost) for (Fr f : F) edges(f);
         int[] lab = labels(F, Ws, Hs);
         if (o.seams && n > 1) seams(F, lab, Ws, Hs);
-        for (Fr f : F) { f.th = null; f.lcol = null; f.lsc = null; f.lr2 = null; }
+        int[] lock = new int[Ws * Hs];
+        java.util.Arrays.fill(lock, -1);
+        if (st.nadirFrames > 0) lockNadir(F, lab, lock, Ws, Hs);
+        if (o.deghost && n > 1) deghost(F, lab, lock, Ws, Hs, st);
+        allowed(F, lock, Ws, Hs);
+        if (o.debugMaps) { st.debugLab = lab.clone(); st.debugLock = lock; }
+        for (Fr f : F) { f.th = null; f.lcol = null; f.lsc = null; f.lr2 = null; f.lgr = null; }
+        st.msSeam = System.currentTimeMillis() - tsm;
         P.on(.5);
 
         // 5. warp + multi-band blend
@@ -511,7 +572,7 @@ public final class PanoStitchCore {
         // rows = groups of frames at about the same sensor pitch (sorted by pitch, split at gaps > 10 degrees), zenith / nadir excluded
         final double[] pt = new double[n];
         List<Integer> all = new ArrayList<>();
-        for (int i = 0; i < n; i++) { pt[i] = Math.asin(Math.max(-1, Math.min(1, -F[i].Rs[8]))) / D; if (Math.abs(pt[i]) < 75) all.add(i); }
+        for (int i = 0; i < n; i++) { pt[i] = Math.asin(Math.max(-1, Math.min(1, -F[i].Rs[8]))) / D; if (Math.abs(pt[i]) < 75 && !F[i].nadir) all.add(i); }
         java.util.Collections.sort(all, (x, y) -> Double.compare(pt[x], pt[y]));
         List<List<Integer>> rows = new ArrayList<>();
         for (int k = 0; k < all.size(); k++) {
@@ -641,6 +702,7 @@ public final class PanoStitchCore {
         double t = Math.tan(fov * D / 2);
         List<int[]> nb = new ArrayList<>();
         for (int i = 0; i < n; i++) for (int j = i + 1; j < n; j++) {
+            if (F[i].nadir || F[j].nadir) continue; // the nadir frame is not part of the pose optimisation (refineNadir)
             double c = -F[i].Rs[2] * -F[j].Rs[2] + -F[i].Rs[5] * -F[j].Rs[5] + -F[i].Rs[8] * -F[j].Rs[8];
             if (Math.acos(Math.max(-1, Math.min(1, c))) / D > fov * 0.95) continue;
             double ov = Math.min(overlapFrac(F[i], F[j], t), overlapFrac(F[j], F[i], t));
@@ -700,6 +762,8 @@ public final class PanoStitchCore {
 
     /** ts: focal values (tan(fovL/2)) the gate must tolerate (pass 1: the fov search range; pass 2: the estimated fov). The pixel
      *  correspondences do not depend on the focal; the rotation RANSAC is run for each ts and the largest inlier set is kept. */
+    private double ransacDeg = RANSAC_DEG; // refineNadir: looser (the nadir frame is taken from another place: floor parallax)
+
     private Pair matchPair(Fr[] F, int i, int j, double[] ts, boolean sift, double gateDeg) {
         Fr fi = F[i], fj = F[j];
         if (fi.nk < MIN_IN || fj.nk < MIN_IN) { log("pair " + i + "-" + j + ": few features " + fi.nk + "/" + fj.nk); return null; }
@@ -761,7 +825,7 @@ public final class PanoStitchCore {
                 double[] u = new double[3]; camDir(fj.ka[q[1]], fj.kb[q[1]], ts[s], u); vJ.add(u);
             }
             java.util.Random rnd = new java.util.Random(1000003L * i + j);
-            double ct = Math.cos(RANSAC_DEG * D * ts[s] / T60);
+            double ct = Math.cos(ransacDeg * D * ts[s] / T60);
             int nS = 0;
             double[] bS = null;
             for (int it = 0; it < RANSAC_IT; it++) {
@@ -1146,7 +1210,7 @@ public final class PanoStitchCore {
     /* ------------------------------------------------------------------ low resolution: gains, labels, seams ------------------------------------------------------------------ */
 
     private void lowWarp(Fr f, double t, int Ws, int Hs) {
-        int[] r = roiOf(f.R, t, f.w, f.h, Ws, Hs, o.yawRef);
+        int[] r = roiOfF(f, t, Ws, Hs);
         f.lx0 = r[0]; f.lw = r[1] - r[0]; f.ly0 = r[2]; f.lh = r[3] - r[2];
         f.lsc = new float[f.lw * f.lh];
         f.lr2 = new float[f.lw * f.lh];
@@ -1161,6 +1225,7 @@ public final class PanoStitchCore {
                 int k = yy * f.lw + xx;
                 f.lsc[k] = -1;
                 double[] d = eqDir(f.lx0 + xx, f.ly0 + yy, Ws, Hs, o.yawRef);
+                if (f.wE != null) displace(f, f.lx0 + xx, f.ly0 + yy, Ws, Hs, d);
                 double cx = m[0] * d[0] + m[3] * d[1] + m[6] * d[2], cy = m[1] * d[0] + m[4] * d[1] + m[7] * d[2], cz = m[2] * d[0] + m[5] * d[1] + m[8] * d[2];
                 if (cz >= -1e-6) continue;
                 double u = f.w / 2.0 + fp * cx / -cz, v = f.h / 2.0 - fp * cy / -cz;
@@ -1209,6 +1274,16 @@ public final class PanoStitchCore {
         if (k >= 1 || mx <= 225) return k;
         double s = Math.min(1, (mx - 225) / 25);
         return k * (1 - s) + s;
+    }
+
+    /** removes the vignetting (vigA / vigB) from the low-res colours of one frame */
+    private void devig(Fr f) {
+        if (vigA == 0 && vigB == 0) return;
+        for (int k = 0; k < f.lsc.length; k++) {
+            if (f.lsc[k] < 0) continue;
+            double kk = protect(1 / vig(f.lr2[k]), mx3(f.lcol, k));
+            for (int c = 0; c < 3; c++) f.lcol[k * 3 + c] = (byte) Math.min(255, Math.round((f.lcol[k * 3 + c] & 255) * kk));
+        }
     }
 
     private interface OverlapVisitor { void on(int a, int ka, int b, int kb); }
@@ -1280,13 +1355,7 @@ public final class PanoStitchCore {
         st.vigA = vigA; st.vigB = vigB;
         log("vignetting: a " + r3(vigA) + " b " + r3(vigB) + " V(edge) " + r3(vig(1)) + " samples " + (long) (tot / 2));
         // correct the low-res colours (gains / seams then work on vignetting-free values)
-        for (Fr f : F) {
-            for (int k = 0; k < f.lsc.length; k++) {
-                if (f.lsc[k] < 0) continue;
-                double kk = protect(1 / vig(f.lr2[k]), mx3(f.lcol, k));
-                for (int c = 0; c < 3; c++) f.lcol[k * 3 + c] = (byte) Math.min(255, Math.round((f.lcol[k * 3 + c] & 255) * kk));
-            }
-        }
+        for (Fr f : F) devig(f);
         // 2. per channel gains (log domain): l_a - l_b = ln Ia - ln Ib, ridge towards 0, then geometric mean 1
         for (int ch = 0; ch < 3; ch++) {
             final int c = ch;
@@ -1334,6 +1403,8 @@ public final class PanoStitchCore {
             for (int yy = 0; yy < f.lh; yy++) for (int xx = 0; xx < f.lw; xx++) {
                 float s = f.lsc[yy * f.lw + xx];
                 if (s < 0) continue;
+                // the nadir frame owns the area below NADIR_LAT that it covers
+                if (f.nadir && (.5 - (f.ly0 + yy + .5) / Hs) * 180 < NADIR_LAT) s += 1000;
                 int p = (f.ly0 + yy) * Ws + (f.lx0 + xx) % Ws;
                 if (lab[p] < 0 || s > best[p]) { lab[p] = i; best[p] = s; }
             }
@@ -1347,6 +1418,16 @@ public final class PanoStitchCore {
         double s = 0;
         for (int c = 0; c < 3; c++) s += Math.abs((a.lcol[ka * 3 + c] & 255) * a.gain[c] - (b.lcol[kb * 3 + c] & 255) * b.gain[c]);
         return s;
+    }
+
+    /** seam cost of one canvas pixel: colour difference (+ smart seams: EDGE_W x the stronger gradient of the two frames, so the seam
+     *  avoids crossing edges / objects that are present in either frame) */
+    private double seamCost(Fr a, Fr b, int x, int y, int Ws) {
+        double c = diff(a, b, x, y, Ws);
+        if (!o.smartSeams || a.lgr == null || b.lgr == null) return c;
+        int ka = at(a, x, y, Ws), kb = at(b, x, y, Ws);
+        if (ka < 0 || kb < 0) return c;
+        return c + EDGE_W * Math.max(a.lgr[ka], b.lgr[kb]);
     }
 
     /** minimal-difference seams: for every pair of neighbouring labels, a DP path inside a band around the Voronoi border */
@@ -1371,7 +1452,7 @@ public final class PanoStitchCore {
             double ang = 2 * Math.PI * (x + .5) / Ws;
             cs[a] += Math.sin(ang); cc[a] += Math.cos(ang); cy[a] += y; cnt[a]++;
         }
-        int band = Math.max(3, Ws * 6 / 360);
+        int band = Math.max(3, Ws * (o.smartSeams ? SEAM_BAND_DEG : 6) / 360);
         List<Integer> keys = new ArrayList<>(adj.keySet());
         java.util.Collections.sort(keys);
         for (int key : keys) {
@@ -1379,6 +1460,7 @@ public final class PanoStitchCore {
             chk();
             int a = key / n, b = key % n;
             if (cnt[a] == 0 || cnt[b] == 0) continue;
+            if (F[a].nadir || F[b].nadir) continue; // the nadir border stays at NADIR_LAT
             double xa = Math.atan2(cs[a], cc[a]) / (2 * Math.PI) * Ws - .5, xb = Math.atan2(cs[b], cc[b]) / (2 * Math.PI) * Ws - .5;
             double ra = Math.hypot(cs[a], cc[a]) / cnt[a], rb = Math.hypot(cs[b], cc[b]) / cnt[b];
             double ya = cy[a] / cnt[a], yb = cy[b] / cnt[b];
@@ -1449,13 +1531,16 @@ public final class PanoStitchCore {
                 bk[k - s0] = new int[m];
                 for (int s = lo[k]; s <= hi[k]; s++) {
                     double c = 1;
-                    if (s - 1 >= 0) { int q = pix(vertical, rev, xc, k, s - 1, nPos, Ws, Hs); c += diff(fa, fb, q % Ws, q / Ws, Ws); }
-                    if (s < nPos) { int q = pix(vertical, rev, xc, k, s, nPos, Ws, Hs); c += diff(fa, fb, q % Ws, q / Ws, Ws); }
+                    if (s - 1 >= 0) { int q = pix(vertical, rev, xc, k, s - 1, nPos, Ws, Hs); c += seamCost(fa, fb, q % Ws, q / Ws, Ws); }
+                    if (s < nPos) { int q = pix(vertical, rev, xc, k, s, nPos, Ws, Hs); c += seamCost(fa, fb, q % Ws, q / Ws, Ws); }
                     double bestE = 0;
                     int arg = -1;
                     if (k > s0) {
                         bestE = Double.MAX_VALUE;
-                        for (int s2 = lo[k - 1]; s2 <= hi[k - 1]; s2++) {
+                        // smart seams: steps of at most 2 per line (a long jump would be an unpriced seam along the line)
+                        int q0 = lo[k - 1], q1 = hi[k - 1];
+                        if (o.smartSeams) { q0 = Math.max(q0, s - 2); q1 = Math.min(q1, s + 2); if (q0 > q1) { q0 = lo[k - 1]; q1 = hi[k - 1]; } }
+                        for (int s2 = q0; s2 <= q1; s2++) {
                             int dd = Math.abs(s - s2);
                             double e = E[k - 1 - s0][s2 - lo[k - 1]] + (dd <= 1 ? .5 * dd : 20.0 * dd);
                             if (e < bestE) { bestE = e; arg = s2; }
@@ -1475,6 +1560,489 @@ public final class PanoStitchCore {
                 sb = bk[k - s0][s - lo[k]];
             }
         }
+    }
+
+    /* ------------------------------------------------------------------ stage 21e: parallax (mesh warp, ghosts, nadir) ------------------------------------------------------------------ */
+
+    private static final double NADIR_LAT = -65;      // the nadir frame owns the area below this latitude (degrees) that it covers
+    private static final double NADIR_GATE = 12, NADIR_MAX_DEG = 15, NADIR_RES_DEG = 2.5, NADIR_RANSAC_DEG = 4;
+    private static final int NADIR_MIN = 12;
+    private static final int SEAM_BAND_DEG = 10;       // smart seams: half width of the band around the Voronoi border
+    private static final double EDGE_W = 3;            // smart seams: cost of a gradient of 1 grey level per canvas pixel
+    private static final int WF_W = 128, WF_H = 64;    // mesh warp field grid (whole sphere, 2.8 degrees per cell)
+    private static final double WARP_SIG_DEG = 8, WARP_MAX_DEG = 3, WARP_LAT = 70, WARP_W0 = .25, WARP_ZNCC = .8;
+    private static final double GHOST_T = 14;          // ghost: structure difference (grey levels, after gains) between two frames
+    private static final double LOCK_RAMP_DEG = 1.5, LOCK_MARGIN_DEG = 1, GHOST_NEAR_DEG = 10, GHOST_CLOSE_DEG = 4, GHOST_CENTRE_DEG = 6;
+
+    /** rotation of nadir frame k refined against the (fixed) lower frames: matches -> world bearings -> robust Kabsch. Kept at the
+     *  current pose (sensor + camera offset) when there are too few matches, the residual is large or the change is > NADIR_MAX_DEG
+     *  (the user stepped aside: the floor shows parallax, so only a rotation that fits the bulk of the matches is accepted) */
+    private void refineNadir(Fr[] F, int k, boolean sift, Stats st) {
+        double t = Math.tan((st.optimized ? st.fovL : o.fovL) * D / 2);
+        for (Fr f : F) f.Rg = f.R;
+        List<double[]> Wd = new ArrayList<>(), Cd = new ArrayList<>();
+        int np = 0;
+        for (int j = 0; j < n; j++) {
+            if (j == k || F[j].nadir || F[j].nk < MIN_IN) continue;
+            if (Math.asin(Math.max(-1, Math.min(1, -F[j].R[8]))) / D > -20) continue; // lower frames only
+            if (overlapFrac(F[k], F[j], t) < .03 && overlapFrac(F[j], F[k], t) < .03) continue;
+            ransacDeg = NADIR_RANSAC_DEG;
+            Pair p;
+            try { p = matchPair(F, j, k, new double[]{t}, sift, NADIR_GATE); } finally { ransacDeg = RANSAC_DEG; }
+            if (p == null) continue;
+            np++;
+            for (int q = 0; q < p.m; q++) {
+                double[] d = new double[3], w = new double[3], c = new double[3];
+                camDir(p.ai[q], p.bi[q], t, d); rot(F[j].R, d, w); Wd.add(w);
+                camDir(p.aj[q], p.bj[q], t, c); Cd.add(c);
+            }
+        }
+        int m = Wd.size();
+        if (m < NADIR_MIN) { log("nadir frame " + k + ": " + m + " matches in " + np + " pairs -> sensor pose"); return; }
+        boolean[] in = new boolean[m];
+        java.util.Arrays.fill(in, true);
+        double[] R = null, res = new double[m], w = new double[3];
+        double med = 0;
+        int ni = m;
+        for (int rep = 0; rep < 4; rep++) {
+            R = kabsch(Wd, Cd, in);
+            if (R == null) break;
+            for (int q = 0; q < m; q++) { rot(R, Cd.get(q), w); double[] a = Wd.get(q); res[q] = Math.acos(Math.min(1, a[0] * w[0] + a[1] * w[1] + a[2] * w[2])) / D; }
+            double[] so = res.clone();
+            java.util.Arrays.sort(so);
+            med = so[m / 2];
+            double lim = Math.max(1, 3 * med);
+            ni = 0;
+            for (int q = 0; q < m; q++) { in[q] = res[q] <= lim; if (in[q]) ni++; }
+            if (ni < NADIR_MIN) break;
+        }
+        if (R == null || ni < NADIR_MIN) { log("nadir frame " + k + ": no consistent rotation -> sensor pose"); return; }
+        double mi = 0;
+        int c = 0;
+        double[] ri = new double[ni];
+        for (int q = 0; q < m; q++) if (in[q]) ri[c++] = res[q];
+        java.util.Arrays.sort(ri);
+        mi = ri[ni / 2];
+        double ang = angDeg(R, F[k].R);
+        if (ang > NADIR_MAX_DEG || mi > NADIR_RES_DEG) { log("nadir frame " + k + ": rotation change " + r1(ang) + " deg, median residual " + r1(mi) + " -> sensor pose"); return; }
+        log("nadir frame " + k + ": registered on " + ni + "/" + m + " matches (" + np + " pairs), change " + r1(ang) + " deg, median residual " + r3(mi) + " deg");
+        F[k].R = R;
+        if (!st.nadirRegistered) { st.nadirRegistered = true; st.nadirCorrDeg = ang; }
+    }
+
+    /** luminance of low-res sample k of f with its gains */
+    private static double lumG(Fr f, int k) {
+        return .114 * (f.lcol[k * 3] & 255) * f.gain[0] + .587 * (f.lcol[k * 3 + 1] & 255) * f.gain[1] + .299 * (f.lcol[k * 3 + 2] & 255) * f.gain[2];
+    }
+
+    /** gradient magnitude of the luminance on the seam canvas (central differences inside the frame, 0 at its border) */
+    private static void edges(Fr f) {
+        int w = f.lw, h = f.lh;
+        float[] L = new float[w * h];
+        for (int k = 0; k < w * h; k++) L[k] = f.lsc[k] < 0 ? -1 : (float) lum(f.lcol, k);
+        f.lgr = new float[w * h];
+        for (int y = 1; y < h - 1; y++) for (int x = 1; x < w - 1; x++) {
+            int k = y * w + x;
+            if (L[k] < 0 || L[k - 1] < 0 || L[k + 1] < 0 || L[k - w] < 0 || L[k + w] < 0) continue;
+            double gx = (L[k + 1] - L[k - 1]) / 2, gy = (L[k + w] - L[k - w]) / 2;
+            f.lgr[k] = (float) Math.sqrt(gx * gx + gy * gy);
+        }
+    }
+
+    private static final class Meas { int a, b; double x, y, dx, dy, w; }
+
+    /** residual displacement of every overlapping pair of normal frames on the seam canvas, by patch matching (ZNCC, coarse-to-fine,
+     *  sub-pixel): b(p + (dx,dy)) ~ a(p). out (optional) <- the accepted measurements. Returns {median, p90} of |displacement| (deg) */
+    private double[] residuals(Fr[] F, int Ws, int Hs, List<Meas> out) {
+        int R = Math.max(3, (int) Math.round(Ws * 2.1 / 360)), S = Math.max(4, (int) Math.round(Ws * 2 * WARP_MAX_DEG / 360)), STEP = Math.max(3, (int) Math.round(Ws * 2.0 / 360));
+        int P = 2 * R + 1, Q = 2 * (R + S) + 1, N = P * P;
+        float[][] G = new float[n][];
+        for (int i = 0; i < n; i++) {
+            Fr f = F[i];
+            G[i] = new float[f.lw * f.lh];
+            for (int k = 0; k < G[i].length; k++) G[i][k] = f.lsc[k] < 0 ? -1 : (float) lumG(f, k);
+        }
+        double[] pa = new double[N], pb = new double[Q * Q];
+        double[] zz = new double[(2 * S + 1) * (2 * S + 1)];
+        List<Double> mags = new ArrayList<>();
+        for (int a = 0; a < n; a++) {
+            Fr fa = F[a];
+            if (fa.nadir) continue;
+            for (int b = a + 1; b < n; b++) {
+                Fr fb = F[b];
+                if (fb.nadir) continue;
+                if (fb.ly0 >= fa.ly0 + fa.lh || fa.ly0 >= fb.ly0 + fb.lh) continue;
+                chk();
+                List<Meas> pm = new ArrayList<>();
+                for (int yy = R; yy < fa.lh - R; yy += STEP) {
+                    int y = fa.ly0 + yy;
+                    double lat = (.5 - (y + .5) / Hs) * 180;
+                    if (Math.abs(lat) > WARP_LAT || y - R - S < 0 || y + R + S >= Hs) continue;
+                    for (int xx = R; xx < fa.lw - R; xx += STEP) {
+                        int x = (fa.lx0 + xx) % Ws;
+                        if (at(fb, x, y, Ws) < 0) continue;
+                        // patch of a
+                        double sa = 0, sa2 = 0;
+                        boolean ok = true;
+                        for (int v = -R; v <= R && ok; v++) for (int u = -R; u <= R; u++) {
+                            int k = at(fa, fm(x + u, Ws), y + v, Ws);
+                            if (k < 0) { ok = false; break; }
+                            double g = G[a][k];
+                            pa[(v + R) * P + u + R] = g; sa += g; sa2 += g * g;
+                        }
+                        if (!ok) continue;
+                        double ma = sa / N, va = sa2 / N - ma * ma;
+                        if (va < 9) continue; // flat: nothing to measure
+                        // window of b
+                        int RS = R + S;
+                        for (int v = -RS; v <= RS && ok; v++) for (int u = -RS; u <= RS; u++) {
+                            int k = at(fb, fm(x + u, Ws), y + v, Ws);
+                            if (k < 0) { ok = false; break; }
+                            pb[(v + RS) * Q + u + RS] = G[b][k];
+                        }
+                        if (!ok) continue;
+                        for (int k = 0; k < N; k++) pa[k] -= ma;
+                        double na = Math.sqrt(va * N);
+                        java.util.Arrays.fill(zz, -2);
+                        int bx = 0, by = 0;
+                        double best = -2;
+                        for (int pass = 0; pass < 2; pass++) { // coarse (step 2) then fine around the best
+                            int x0 = pass == 0 ? -S : Math.max(-S, bx - 1), x1 = pass == 0 ? S : Math.min(S, bx + 1);
+                            int y0 = pass == 0 ? -S : Math.max(-S, by - 1), y1 = pass == 0 ? S : Math.min(S, by + 1), st = pass == 0 ? 2 : 1;
+                            for (int sy = y0; sy <= y1; sy += st) for (int sx = x0; sx <= x1; sx += st) {
+                                int zi = (sy + S) * (2 * S + 1) + sx + S;
+                                if (zz[zi] > -2) continue;
+                                double sb = 0, sb2 = 0, sab = 0;
+                                for (int v = 0; v < P; v++) {
+                                    int ob = (v + S + sy) * Q + S + sx, oa = v * P;
+                                    for (int u = 0; u < P; u++) { double g = pb[ob + u]; sb += g; sb2 += g * g; sab += pa[oa + u] * g; }
+                                }
+                                double vb = sb2 - sb * sb / N;
+                                double z = vb < 1e-6 ? 0 : sab / (na * Math.sqrt(vb));
+                                zz[zi] = z;
+                                if (z > best) { best = z; bx = sx; by = sy; }
+                            }
+                        }
+                        if (best < WARP_ZNCC || Math.abs(bx) >= S || Math.abs(by) >= S) continue;
+                        // distinct peak (no aperture problem along an edge): the best value 3+ pixels away must be clearly lower
+                        double far = -2;
+                        for (int sy = -S; sy <= S; sy++) for (int sx = -S; sx <= S; sx++) {
+                            if (Math.max(Math.abs(sx - bx), Math.abs(sy - by)) < 3) continue;
+                            double z = zz[(sy + S) * (2 * S + 1) + sx + S];
+                            if (z > far) far = z;
+                        }
+                        if (far > best - .08) continue;
+                        // sub-pixel (parabola) where the neighbours were evaluated
+                        double fx = 0, fy = 0;
+                        double zl = zz[(by + S) * (2 * S + 1) + bx - 1 + S], zr = zz[(by + S) * (2 * S + 1) + bx + 1 + S];
+                        double zu = zz[(by - 1 + S) * (2 * S + 1) + bx + S], zd = zz[(by + 1 + S) * (2 * S + 1) + bx + S];
+                        if (zl > -2 && zr > -2) { double den = zl - 2 * best + zr; if (den < -1e-9) fx = Math.max(-.5, Math.min(.5, (zl - zr) / (2 * den))); }
+                        if (zu > -2 && zd > -2) { double den = zu - 2 * best + zd; if (den < -1e-9) fy = Math.max(-.5, Math.min(.5, (zu - zd) / (2 * den))); }
+                        Meas me = new Meas();
+                        me.a = a; me.b = b; me.x = x; me.y = y; me.dx = bx + fx; me.dy = by + fy;
+                        me.w = Math.min(1, (best - .7) / .3) * Math.min(1, Math.sqrt(va) / 10);
+                        pm.add(me);
+                    }
+                }
+                // local consistency inside the pair (a wrong peak on repeated texture disagrees with its neighbours)
+                double nr2 = (2.5 * STEP) * (2.5 * STEP);
+                for (Meas me : pm) {
+                    List<Double> lx = new ArrayList<>(), ly = new ArrayList<>();
+                    for (Meas o2 : pm) {
+                        if (o2 == me) continue;
+                        double ddx = Math.IEEEremainder(o2.x - me.x, Ws), ddy = o2.y - me.y;
+                        if (ddx * ddx + ddy * ddy <= nr2) { lx.add(o2.dx); ly.add(o2.dy); }
+                    }
+                    if (lx.size() >= 3) {
+                        java.util.Collections.sort(lx); java.util.Collections.sort(ly);
+                        if (Math.abs(me.dx - lx.get(lx.size() / 2)) > 2 || Math.abs(me.dy - ly.get(ly.size() / 2)) > 2) continue;
+                    }
+                    if (out != null) out.add(me);
+                    double cl = Math.cos((.5 - (me.y + .5) / Hs) * Math.PI);
+                    mags.add(Math.hypot(me.dx * cl, me.dy) * 360.0 / Ws);
+                }
+            }
+        }
+        if (mags.isEmpty()) return new double[]{0, 0};
+        java.util.Collections.sort(mags);
+        return new double[]{mags.get(mags.size() / 2), mags.get(Math.min(mags.size() - 1, (int) (mags.size() * .9)))};
+    }
+
+    /** local mesh warp: every measured displacement is split half / half between the two frames and spread by a Gaussian of radius
+     *  WARP_SIG_DEG (decaying to 0 away from the measurements), at most WARP_MAX_DEG, faded out towards the poles. Returns true if
+     *  any frame got a field. A field this smooth (gradient ~ max / sigma < 0.4) cannot fold the image. */
+    private boolean meshWarp(Fr[] F, int Ws, int Hs, Stats st) {
+        List<Meas> M = new ArrayList<>();
+        double[] r = residuals(F, Ws, Hs, M);
+        st.warpPts = M.size(); st.warpMedDeg = r[0]; st.warpP90Deg = r[1];
+        if (M.size() < 3) { log("mesh warp: " + M.size() + " points - off"); return false; }
+        List<List<double[]>> C = new ArrayList<>();
+        for (int i = 0; i < n; i++) C.add(new ArrayList<>());
+        double pr = 2 * Math.PI / Ws;
+        for (Meas m : M) {
+            double qx = m.x + m.dx / 2, qy = m.y + m.dy / 2;
+            double lat = (.5 - (qy + .5) / Hs) * Math.PI;
+            double sE = m.dx * pr * Math.cos(lat), sN = -m.dy * pr;
+            double[] d = eqDir(qx, qy, Ws, Hs, o.yawRef);
+            C.get(m.a).add(new double[]{d[0], d[1], d[2], -sE / 2, -sN / 2, m.w});
+            C.get(m.b).add(new double[]{d[0], d[1], d[2], sE / 2, sN / 2, m.w});
+        }
+        double s2 = 2 * (WARP_SIG_DEG * D) * (WARP_SIG_DEG * D), cut = Math.cos(3 * WARP_SIG_DEG * D), mx = WARP_MAX_DEG * D;
+        boolean any = false;
+        for (int i = 0; i < n; i++) {
+            List<double[]> L = C.get(i);
+            if (L.isEmpty()) continue;
+            chk();
+            float[] fe = new float[WF_W * WF_H], fn = new float[WF_W * WF_H];
+            for (int gy = 0; gy < WF_H; gy++) {
+                double latd = (.5 - (gy + .5) / WF_H) * 180, fade = Math.max(0, Math.min(1, (WARP_LAT + 2 - Math.abs(latd)) / 10));
+                if (fade <= 0) continue;
+                for (int gx = 0; gx < WF_W; gx++) {
+                    double[] d = eqDir(gx, gy, WF_W, WF_H, o.yawRef);
+                    double se = 0, sn = 0, sw = WARP_W0;
+                    for (double[] c : L) {
+                        double dot = d[0] * c[0] + d[1] * c[1] + d[2] * c[2];
+                        if (dot < cut) continue;
+                        double g = c[5] * Math.exp(-2 * (1 - dot) / s2);
+                        se += g * c[3]; sn += g * c[4]; sw += g;
+                    }
+                    double e = se / sw, nn = sn / sw, mg = Math.hypot(e, nn);
+                    if (mg > mx) { e *= mx / mg; nn *= mx / mg; }
+                    fe[gy * WF_W + gx] = (float) (e * fade); fn[gy * WF_W + gx] = (float) (nn * fade);
+                }
+            }
+            double ml = 0, mt = 0;
+            for (int gy = 0; gy < WF_H; gy++) {
+                double cl = Math.cos((.5 - (gy + .5) / WF_H) * Math.PI);
+                for (int gx = 0; gx < WF_W; gx++) {
+                    int k = gy * WF_W + gx;
+                    ml = Math.max(ml, Math.abs(fe[k]) / Math.max(.05, cl)); mt = Math.max(mt, Math.abs(fn[k]));
+                }
+            }
+            F[i].wE = fe; F[i].wN = fn; F[i].wLon = ml / D; F[i].wLat = mt / D;
+            any = true;
+        }
+        return any;
+    }
+
+    /** d (unit world direction of canvas pixel (x, y) of a Wc x Hc canvas) <- the direction frame f samples there (mesh warp) */
+    private static void displace(Fr f, double x, double y, int Wc, int Hc, double[] d) {
+        double gx = (x + .5) / Wc * WF_W - .5, gy = Math.max(0, Math.min(WF_H - 1.001, (y + .5) / Hc * WF_H - .5));
+        int ix = (int) Math.floor(gx), iy = (int) Math.floor(gy);
+        double ax = gx - ix, ay = gy - iy;
+        int x0 = fm(ix, WF_W), x1 = fm(ix + 1, WF_W), y0 = iy, y1 = Math.min(WF_H - 1, iy + 1);
+        double e = (f.wE[y0 * WF_W + x0] * (1 - ax) + f.wE[y0 * WF_W + x1] * ax) * (1 - ay) + (f.wE[y1 * WF_W + x0] * (1 - ax) + f.wE[y1 * WF_W + x1] * ax) * ay;
+        double nn = (f.wN[y0 * WF_W + x0] * (1 - ax) + f.wN[y0 * WF_W + x1] * ax) * (1 - ay) + (f.wN[y1 * WF_W + x0] * (1 - ax) + f.wN[y1 * WF_W + x1] * ax) * ay;
+        if (e == 0 && nn == 0) return;
+        double cl = Math.sqrt(d[0] * d[0] + d[1] * d[1]);
+        if (cl < 1e-6) return;
+        // east = (cos lon, -sin lon, 0), north = (-sin lat sin lon, -sin lat cos lon, cos lat) (tangent offsets e, nn in radians)
+        double sl = d[2], sLo = d[0] / cl, cLo = d[1] / cl;
+        d[0] += e * cLo - nn * sl * sLo;
+        d[1] += -e * sLo - nn * sl * cLo;
+        d[2] += nn * cl;
+    }
+
+    /** footprint of f on a Wc x Hc canvas, widened when f has a mesh warp field (the field moves the content by up to WARP_MAX_DEG) */
+    private int[] roiOfF(Fr f, double t, int Wc, int Hc) {
+        int[] r = roiOf(f.R, t, f.w, f.h, Wc, Hc, o.yawRef);
+        if (f.wE == null) return r;
+        // a canvas pixel at most max|shift| outside the footprint can sample inside the frame
+        int mx = (int) Math.ceil(Wc * (Math.min(20, f.wLon) + .5) / 360), my = (int) Math.ceil(Hc * (f.wLat + .5) / 180);
+        int y0 = Math.max(0, r[2] - my), y1 = Math.min(Hc, r[3] + my);
+        if (r[4] == 1) return new int[]{0, Wc, y0, y1, 1};
+        int wd = r[1] - r[0] + 2 * mx;
+        if (wd >= Wc - 4) return new int[]{0, Wc, y0, y1, 1};
+        int x0 = fm(r[0] - mx, Wc);
+        return new int[]{x0, x0 + wd, y0, y1, 0};
+    }
+
+    /** the nadir frame owns (exclusively) the part of its label region that lies LOCK_MARGIN_DEG inside its frame */
+    private void lockNadir(Fr[] F, int[] lab, int[] lock, int Ws, int Hs) {
+        for (int y = 0; y < Hs; y++) for (int x = 0; x < Ws; x++) {
+            int p = y * Ws + x, a = lab[p];
+            if (a < 0 || !F[a].nadir) continue;
+            int k = at(F[a], x, y, Ws);
+            if (k >= 0 && F[a].lsc[k] >= LOCK_MARGIN_DEG) lock[p] = a;
+        }
+    }
+
+    /** ghost removal: for every pair of neighbouring labels, the places where the two frames disagree in structure (difference after
+     *  gains minus its smooth part > GHOST_T) near their border are collected on one canvas mask; the mask is closed (~GHOST_CLOSE_DEG,
+     *  so the edges / copies of one object become one region) and every region is given whole to ONE frame - the one that covers most
+     *  of it, where it lies furthest from the frame border and which is sharpest there - relabelled and locked (the other frames are excluded
+     *  there at every pyramid level, see allowed()) */
+    private void deghost(Fr[] F, int[] lab, int[] lock, int Ws, int Hs, Stats st) {
+        java.util.TreeMap<Integer, int[]> adj = new java.util.TreeMap<>();
+        for (int y = 0; y < Hs; y++) for (int x = 0; x < Ws; x++) {
+            int a = lab[y * Ws + x];
+            if (a < 0) continue;
+            int r = lab[y * Ws + (x + 1) % Ws], d = y + 1 < Hs ? lab[(y + 1) * Ws + x] : -1;
+            for (int b : new int[]{r, d}) {
+                if (b < 0 || b == a) continue;
+                int key = Math.min(a, b) * n + Math.max(a, b);
+                int[] c = adj.get(key);
+                if (c == null) adj.put(key, new int[]{1}); else c[0]++;
+            }
+        }
+        int near = Math.max(3, (int) Math.round(Ws * GHOST_NEAR_DEG / 360)), minA = Math.max(6, (int) Math.round(2 * (Ws / 360.0) * (Ws / 360.0)));
+        double sig = Math.max(2, Ws * 3.0 / 360);
+        byte[] G = new byte[Ws * Hs];
+        // 1. disagreement of every neighbouring pair (in the region of frame a) -> canvas mask G
+        for (java.util.Map.Entry<Integer, int[]> en : adj.entrySet()) {
+            if (en.getValue()[0] < 3) continue;
+            int a = en.getKey() / n, b = en.getKey() % n;
+            Fr fa = F[a], fb = F[b];
+            if (fa.nadir || fb.nadir) continue;
+            chk();
+            int w = fa.lw, h = fa.lh, nb = 0;
+            float[] df = new float[w * h];
+            byte[] both = new byte[w * h], la = new byte[w * h], lb = new byte[w * h];
+            for (int yy = 0; yy < h; yy++) for (int xx = 0; xx < w; xx++) {
+                int k = yy * w + xx;
+                if (fa.lsc[k] < 0) continue;
+                int x = (fa.lx0 + xx) % Ws, y = fa.ly0 + yy, kb = at(fb, x, y, Ws);
+                int L = lab[y * Ws + x];
+                la[k] = (byte) (L == a ? 255 : 0); lb[k] = (byte) (L == b ? 255 : 0);
+                if (kb < 0) continue;
+                df[k] = (float) (lumG(fa, k) - lumG(fb, kb));
+                both[k] = (byte) 255; nb++;
+            }
+            if (nb < minA) continue;
+            Mat D1 = new Mat(h, w, CvType.CV_32FC1), DL = new Mat(), Bm = new Mat(h, w, CvType.CV_8UC1), Am = new Mat(h, w, CvType.CV_8UC1), Lb = new Mat(h, w, CvType.CV_8UC1);
+            Mat mask = new Mat(), nearM = new Mat(), tmp = new Mat(), k2 = null;
+            try {
+                D1.put(0, 0, df); Bm.put(0, 0, both); Am.put(0, 0, la); Lb.put(0, 0, lb);
+                Imgproc.GaussianBlur(D1, DL, new Size(0, 0), sig);
+                Imgproc.GaussianBlur(D1, D1, new Size(0, 0), 1);
+                Core.subtract(D1, DL, D1);
+                Core.absdiff(D1, new Scalar(0), D1);
+                Imgproc.threshold(D1, D1, GHOST_T, 255, Imgproc.THRESH_BINARY);
+                D1.convertTo(mask, CvType.CV_8U);
+                Core.bitwise_and(mask, Bm, mask);
+                k2 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(2 * near + 1, 2 * near + 1));
+                Imgproc.dilate(Am, nearM, k2);
+                Imgproc.dilate(Lb, tmp, k2);
+                Core.bitwise_and(nearM, tmp, nearM);
+                Core.bitwise_and(mask, nearM, mask);
+                byte[] mb = new byte[w * h];
+                mask.get(0, 0, mb);
+                for (int k = 0; k < w * h; k++) if (mb[k] != 0) G[(fa.ly0 + k / w) * Ws + (fa.lx0 + k % w) % Ws] = (byte) 255;
+            } finally {
+                D1.release(); DL.release(); Bm.release(); Am.release(); Lb.release(); mask.release(); nearM.release(); tmp.release();
+                if (k2 != null) k2.release();
+            }
+        }
+        // 2. regions: closing (periodic in x), small dilation, components
+        int ck = 2 * Math.max(2, (int) Math.round(Ws * GHOST_CLOSE_DEG / 360 / 2)) + 1, pad = ck + 4;
+        Mat g = new Mat(Hs, Ws, CvType.CV_8UC1), gp = new Mat(), ker = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(ck, ck));
+        Mat k5 = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(5, 5)), cc = new Mat(), stats = new Mat(), cent = new Mat();
+        int[] cl = new int[Ws * Hs];
+        int nc;
+        try {
+            g.put(0, 0, G);
+            Core.copyMakeBorder(g, gp, 0, 0, pad, pad, Core.BORDER_WRAP);
+            Imgproc.morphologyEx(gp, gp, Imgproc.MORPH_CLOSE, ker);
+            Imgproc.dilate(gp, gp, k5);
+            Mat c = gp.submat(0, Hs, pad, pad + Ws);
+            c.copyTo(g);
+            c.release();
+            nc = Imgproc.connectedComponentsWithStats(g, cc, stats, cent, 8, CvType.CV_32S);
+            cc.get(0, 0, cl);
+        } finally { g.release(); gp.release(); ker.release(); k5.release(); cc.release(); stats.release(); cent.release(); }
+        if (nc <= 1) { st.ghostRegions = 0; log("ghost removal: no regions"); return; }
+        // 3. owner per region: the frame with the best (covered fraction)^2 x mean distance from its border; the part it does not
+        //    cover goes the same way to the next frame (up to 3 rounds) - one source per part, never an average of two copies
+        int regions = 0;
+        for (int round = 0; round < 3; round++) {
+            int[] area = new int[nc];
+            int[][] cov = new int[nc][n];
+            double[][] sl = new double[nc][n], sg = new double[nc][n];
+            for (int p = 0; p < Ws * Hs; p++) {
+                int c = cl[p];
+                if (c <= 0 || lock[p] >= 0) continue;
+                area[c]++;
+                int x = p % Ws, y = p / Ws;
+                for (int i = 0; i < n; i++) {
+                    if (F[i].nadir) continue;
+                    int k = at(F[i], x, y, Ws);
+                    if (k < 0) continue;
+                    cov[c][i]++; sl[c][i] += F[i].lsc[k]; sg[c][i] += F[i].lgr[k];
+                }
+            }
+            int[] own = new int[nc];
+            boolean any = false;
+            for (int c = 1; c < nc; c++) {
+                own[c] = -1;
+                if (area[c] < minA) continue;
+                int best = -1;
+                double bestS = 0;
+                for (int i = 0; i < n; i++) {
+                    if (cov[c][i] == 0) continue;
+                    // covered fraction^2 x distance from the frame border (saturating at GHOST_CENTRE_DEG) x sharpness (mean gradient:
+                    // a blurred copy - motion / focus - loses against a sharp one at the same distance)
+                    double fr = cov[c][i] / (double) area[c];
+                    double s = fr * fr * Math.min(GHOST_CENTRE_DEG, sl[c][i] / cov[c][i]) * (1 + sg[c][i] / cov[c][i]);
+                    if (s > bestS) { bestS = s; best = i; }
+                }
+                own[c] = best;
+                if (best < 0) continue;
+                any = true;
+                if (round == 0) regions++;
+                if (o.log != null && area[c] >= 20 * minA) {
+                    StringBuilder sb = new StringBuilder("ghost region " + c + " round " + round + ": area " + area[c] + " owner " + best + " covers:");
+                    for (int i = 0; i < n; i++) if (cov[c][i] > 0) sb.append(" " + i + ":" + Math.round(100.0 * cov[c][i] / area[c]) + "%/" + r1(sl[c][i] / cov[c][i]) + "/g" + r1(sg[c][i] / cov[c][i]));
+                    log(sb.toString());
+                }
+            }
+            if (!any) break;
+            for (int p = 0; p < Ws * Hs; p++) {
+                int c = cl[p];
+                if (c <= 0 || own[c] < 0 || lock[p] >= 0) continue;
+                int k = at(F[own[c]], p % Ws, p / Ws, Ws);
+                if (k < 0 || F[own[c]].lsc[k] < LOCK_MARGIN_DEG) continue;
+                lock[p] = own[c]; lab[p] = own[c];
+            }
+        }
+        st.ghostRegions = regions;
+        log("ghost removal: " + regions + " regions given to one frame");
+    }
+
+    /** per frame weight factor on the seam canvas: 0 where another frame owns the pixel exclusively (lock), rising to 1 over
+     *  LOCK_RAMP_DEG outside; null when the frame is nowhere excluded */
+    private void allowed(Fr[] F, int[] lock, int Ws, int Hs) {
+        double rpx = Math.max(1, Ws * LOCK_RAMP_DEG / 360);
+        for (int i = 0; i < n; i++) {
+            Fr f = F[i];
+            f.lal = null;
+            byte[] ex = new byte[f.lw * f.lh];
+            boolean any = false;
+            for (int yy = 0; yy < f.lh; yy++) for (int xx = 0; xx < f.lw; xx++) {
+                int k = yy * f.lw + xx, L = lock[(f.ly0 + yy) * Ws + (f.lx0 + xx) % Ws];
+                if (f.lsc[k] >= 0 && L >= 0 && L != i) any = true; else ex[k] = (byte) 255;
+            }
+            if (!any) continue;
+            Mat m = new Mat(f.lh, f.lw, CvType.CV_8UC1), dist = new Mat();
+            try {
+                m.put(0, 0, ex);
+                Imgproc.distanceTransform(m, dist, Imgproc.DIST_L2, 3);
+                float[] dv = new float[f.lw * f.lh];
+                dist.get(0, 0, dv);
+                for (int k = 0; k < dv.length; k++) dv[k] = (float) Math.min(1, dv[k] / rpx);
+                f.lal = dv;
+            } finally { m.release(); dist.release(); }
+        }
+    }
+
+    /** weight factor of frame f at seam canvas pixel (x, y): 1 outside its low-res region or without exclusions */
+    private static float lalAt(Fr f, int x, int y, int Ws) {
+        if (f.lal == null) return 1;
+        int ly = y - f.ly0;
+        if (ly < 0 || ly >= f.lh) return 1;
+        int lx = x - f.lx0;
+        if (lx < 0) lx += Ws;
+        if (lx >= f.lw) return 1;
+        return f.lal[ly * f.lw + lx];
     }
 
     /* ------------------------------------------------------------------ full resolution: warp + multi-band blend ------------------------------------------------------------------ */
@@ -1560,7 +2128,7 @@ public final class PanoStitchCore {
         Mat img = decode(i);
         Mat src = img;
         List<Mat> lap = new ArrayList<>(), gw = new ArrayList<>();
-        Mat roiImg = null, roiW = null, valid = null;
+        Mat roiImg = null, roiW = null, valid = null, roiAl = null;
         try {
             int w = f.w, h = f.h;
             // pre-downscale so the source is not much finer than the output (anti-aliasing)
@@ -1572,7 +2140,7 @@ public final class PanoStitchCore {
             }
             int sw = src.cols(), sh = src.rows();
             double sfp = (Math.max(sw, sh) / 2.0) / t;
-            int[] r = roiOf(f.R, t, w, h, W, H, o.yawRef);
+            int[] r = roiOfF(f, t, W, H);
             boolean full = r[4] == 1;
             int x0, x1;
             if (full) { x0 = -A; x1 = W + A; }
@@ -1585,6 +2153,8 @@ public final class PanoStitchCore {
             if (rh <= 0) return;
             roiImg = new Mat(rh, rw, CvType.CV_32FC3);
             roiW = new Mat(rh, rw, CvType.CV_32FC1);
+            if (f.lal != null) roiAl = new Mat(rh, rw, CvType.CV_32FC1);
+            double[] dv = new double[3];
             valid = new Mat(rh, rw, CvType.CV_32FC1);
             double[] m = f.R;
             double[] sinLo = new double[rw], cosLo = new double[rw];
@@ -1598,6 +2168,8 @@ public final class PanoStitchCore {
                 for (int ys = 0; ys < rh; ys += STRIP) {
                     int sh2 = Math.min(STRIP, rh - ys);
                     float[] ax = new float[sh2 * rw], ay = new float[sh2 * rw], vw = new float[sh2 * rw], vv = new float[sh2 * rw], r2 = new float[sh2 * rw];
+                    float[] al = roiAl != null ? new float[sh2 * rw] : null;
+                    if (al != null) java.util.Arrays.fill(al, 1);
                     for (int yy = 0; yy < sh2; yy++) {
                         int y = y0 + ys + yy;
                         double lat = (.5 - (y + .5) / H) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
@@ -1607,8 +2179,9 @@ public final class PanoStitchCore {
                         int lyA = Math.max(0, Math.min(Hs - 1, ly0)), lyB = Math.max(0, Math.min(Hs - 1, ly0 + 1));
                         for (int xx = 0; xx < rw; xx++) {
                             int k = yy * rw + xx;
-                            double d0 = cl * sinLo[xx], d1 = cl * cosLo[xx];
-                            double cx = m[0] * d0 + m[3] * d1 + m[6] * sl, cy = m[1] * d0 + m[4] * d1 + m[7] * sl, cz = m[2] * d0 + m[5] * d1 + m[8] * sl;
+                            double d0 = cl * sinLo[xx], d1 = cl * cosLo[xx], d2 = sl;
+                            if (f.wE != null) { dv[0] = d0; dv[1] = d1; dv[2] = d2; displace(f, x0 + xx, y, W, H, dv); d0 = dv[0]; d1 = dv[1]; d2 = dv[2]; }
+                            double cx = m[0] * d0 + m[3] * d1 + m[6] * d2, cy = m[1] * d0 + m[4] * d1 + m[7] * d2, cz = m[2] * d0 + m[5] * d1 + m[8] * d2;
                             if (cz >= -1e-6) { ax[k] = -1e4f; ay[k] = -1e4f; continue; }
                             double u = sw / 2.0 + sfp * cx / -cz, v = sh / 2.0 - sfp * cy / -cz;
                             ax[k] = (float) (u - .5); ay[k] = (float) (v - .5);
@@ -1622,7 +2195,12 @@ public final class PanoStitchCore {
                             int xa = fm(lx0, Ws), xb = fm(lx0 + 1, Ws);
                             double ind = (lab[lyA * Ws + xa] == i ? (1 - fx) * (1 - fy) : 0) + (lab[lyA * Ws + xb] == i ? fx * (1 - fy) : 0)
                                     + (lab[lyB * Ws + xa] == i ? (1 - fx) * fy : 0) + (lab[lyB * Ws + xb] == i ? fx * fy : 0);
-                            vw[k] = ind > .5 ? 1 : 0;
+                            float a1 = 1;
+                            if (al != null) { // ghost / nadir exclusion (bilinear on the seam canvas)
+                                a1 = (float) ((lalAt(f, xa, lyA, Ws) * (1 - fx) + lalAt(f, xb, lyA, Ws) * fx) * (1 - fy) + (lalAt(f, xa, lyB, Ws) * (1 - fx) + lalAt(f, xb, lyB, Ws) * fx) * fy);
+                                al[k] = a1;
+                            }
+                            vw[k] = ind > .5 ? a1 : 0;
                         }
                     }
                     if (full) { // periodic copy: only the central W columns count
@@ -1645,6 +2223,7 @@ public final class PanoStitchCore {
                     roiImg.put(ys, 0, fpx);
                     Mat ws = roiW.submat(ys, ys + sh2, 0, rw); ws.put(0, 0, vw); ws.release();
                     Mat vs = valid.submat(ys, ys + sh2, 0, rw); vs.put(0, 0, vv); vs.release();
+                    if (al != null) { Mat as = roiAl.submat(ys, ys + sh2, 0, rw); as.put(0, 0, al); as.release(); }
                 }
             } finally { tmp.release(); mx.release(); my.release(); g3.release(); }
             src.release();
@@ -1661,6 +2240,16 @@ public final class PanoStitchCore {
                 Imgproc.pyrDown(gw.get(l - 1), ww);
                 lap.add(g); gw.add(ww);
             }
+            // excluded areas stay excluded at every level (the pyramid would otherwise spread the weight of the excluded copy back in)
+            if (roiAl != null) {
+                for (int l = 1; l <= levels; l++) {
+                    Mat a = new Mat();
+                    Imgproc.resize(roiAl, a, gw.get(l).size(), 0, 0, Imgproc.INTER_AREA);
+                    Core.multiply(gw.get(l), a, gw.get(l));
+                    a.release();
+                }
+                roiAl.release(); roiAl = null;
+            }
             for (int l = 0; l < levels; l++) {
                 Mat up = new Mat();
                 Imgproc.pyrUp(lap.get(l + 1), up, lap.get(l).size());
@@ -1674,6 +2263,7 @@ public final class PanoStitchCore {
             if (roiImg != null) roiImg.release();
             if (roiW != null) roiW.release();
             if (valid != null) valid.release();
+            if (roiAl != null) roiAl.release();
             for (Mat m : lap) m.release();
             for (Mat m : gw) m.release();
         }
