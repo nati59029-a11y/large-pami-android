@@ -35,11 +35,15 @@ jobs:
             const net = [];
             p.on('response', r => { const q = r.request(); const t = q.resourceType(); if (t === 'xhr' || t === 'fetch' || t === 'document') net.push({ m: q.method(), u: r.url().split('?')[0], q: (r.url().split('?')[1] || '').replace(/=[^&]*/g, '='), s: r.status(), t, ct: (r.headers()['content-type'] || '').slice(0, 40) }); });
             const shot = async n => { try { await p.screenshot({ path: `out/${n}.png`, fullPage: true }); } catch (e) { console.log('shot fail', n, e.message); } };
-            const dump = async n => { try { const d = await p.evaluate(() => ({ url: location.href, title: document.title, inputs: [...document.querySelectorAll('input,select,button,a')].filter(e => e.offsetParent).slice(0, 400).map(e => ({ tag: e.tagName, type: e.type || '', name: e.name || '', id: e.id || '', ph: e.placeholder || '', txt: (e.innerText || e.value || '').trim().slice(0, 60), href: e.getAttribute && (e.getAttribute('href') || ''), ng: [...e.attributes].filter(a => /^(ng-|data-|ui-sref|formcontrolname)/.test(a.name)).map(a => a.name + '=' + a.value.slice(0, 60)).join(' ') })) })); for (const i of d.inputs) if (i.type === 'password') i.txt = ''; fs.writeFileSync(`out/${n}.json`, JSON.stringify(d, null, 1)); } catch (e) { console.log('dump fail', n, e.message); } };
+            const dump = async n => { try { const d = await p.evaluate(() => ({ url: location.href, title: document.title, inputs: [...document.querySelectorAll('input,select,button,a')].filter(e => e.offsetParent).slice(0, 400).map(e => ({ tag: e.tagName, type: e.type || '', name: e.name || '', id: e.id || '', ph: e.placeholder || '', txt: (e.innerText || e.value || '').trim().slice(0, 60), href: e.getAttribute && (e.getAttribute('href') || ''), ng: [...e.attributes].filter(a => /^(ng-|data-|ui-sref|formcontrolname)/.test(a.name)).map(a => a.name + '=' + a.value.slice(0, 60)).join(' ') })) })); for (const i of d.inputs) if (i.type === 'password') i.txt = ''; fs.writeFileSync(`out/${n}.json`, JSON.stringify(d, null, 1)); console.log('DUMP', n, d.url, d.title); for (const i of d.inputs) console.log('  ', i.tag, i.type, i.name, i.id, i.ph, '|', i.txt.replace(/\s+/g,' '), '|', i.href, '|', i.ng); } catch (e) { console.log('dump fail', n, e.message); } };
             await p.goto('https://caspit.valu.co.il/bo/', { waitUntil: 'networkidle', timeout: 60000 }).catch(e => console.log('goto', e.message));
+            await p.waitForTimeout(5000);
             await shot('01-login'); await dump('01-login');
-            const pw = p.locator('input[type=password]:visible').first();
-            const us = p.locator('input:not([type=password]):not([type=hidden]):not([type=checkbox]):visible').first();
+            console.log('FRAMES', p.frames().map(f => f.url()).join(' , '));
+            const html = await p.content(); console.log('HTMLLEN', html.length); console.log(html.replace(/\s+/g, ' ').slice(0, 3000));
+            const lf = p.frames().find(f => f !== p.mainFrame() && /login|auth|account/i.test(f.url())) || p.mainFrame();
+            const pw = lf.locator('input[type=password]:visible').first();
+            const us = lf.locator('input[type=text]:visible, input[type=email]:visible, input:not([type]):visible').first();
             await us.fill(process.env.CU); await pw.fill(process.env.CP);
             await pw.press('Enter');
             await p.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
