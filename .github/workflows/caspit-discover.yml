@@ -1,0 +1,74 @@
+# גילוי מסכי כספית לבניית הרובוט (שלב ב'). רץ רק בדחיפה לענף claude/caspit-robot שמשנה את הקובץ הזה.
+# לא כותב שום דבר לכספית: רק נכנס, מצלם מסכים ורושם כתובות של בקשות (בלי תוכן, בלי עוגיות, בלי סיסמה).
+name: Caspit discover
+on:
+  push:
+    branches: ["claude/caspit-robot"]
+    paths: [".github/workflows/caspit-discover.yml"]
+permissions:
+  contents: read
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install Playwright
+        run: |
+          mkdir -p w && cd w && npm init -y >/dev/null && npm i playwright@1.47.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+      - name: Discover
+        working-directory: w
+        env:
+          CU: ${{ secrets.CASPIT_USER }}
+          CP: ${{ secrets.CASPIT_PASS }}
+        run: |
+          [ -n "$CU" ] && [ -n "$CP" ] || { echo "::error::חסרים הסודות CASPIT_USER / CASPIT_PASS"; exit 1; }
+          mkdir -p out
+          cat > d.js <<'JS'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          (async () => {
+            const b = await chromium.launch();
+            const c = await b.newContext({ viewport: { width: 1366, height: 900 }, locale: 'he-IL', acceptDownloads: true });
+            const p = await c.newPage();
+            const net = [];
+            p.on('response', r => { const q = r.request(); const t = q.resourceType(); if (t === 'xhr' || t === 'fetch' || t === 'document') net.push({ m: q.method(), u: r.url().split('?')[0], q: (r.url().split('?')[1] || '').replace(/=[^&]*/g, '='), s: r.status(), t, ct: (r.headers()['content-type'] || '').slice(0, 40) }); });
+            const shot = async n => { try { await p.screenshot({ path: `out/${n}.png`, fullPage: true }); } catch (e) { console.log('shot fail', n, e.message); } };
+            const dump = async n => { try { const d = await p.evaluate(() => ({ url: location.href, title: document.title, inputs: [...document.querySelectorAll('input,select,button,a')].filter(e => e.offsetParent).slice(0, 400).map(e => ({ tag: e.tagName, type: e.type || '', name: e.name || '', id: e.id || '', ph: e.placeholder || '', txt: (e.innerText || e.value || '').trim().slice(0, 60), href: e.getAttribute && (e.getAttribute('href') || ''), ng: [...e.attributes].filter(a => /^(ng-|data-|ui-sref|formcontrolname)/.test(a.name)).map(a => a.name + '=' + a.value.slice(0, 60)).join(' ') })) })); for (const i of d.inputs) if (i.type === 'password') i.txt = ''; fs.writeFileSync(`out/${n}.json`, JSON.stringify(d, null, 1)); } catch (e) { console.log('dump fail', n, e.message); } };
+            await p.goto('https://caspit.valu.co.il/bo/', { waitUntil: 'networkidle', timeout: 60000 }).catch(e => console.log('goto', e.message));
+            await shot('01-login'); await dump('01-login');
+            const pw = p.locator('input[type=password]:visible').first();
+            const us = p.locator('input:not([type=password]):not([type=hidden]):not([type=checkbox]):visible').first();
+            await us.fill(process.env.CU); await pw.fill(process.env.CP);
+            await pw.press('Enter');
+            await p.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+            await p.waitForTimeout(4000);
+            await shot('02-after-login'); await dump('02-after-login');
+            const routes = ['catalogs', 'csv-imports', 'sales-items-report', 'items-sales-report'];
+            let i = 3;
+            for (const r of routes) {
+              await p.goto('https://caspit.valu.co.il/bo#/' + r, { waitUntil: 'networkidle', timeout: 30000 }).catch(e => console.log('route', r, e.message));
+              await p.waitForTimeout(3000);
+              const n = String(i++).padStart(2, '0') + '-' + r; await shot(n); await dump(n);
+            }
+            await p.goto('https://caspit.valu.co.il/bo#/', { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+            await p.waitForTimeout(2000);
+            const menus = await p.locator('a.dropdown-toggle:visible, [data-toggle=dropdown]:visible').all();
+            const menuDump = [];
+            for (const [k, m] of menus.entries()) {
+              try { const t = (await m.innerText()).trim(); await m.click(); await p.waitForTimeout(700);
+                const items = await p.evaluate(() => [...document.querySelectorAll('.dropdown-menu a, .open a, .show a')].filter(e => e.offsetParent).map(e => ({ t: e.innerText.trim(), h: e.getAttribute('href') || '', s: e.getAttribute('ui-sref') || '' })));
+                menuDump.push({ menu: t, items }); await shot('m' + String(k).padStart(2, '0')); await p.keyboard.press('Escape'); await p.mouse.click(5, 5); } catch (e) { console.log('menu', k, e.message); }
+            }
+            fs.writeFileSync('out/menus.json', JSON.stringify(menuDump, null, 1));
+            fs.writeFileSync('out/net.json', JSON.stringify(net, null, 1));
+            console.log('MENUS'); for (const m of menuDump) console.log('#', m.menu, '=>', m.items.map(x => x.t + ' [' + (x.h || x.s) + ']').join(' | '));
+            console.log('NET'); const seen = new Set(); for (const n of net) { const k = n.m + ' ' + n.u; if (seen.has(k)) continue; seen.add(k); console.log(n.s, n.m, n.t, n.u, n.q, n.ct); }
+            await b.close();
+          })().catch(e => { console.log('FATAL', e.message); process.exit(1); });
+          JS
+          node d.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: caspit-discover, path: w/out, retention-days: 3 }
