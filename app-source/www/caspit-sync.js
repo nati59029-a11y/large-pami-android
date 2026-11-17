@@ -57,12 +57,33 @@ CHG.cxFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f)return;X.s
 const isL=r=>r[1]==='link';
 const TABS=[['new','חדשים',r=>r[1]==='new'],['in','מכספית',r=>isL(r)&&(r[3]==='in'||r[6]==='in')],['out','לכספית',r=>isL(r)&&['out','conf'].some(a=>r[3]===a||r[6]===a)],['first','הבדל ראשון',r=>isL(r)&&(r[3]==='first'||r[6]==='first')],['link','מקושרים',isL]];
 const listOf=k=>{const t=TABS.find(x=>x[0]===k);if(t)return X.R.rows.filter(t[2]);if(k==='mrg')return X.R.merged;if(k==='flt')return X.R.filt;return X.R.warn};
-const cntOf=k=>listOf(k).length;
+const cntOf=k=>dlList(k).length;
+/* תיקון סבב 1 (החלטה 12): כל משבצת לחיצה ופותחת את הרשימה המלאה שמאחוריה (חלון, 100 בכל פעם + "הצג עוד") */
+const tile=(l,v,cls,key)=>`<button type="button" class="k${cls?' '+cls:''}" data-a="cxDl" data-k="${key}" style="width:100%;min-height:64px;text-align:start;color:inherit;font:inherit;cursor:pointer"><small>${l}</small><b>${nf(v)}</b></button>`;
+const live=r=>!X.skip.has(r[0]);
+const fIn=i=>r=>isL(r)&&live(r)&&(r[i]==='in'||(r[i]==='first'&&X.take==='cx'));
+const fOut=i=>r=>isL(r)&&live(r)&&(r[i]==='out'||r[i]==='conf'||(r[i]==='first'&&X.take!=='cx'));
+const DL={newS:['יקלטו כמוצרים חדשים',r=>r[1]==='new'&&live(r)],link:['מקושרים למוצרים קיימים',isL],in:['מחיר/עלות מכספית',r=>TABS[1][2](r)&&live(r)],out:['ייצאו לכספית',r=>TABS[2][2](r)],first:['הבדל ראשון',TABS[3][2]],
+ pin:['מחירים מכספית',fIn(3)],cin:['עלויות מכספית',fIn(6)],pout:['מחירים לכספית',fOut(3)],cout:['עלויות לכספית',fOut(6)],dlink:['קישורים',r=>isL(r)&&live(r)]};
+const dlList=k=>DL[k]?X.R.rows.filter(DL[k][1]):listOf(k);
+const DLT={mrg:'אוחדו',flt:'סוננו',warn:'אזהרות'};
+const arrow=(a,b)=>`${pz(a)} ← ${pz(b)}`; // מימין לשמאל: ישן ← חדש
+function dlRow(k,r){
+ if(k==='mrg')return `<div class="li" style="cursor:default"><div class="m"><b>${esc(r.n)}</b><small>קוד ${esc(r.c)} אוחד לקוד ${esc(r.to)} (אותו שם, מחיר וצבע/מידה)</small></div></div>`;
+ if(k==='flt')return `<div class="li" style="cursor:default"><div class="m"><b>${esc(r.n||'(בלי שם)')}</b><small>קוד ${esc(r.c)} · הסיבה: ${esc(C.WHY[r.why]||r.why)}</small></div></div>`;
+ if(k==='warn')return `<div class="li" style="cursor:default"><div class="m"><b>קוד ${esc(r.c)}</b><small>${esc(C.WARN[r.w]||r.w)}${r.v?' · '+esc(String(r.v).slice(0,60)):''}</small></div></div>`;
+ if(r[1]==='new')return `<div class="li" style="cursor:default"><div class="m"><b>${esc(r[2])}</b><small>קוד ${esc(r[0])} · מחיר ${pz(r[3])} · עלות ${pz(r[4])}${r[5]?' · אוחדו אליו '+r[5]+' קודים':''}</small></div></div>`;
+ const ln=(a,f,ap,l)=>{const inn=a==='in'||(a==='first'&&X.take==='cx'),out=a==='out'||a==='conf'||(a==='first'&&X.take!=='cx');
+  return inn?`<small>${l} באפליקציה: ${arrow(ap,f)} (מכספית)</small>`:out?`<small>${l} בכספית: ${arrow(f,ap)} (יוצא לכספית${a==='conf'?' – התנגשות, האפליקציה קובעת':''})</small>`:a==='same'?'':`<small>${l}: ${pz(ap)} (זהה)</small>`};
+ return `<div class="li" style="cursor:default"><div class="m"><b>${esc(r[2])}</b><small>קוד ${esc(r[0])}${r[10]&&r[10]!==r[2]?' · באפליקציה: '+esc(r[10]):''} · קושר לפי ${VIA[r[9]]||'—'}</small>${ln(r[3],r[4],r[5],'מחיר')}${ln(r[6],r[7],r[8],'עלות')}</div></div>`}
+const dlH=()=>{const D=X.dl,L=dlList(D.k),S=L.slice(0,D.n);return `<h3>${esc((DL[D.k]&&DL[D.k][0])||DLT[D.k]||'')} · ${nf(L.length)}</h3><div style="max-height:60vh;overflow:auto">${S.map(r=>dlRow(D.k,r)).join('')||'<p class="note">אין פריטים</p>'}</div>${L.length>S.length?`<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="cxDlMore">הצג עוד (${nf(L.length-S.length)})</button>`:''}<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`};
+ACT.cxDl=el=>{if(!X.R)return;X.dl={k:el.dataset.k,n:PG};dlg(dlH())};
+ACT.cxDlMore=()=>{if(!X.dl)return;X.dl.n+=PG;const b=document.querySelector('#dlg [data-a=cxDlMore]');const sc=document.querySelector('#dlg div[style*="max-height"]');const t=sc?sc.scrollTop:0;dlg(dlH());const s2=document.querySelector('#dlg div[style*="max-height"]');if(s2)s2.scrollTop=t;void b};
 function pvH(){const R=X.R,c=R.cnt,pin=cntOf('in'),pout=cntOf('out'),fst=cntOf('first');
- const k=(l,v,cls)=>`<div class="k${cls?' '+cls:''}"><small>${l}</small><b>${nf(v)}</b></div>`;
+ const k=(l,v,cls,key)=>tile(l,v,cls,key);
  const tabs=TABS.map(t=>[t[0],t[1]]).concat([['mrg','מאוחדים'],['flt','מסוננים'],['warn','אזהרות']]);
  const L=listOf(X.tab),pages=Math.max(1,Math.ceil(L.length/PG)),pg=Math.min(X.pg,pages-1),S=L.slice(pg*PG,pg*PG+PG);
- return `<div class="card"><p class="note" style="margin-top:0">${esc(X.file||'')} · ${nf(c.codes)} קודים בקובץ</p><div class="kg">${k('יקלטו כמוצרים חדשים',c.nw-[...X.skip].filter(x=>R.rows.some(r=>r[0]===x&&r[1]==='new')).length,'pos')}${k('מקושרים למוצרים קיימים',c.link)}${k('אוחדו (שם ומחיר זהים)',c.merged)}${k('סוננו',c.filt,c.filt?'neg':'')}${k('מחיר/עלות מכספית',pin)}${k('ייצאו לכספית',pout)}${fst?k('הבדל ראשון',fst):''}${k('אזהרות',c.warn)}</div>
+ return `<div class="card"><p class="note" style="margin-top:0">${esc(X.file||'')} · ${nf(c.codes)} קודים בקובץ</p><div class="kg">${k('יקלטו כמוצרים חדשים',cntOf('newS'),'pos','newS')}${k('מקושרים למוצרים קיימים',c.link,'','link')}${k('אוחדו (שם, מחיר וצבע זהים)',c.merged,'','mrg')}${k('סוננו',c.filt,c.filt?'neg':'','flt')}${k('מחיר/עלות מכספית',pin,'','in')}${k('ייצאו לכספית',pout,'','out')}${fst?k('הבדל ראשון',fst,'','first'):''}${k('אזהרות',c.warn,'','warn')}</div><p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את כל הפריטים שמאחורי המספר.</p>
  ${c.appOnly?`<p class="note">${nf(c.appOnly)} מוצרים קיימים באפליקציה ואינם בכספית – אחרי השמירה הם ייכנסו לקובץ "פריטים חדשים".</p>`:''}
  ${fst?`<p class="note"><b>הבדל ראשון</b> = המחיר באפליקציה ובכספית שונים ואין סנכרון קודם. מי קובע?</p><div class="chips" role="group"><button class="chip${X.take==='app'?' on':''}" data-a="cxTake" data-k="app" aria-pressed="${X.take==='app'}">האפליקציה (יוצא לכספית)</button><button class="chip${X.take==='cx'?' on':''}" data-a="cxTake" data-k="cx" aria-pressed="${X.take==='cx'}">קח הכול מכספית</button></div>`:''}</div>
  <div class="chips scroll-x nw" role="tablist" style="margin:8px 0">${tabs.map(([id,l])=>`<button class="chip${X.tab===id?' on':''}" role="tab" aria-selected="${X.tab===id}" data-a="cxTab" data-k="${id}">${l} ${nf(cntOf(id))}</button>`).join('')}</div>
@@ -96,12 +117,14 @@ ACT.cxGo=async()=>{closeDlg();X.st='busy';prog('שומר… זה יכול לקח
  try{let r,first=true;for(let i=0;i<20;i++){r=await fnCall('cxApply',first?{run:X.run,take:X.take,skip:[...X.skip]}:{run:X.run});first=false;if(r.done)break;prog('שומר… עדיין עובד')}
   if(!r||!r.done)throw new Error('השמירה לא הסתיימה. לחצו שוב "אשר ושמור" – מה שכבר נשמר לא יישמר פעמיים.');
   X.res=r.res||{};X.st='done';X.cfg=null;rerender();toast('✓ הסנכרון נשמר');if(typeof window.__oxReload==='function')window.__oxReload()}
- catch(e){X.st='pv';rerender();err(e)}};
+ catch(e){if(e&&e.reason==='stale')return restale();X.st='pv';rerender();err(e)}};
+/* תצוגה מיושנת (נשמר בינתיים סנכרון או קובץ לכספית): מציגים שוב את אותו קובץ; אם האישור כבר התחיל ונעצר – מתחילים מהקובץ */
+async function restale(){prog('הנתונים השתנו מאז התצוגה המקדימה – משווה שוב…');try{const r=await fnCall('cxPreview',{run:X.run});Object.assign(X,{st:'pv',R:r,pg:0});rerender();toast('הנתונים השתנו מאז התצוגה המקדימה. בדקו שוב ואשרו.')}catch(e){X.st='pick';X.R=null;rerender();toast('הנתונים השתנו באמצע השמירה. מה שנשמר נשאר. בחרו שוב את הקובץ כדי להשלים.')}}
 
 /* ---------- סיום ---------- */
-function doneH(){const r=X.res||{},k=(l,v)=>`<div class="k"><small>${l}</small><b>${nf(v)}</b></div>`;
- return `<div class="card"><h3 style="margin-top:0">✓ הסנכרון נשמר</h3><div class="kg">${k('מוצרים חדשים',r.nw)}${k('קישורים',r.link)}${k('מחירים מכספית',r.pin)}${k('עלויות מכספית',r.cin)}${k('מחירים לכספית',r.pout)}${k('עלויות לכספית',r.cout)}</div>
- ${r.chg?`<p class="note">${nf(r.chg)} מוצרים השתנו באפליקציה בזמן התצוגה המקדימה ולא עודכנו – יופיעו בסנכרון הבא.</p>`:''}</div>${expH(true)}<button class="btn g w" style="min-height:48px" data-a="cxX0">סיום</button>`}
+function doneH(){const r=X.res||{},k=(l,v,key)=>X.R?tile(l,v,'',key):`<div class="k"><small>${l}</small><b>${nf(v)}</b></div>`;
+ return `<div class="card"><h3 style="margin-top:0">✓ הסנכרון נשמר</h3><div class="kg">${k('מוצרים חדשים',r.nw,'newS')}${k('קישורים',r.link,'dlink')}${k('מחירים מכספית',r.pin,'pin')}${k('עלויות מכספית',r.cin,'cin')}${k('מחירים לכספית',r.pout,'pout')}${k('עלויות לכספית',r.cout,'cout')}</div>
+ ${X.R?'<p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את הפריטים.</p>':''}${r.chg?`<p class="note">${nf(r.chg)} מוצרים השתנו באפליקציה בזמן התצוגה המקדימה ולא עודכנו – יופיעו בסנכרון הבא.</p>`:''}</div>${expH(true)}<button class="btn g w" style="min-height:48px" data-a="cxX0">סיום</button>`}
 ACT.cxX0=()=>{X.st='pick';X.R=null;rerender()};
 
 /* ---------- קבצים לכספית ---------- */

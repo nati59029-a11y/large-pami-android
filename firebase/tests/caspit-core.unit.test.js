@@ -10,7 +10,7 @@ const C = require('../functions/lib/caspit-core');
 const WWW = path.join(__dirname, '../../app-source/www/caspit-core.js');
 
 const H = ['קוד פריט', 'שם פריט', 'ברקוד', 'צבע', 'מידה', 'ספק', 'תאריך יצירה', 'קטגוריה ראשית', 'קטגוריה משנית', 'מחיר עלות', 'מחיר עלות ללא מעמ', 'מחיר לצרכן', "מחיר בחנות דמה", 'אחוז רווחיות', 'קוד פריט ספק', 'פריט ללא מעמ'];
-const row = (c, n, bc, p, o) => { const r = new Array(H.length).fill(''); Object.assign(r, { 0: c, 1: n, 2: bc, 5: (o && o.sup) || 'ללא ספק', 7: (o && o.c1) || '', 8: (o && o.c2) || '', 9: (o && o.cost) || 0, 10: 0, 11: p, 15: (o && o.nv) ? 'כן' : 'לא' }); return r; };
+const row = (c, n, bc, p, o) => { const r = new Array(H.length).fill(''); Object.assign(r, { 0: c, 1: n, 2: bc, 3: (o && o.col) || '', 4: (o && o.sz) || '', 5: (o && o.sup) || 'ללא ספק', 7: (o && o.c1) || '', 8: (o && o.c2) || '', 9: (o && o.cost) || 0, 10: 0, 11: p, 15: (o && o.nv) ? 'כן' : 'לא' }); return r; };
 const CAT = [H,
   row('200001', 'כוס נייר לבנה', '7000000000011', 9.9, { cost: 5.9, c1: 'כלים', c2: 'כוסות', sup: 'ספק א' }),
   row('200001', 'כוס נייר לבנה', '7000000000028', 9.9, { cost: 5.9 }), // אותו קוד, ברקוד נוסף
@@ -23,6 +23,10 @@ const CAT = [H,
   row('200007', 'ש'.repeat(70), '7000000000011', 5, {}), // שם ארוך + ברקוד של קוד אחר
   row('6954-7', 'מגש עם קוד מקף', '', 4.5, { nv: true }),
   row('200008', 'מחיר שגוי', '', -3, {}),
+  row('200009', 'סרט סאטן', '', 5, { col: 'אדום' }), // וריאנט – לא מאוחד עם 200010
+  row('200010', 'סרט סאטן', '', 5, { col: 'כחול' }),
+  row('200011', 'מגש עגול', '$7000000000059', 8, { cost: 3 }), // ברקוד עם קידומת סורק "$"
+  row('200012', 'מגש עגול', '', 8, { cost: 4 }), // מאוחד ל-200011, עלות שונה → אזהרה
 ];
 
 describe('זיהוי קובץ וקיבוץ', () => {
@@ -40,11 +44,13 @@ describe('זיהוי קובץ וקיבוץ', () => {
   it('מספרים: פסיק אלפים, פסיק עשרוני, ₪, מינוס בסוף', () => {
     assert.equal(C.num('1,234.50'), 1234.5); assert.equal(C.num('12,5'), 12.5); assert.equal(C.num('₪ 9.90'), 9.9);
     assert.equal(C.num('5-'), -5); assert.equal(C.num(7), 7); assert.ok(Number.isNaN(C.num('abc'))); assert.ok(Number.isNaN(C.num('')));
+    assert.equal(C.num('1,234'), 1234); assert.equal(C.num('12,345,678.9'), 12345678.9);
+    for (const x of ['1.234,50', '1,2,3', '12,3456', '1,23,456']) assert.ok(Number.isNaN(C.num(x)), x); // לא מנחשים סכום כסף
   });
   it('קוד אחד = פריט אחד, כל הברקודים נאספים', () => {
     const g = C.groupCat(CAT);
-    assert.equal(g.rows, 11);
-    assert.equal(g.items.length, 10);
+    assert.equal(g.rows, 15);
+    assert.equal(g.items.length, 14);
     assert.deepEqual(g.items[0].bcs, ['7000000000011', '7000000000028']);
     assert.equal(g.items[0].cost, 5.9);
   });
@@ -58,7 +64,7 @@ describe('ניקוי ואיחוד', () => {
     assert.deepEqual(r.cnt.by, { skip: 1, noname: 1, junk: 1, price: 1 });
   });
   it('שם ומחיר זהים → מאוחדים, וכל הברקודים עוברים לראשי; מחיר שונה – לא מאוחד (אזהרה)', () => {
-    assert.deepEqual(r.merged.map((m) => [m.c, m.to]), [['200003', '200001']]);
+    assert.deepEqual(r.merged.map((m) => [m.c, m.to]), [['200003', '200001'], ['200012', '200011']]);
     const a = r.keep.find((x) => x.c === '200001');
     assert.deepEqual(a.m, ['200003']);
     assert.equal(a.bc, '7000000000011');
@@ -88,8 +94,25 @@ describe('ניקוי ואיחוד', () => {
     assert.ok(r2.keep.some((x) => x.c === '1000')); // 1000 כבר לא ברשימה המיוחדת → נקלט (מחיר 0, אזהרה)
     assert.ok(r2.warn.some((x) => x.c === '1000' && x.w === 'p0'));
   });
-  it('ספירה: 10 קודים = 5 נקלטים + 1 מאוחד + 4 מסוננים', () => {
-    assert.deepEqual([r.cnt.codes, r.cnt.keep, r.cnt.merged, r.cnt.filt], [10, 5, 1, 4]);
+  it('ספירה: 14 קודים = 8 נקלטים + 2 מאוחדים + 4 מסוננים', () => {
+    assert.deepEqual([r.cnt.codes, r.cnt.keep, r.cnt.merged, r.cnt.filt], [14, 8, 2, 4]);
+  });
+  it('וריאנט (צבע אחר) – מוצר נפרד; שם זהה – מסומן dn בשני המוצרים (החלטה 10)', () => {
+    const a = r.keep.find((x) => x.c === '200009'), b = r.keep.find((x) => x.c === '200010');
+    assert.ok(a && b); assert.equal(a.dn, true); assert.equal(b.dn, true);
+    assert.deepEqual(a.col, ['אדום']);
+    assert.equal(r.keep.find((x) => x.c === '200001').dn, true); // 200004 – אותו שם במחיר אחר
+    assert.equal(r.keep.find((x) => x.c === '200002').dn, undefined);
+  });
+  it('איחוד עם עלות שונה – אזהרה mcost (לא נזרק בשקט)', () => {
+    assert.ok(w('200012', 'mcost'));
+    assert.equal(r.keep.find((x) => x.c === '200011').cost, 3);
+  });
+  it('ברקוד עם "$" נשמר בלי הקידומת; אין תקרה למספר הברקודים', () => {
+    assert.equal(r.keep.find((x) => x.c === '200011').bc, '7000000000059');
+    const many = [H].concat(Array.from({ length: 35 }, (_, i) => row('500001', 'מוצר רב ברקודים', String(7400000000000 + i), 3)));
+    const k = C.clean(C.groupCat(many).items).keep[0];
+    assert.equal(1 + k.bx.length, 35);
   });
 });
 
@@ -161,7 +184,7 @@ it('שני העותקים (שרת ואפליקציה) זהים, והעותק ב�
   assert.equal(a, b);
   const ctx = { self: {}, TextDecoder }; vm.createContext(ctx); vm.runInContext(a, ctx);
   const X = ctx.self.CaspitCore; assert.ok(X && typeof X.clean === 'function');
-  assert.equal(X.clean(X.groupCat(CAT).items).cnt.keep, 5);
+  assert.equal(X.clean(X.groupCat(CAT).items).cnt.keep, 8);
 });
 
 it('ביצועים: 9,000 קודים (11,000 שורות) – קיבוץ וניקוי מתחת לשנייה', () => {

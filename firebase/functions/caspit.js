@@ -7,9 +7,10 @@
 //                      שמור לשלב A2/A3 (לא בשימוש ב-A1): br – סניף המלאי באפליקציה (אחד לשתי הקופות), reg: { <מספר/שם סניף בכספית>: <קופה בסגירת הקופה> }
 //   cxItem/{code}      { c, pid, st:'link', n, pr:{ fb, ab, pd? }, co:{ fb, ab, pd? }, m?: קוד ראשי (קוד שאוחד), nv?, nw?: פריט חדש מהאפליקציה שטרם נקלט בכספית, run, at }
 //                        pr = מחיר לצרכן, co = עלות כולל מע"מ. fb/ab = הערך בכספית/באפליקציה בסנכרון האחרון, pd = נשלח לכספית וטרם נקלט (caspit-core: decide/after)
+//   cxcfg/seen         { codes:[כל קודי הקטלוג שאושרו, גם מסוננים] } – תפוסים לקוד 900000+ · cxBak/{id} – גיבוי לפני האישור הראשון (נפרד מ-stockBak)
 //   cxRun/{run}        { st:'up'|'pv'|'ap'|'done', parts, by, at, gen, cnt, sel?, res? } + in/{k} { items } (קלט) + pv/{k} { rows } (תצוגה מקדימה) + done/{k}
-//   prod/{id}          + cx: קוד כספית, nc: true ("לא נספר" – יורד בהכנסת מלאי / תיקון כמות), bcx: [ברקודים נוספים], src:'cx'
-//   priceLog/{id}      { prod, k:'p'|'c', old, new, src:'caspit', code, run, by, at } (גם src:'app' – orders.js)
+//   prod/{id}          + dn: true = "שם כפול – לבדוק" (cxDnOk מסיר), cx: קוד כספית, nc: true ("לא נספר" – יורד בהכנסת מלאי / תיקון כמות), bcx: [ברקודים נוספים], src:'cx'
+//   priceLog/{id}      { prod, k:'p'|'c', old, new, src:'caspit'|'conf', code, run, by, at } (גם src:'app' – orders.js). conf = האפליקציה ניצחה: old = הערך בכספית
 // בסיס לשלבים הבאים (A2/A3): cxItem לפי קוד → pid (מכירות → מלאי), cxcfg.skip לקודים שלא נוגעים במלאי.
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onCall } = require('./lib/region');
@@ -27,6 +28,8 @@ const MAX_PARTS = 20; // 20 × 1,500 = 30,000 קודים
 const PV_PART = 200; // שורות בכל חלק של התצוגה המקדימה (= טרנזקציה אחת באישור)
 const BUDGET = 200000; // אישור: עד 200 שניות לקריאה, והטלפון ממשיך בקריאה נוספת
 const CFG = 'cxcfg/main';
+const SEEN = 'cxcfg/seen'; // { codes:[כל הקודים שהופיעו בקטלוגים שאושרו] }
+const STALE = 'מאז התצוגה המקדימה נשמר סנכרון או קובץ לכספית. מציגים שוב.';
 
 async function mgrW(request) { const w = await O.who(request); if (w.role !== 'manager') throw O.deny('manager-only', 'הפעולה מותרת למנהל בלבד'); return w; }
 const runOf = (v) => { if (typeof v !== 'string' || !RUN_RE.test(v)) throw bad('bad-run', 'מזהה סנכרון לא תקין'); return v; };
@@ -38,8 +41,9 @@ function cleanIn(x) {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const c = s(x.c, 40).trim();
   if (!c) return null;
-  return { c, n: s(x.n, 200), bcs: (Array.isArray(x.bcs) ? x.bcs.slice(0, 50) : []).map((b) => s(b, 40).trim()).filter(Boolean),
-    p: numOrNull(x.p), cost: numOrNull(x.cost) > 0 ? x.cost : null, nv: x.nv === true, c1: s(x.c1, 60), c2: s(x.c2, 60), sup: s(x.sup, 80) };
+  const arr = (a, n) => (Array.isArray(a) ? a.slice(0, n) : []).map((b) => s(b, 40).trim()).filter(Boolean);
+  return { c, n: s(x.n, 200), bcs: arr(x.bcs, 200), col: arr(x.col, 50), sz: arr(x.sz, 50),
+    p: numOrNull(x.p), cost: numOrNull(x.cost) > 0 && x.cost <= 1000000 ? x.cost : null, nv: x.nv === true, c1: s(x.c1, 60), c2: s(x.c2, 60), sup: s(x.sup, 80) };
 }
 
 // cxCfg() → { cfg, items: מספר קודים מקושרים }
@@ -169,9 +173,11 @@ async function cxApply(request) {
   if (!r.exists || r.get('by') !== w.uid) throw new HttpsError('not-found', 'הסנכרון לא נמצא', { reason: 'no-run' });
   if (r.get('st') === 'done') return { done: true, dup: true, res: r.get('res') || {} };
   if (r.get('st') === 'up') throw pre('no-preview', 'קודם מציגים תצוגה מקדימה');
+  if (r.get('st') === 'void') throw pre('stale', STALE);
   let cfg = cfgOf(await cref.get());
+  // תיקון סבב 1 (ליקוי 4): בדיקת "תצוגה מיושנת" בכל קריאה (גם בהמשך אישור), ושוב בתוך כל חלק (applyPart). gen עולה בכל אישור ובכל cxExport
+  if (cfg.gen !== r.get('gen')) { if (r.get('st') === 'ap') await ref.update({ st: 'void' }); throw pre('stale', STALE); }
   if (r.get('st') === 'pv') {
-    if (cfg.gen !== r.get('gen')) throw pre('stale', 'מאז התצוגה המקדימה נשמר סנכרון אחר. הציגו שוב.');
     if (input.take != null && !['app', 'cx'].includes(input.take)) throw bad('bad-take', 'בחירה לא תקינה');
     if (input.skip != null && (!Array.isArray(input.skip) || input.skip.length > 30000)) throw bad('bad-skip', 'רשימה לא תקינה');
     const sel = { take: input.take === 'cx' ? 'cx' : 'app', skip: (input.skip || []).map((x) => s(x, 40)).filter(Boolean) };
@@ -179,7 +185,7 @@ async function cxApply(request) {
     r = await ref.get();
   }
   if (!cfg.bak) { // גיבוי לפני האישור הראשון (פעם אחת לעסק)
-    const b = await O.snapAll(db, w, 'prod', 'stockBak', 'caspit');
+    const b = await O.snapAll(db, w, 'prod', 'cxBak', 'caspit'); // אוסף נפרד – לא נוגע בגיבויי המחיקה (stockBak) ובשחזור שלהם (ליקוי 10)
     await cref.set({ bak: Object.assign(b, { at: Date.now() }) }, { merge: true });
     cfg = cfgOf(await cref.get());
   }
@@ -192,8 +198,16 @@ async function cxApply(request) {
     if (doneIds.has(String(k))) continue;
     if (Date.now() - t0 > BUDGET) return { done: false, next: k, res: (await ref.get()).get('res') || {} };
     const rows = (await ref.collection('pv').doc(String(k)).get()).get('rows') || [];
-    await applyPart(db, w, run, ref, k, rows, sel.take, skip, cats);
+    try { await applyPart(db, w, run, ref, k, rows, sel.take, skip, cats, r.get('gen')); } catch (e) {
+      if (e && e.details && e.details.reason === 'stale') await ref.update({ st: 'void' });
+      throw e;
+    }
   }
+  // ליקוי 6: כל הקודים שהופיעו בקטלוג (גם מסוננים ושורות שבוטל סימונן) נשמרים כתפוסים – קוד 900000+ לפריט חדש לא יתנגש בהם
+  const seenRef = db.doc(SEEN);
+  const codes = new Set(((await seenRef.get()).get('codes')) || []);
+  (await ref.collection('in').get()).docs.forEach((d) => (d.get('items') || []).forEach((x) => codes.add(x.c)));
+  await seenRef.set({ codes: [...codes], at: Date.now() });
   await db.runTransaction(async (tx) => {
     const x = await tx.get(ref), c = await tx.get(cref);
     if (x.get('st') === 'done') return;
@@ -206,10 +220,11 @@ async function cxApply(request) {
   return { done: true, res };
 }
 
-async function applyPart(db, w, run, ref, k, rows, take, skip, cats) {
+async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen) {
   const mark = ref.collection('done').doc(String(k));
   await db.runTransaction(async (tx) => {
     if ((await tx.get(mark)).exists) return;
+    if (gen !== undefined && cfgOf(await tx.get(db.doc(CFG))).gen !== gen) throw pre('stale', STALE);
     const L = rows.filter((x) => !skip.has(x.c));
     const pids = L.map((x) => (x.a === 'new' ? 'cx' + x.c : x.pid));
     const ps = pids.length ? await tx.getAll(...pids.map((id) => db.doc('prod/' + id))) : [];
@@ -219,7 +234,8 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats) {
     const now = Date.now();
     const res = { nw: 0, link: 0, pin: 0, cin: 0, pout: 0, cout: 0, chg: 0, skip: rows.length - L.length };
     const log = (pid, kk, old, nv, code) => tx.set(O.priceRef(db), { prod: pid, k: kk, old, new: nv, src: 'caspit', code, run, by: w.uid, at: now });
-    const xi = (c, d) => tx.set(db.doc('cxItem/' + c), Object.assign({ c, run, at: now, st: 'link', nw: FV().delete() }, d), { merge: true });
+    // fresh = מוצר שנוצר עכשיו: המסמך נכתב מחדש (בלי שאריות של cxItem יתום – m/pd/nv ישנים)
+    const xi = (c, d, fresh) => (fresh ? tx.set(db.doc('cxItem/' + c), Object.assign({ c, run, at: now, st: 'link' }, d)) : tx.set(db.doc('cxItem/' + c), Object.assign({ c, run, at: now, st: 'link', nw: FV().delete() }, d), { merge: true }));
     L.forEach((x, i) => {
       const s0 = ps[i];
       if (x.a === 'new' && !s0.exists) {
@@ -229,11 +245,12 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats) {
         if (it.c1 && it.c2) { ext.sub = catIdOf(it.c2, ext.cat); if (!cats.has(ext.sub)) { tx.set(db.doc('cat/' + ext.sub), { name: it.c2, parent: ext.cat, ord: 0, upd: now }); cats.set(ext.sub, true); } }
         if (it.sup) ext.sup = it.sup;
         if (it.bx && it.bx.length) ext.bcx = it.bx;
+        if (it.dn) ext.dn = true; // "שם כפול – לבדוק" (החלטה 10)
         tx.set(db.doc('prod/' + pid), Object.assign({ name: it.n, price: it.p, barcode: it.bc || '', on: true, q: {}, nc: true, sku: it.c, cx: it.c, at: now, by: w.uid, upd: now, src: 'cx' }, ext));
         if (it.cost != null) tx.set(db.doc(`prod/${pid}/p/cost`), { cost: it.cost, at: now, by: w.uid, src: 'cx' });
         const st = { pr: { fb: it.p, ab: it.p }, co: { fb: it.cost, ab: it.cost } };
-        xi(x.c, Object.assign({ pid, n: it.n }, st, it.nv ? { nv: true } : {}));
-        for (const m of x.m || []) xi(m, Object.assign({ pid, n: it.n, m: x.c }, st));
+        xi(x.c, Object.assign({ pid, n: it.n }, st, it.nv ? { nv: true } : {}), true);
+        for (const m of x.m || []) xi(m, Object.assign({ pid, n: it.n, m: x.c }, st), true);
         res.nw++;
         return;
       }
@@ -250,6 +267,10 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats) {
         const cIn = dc.act === 'in' || (dc.act === 'first' && take === 'cx');
         if (pIn && dp.f != null && !CC.eq(dp.f, ap)) { upd.price = dp.f; log(pid, 'p', ap, dp.f, x.c); res.pin++; }
         if (cIn && dc.f != null && !CC.eq(dc.f, ac)) { tx.set(db.doc(`prod/${pid}/p/cost`), { cost: dc.f, at: now, by: w.uid, src: 'cx' }); log(pid, 'c', ac, dc.f, x.c); res.cin++; }
+        // ליקוי 7ב: האפליקציה ניצחה בהתנגשות / בהבדל ראשון – הערך שהיה בכספית נרשם בהיסטוריה (src:'conf': old = כספית, new = האפליקציה)
+        const lose = (d) => (d.act === 'conf' || (d.act === 'first' && take !== 'cx')) && d.f != null;
+        if (lose(dp)) tx.set(O.priceRef(db), { prod: pid, k: 'p', old: dp.f, new: ap, src: 'conf', code: x.c, run, by: w.uid, at: now });
+        if (lose(dc)) tx.set(O.priceRef(db), { prod: pid, k: 'c', old: dc.f, new: ac, src: 'conf', code: x.c, run, by: w.uid, at: now });
         if (['out', 'conf'].includes(dp.act) || (dp.act === 'first' && take !== 'cx')) res.pout++;
         if (['out', 'conf'].includes(dc.act) || (dc.act === 'first' && take !== 'cx')) res.cout++;
         if (!p.cx) upd.cx = x.c;
@@ -300,26 +321,38 @@ async function cxExport(request) {
       ups.push([db.doc('cxItem/' + c), u]);
     }
     for (let i = 0; i < ups.length; i += 400) { const b = db.batch(); ups.slice(i, i + 400).forEach(([rf, u]) => b.update(rf, u)); await b.commit(); }
+    if (ups.length) await bumpGen(db); // תצוגה מקדימה שנעשתה לפני הקובץ – מיושנת (ליקוי 4)
     return { csv: CC.csvPrice(rows, vat), n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })) };
   }
   if (!S.cfg.last) throw pre('no-cat', 'קודם מסנכרנים קטלוג מכספית, כדי לא לתת קוד חדש למוצר שכבר קיים שם');
+  // ליקוי 5: הכול בטרנזקציה – מוצרי המועמדים וההגדרות נקראים בתוכה; מוצר שכבר קיבל קוד (cx) בקריאה מקבילה – מדולג.
+  // ליקוי 6: תפוסים = cxItem + כל הקודים שהופיעו בקטלוג (cxcfg/seen).
   const linked = new Set([...S.X.values()].map((x) => x.pid).filter(Boolean));
-  const todo = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && p.on !== false).sort((a, b) => String(a[1].name).localeCompare(String(b[1].name), 'he'));
-  if (todo.length) {
+  const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && p.on !== false).map(([id]) => id);
+  let added = 0, made = [];
+  if (cand.length) {
     await db.runTransaction(async (tx) => {
-      const c0 = cfgOf(await tx.get(db.doc(CFG)));
-      const taken = new Set(S.X.keys());
+      added = 0; made = []; // ניסיון חוזר של הטרנזקציה מתחיל נקי
+      const [cs, seen] = await Promise.all([tx.get(db.doc(CFG)), tx.get(db.doc(SEEN))]);
+      const c0 = cfgOf(cs);
+      const ps = [];
+      for (let i = 0; i < cand.length; i += 300) ps.push(...await tx.getAll(...cand.slice(i, i + 300).map((id) => db.doc('prod/' + id))));
+      const taken = new Set([...S.X.keys()].concat(seen.exists ? seen.get('codes') || [] : []));
+      const todo = ps.filter((x) => x.exists && !x.get('cx') && x.get('on') !== false).sort((a, b) => String(a.get('name')).localeCompare(String(b.get('name')), 'he'));
       let n = c0.next;
-      for (const [pid, p] of todo) {
+      for (const ps1 of todo) {
+        const pid = ps1.id, p = ps1.data();
         n = CC.nextCode(n, taken); const code = String(n); taken.add(code); n++;
         const ap = typeof p.price === 'number' ? p.price : null, ac = S.cost.has(pid) ? S.cost.get(pid) : null;
         const d = { c: code, pid, st: 'link', nw: true, src: 'app', n: p.name, pr: { fb: null, ab: ap, pd: ap }, co: { fb: null, ab: ac, pd: ac }, at: now };
         tx.set(db.doc('cxItem/' + code), d);
-        tx.update(db.doc('prod/' + pid), Object.assign({ cx: code, upd: now }, p.sku ? {} : { sku: code }));
-        S.X.set(code, d);
+        tx.update(ps1.ref, Object.assign({ cx: code, upd: now }, p.sku ? {} : { sku: code }));
+        made.push([code, d, pid, Object.assign({}, p, { cx: code })]);
+        added++;
       }
-      tx.set(db.doc(CFG), { next: n }, { merge: true });
+      tx.set(db.doc(CFG), Object.assign({ next: n }, added ? { gen: c0.gen + 1 } : {}), { merge: true });
     });
+    for (const [code, d, pid, p] of made) { S.X.set(code, d); S.P.set(pid, p); }
   }
   const catN = new Map((await db.collection('cat').get()).docs.map((d) => [d.id, d.get('name') || '']));
   const rows = [];
@@ -329,7 +362,21 @@ async function cxExport(request) {
     rows.push({ c, bc: p.barcode || '', n: p.name, p: typeof p.price === 'number' ? p.price : 0, cost: S.cost.has(x.pid) ? S.cost.get(x.pid) : null, c1: p.cat ? catN.get(p.cat) || '' : '', c2: p.sub ? catN.get(p.sub) || '' : '', sup: p.sup || '' });
   }
   O.ixDrop(w);
-  return { csv: CC.csvNew(rows, vat), n: rows.length, added: todo.length, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })) };
+  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })) };
+}
+
+async function bumpGen(db) { await db.runTransaction(async (tx) => { const c = cfgOf(await tx.get(db.doc(CFG))); tx.set(db.doc(CFG), { gen: c.gen + 1 }, { merge: true }); }); }
+
+// cxDnOk({ pid }) – "נבדק": מסיר את הסימון "שם כפול – לבדוק" (dn) מהמוצר (החלטה 10). מנהל בלבד.
+async function cxDnOk(request) {
+  const w = await mgrW(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['pid']);
+  const pid = idOf(input.pid, 'מוצר');
+  const ref = T.tdb().doc('prod/' + pid);
+  if (!(await ref.get()).exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+  await ref.update({ dn: FV().delete(), upd: Date.now(), dnBy: w.uid });
+  return { ok: true };
 }
 
 // cxHist({ pid }) → { codes:[קודי כספית], log:[{ k, old, new, src, at }] } – היסטוריית מחיר ועלות למוצר (30 אחרונים)
@@ -350,7 +397,7 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist };
+const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk };
 const BIG = ['cxPreview', 'cxApply', 'cxExport']; // ~9,000 מוצרים
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, loadState, applyPart, PV_PART } });

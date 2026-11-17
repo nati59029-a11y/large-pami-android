@@ -7,9 +7,10 @@
 //   מוצר אחד לכל קוד פריט; כל הברקודים של הקוד נשמרים (הראשון התקין = ברקוד ראשי, השאר = bx).
 //   מסוננים: קודים מיוחדים (skip: 1000, 9999, 6666, 5555, 8888 – ניתן לשינוי בהגדרות), קוד לא תקין, שם ריק או בלי אף אות,
 //   מחיר חסר/שלילי, ומחיר 0 עם שם של פחות מ-4 תווים (שורות זבל, למשל "חל").
-//   כפולים: אותו שם (אחרי נרמול רווחים ואותיות) ואותו מחיר → מאוחדים למוצר אחד (הקוד הראשון בקובץ), וכל הקודים מקושרים אליו.
-//   אותו שם ומחיר שונה – לא מאוחדים (אזהרה). שם מעל 60 תווים מקוצר ל-59 + "…" (אזהרה).
-//   ברקוד לא תקין (/^[0-9A-Za-z-]{3,30}$/) – לא נשמר, המוצר נשאר (אזהרה). ברקוד שכבר שייך לקוד אחר – נשאר רק בראשון (אזהרה).
+//   כפולים: אותו שם (אחרי נרמול רווחים ואותיות), אותו מחיר ואותם צבע/מידה → מאוחדים למוצר אחד (הקוד הראשון בקובץ), וכל הקודים מקושרים אליו.
+//   עלות שונה בקוד שאוחד – אזהרה (mcost). וריאנט (צבע/מידה אחרים) – מוצר נפרד.
+//   אותו שם ומחיר/וריאנט שונה – לא מאוחדים: אזהרה + dn ("שם כפול – לבדוק" באפליקציה, החלטה 10). שם מעל 60 תווים מקוצר ל-59 + "…" (אזהרה).
+//   ברקוד: קידומת סורק "$"/"*" מוסרת. ברקוד לא תקין (/^[0-9A-Za-z-]{3,30}$/) – לא נשמר, המוצר נשאר (אזהרה). ברקוד שכבר שייך לקוד אחר – נשאר רק בראשון (אזהרה).
 //
 // החלטת מחיר/עלות (decide) – f = הערך בכספית עכשיו, a = הערך באפליקציה עכשיו, s = { fb, ab, pd } מהסנכרון הקודם
 //   (fb = כספית, ab = אפליקציה, pd = ערך שנשלח לכספית בקובץ וטרם נקלט). null = אין ערך (עלות 0 בכספית = אין עלות).
@@ -27,10 +28,10 @@ const PART = 1500; // פריטים בכל חלק שנשלח לשרת
 const HDR_NEW = ['קוד פריט', 'ברקוד', 'שם פריט', 'צבע', 'מידה', 'מחיר לצרכן כולל מעמ', 'מחיר בחנות', 'מחיר עלות אחרי הנחות לא כולל מעמ', 'מחיר עלות אחרי הנחות כולל מעמ', 'אפשר מחיר אפס', 'כמות במלאי', 'פריט ללא מעמ', 'שם קטגוריה ראשית', 'שם קטגוריה משנית', 'פריט תוספת', 'פריט אב', 'פריט שקיל', 'הצג בתפריט ראשי', 'אל תציג בתפריט', 'שם ספק', 'קוד פריט ספק', 'מותג', 'משפחה', 'עונה', 'מגוון תפריט', 'שם תפריט תצוגה', 'שם תפריט משני תצוגה', 'שם תפריט תצוגה שלישי', 'קבוצה', 'תת קבוצה', 'הוראות הכנה', 'הוראות הכנה שירות עצמי', 'פתיחת חלון הוראות הכנה שירות עצמי אוטומטית', 'פתיחת חלון הוראות הכנה אוטומטית', 'מדפסות בונים', 'תיאור פריט מורחב', 'מידה מוצהרת של הפריט', 'יחידת מידה מוצהרת לפריט', 'יחידת מידה להצגה', 'פריט נעול', 'מנהל מלאי', 'פריט אחוזים', 'פריט אינו צובר נקודות', 'דורש סיסמת מנהל', 'חייב מע”מ תמיד', 'שינוי שם לפריט כללי', 'פריט לא יכול לקבל הנחה', 'לא זמין למכירה בקופה', 'חלק מאריזה', 'תיאור פריט קצר', 'פריט לא נשלח לאתר אינטרנט', 'מחיר לאחר הנחה באתר', 'מלל נוסף שיודפס ב-בון', 'הודעה בעת הוספת פריט', 'שובר הדפסה לפריט', 'זמינות בוולט לפי מלאי', 'שורה אחת בלבד לפריט בחשבון', 'מחיר לפי מדרגת משקל', 'מדרגות מחיר לפי משקל'];
 const HDR_PRICE = ['קוד פריט', 'מחיר לצרכן כולל מעמ', 'מחיר עלות אחרי הנחות לא כולל מעמ', 'מחיר עלות אחרי הנחות כולל מעמ'];
 // עמודות הקטלוג (ייצוא "קטלוג פריטים" מכספית). המחיר = "מחיר לצרכן" (לא "מחיר בחנות" – החלטה 4). עלות = "מחיר עלות" (כולל מע"מ, כמו באפליקציה)
-const CAT = { c: 'קוד פריט', n: 'שם פריט', bc: 'ברקוד', sup: 'ספק', c1: 'קטגוריה ראשית', c2: 'קטגוריה משנית', cost: 'מחיר עלות', p: 'מחיר לצרכן', nv: 'פריט ללא מעמ' };
+const CAT = { c: 'קוד פריט', n: 'שם פריט', bc: 'ברקוד', col: 'צבע', sz: 'מידה', sup: 'ספק', c1: 'קטגוריה ראשית', c2: 'קטגוריה משנית', cost: 'מחיר עלות', p: 'מחיר לצרכן', nv: 'פריט ללא מעמ' };
 const SALES = ['מספר עסקה', 'פדיון', 'מספר ברקוד']; // דוח מכירות – זיהוי בלבד בשלב A1 (הקליטה – A2)
 const WHY = { skip: 'קוד מיוחד', code: 'קוד פריט לא תקין', noname: 'בלי שם', junk: 'שם קצר ומחיר 0', price: 'מחיר חסר או שלילי' };
-const WARN = { long: 'שם ארוך – קוצר', badbc: 'ברקוד לא תקין – לא נשמר', dupbc: 'ברקוד של קוד אחר – לא נשמר', p0: 'מחיר 0', same: 'שם זהה לקוד אחר במחיר שונה – לא אוחד', sku: 'קוד פריט אחר באפליקציה – לא נדרס' };
+const WARN = { long: 'שם ארוך – קוצר', badbc: 'ברקוד לא תקין – לא נשמר', dupbc: 'ברקוד של קוד אחר – לא נשמר', p0: 'מחיר 0', same: 'שם זהה לקוד אחר (מחיר/צבע/מידה שונים) – לא אוחד, מסומן "שם כפול – לבדוק"', mcost: 'אוחד, אבל העלות שלו שונה מהקוד הראשי – נשמרה העלות של הראשי', sku: 'קוד פריט אחר באפליקציה – לא נדרס' };
 
 const str = (v) => (v == null ? '' : String(v)).replace(/^﻿/, '').trim();
 const hk = (s) => str(s).replace(/[”“״"]/g, '"').replace(/\s+/g, ' ');
@@ -41,7 +42,9 @@ function num(v) {
   if (!s) return NaN;
   let neg = false;
   if (/^-/.test(s)) { neg = true; s = s.slice(1); } else if (/-$/.test(s)) { neg = true; s = s.slice(0, -1); }
-  if (/^\d+,\d{1,2}$/.test(s)) s = s.replace(',', '.'); else s = s.replace(/,/g, '');
+  // פסיק: עשרוני ("12,5") או מפריד אלפים תקין ("1,234" / "1,234.50") בלבד. "1.234,50" / "1,2,3" – לא ברור → NaN (לא מנחשים סכום כסף)
+  if (/^\d+,\d{1,2}$/.test(s)) s = s.replace(',', '.');
+  else if (s.includes(',')) { if (!/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) return NaN; s = s.replace(/,/g, ''); }
   if (!/^\d+(\.\d+)?$|^\.\d+$/.test(s)) return NaN;
   const n = +s;
   return neg ? -n : n;
@@ -51,6 +54,9 @@ const eq = (x, y) => (x == null && y == null) || (x != null && y != null && Math
 // מפתח לשם (איחוד כפולים): רווחים מנורמלים, אותיות קטנות, מירכאות אחידות
 const nameKey = (s) => hk(s).toLowerCase().replace(/['׳`]/g, "'");
 const hasLetter = (s) => /\p{L}/u.test(s);
+// ברקוד: בלי קידומת של סורק ("$6923538223502" → "6923538223502")
+const bcNorm = (b) => str(b).replace(/^[$*]+/, '');
+const vk = (a) => (Array.isArray(a) ? a.map(hk).filter(Boolean).sort().join('/') : '');
 
 // ---------- זיהוי הקובץ ----------
 // rows = מערך שורות (כל שורה מערך תאים), כמו readTable באפליקציה. הכותרת – באחת מ-10 השורות הראשונות.
@@ -92,7 +98,7 @@ function groupCat(rows, det) {
     let it = by.get(c);
     if (!it) {
       const cost = num(get(r, 'cost'));
-      it = { c, n: str(get(r, 'n')), bcs: [], p: num(get(r, 'p')), cost: cost > 0 ? r2(cost) : null, nv: str(get(r, 'nv')) === 'כן',
+      it = { c, n: str(get(r, 'n')), bcs: [], col: [], sz: [], p: num(get(r, 'p')), cost: cost > 0 ? r2(cost) : null, nv: str(get(r, 'nv')) === 'כן',
         c1: str(get(r, 'c1')), c2: str(get(r, 'c2')), sup: str(get(r, 'sup')) };
       by.set(c, it);
     } else {
@@ -101,6 +107,7 @@ function groupCat(rows, det) {
       if (!Number.isNaN(p) && !eq(p, it.p) && !pdiff.includes(c)) pdiff.push(c);
     }
     if (bc && !it.bcs.includes(bc)) it.bcs.push(bc);
+    for (const [k, a] of [['col', it.col], ['sz', it.sz]]) { const v = hk(get(r, k)); if (v && !a.includes(v)) a.push(v); } // וריאנטים (צבע/מידה) – חלק ממפתח האיחוד
   }
   return { items: [...by.values()], rows: n, noCode, pdiff };
 }
@@ -119,21 +126,23 @@ function clean(items, opt) {
     if (!n0 || !hasLetter(n0)) { filt.push({ c, n: n0, why: 'noname' }); continue; }
     if (Number.isNaN(p) || p < 0 || p > 1000000) { filt.push({ c, n: n0, why: 'price' }); continue; }
     if (p === 0 && n0.replace(/\s/g, '').length < 4) { filt.push({ c, n: n0, why: 'junk' }); continue; }
-    const k = nameKey(n0) + '|' + r2(p);
+    // מפתח איחוד: שם + מחיר + צבעים + מידות (וריאנט אחר = מוצר אחר)
+    const k = [nameKey(n0), r2(p), vk(x.col), vk(x.sz)].join('|');
     const prim = byKey.get(k);
     if (prim) {
       merged.push({ c, to: prim.c, n: n0 });
       prim.m.push(c);
-      for (const b of x.bcs || []) if (!prim.raw.includes(str(b))) prim.raw.push(str(b));
+      for (const b of (x.bcs || []).map(bcNorm)) if (b && !prim.raw.includes(b)) prim.raw.push(b);
       if (prim.cost == null && x.cost > 0) prim.cost = r2(x.cost);
+      else if (x.cost > 0 && !eq(r2(x.cost), prim.cost)) warn.push({ c, w: 'mcost', v: `${r2(x.cost)} ≠ ${prim.cost} (קוד ${prim.c})` });
       continue;
     }
-    const it = { c, n: n0, p: r2(p), cost: x.cost > 0 ? r2(x.cost) : null, nv: x.nv === true, c1: hk(x.c1).slice(0, 40), c2: hk(x.c2).slice(0, 40), sup: hk(x.sup).slice(0, 60), m: [], raw: (x.bcs || []).map(str).filter(Boolean) };
+    const it = { c, n: n0, col: (x.col || []).slice(), sz: (x.sz || []).slice(), p: r2(p), cost: x.cost > 0 ? r2(x.cost) : null, nv: x.nv === true, c1: hk(x.c1).slice(0, 40), c2: hk(x.c2).slice(0, 40), sup: hk(x.sup).slice(0, 60), m: [], raw: (x.bcs || []).map(bcNorm).filter(Boolean) };
     byKey.set(k, it); keep.push(it);
   }
   // שם זהה במחיר שונה – אזהרה בלבד
   const names = new Map();
-  for (const it of keep) { const k = nameKey(it.n); if (names.has(k)) warn.push({ c: it.c, w: 'same', v: names.get(k) }); else names.set(k, it.c); }
+  for (const it of keep) { const k = nameKey(it.n); if (names.has(k)) { warn.push({ c: it.c, w: 'same', v: names.get(k).c }); it.dn = true; names.get(k).dn = true; } else names.set(k, it); } // dn = "שם כפול – לבדוק" (החלטה 10)
   const used = new Map();
   for (const it of keep) {
     if (it.n.length > NAME_MAX) { warn.push({ c: it.c, w: 'long', v: it.n }); it.n = it.n.slice(0, NAME_MAX - 1).trim() + '…'; }
@@ -144,12 +153,14 @@ function clean(items, opt) {
       if (used.has(b) && used.get(b) !== it.c) { warn.push({ c: it.c, w: 'dupbc', v: b }); continue; }
       used.set(b, it.c); if (!ok.includes(b)) ok.push(b);
     }
-    it.bc = ok[0] || ''; it.bx = ok.slice(1, 21);
+    it.bc = ok[0] || ''; it.bx = ok.slice(1); // כל הברקודים נשמרים (בלי תקרה)
     delete it.raw;
     if (!it.c1) delete it.c1;
     if (!it.c2 || !it.c1) delete it.c2;
     if (!it.sup || it.sup === 'ללא ספק') delete it.sup;
     if (!it.nv) delete it.nv;
+    if (!it.col.length) delete it.col;
+    if (!it.sz.length) delete it.sz;
   }
   const by = {}; for (const f of filt) by[f.why] = (by[f.why] || 0) + 1;
   return { keep, merged, filt, warn, cnt: { codes: (items || []).length, keep: keep.length, merged: merged.length, filt: filt.length, by } };
@@ -212,7 +223,7 @@ function nextCode(from, taken) {
 }
 const parts = (a, n) => { const out = []; for (let i = 0; i < a.length; i += n || PART) out.push(a.slice(i, i + (n || PART))); return out; };
 
-const api = { SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
+const api = { bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);

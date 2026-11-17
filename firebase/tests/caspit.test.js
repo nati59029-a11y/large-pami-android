@@ -31,8 +31,9 @@ const P = (id) => adm().doc(`b/${A}/prod/${id}`);
 
 const HDR = ['קוד פריט', 'שם פריט', 'ברקוד', 'ספק', 'קטגוריה ראשית', 'קטגוריה משנית', 'מחיר עלות', 'מחיר לצרכן', 'פריט ללא מעמ'];
 const r = (c, nm, bc, p, cost, c1) => [c, nm, bc || '', 'ללא ספק', c1 || '', '', cost || 0, p, 'לא'];
-// קטלוג 1: 200001 מקושר לפי ברקוד למוצר קיים (מחיר שונה – הבדל ראשון), 200002/200004 חדשים, 200003 כפול של 200002, 1000 מיוחד
-const CAT1 = [HDR, r('200001', 'כוס נייר לבנה', '7000000000011', 9.9, 5.9), r('200002', 'צלחת גדולה', '7000000000028', 12, 7, 'כלים'), r('200003', 'צלחת  גדולה', '7000000000035', 12), r('200004', 'מגש מלבני', '', 20, 0), r('1000', 'פריט כללי', '', 0)];
+// קטלוג 1: 200001 מקושר לפי ברקוד למוצר קיים (מחיר שונה – הבדל ראשון), 200002/200004/200005 חדשים, 200003 כפול של 200002,
+// 200004/200005 – אותו שם במחיר שונה (נפרדים, "שם כפול – לבדוק"), 1000 מיוחד
+const CAT1 = [HDR, r('200001', 'כוס נייר לבנה', '7000000000011', 9.9, 5.9), r('200002', 'צלחת גדולה', '7000000000028', 12, 7, 'כלים'), r('200003', 'צלחת  גדולה', '7000000000035', 12), r('200004', 'מגש מלבני', '', 20, 0), r('200005', 'מגש מלבני', '', 25, 0), r('1000', 'פריט כללי', '', 0)];
 async function sendCat(uid, rows) {
   const g = CC.groupCat(rows); const id = run(); const parts = CC.parts(g.items, 2); // חלקים קטנים – כדי לבדוק כמה חלקים
   for (let k = 0; k < parts.length; k++) await ok('cxUpload', uid, { run: id, part: k, parts: parts.length, items: parts[k] });
@@ -81,7 +82,7 @@ describe('סנכרון כספית A1', () => {
     before1 = JSON.stringify([...(await prods())]);
     run1 = await sendCat(MGR, CAT1);
     const pv = await ok('cxPreview', MGR, { run: run1 });
-    assert.deepEqual([pv.cnt.codes, pv.cnt.keep, pv.cnt.merged, pv.cnt.filt, pv.cnt.nw, pv.cnt.link], [5, 3, 1, 1, 2, 1]);
+    assert.deepEqual([pv.cnt.codes, pv.cnt.keep, pv.cnt.merged, pv.cnt.filt, pv.cnt.nw, pv.cnt.link], [6, 4, 1, 1, 3, 1]);
     assert.equal(pv.first, true);
     const l = pv.rows.find((x) => x[0] === '200001');
     assert.deepEqual(l.slice(1, 4), ['link', 'כוס נייר לבנה', 'first']);
@@ -97,11 +98,16 @@ describe('סנכרון כספית A1', () => {
   it('אישור: גיבוי לפני, מוצרים חדשים "לא נספר" עם קוד, האפליקציה מנצחת בהבדל הראשון; אישור כפול לא מכפיל', async () => {
     const a = await ok('cxApply', MGR, { run: run1, take: 'app' });
     assert.equal(a.done, true);
-    assert.equal(a.res.nw, 2); assert.equal(a.res.link, 1); assert.equal(a.res.pout, 1); assert.equal(a.res.cout, 1);
-    const bak = (await adm().collection(`b/${A}/stockBak`).get()).docs;
+    assert.equal(a.res.nw, 3); assert.equal(a.res.link, 1); assert.equal(a.res.pout, 1); assert.equal(a.res.cout, 1);
+    const bak = (await adm().collection(`b/${A}/cxBak`).get()).docs;
     assert.equal(bak.length, 1); assert.equal(bak[0].get('st'), 'snap'); assert.equal(bak[0].get('n'), 2);
+    assert.equal((await adm().collection(`b/${A}/stockBak`).get()).size, 0); // לא נוגעים בגיבויי מחיקת המלאי (ליקוי 10)
     const p = await prods();
-    assert.equal(p.size, 4);
+    assert.equal(p.size, 5);
+    assert.deepEqual([p.get('cx200004').dn, p.get('cx200005').dn, p.get('cx200002').dn], [true, true, undefined]);
+    // האפליקציה ניצחה בהבדל הראשון – הערך שבכספית נרשם בהיסטוריה (src:'conf')
+    const lg = (await adm().collection(`b/${A}/priceLog`).where('prod', '==', 'pold1').get()).docs.map((d) => [d.get('k'), d.get('old'), d.get('new'), d.get('src')]).sort();
+    assert.deepEqual(lg, [['c', 5.9, 6, 'conf'], ['p', 9.9, 10, 'conf']]);
     assert.equal(p.get('pold1').price, 10); assert.equal(p.get('pold1').cx, '200001'); assert.equal(p.get('pold1').q._, 4);
     assert.equal(await cost('pold1'), 6);
     const nw = p.get('cx200002');
@@ -119,7 +125,7 @@ describe('סנכרון כספית A1', () => {
     const again = await ok('cxApply', MGR, { run: run1, take: 'cx' });
     assert.equal(again.dup, true);
     assert.equal(JSON.stringify([...(await prods())]), snap);
-    assert.equal((await adm().collection(`b/${A}/stockBak`).get()).size, 1);
+    assert.equal((await adm().collection(`b/${A}/cxBak`).get()).size, 1);
   });
   it('אישור חוזר של חלק (כמו ניסיון חוזר אחרי תקלה) לא כותב שוב', async () => {
     const C = require('../functions/caspit.js')._core;
@@ -157,7 +163,7 @@ describe('סנכרון כספית A1', () => {
   it('קטלוג 2: כספית קלטה (ack), שינוי מכספית (in, עם היסטוריה), קונפליקט – האפליקציה מנצחת', async () => {
     // באפליקציה: מגש מלבני 20 → 22 (דרך saveProduct, נרשם priceLog src:'app')
     await ok('saveProduct', MGR, { id: 'cx200004', name: 'מגש מלבני', price: 22, barcode: '', cost: 9 });
-    const CAT2 = [HDR, r('200001', 'כוס נייר לבנה', '7000000000011', 10, 6), r('200002', 'צלחת גדולה', '7000000000028', 13, 7, 'כלים'), r('200003', 'צלחת גדולה', '7000000000035', 13), r('200004', 'מגש מלבני', '', 21, 0), r('900000', 'מוצר של האפליקציה בלבד', '', 5)];
+    const CAT2 = [HDR, r('200001', 'כוס נייר לבנה', '7000000000011', 10, 6), r('200002', 'צלחת גדולה', '7000000000028', 13, 7, 'כלים'), r('200003', 'צלחת גדולה', '7000000000035', 13), r('200004', 'מגש מלבני', '', 21, 0), r('900000', 'מוצר של האפליקציה בלבד', '', 5), r('900001', '12.9', '', 0)]; // 900001 מסונן (בלי אותיות) – אבל תפוס
     const id = await sendCat(MGR, CAT2);
     const pv = await ok('cxPreview', MGR, { run: id });
     const act = Object.fromEntries(pv.rows.map((x) => [x[0], x[3]]));
@@ -168,14 +174,14 @@ describe('סנכרון כספית A1', () => {
     const p = await prods();
     assert.equal(p.get('cx200002').price, 13);
     assert.equal(p.get('cx200004').price, 22);
-    assert.equal(p.size, 4);
+    assert.equal(p.size, 5);
     assert.ok(!('pd' in (await adm().doc(`b/${A}/cxItem/200001`).get()).get('pr')));
     assert.equal((await adm().doc(`b/${A}/cxItem/900000`).get()).get('nw'), undefined);
     const h = await ok('cxHist', MGR, { pid: 'cx200002' });
     assert.deepEqual(h.codes.sort(), ['200002', '200003']);
     assert.deepEqual(h.log.map((x) => [x.k, x.old, x.new, x.src]), [['p', 12, 13, 'caspit']]);
     const h4 = await ok('cxHist', MGR, { pid: 'cx200004' });
-    assert.deepEqual(h4.log.map((x) => [x.k, x.old, x.new, x.src]).sort(), [['c', null, 9, 'app'], ['p', 20, 22, 'app']]);
+    assert.deepEqual(h4.log.map((x) => [x.k, x.old, x.new, x.src]).sort(), [['c', null, 9, 'app'], ['p', 20, 22, 'app'], ['p', 21, 22, 'conf']]);
     // ועכשיו בקובץ עדכון המחיר: 200004 ב-22 (קונפליקט – האפליקציה ניצחה)
     const e = await ok('cxExport', MGR, { kind: 'price' });
     assert.ok(e.csv.includes('\n200004,22,7.63,9\n'), e.csv);
@@ -188,10 +194,44 @@ describe('סנכרון כספית A1', () => {
     await ok('cxApply', MGR, { run: id2 });
     assert.equal((await call('cxApply', MGR, { run: id1 })).reason, 'stale');
   });
+  it('קובץ לכספית אחרי תצוגה מקדימה → האישור נחסם (stale) והסנכרון מוצג שוב; המשך אישור מיושן – נחסם ומסומן void', async () => {
+    const id1 = await sendCat(MGR, CAT1);
+    await ok('cxPreview', MGR, { run: id1 });
+    await ok('saveProduct', MGR, { id: 'cx200002', name: 'צלחת גדולה', price: 14, barcode: '7000000000028' });
+    await ok('cxExport', MGR, { kind: 'price' });
+    assert.equal((await call('cxApply', MGR, { run: id1 })).reason, 'stale');
+    await ok('cxPreview', MGR, { run: id1 }); // תצוגה חוזרת של אותו קובץ – ואז אפשר לאשר
+    await ok('cxApply', MGR, { run: id1 });
+    const id2 = await sendCat(MGR, CAT1);
+    await ok('cxPreview', MGR, { run: id2 });
+    await adm().doc(`b/${A}/cxRun/${id2}`).update({ st: 'ap', sel: { take: 'app', skip: [] }, gen: -5 });
+    assert.equal((await call('cxApply', MGR, { run: id2 })).reason, 'stale');
+    assert.equal((await adm().doc(`b/${A}/cxRun/${id2}`).get()).get('st'), 'void');
+  });
+  it('פריטים חדשים: שתי קריאות במקביל – קוד אחד למוצר; קוד שהופיע בקטלוג (גם מסונן) לא ניתן', async () => {
+    await ok('saveProduct', MGR, { reqId: 'reqcxnew01zz', name: 'מוצר חדש מהאפליקציה', price: 8 });
+    const [e1, e2] = await Promise.all([ok('cxExport', MGR, { kind: 'new' }), ok('cxExport', MGR, { kind: 'new' })]);
+    assert.equal(e1.added + e2.added, 1);
+    const d = (await adm().doc(`b/${A}/prod/preqcxnew01zz`).get()).data();
+    assert.equal(d.cx, '900002'); // 900000 – pold2, 900001 – בקטלוג (מסונן)
+    const x = (await adm().collection(`b/${A}/cxItem`).where('pid', '==', 'preqcxnew01zz').get()).size;
+    assert.equal(x, 1);
+  });
+  it('"שם כפול – לבדוק": "נבדק" מסיר את הסימון (מנהל בלבד)', async () => {
+    assert.notEqual((await call('cxDnOk', E1, { pid: 'cx200005' })).status, 'OK');
+    await ok('cxDnOk', MGR, { pid: 'cx200005' });
+    assert.equal((await P('cx200005').get()).get('dn'), undefined);
+    assert.equal((await P('cx200004').get()).get('dn'), true);
+  });
+  it('ייבוא מוצרים (importProducts) שמשנה עלות של מוצר קיים – נרשם בהיסטוריה', async () => {
+    await ok('importProducts', MGR, { reqId: 'reqcximp01zz', rows: [{ name: 'מגש מלבני', price: 22, barcode: '', cost: 11 }] });
+    const h = await ok('cxHist', MGR, { pid: 'cx200004' });
+    assert.ok(h.log.some((x) => x.k === 'c' && x.old === 9 && x.new === 11 && x.src === 'app'), JSON.stringify(h.log));
+  });
   it('"לא נספר" יורד בתיקון כמות; שום מוצר לא נמחק', async () => {
     await ok('stockSet', MGR, { reqId: 'reqcxset01zz', pid: 'cx200002', qty: 3 });
     const d = (await P('cx200002').get()).data();
     assert.equal(d.nc, undefined); assert.equal(d.q._, 3);
-    assert.equal((await adm().collection(`b/${A}/prod`).get()).size, 4);
+    assert.equal((await adm().collection(`b/${A}/prod`).get()).size, 6);
   });
 });

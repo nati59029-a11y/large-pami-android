@@ -11,7 +11,7 @@ const S = (v) => ({ stringValue: v }), N = (v) => (Number.isInteger(v) ? { integ
 const BASE = 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/';
 const NP = 8700; // מוצרים מדומים – כמו הקטלוג אחרי ניקוי
 const pid = (i) => 'cx' + String(300000 + i);
-const PROD = Array.from({ length: NP }, (_, i) => ({ document: { name: BASE + 'prod/' + pid(i), fields: Object.assign({ name: S('מוצר בדיקה ' + i), price: N(5 + (i % 40)), barcode: S(String(7100000000000 + i)), on: { booleanValue: true }, q: M({}), cx: S(String(300000 + i)), sku: S(String(300000 + i)) }, i % 3 ? { nc: { booleanValue: true } } : {}) } }));
+const PROD = Array.from({ length: NP }, (_, i) => ({ document: { name: BASE + 'prod/' + pid(i), fields: Object.assign({ name: S('מוצר בדיקה ' + i), price: N(5 + (i % 40)), barcode: S(String(7100000000000 + i)), on: { booleanValue: true }, q: M({}), cx: S(String(300000 + i)), sku: S(String(300000 + i)) }, i % 3 ? { nc: { booleanValue: true } } : {}, i % 1000 === 7 ? { dn: { booleanValue: true } } : {}) } }));
 PROD.sort((a, b) => (a.document.name < b.document.name ? -1 : 1));
 const PV = {
   cnt: { codes: 12, keep: 9, merged: 2, filt: 1, by: { skip: 1 }, nw: 5, link: 4, pr: { in: 1, out: 1, conf: 1, first: 1 }, co: {}, appOnly: 2, warn: 2 },
@@ -33,7 +33,8 @@ const PV = {
     const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
     if (/:runQuery$/.test(u.pathname)) { let q = {}; try { q = JSON.parse(body).structuredQuery; } catch (e) { /* */ }
       const c = q.from && q.from[0].collectionId;
-      if (c === 'prod') { rqProd++; const lim = q.limit || 500, after = q.startAt && q.startAt.values[0].referenceValue; const i0 = after ? PROD.findIndex((d) => d.document.name === after) + 1 : 0;
+      if (c === 'prod') { rqProd++; const lim = q.limit || 500, after = q.startAt && q.startAt.values[0].referenceValue;
+        if (after && globalThis.__PFAIL) { globalThis.__PFAIL = 0; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 503, message: 'x', status: 'UNAVAILABLE' } }) }); } const i0 = after ? PROD.findIndex((d) => d.document.name === after) + 1 : 0;
         return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PROD.slice(i0, i0 + lim)) }); }
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ readTime: '2026-11-03T09:00:00Z' }]) }); }
     if (/\/ordcfg\/main$/.test(u.pathname)) return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
@@ -78,6 +79,17 @@ const PV = {
   check('3 שליחה: 1,600 קודים ב-2 חלקים (1,500 + 100), אותו מזהה, ברקוד נוסף נאסף לקוד', up.length === 2 && up[0].d.items.length === 1500 && up[1].d.items.length === 100 && up[0].d.run === up[1].d.run && up[0].d.items[0].bcs.length === 2, up.map((x) => x.d.items.length));
   const p2 = await q(); await shot('cx-2-preview');
   check('4 תצוגה מקדימה: מונים למעלה (חדשים 5, מקושרים 4, אוחדו 2, סוננו 1), כרטיסיות, בחירה "מי קובע", אשר/ביטול; מגע ≥44', fine(p2) && /יקלטו כמוצרים חדשים\s*5/.test(p2.text) && /מקושרים למוצרים קיימים\s*4/.test(p2.text) && /קח הכול מכספית/.test(p2.text) && /אשר ושמור/.test(p2.text), { small: p2.small });
+  await page.click('[data-a=cxDl][data-k=out]'); await H.settle(page, 300);
+  const d1 = await q(); await shot('cx-2b-tile-out');
+  check('4ב משבצת "ייצאו לכספית" נפתחת לרשימה מלאה: קוד, שם, ישן ← חדש; מגע ≥44', /ייצאו לכספית · 2/.test(d1.text) && /200011/.test(d1.text) && /כוס זכוכית/.test(d1.text) && /יוצא לכספית/.test(d1.text) && /התנגשות/.test(d1.text) && d1.small.length === 0, { small: d1.small, t: d1.text.slice(0, 300) });
+  await page.evaluate(() => closeDlg());
+  await page.click('[data-a=cxDl][data-k=mrg]'); await H.settle(page, 300);
+  const d2 = await q();
+  check('4ג משבצת "אוחדו" – איזה קוד אוחד לאיזה', /200006 אוחד לקוד 200001/.test(d2.text), d2.text.slice(0, 200));
+  await page.evaluate(() => closeDlg());
+  await page.click('[data-a=cxDl][data-k=flt]'); await H.settle(page, 300);
+  check('4ד משבצת "סוננו" – פריט וסיבה', /הסיבה: קוד מיוחד/.test((await q()).text));
+  await page.evaluate(() => closeDlg());
   await page.click('[data-a=cxTab][data-k=in]'); await H.settle(page, 200);
   const p3 = await q(); await shot('cx-3-preview-in');
   check('5 כרטיסיית "מכספית": מחיר באפליקציה מול כספית, תגית', /באפליקציה ₪\s?12/.test(p3.text.replace(/‏/g, '')) || /מכספית/.test(p3.text), p3.text.slice(0, 200));
@@ -95,6 +107,10 @@ const PV = {
   check('8 אישור: נשלחו run, take=app ורשימת הדילוג', ap && ap.d.take === 'app' && JSON.stringify(ap.d.skip) === '["200002"]', ap && ap.d);
   const p5 = await q(); await shot('cx-6-done');
   check('9 מסך סיום: מונים וקבצים לכספית', fine(p5) && /הסנכרון נשמר/.test(p5.text) && /עדכון מחירים ועלויות/.test(p5.text), { small: p5.small });
+  await page.click('[data-a=cxDl][data-k=pin]'); await H.settle(page, 300);
+  const d3 = await q(); await shot('cx-6b-done-tile');
+  check('9ב מסך סיום: משבצת "מחירים מכספית" נפתחת לרשימה', /מחירים מכספית · 1/.test(d3.text) && /קערה/.test(d3.text) && /\(מכספית\)/.test(d3.text), d3.text.slice(0, 200));
+  await page.evaluate(() => closeDlg());
   await page.click('[data-a=cxExp][data-k=price]'); await H.settle(page, 400);
   const p6 = await q(); await shot('cx-7-export');
   check('10 קובץ עדכון מחיר: נשמר, וחלון עם השורות', (await page.evaluate(() => window.__saved.length)) === 2 && /2 שורות/.test(p6.text) && p6.small.length === 0, { small: p6.small });
@@ -108,6 +124,21 @@ const PV = {
   const st = await q(); await shot('cx-8-stock-8700');
   const rows = await page.evaluate(() => document.querySelectorAll('#oxpl .li').length);
   check('11 מלאי: 8,700 מוצרים נטענים (5 עמודים), מוצגים 150 + "הצג עוד", "לא נספר", מתחת ל-8 שניות', n.replace(/\D/g, '') === String(NP) && rows === 150 && /הצג עוד/.test(st.text) && /לא נספר/.test(st.text) && rqProd >= 5 && tLoad < 8000 && st.sw <= st.iw, { n, rows, rqProd, tLoad });
+  // כשל בטעינת עמוד: הודעה + "נסה שוב" (לא חותכים בשקט)
+  await page.evaluate(() => { window.__oxReload(); NAV = [{ v: 'home' }]; }); globalThis.__PFAIL = 1; // העמוד השני ייכשל פעם אחת
+  await page.evaluate(() => go('oxStock')); await H.settle(page, 1500);
+  const er = await q(); await shot('cx-8b-stock-load-error');
+  check('11ב כשל בטעינת עמוד: "לא כל המוצרים נטענו" + נסה שוב', /לא כל המוצרים נטענו/.test(er.text) && /נסה שוב/.test(er.text), er.text.slice(0, 120));
+  await page.click('[data-a=oxPRetry]'); await H.settle(page, 2000);
+  const er2 = await q();
+  check('11ג אחרי "נסה שוב" – כל 8,700 נטענו', !/לא כל המוצרים נטענו/.test(er2.text) && (await page.evaluate(() => (document.querySelector('#oxSumN') || {}).textContent)).replace(/\D/g, '') === String(NP));
+  await page.click('[data-a=oxDnF]'); await H.settle(page, 300);
+  const dnv = await q(); await shot('cx-8c-stock-dup-names');
+  const dnRows = await page.evaluate(() => document.querySelectorAll('#oxpl .li').length);
+  check('11ד מסנן "שם כפול – לבדוק": רק המסומנים (9), עם תגית וכפתור "נבדק"', dnRows === 9 && /שם כפול – לבדוק/.test(dnv.text) && /נבדק/.test(dnv.text) && dnv.small.length === 0, { dnRows, small: dnv.small });
+  await page.click('#oxpl [data-a=oxDnOk]'); await H.settle(page, 400);
+  check('11ה "נבדק" – נשלח cxDnOk והשורה יצאה מהמסנן', calls.some((x) => x.n === 'cxDnOk') && (await page.evaluate(() => document.querySelectorAll('#oxpl .li').length)) === 8);
+  await page.click('[data-a=oxDnF]'); await H.settle(page, 300);
   const t1 = Date.now();
   await page.fill('input[data-i=oxSQ]', '304321'); await page.dispatchEvent('input[data-i=oxSQ]', 'input'); await H.settle(page, 200);
   const hit = await page.evaluate(() => [...document.querySelectorAll('#oxpl .li .m > b')].map((b) => b.textContent));

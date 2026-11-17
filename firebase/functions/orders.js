@@ -402,7 +402,7 @@ async function inChunks(db, groups) {
   }
   if (k) await b.commit();
 }
-const BAK_OK = ['done', 'wiped', 'snap']; // snap = גיבוי בלי מחיקה (snapAll – לפני סנכרון כספית ראשון)
+const BAK_OK = ['done', 'wiped'];
 // גיבוי אחרון שאפשר לשחזר ממנו (מדלגים על גיבוי חלקי – partial – שנכתב בזמן תקלה, לפני שנמחק משהו)
 async function lastBak(db, bak) {
   const q = await db.collection(bak).orderBy('at', 'desc').limit(20).get();
@@ -469,7 +469,7 @@ async function restoreAll(db, w, coll, bak, mark) {
   return { ok: true, dup: false, n, skip };
 }
 // 17.11.2026 (סנכרון כספית A1): גיבוי מלא בלי מחיקה, באותו מבנה של wipeAll (bak/{id} + items/{pid} { d, p }). st: partial → snap.
-// restoreAll משחזר ממנו כמו מכל גיבוי (מסמך שקיים לא נדרס). wipeAll לא "ממשיך" גיבוי כזה (רק st:'done').
+// נשמר באוסף נפרד (caspit.js: cxBak) – לא נכנס לרשימת הגיבויים של מחיקת מלאי/שחזור (stockBak). לעיון ולשחזור ידני של מוצרים.
 async function snapAll(db, w, coll, bak, note) {
   const all = await db.collection(coll).get();
   const now = Date.now();
@@ -1725,6 +1725,10 @@ async function prodRows(w, input) {
     const cats = new Map();
     for (const o of ok) if (o.cat) { cats.set(catIdOf(o.cat, ''), { name: o.cat }); if (o.sub) cats.set(catIdOf(o.sub, catIdOf(o.cat, '')), { name: o.sub, parent: catIdOf(o.cat, '') }); }
     const catSnaps = cats.size ? await tx.getAll(...[...cats.keys()].map((id) => db.doc('cat/' + id))) : [];
+    // 17.11.2026 (סנכרון כספית, תיקון סבב 1): עלות קודמת של מוצרים קיימים – להיסטוריית העלות (priceLog k:'c'). נקרא לפני כל כתיבה
+    const oldCost = new Map();
+    const exIds = [...new Set(ok.filter((o) => o.cost != null && !skipEx).map((o) => ((o.barcode && byBc.get(o.barcode)) || (o.sku && bySku.get(o.sku)) || byName.get(o.name) || {}).id).filter(Boolean))];
+    if (exIds.length) (await tx.getAll(...exIds.map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((x) => oldCost.set(x.ref.parent.parent.id, x.exists && typeof x.get('cost') === 'number' ? x.get('cost') : null));
     const now = Date.now();
     catSnaps.forEach((s) => { if (!s.exists) tx.set(s.ref, Object.assign({ ord: 0, upd: now }, cats.get(s.id))); });
     const seen = new Map(); // מוצר חדש שכבר נוצר במנה הזו (שורה כפולה בקובץ)
@@ -1758,6 +1762,7 @@ async function prodRows(w, input) {
       }
       if (o.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: o.wp, at: now, by: w.uid });
       if (o.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: o.cost, at: now, by: w.uid });
+      if (o.cost != null && ex && ex.ref && oldCost.has(id) && oldCost.get(id) !== o.cost) tx.set(priceRef(db), { prod: id, k: 'c', old: oldCost.get(id), new: o.cost, src: 'app', by: w.uid, at: now });
       if (qty) tx.set(stockRef(db), { prod: id, name: o.name, br, delta: qty, why: 'in', note: 'ייבוא', by: w.uid, at: now });
     }
     tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated, same: res.same } });
