@@ -6623,9 +6623,10 @@ ACT.rqTab=el=>{RQT=el.dataset.v;if(RQT==='done')RQ.hat=0;rerender()};
 ACT.rqRefresh=()=>{RQ.at=0;RQ.mat=0;RQ.hat=0;if(isA()){rqLoad();if(RQT==='done')rqHLoad()}else rqMine();toast('מרענן...')};
 FRM.rqNew=async f=>{const txt=String(fd(f).txt||'').trim().slice(0,1000);if(!txt)return toast('כתוב את הבקשה');const b=f.querySelector('button:not([type=button])');if(b)b.disabled=true;
  const rid=uid(),rf={owner:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),t:iv(Date.now()),st:sv('new'),ans:sv('')},rk=window.TKW&&TKW.rqK?TKW.rqK(f):'',ims=RQI.n.slice(0,3);if(rk)rf.k=sv(rk);if(ims.length)rf.np=iv(ims.length);
- /* 403 עם שדות חדשים (k / np) = חוקים ישנים: שולחים שוב בלי השדות החדשים (בלי התמונות) */
- let ok=false,np=ims.length;
- try{try{await fsx('/rq?documentId='+encodeURIComponent(rid),{method:'POST',body:JSON.stringify({fields:rf})})}catch(e){if(!((rk||np)&&e.code===403))throw e;if(rk){TKW.rvOld();delete rf.k}delete rf.np;np=0;await fsx('/rq?documentId='+encodeURIComponent(rid),{method:'POST',body:JSON.stringify({fields:rf})})}ok=true;f.reset()}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
+ /* 403 עם שדות חדשים = חוקים ישנים. קודם שולחים שוב בלי התמונות (np) ומשאירים את הסוג (k); רק אם גם זה נדחה – גם בלי הסוג (rvOld) */
+ let ok=false,np=ims.length;const post=()=>fsx('/rq?documentId='+encodeURIComponent(rid),{method:'POST',body:JSON.stringify({fields:rf})});
+ try{try{await post()}catch(e){if(!((rk||np)&&e.code===403))throw e;let e2=e;if(np){delete rf.np;np=0;try{await post();e2=null}catch(x){if(!(rk&&x.code===403))throw x;e2=x}}
+  if(e2){TKW.rvOld();delete rf.k;await post()}}ok=true;f.reset()}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
  if(ok){let n=0,er=null;if(np)try{n=await rqImPut('/rq/'+rid,['r1','r2','r3'],ims)}catch(e){er=e}RQI.n=[];rqImPaint('n');
   toast(ims.length&&!np?'✓ הבקשה נשלחה למנהל, בלי התמונות (השרת עוד לא מעודכן)':np&&n<np?'הבקשה נשלחה, אבל רק '+n+' מתוך '+np+' תמונות עלו. '+tkErr(er):'✓ הבקשה נשלחה למנהל')}
  RQ.mb=0;await rqMine()};
