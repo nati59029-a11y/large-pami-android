@@ -7,6 +7,7 @@
 //                        audio – מבצע מוקלט (עובד ומנהל, promoKey שמתחיל ב-rec_, תאריך הורדה חובה, תמיד בלי צינתוק). משימה 2026-11-04.
 //                        בלי צינתוק: בלי הגבלה לאף אחד.
 //                        { statusOnly: true } – רק מחזיר אם המשתמש עוד יכול לשלוח צינתוק היום (בלי שום פנייה לימות).
+//                        מנהל + צינתוק + yemot_state/fblist.tzOn: גם צינתוק בתשלום ללקוחות המשוב (fbTzintuk, משימה 2026-11-17 שלב 5). statusOnly מחזיר למנהל גם fbTz:{on,upTo,max}.
 //                        promoKey – מזהה קבוע של המבצע: קובץ אחד לכל מבצע; ניסיון חוזר לא מעלה קובץ נוסף (פירוט למטה).
 //   expirePromosOnLine – כל לילה 00:15 שעון ישראל: מוחקת מהקו מבצעים שפג תוקפם. מוחקת רק קבצים שהיא עצמה העלתה.
 //   runExpiry(opts)    – הלב של ההורדה, מיוצא לבדיקות (לא מ-index.js).
@@ -26,7 +27,7 @@ const { inputObject } = roles;
 // ריבוי עסקים (שלב 5): פונקציות הקו – רק כשהתוספת yemot מופעלת בעסק, ורק בעסק שמחובר לקו (היום: largpeami בלבד).
 // עסק אחר מקבל yemot-not-connected לפני כל פנייה לימות. הנתונים (T.tdb()) בתוך העסק; בשורש ללארג' פעמי במצב legacy.
 const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot', yemotLine: true });
-const { YemotError, apiBase, yemotCall, deleteFiles } = require('./lib/yemot-client');
+const { YemotError, apiBase, yemotCall, deleteFiles, getTemplateEntries, tzlEntries, runTzintukPhones } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { parseLexicon, applyLexicon } = require('./lib/lexicon');
 // מבנה השלוחות (משימה 2026-11-17): yemot_state/layout. בלי מסמך / single:false – בדיוק כמו קודם (שלוחה YEMOT_EXT, מונה yemot_state/line).
@@ -41,12 +42,14 @@ const YEMOT_EMPLOYEE_DAILY = defineInt('YEMOT_EMPLOYEE_DAILY', { default: 1, des
 const YEMOT_MAX_DAYS = defineInt('YEMOT_MAX_DAYS', { default: 60, description: 'כמה ימים קדימה מותר תאריך הורדה' });
 const YEMOT_TEXT_MAX = defineInt('YEMOT_TEXT_MAX', { default: 400, description: 'אורך מרבי לנוסח (תווים)' });
 const YEMOT_TIMEOUT_MS = defineInt('YEMOT_TIMEOUT_MS', { default: 15000, description: 'זמן המתנה מרבי לכל קריאה לימות' });
+const YEMOT_FB_TZ_MAX = defineInt('YEMOT_FB_TZ_MAX', { default: 300, description: 'מכסה לצינתוק ללקוחות משוב במבצע אחד (מעל זה לא שולחים להם)' });
 const YEMOT_REC_MAX_SEC = defineInt('YEMOT_REC_MAX_SEC', { default: 120, description: 'אורך מרבי להקלטה בשלוחת העדכונים (שניות, הערכה)' });
 const REC_MAX_BYTES = 2000000; // כמו ב-yemot-line.js: 120 שניות × 16,000 בתים + כותרת
 
 const PROMOS = 'yemot_promos';
 const USAGE = 'yemot_usage';
 const STATE = 'yemot_state/line';
+const FBLIST = 'yemot_state/fblist'; // לקוחות משוב (yemot-fblist.js): templateId, tzOn, sentCount, tzMonth
 const ACTIVE = ['live', 'remove-failed'];
 
 // ---------------- תאריכים (שעון ישראל) ----------------
@@ -137,6 +140,7 @@ function readCfg() {
     ext: YEMOT_EXT.value(), list: YEMOT_TZINTUK_LIST.value(), daily: YEMOT_EMPLOYEE_DAILY.value(),
     maxDays: YEMOT_MAX_DAYS.value(), textMax: YEMOT_TEXT_MAX.value(), timeoutMs: YEMOT_TIMEOUT_MS.value(),
     recMaxSec: Number.isInteger(YEMOT_REC_MAX_SEC.value()) && YEMOT_REC_MAX_SEC.value() > 0 ? YEMOT_REC_MAX_SEC.value() : 120,
+    fbTzMax: Number.isInteger(YEMOT_FB_TZ_MAX.value()) && YEMOT_FB_TZ_MAX.value() > 0 ? YEMOT_FB_TZ_MAX.value() : 300,
   };
 }
 
@@ -149,6 +153,50 @@ async function lineNumbers(ctx, ext) {
     if (m) nums.add(Number(m[1]));
   }
   return nums;
+}
+
+// ---------------- צינתוק ללקוחות משוב (משימה 2026-11-17, שלב 5) ----------------
+// רק מנהל, רק עם צינתוק, ורק כשהמתג tzOn דולק (נבדק אצל המתקשר). בתשלום – 0.1 יחידה למספר לפי התיעוד (לא מאומת).
+// הנמענים: רשימת התפוצה "לקוחות משוב" (רק לא חסומים) פחות מי שכבר ברשימת הצינתוקים החינמית (קיבל את הצינתוק הרגיל). כל מספר פעם אחת.
+// מעל המכסה (YEMOT_FB_TZ_MAX) – לא שולחים לאף אחד ('capped'). כשל – 'failed' בלי לזרוק; הצינתוק הרגיל לא מושפע.
+// מחזיר { st: 'sent'|'empty'|'capped'|'failed', count, total }. מספרים שנשלחו נספרים במונה החודשי fblist.tzMonth (שעון ישראל).
+const israelMonth = () => israelDay().slice(0, 7);
+async function fbTzintuk(db, ctx, cfg, fbs) {
+  const out = { st: 'empty', count: 0, total: 0 };
+  try {
+    const tplId = fbs.templateId;
+    if (!Number.isInteger(tplId) || tplId <= 0) return out; // הרשימה עוד לא נוצרה
+    const { normPhone } = require('./yemot-fblist')._core;
+    const all = [...new Set((await getTemplateEntries(ctx, tplId)).filter((e) => !e.blocked).map((e) => normPhone(e.phone)).filter(Boolean))];
+    if (!all.length) return out;
+    const subs = new Set((await tzlEntries(ctx, cfg.list)).map(normPhone).filter(Boolean));
+    const phones = all.filter((p) => !subs.has(p));
+    out.total = phones.length;
+    if (!phones.length) return out;
+    if (phones.length > cfg.fbTzMax) { out.st = 'capped'; return out; }
+    for (let i = 0; i < phones.length; i += 500) {
+      const part = phones.slice(i, i + 500);
+      await runTzintukPhones(ctx, part);
+      out.count += part.length;
+    }
+    out.st = 'sent';
+  } catch (e) {
+    out.st = 'failed';
+    logger.warn('yemot: fb tzintuk failed', { reason: 'fb-tz-failed', code: e instanceof YemotError ? e.code : 'internal', sent: out.count });
+  }
+  if (out.count) {
+    const ref = db.doc(FBLIST);
+    const month = israelMonth();
+    try {
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(ref);
+        const t = s.exists ? s.get('tzMonth') : null;
+        const prev = t && t.month === month && Number.isInteger(t.count) ? t.count : 0;
+        tx.set(ref, { tzMonth: { month, count: prev + out.count } }, { merge: true });
+      });
+    } catch (e) { logger.error('yemot: fb tz count failed', { reason: 'fb-tz-count-failed' }); }
+  }
+  return out;
 }
 
 // ---------------- מכסה יומית לצינתוק (עובד בלבד) ----------------
@@ -277,7 +325,15 @@ async function sendPromo(request, key, base, pre) {
   const todayView = async () => (isEmp ? usageView(await usageRef.get(), today, cfg.daily) : { day: today, used: null, limit: null, allowed: true });
 
   // מצב בלבד: האם אפשר עוד לשלוח צינתוק היום. בלי פנייה לימות.
-  if (input.statusOnly === true && !pre) return { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
+  // למנהל גם הערכה ללקוחות המשוב (שלב 5): upTo = כמה נשלחו לרשימה עד היום (עד N; חסומים ורשומים לצינתוק החינמי לא יקבלו)
+  if (input.statusOnly === true && !pre) {
+    const r = { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
+    if (who.role === 'manager') {
+      const f = (await db.doc(FBLIST).get()).data() || {};
+      r.fbTz = { on: f.tzOn === true, upTo: Number.isInteger(f.sentCount) ? f.sentCount : 0, max: cfg.fbTzMax };
+    }
+    return r;
+  }
   // השלוחה שאליה המבצע עולה עכשיו: YEMOT_EXT, או שלוחת "כל התוכן בשלוחה אחת" (משימה 2026-11-17)
   const layout = await LY.loadLayout(db);
   const pext = LY.extOf('promos', layout, cfg.ext);
@@ -312,6 +368,9 @@ async function sendPromo(request, key, base, pre) {
   const spoken = isRec ? null : pre && pre.rendered ? pre.spoken || null : applyLexicon(v.text, await loadLexicon(db));
   // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק כשבאמת מעלים – שלב 2 למטה. אותו נוסח שכבר בקו = בלי הקראה חדשה.
   let rendered = null;
+  // צינתוק ללקוחות משוב (שלב 5): מנהל + צינתוק + המתג דולק. עובד – אף פעם לא.
+  const fbs = who.role === 'manager' && v.withTzintuk ? ((await db.doc(FBLIST).get()).data() || {}) : null;
+  const fbOn = !!fbs && fbs.tzOn === true;
 
   // 1. טרנזקציה: נעילת המבצע, החלטה מה לעשות, ו(לעובד, אם יישלח צינתוק) תפיסת המכסה היומית.
   // הרשומה מתארת את מה שבאמת בקו: text/until/tzintuk משתנים רק אחרי שהפעולה בימות הצליחה.
@@ -334,13 +393,15 @@ async function sendPromo(request, key, base, pre) {
       && voice.extOf(x.path) === voice.extFor(engine) && LY.dirOf(x.path) === pext; // מבצע שבקו בשלוחה אחרת (אחרי שינוי המבנה) – עולה מחדש לשלוחה הנוכחית
     const upload = !sameText;
     const doTz = v.withTzintuk && !(sameText && x.tzintuk === 'sent');
+    // ניסיון חוזר: הצינתוק הרגיל כבר נשלח, וחלק המשוב חסר או נכשל – משלימים רק אותו
+    const fbRetry = fbOn && !upload && !doTz && x.tzintuk === 'sent' && (x.fbTz == null || x.fbTz === 'failed');
     const now = new Date(nowMs).toISOString();
     const who2 = { withTzintuk: v.withTzintuk, byUid: who.uid, byRole: who.role, day: today, updatedAt: now };
     if (v.source) who2.source = v.source;
     if (manual) who2.manual = true;
     if (isRec) Object.assign(who2, { kind: 'audio', title: v.title, durationSec: v.durationSec, engine: pre ? pre.engine : 'recording' });
     if (pre) Object.assign(who2, { restoredFrom: pre.restoredFrom }, pre.title ? { title: pre.title } : {});
-    if (!upload && !doTz) {
+    if (!upload && !doTz && !fbRetry) {
       tx.update(promoRef, Object.assign(who2, { until: v.until, lastRequestId: v.requestId, lastResult: 'done' },
         x.status === 'remove-failed' && v.until >= today ? { status: 'live', error: null } : {}));
       return { kind: 'none', x, untilChanged: x.until !== v.until };
@@ -364,7 +425,7 @@ async function sendPromo(request, key, base, pre) {
       if (!x) Object.assign(rec, { createdAt: now, createdBy: who.uid });
     }
     tx.set(promoRef, rec, { merge: true });
-    return { kind: 'work', x, onLine, upload, doTz, usage, replacing: upload && onLine && ACTIVE.includes(x.status) };
+    return { kind: 'work', x, onLine, upload, doTz, fbRetry, usage, replacing: upload && onLine && ACTIVE.includes(x.status) };
   });
 
   if (plan.kind === 'duplicate' || plan.kind === 'none') {
@@ -448,7 +509,8 @@ async function sendPromo(request, key, base, pre) {
       // הצינתוק הקודם שייך לנוסח הקודם
       // שדות השמע מתאפסים בכל העלאה חדשה (עותק ישן לא יתאר תוכן אחר ממה שבקו), ואחר כך – עותק חדש אם יש
       await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp(),
-        kind: isRec ? 'audio' : null, audioPath: null, audioMime: null, audioBytes: null, audioSavedAt: null, audioError: null });
+        kind: isRec ? 'audio' : null, audioPath: null, audioMime: null, audioBytes: null, audioSavedAt: null, audioError: null },
+        plan.x && plan.x.fbTz != null ? { fbTz: null, fbTzCount: null } : {}); // גם הצינתוק ללקוחות משוב שייך לנוסח הקודם
       // עותק של השמע שעלה (הקלטה / קול משוכפל) ב-line_audio/promos/<promoKey>. כשל = אזהרה בלבד (משימה 2026-11-04).
       const a = voice.savedAudioOf(rendered);
       if (a) {
@@ -480,19 +542,30 @@ async function sendPromo(request, key, base, pre) {
         logger.warn('yemot: tzintuk failed', { reason: 'tzintuk-failed', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId });
       }
     }
-    await finish(tz === 'failed' ? 'partial' : 'done', Object.assign({ tzintuk: tz }, tz === 'sent' ? { tzintukAt: stamp() } : {}));
+    // 3א. לקוחות משוב: רק אחרי צינתוק רגיל שנשלח עכשיו, או השלמה (fbRetry). כשל כאן לא משנה את tzintuk ולא זורק.
+    let fb = null;
+    if (fbOn && (tzSent || plan.fbRetry)) {
+      fb = await fbTzintuk(db, ctx, cfg, fbs);
+      if (fb.st === 'capped') v.warnings.push('fb-tz-capped');
+    }
+    await finish(tz === 'failed' || (fb && fb.st === 'failed') ? 'partial' : 'done', Object.assign({ tzintuk: tz }, tzSent ? { tzintukAt: stamp() } : {},
+      fb ? { fbTz: fb.st, fbTzCount: fb.count, fbTzAt: stamp() } : {}));
 
     const tToday = await todayView();
     const end = `המבצע יושמע בקו עד ${heDate(v.until)}.`;
     const head = action === 'replaced' ? 'הנוסח של המבצע בקו הוחלף' : action === 'tzintuk-only' ? 'המבצע כבר היה בקו' : 'המבצע עלה לקו';
-    const tzPart = tz === 'sent' ? (action === 'tzintuk-only' ? ', ועכשיו נשלח צינתוק לנרשמים.' : ' ונשלח צינתוק לנרשמים.')
+    const tzPart = plan.fbRetry ? ', והצינתוק לנרשמים כבר נשלח.'
+      : tz === 'sent' ? (action === 'tzintuk-only' ? ', ועכשיו נשלח צינתוק לנרשמים.' : ' ונשלח צינתוק לנרשמים.')
       : tz === 'failed' ? `, אבל הצינתוק לנרשמים לא נשלח${isEmp ? ' (ולא נספר במכסה היומית)' : ''}. אפשר לנסות שוב – הקובץ לא יועלה פעמיים.`
         : (v.withTzintuk ? '.' : ' בלי צינתוק.');
-    return {
+    const fbPart = !fb ? '' : fb.st === 'sent' ? ` גם ${fb.count} לקוחות משוב קיבלו צינתוק.`
+      : fb.st === 'capped' ? ` לקוחות המשוב לא קיבלו צינתוק: ${fb.total} מספרים, יותר מהמכסה (${cfg.fbTzMax}).`
+        : fb.st === 'failed' ? ' הצינתוק ללקוחות המשוב לא נשלח. אפשר לנסות שוב – הצינתוק לנרשמים לא יישלח פעמיים.' : '';
+    return Object.assign({
       ok: true, id: v.promoKey, promoKey: v.promoKey, requestId: v.requestId, action, file, until: v.until, withTzintuk: v.withTzintuk, tzintuk: tz,
-      role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart} ${end}`,
+      role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart}${fbPart} ${end}`,
       engine: rendered ? rendered.engine : null, kind: isRec ? 'audio' : 'text', audioSaved,
-    };
+    }, fb ? { fbTz: fb.st, fbTzCount: fb.count } : {});
   } catch (e) {
     if (e instanceof HttpsError) throw e;
     // חריגה פנימית (לא מימות): מחזירים מכסה שלא נוצלה, משחררים נעילה, ומסמנים "לא ודאי" כדי שההורדה תנקה את הקובץ אם הוא בקו
@@ -590,12 +663,12 @@ async function nightly(opts) {
   const out = {};
   try { out.promos = await runExpiry(opts); } catch (e) { logger.error('yemot: expiry failed', { reason: 'internal', name: e && e.name }); out.promos = { error: 'internal' }; }
   try { out.line = await require('./yemot-line').runLineExpiry(opts); } catch (e) { logger.error('yemot: line expiry failed', { reason: 'internal', name: e && e.name }); out.line = { error: 'internal' }; }
-  // לקוחות משוב חדשים ← רשימת התפוצה בימות (yemot-fblist.js, משימה 2026-11-17). רק הוספה; בלי טלפונים חדשים – בלי פנייה לימות.
-  try { out.fblist = await require('./yemot-fblist').runFbSync(Object.assign({}, opts, { by: 'nightly' })); } catch (e) { logger.error('yemot: fb sync failed', { reason: 'internal', name: e && e.name }); out.fblist = { error: 'internal' }; }
   // מטמון השמע של הקול המשוכפל: מחיקת קבצים ישנים (VOICE_CACHE_HOURS). לא נוגע בקו.
   if (!(opts && opts.skipCache)) out.voiceCache = await voice.cleanCache();
   // שמע שמור של הודעות בקו (line_audio/): מחיקה 8 ימים אחרי הירידה (משימה 2026-11-04, חוזה 5.5.8). לא נוגע בקו ולא ב-voice_cache/.
   try { out.lineAudio = await require('./yemot-board').cleanLineAudio(opts); } catch (e) { logger.error('yemot: line audio clean failed', { reason: 'internal', name: e && e.name }); out.lineAudio = { error: 'internal' }; }
+  // לקוחות משוב חדשים ← רשימת התפוצה בימות (yemot-fblist.js, משימה 2026-11-17). אחרון – כדי שפנייה איטית לימות לא תקטע את הניקויים. רק הוספה; בלי טלפונים חדשים – בלי פנייה לימות.
+  try { out.fblist = await require('./yemot-fblist').runFbSync(Object.assign({}, opts, { by: 'nightly' })); } catch (e) { logger.error('yemot: fb sync failed', { reason: 'internal', name: e && e.name }); out.fblist = { error: 'internal' }; }
   return out;
 }
 // ריבוי עסקים (שלב 5): לולאה על העסקים שהתוספת yemot מופעלת אצלם. כל עסק עטוף לבד (כשל באחד לא עוצר את האחרים).

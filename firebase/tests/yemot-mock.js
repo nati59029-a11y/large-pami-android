@@ -12,7 +12,7 @@ const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tt
 function reset(files, dirs) {
   state.requests = [];
   state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok', templates: 'ok', create: 'ok', entries: 'ok', phonelist: 'ok', tzl: 'ok' };
-  state.templates = []; state.tzl = {}; state.nextTpl = 1001;
+  state.templates = []; state.tzl = {}; state.nextTpl = 1001; state.headerRow = false;
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
@@ -53,7 +53,8 @@ function start(port) {
       const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download', GetTextFile: 'text',
         GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: 'tzl' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
-      const mode = state.modes[key];
+      // tzphones (משימה 2026-11-17): מצב נפרד ל-RunTzintuk עם מערך מספרים (צינתוק ללקוחות משוב). לא הוגדר = כמו tzintuk
+      const mode = cmd === 'RunTzintuk' && Array.isArray(body.phones) && state.modes.tzphones ? state.modes.tzphones : state.modes[key];
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
       if (mode === 'http500') return reply(res, 500, { responseStatus: 'EXCEPTION' });
       if (mode === 'exception') return reply(res, 200, { responseStatus: 'EXCEPTION', exceptionClass: 'IllegalArgumentException', exceptionMessage: 'bad token ' + auth });
@@ -126,7 +127,8 @@ function start(port) {
         const type = body.updateType || 'UPDATE';
         if (type === 'NEW') t.entries.clear();
         const rejectedRecords = []; let totalParsed = 0, totalInserted = 0, totalUpdated = 0, totalRemoved = 0;
-        String(body.data || '').split('\n').filter(Boolean).forEach((line, i) => {
+        // state.headerRow (משימה 2026-11-17): מדמה ימות שקורא את השורה הראשונה ככותרת (לא מאומת) – השורה לא נספרת ולא נכנסת
+        String(body.data || '').split('\n').filter(Boolean).slice(state.headerRow ? 1 : 0).forEach((line, i) => {
           const [phone, name] = line.split(String(body.delimiter || ','));
           totalParsed++;
           if (!/^0\d{8,9}$/.test(phone) || (state.invalidPhones || []).includes(phone)) { rejectedRecords.push({ phone, name, moreinfo: null, blocked: false, errorState: 'INVALID', originalRowNumber: i + 1 }); return; }

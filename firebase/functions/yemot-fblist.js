@@ -2,7 +2,7 @@
 // לקוחות משוב ← רשימת תפוצה בימות (משימה 2026-11-17, שלב 4).
 //   runFbSync(opts) – מוסיפה לרשימת התפוצה "לקוחות משוב" בימות את הטלפונים מטופסי משוב מאושרים (fb, st=='ok'),
 //                     גם בשורש וגם ב-b/largpeami/fb, שעוד לא נשלחו (yemot_fbsent/{טלפון}). נקראת מהריצה הלילית (yemot.js) ומ-yemotFbList.
-//   yemotFbList      – מנהל בלבד: { action:'state' } מצב, { action:'sync' } סנכרון עכשיו, { action:'setTz', on } מתג צינתוק (רק שמירה – הצינתוק עצמו בשלב 5).
+//   yemotFbList      – מנהל בלבד: { action:'state' } מצב, { action:'sync' } סנכרון עכשיו, { action:'setTz', on } מתג צינתוק (רק שמירה – הצינתוק עצמו ב-sendPromo ב-yemot.js).
 // בטיחות: רק הוספה ועדכון (UploadPhoneList עם updateType UPDATE, ב-lib/yemot-client.js). אין מחיקת מספרים, אין ניקוי רשימה ואין מחיקת תבנית.
 // הרשימה נוצרת פעם אחת: קודם templateId השמור, אחר כך GetTemplates לפי השם, ורק אם אין – CreateTemplate. יצירה שלא ודאית (פסק זמן) לא חוזרת באותה ריצה;
 // בריצה הבאה GetTemplates ימצא אותה אם נוצרה.
@@ -157,6 +157,13 @@ async function runFbSync(opts) {
         out.error = unsure ? 'upload-uncertain' : 'upload-failed';
         break; // לא ממשיכים; מה שלא סומן יישלח שוב בריצה הבאה
       }
+      // ספירה של ימות קטנה ממספר השורות (למשל השורה הראשונה נקראה ככותרת – לא מאומת): לא מסמנים אף מספר בקבוצה,
+      // כדי שאף לקוח לא יסומן "נשלח" בלי שנכנס. נספר "לא ודאי" ויישלח שוב בריצה הבאה (UPDATE לא יוצר כפילות).
+      if (r.parsed < part.length || r.inserted + r.updated + r.rejected.length < part.length) {
+        logger.warn('yemot-fblist: count mismatch', { reason: 'count-mismatch', rows: part.length, parsed: r.parsed });
+        out.uncertain += part.length; out.error = 'count-mismatch';
+        break;
+      }
       const bad = new Map(r.rejected.map((x) => [normPhone(x.phone), x.errorState]));
       const now = new Date().toISOString();
       const wb = db.batch();
@@ -181,7 +188,7 @@ async function runFbSync(opts) {
 // ---------------- yemotFbList (מנהל) ----------------
 // חוזה מסך המנהל (שלב 6): אותו אובייקט state בכל שלוש הפעולות.
 // sent/rejected = סה"כ מצטבר; uncertain = מהריצה האחרונה; pending = מספרים תקינים ממשוב מאושר שעוד לא נשלחו;
-// lastRun = זמן הריצה האחרונה; lastError = קוד קצר בלבד (לא טקסט מימות); tzMonth – ימולא בשלב 5 (עד אז count:0 לחודש הנוכחי).
+// lastRun = זמן הריצה האחרונה; lastError = קוד קצר בלבד (לא טקסט מימות); tzMonth = צינתוקים בתשלום ללקוחות משוב בחודש הנוכחי (נספר ב-yemot.js, שלב 5).
 const israelMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
 async function stateOf(db) {
   const x = (await db.doc(STATE).get()).data() || {};

@@ -163,6 +163,20 @@ describe('ימות שלב 4: לקוחות משוב ← רשימת תפוצה ב�
     assert.equal(await readDoc(env, 'yemot_fbsent/0541112222'), null);
   });
 
+  it('ספירה של ימות קטנה ממספר השורות (השורה הראשונה נקראה ככותרת) – אף מספר לא מסומן נשלח; uncertain; lastError count-mismatch (תיקון בודק, סבב 1)', async () => {
+    await fb(env, 'fb/k1', '0501234567', 'א'); await fb(env, 'fb/k2', '0541112222', 'ב');
+    M.state.headerRow = true;
+    const r = await sync();
+    assert.equal(r.error, 'count-mismatch'); assert.equal(r.sent, 0); assert.equal(r.uncertain, 2);
+    assert.deepEqual(await ids(env, 'yemot_fbsent'), []);
+    const s = await call('yemotFbList', 'u_mgr', { action: 'state' });
+    assert.equal(s.result.lastError, 'count-mismatch'); assert.equal(s.result.pending, 2); assert.equal(s.result.sent, 0);
+    M.state.headerRow = false;
+    const r2 = await sync();
+    assert.equal(r2.error, null); assert.equal(r2.sent, 2);
+    assert.deepEqual(await ids(env, 'yemot_fbsent'), ['0501234567', '0541112222']);
+  });
+
   it('נעילה: סנכרון שני בזמן ריצה – busy, בלי פנייה לימות', async () => {
     await fb(env, 'fb/f1', '0501234567', 'א');
     await writeDoc(env, 'yemot_state/fblist', { lockAt: new Date().toISOString() });
@@ -241,6 +255,115 @@ describe('ימות שלב 4: לקוחות משוב ← רשימת תפוצה ב�
       assert.ok(!/'NEW'|'REMOVE'|ClearTemplateEntries|UpdateTemplateEntr|DeleteTemplate|resetList/.test(t), f);
     }
     assert.match(fs.readFileSync(path.join(H.ROOT, 'functions', 'lib/yemot-client.js'), 'utf8'), /updateType: 'UPDATE'/);
+  });
+
+  // ---------------- שלב 5: צינתוק ללקוחות משוב במבצע (sendPromo ב-yemot.js) ----------------
+  const day = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const in3 = () => { const [y, m, d] = day().split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + 3)).toISOString().slice(0, 10); };
+  let pseq = 0;
+  const promo = (extra) => { const k = `fbtz_${Date.now().toString(36)}_${++pseq}`; return Object.assign({ requestId: 'rq_' + k, promoKey: 'pk_' + k, text: 'מבצע דמה ללקוחות משוב', until: in3(), withTzintuk: true }, extra || {}); };
+  // רשימת תפוצה בימות + מסמך fblist. entries: [טלפון | [טלפון, חסום]]
+  async function fbSetup(entries, tzOn) {
+    M.state.templates.push({ templateId: 900, description: 'לקוחות משוב', entries: new Map(entries.map((e) => (Array.isArray(e) ? [e[0], { name: null, blocked: e[1] }] : [e, { name: null, blocked: false }]))) });
+    await writeDoc(env, 'yemot_state/fblist', { templateId: 900, tzOn: tzOn !== false, sentCount: entries.length });
+  }
+  const arrTz = () => M.calls('RunTzintuk').filter((q) => Array.isArray(q.body.phones));
+  const tzlTz = () => M.calls('RunTzintuk').filter((q) => q.body.phones === 'tzl:mivtzaim');
+  const monthNow = () => day().slice(0, 7);
+
+  it('שלב 5: מנהל + מתג דולק – צינתוק רגיל ואחריו מערך: לא חסומים, בלי מי שברשימה החינמית, כפול פעם אחת; נרשם במבצע ובמונה החודשי', async () => {
+    await fbSetup(['0501111111', '0502222222', ['0503333333', true], '0504444444', '0771234567']);
+    M.state.tzl.mivtzaim = ['0502222222', '+972504444444']; // כפולים בשתי הרשימות (גם בפורמט אחר)
+    const st = await call('sendPromoToLine', 'u_mgr', { statusOnly: true });
+    assert.deepEqual(st.result.fbTz, { on: true, upTo: 5, max: 300 });
+    assert.equal(M.state.requests.length, 0, 'statusOnly לא פונה לימות');
+    const p = promo();
+    const r = await call('sendPromoToLine', 'u_mgr', p);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.tzintuk, 'sent'); assert.equal(r.result.fbTz, 'sent'); assert.equal(r.result.fbTzCount, 2);
+    assert.match(r.result.message, /גם 2 לקוחות משוב קיבלו צינתוק/);
+    assert.equal(tzlTz().length, 1); assert.equal(arrTz().length, 1);
+    assert.deepEqual(arrTz()[0].body.phones.slice().sort(), ['0501111111', '0771234567'], 'חסום לא; מי שברשימה החינמית לא (כבר קיבל)');
+    const cmds = M.state.requests.map((q) => q.cmd);
+    assert.ok(cmds.indexOf('RunTzintuk') < cmds.indexOf('GetTemplateEntries'), 'הרגיל קודם');
+    const rec = await readDoc(env, 'yemot_promos/' + p.promoKey);
+    assert.equal(rec.tzintuk, 'sent'); assert.equal(rec.fbTz, 'sent'); assert.equal(rec.fbTzCount, 2); assert.equal(rec.lastResult, 'done');
+    assert.deepEqual((await readDoc(env, 'yemot_state/fblist')).tzMonth, { month: monthNow(), count: 2 });
+    const s = await call('yemotFbList', 'u_mgr', { action: 'state' });
+    assert.deepEqual(s.result.tzMonth, { month: monthNow(), count: 2 });
+    // שליחה חוזרת של אותו מבצע (אותו נוסח, הכול נשלח) – בלי שום פנייה לימות
+    M.state.requests = [];
+    const r2 = await call('sendPromoToLine', 'u_mgr', promo({ promoKey: p.promoKey }));
+    assert.equal(r2.status, 'OK', r2.text); assert.equal(r2.result.action, 'none'); assert.equal(M.state.requests.length, 0);
+  });
+
+  it('שלב 5: עובד – אף פעם לא; מתג כבוי – לא; בלי צינתוק – לא', async () => {
+    await fbSetup(['0501111111']);
+    const e = await call('sendPromoToLine', 'u_emp', promo());
+    assert.equal(e.status, 'OK', e.text); assert.equal(e.result.tzintuk, 'sent'); assert.equal(e.result.fbTz, undefined);
+    assert.equal((await call('sendPromoToLine', 'u_emp', { statusOnly: true })).result.fbTz, undefined);
+    const n = await call('sendPromoToLine', 'u_mgr', promo({ withTzintuk: false }));
+    assert.equal(n.status, 'OK', n.text);
+    assert.equal(arrTz().length, 0); assert.equal(M.calls('GetTemplateEntries').length, 0);
+    await writeDoc(env, 'yemot_state/fblist', { templateId: 900, tzOn: false });
+    const m = await call('sendPromoToLine', 'u_mgr', promo());
+    assert.equal(m.result.tzintuk, 'sent'); assert.equal(m.result.fbTz, undefined);
+    assert.equal(arrTz().length, 0); assert.equal(M.calls('GetTemplateEntries').length, 0);
+    assert.equal((await readDoc(env, 'yemot_state/fblist')).tzMonth, undefined);
+  });
+
+  it('שלב 5: מעל המכסה (300) – לא נשלח לאף לקוח משוב, אזהרה fb-tz-capped; הצינתוק הרגיל נשלח', async () => {
+    await fbSetup(Array.from({ length: 301 }, (_, i) => '050' + String(1000000 + i)));
+    const p = promo();
+    const r = await call('sendPromoToLine', 'u_mgr', p);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.tzintuk, 'sent'); assert.equal(r.result.fbTz, 'capped'); assert.equal(r.result.fbTzCount, 0);
+    assert.ok(r.result.warnings.includes('fb-tz-capped'));
+    assert.match(r.result.message, /301 מספרים, יותר מהמכסה \(300\)/);
+    assert.equal(arrTz().length, 0); assert.equal(tzlTz().length, 1);
+    assert.equal((await readDoc(env, 'yemot_promos/' + p.promoKey)).fbTz, 'capped');
+    assert.equal((await readDoc(env, 'yemot_state/fblist')).tzMonth, undefined);
+  });
+
+  for (const [what, setFail] of [['RunTzintuk למערך', () => M.setMode('tzphones', 'error')], ['GetTemplateEntries', () => M.setMode('entries', 'error')]]) {
+    it(`שלב 5: כשל ב-${what} – fbTz:'failed' בלי לשנות tzintuk:'sent' ובלי לזרוק; ניסיון חוזר משלים רק את המשוב`, async () => {
+      await fbSetup(['0501111111', '0502222222']);
+      setFail();
+      const p = promo();
+      const r = await call('sendPromoToLine', 'u_mgr', p);
+      assert.equal(r.status, 'OK', r.text);
+      assert.equal(r.result.tzintuk, 'sent'); assert.equal(r.result.fbTz, 'failed'); assert.equal(r.result.fbTzCount, 0);
+      assert.match(r.result.message, /הצינתוק ללקוחות המשוב לא נשלח/);
+      assert.ok(!r.text.includes('incorrect'));
+      let rec = await readDoc(env, 'yemot_promos/' + p.promoKey);
+      assert.equal(rec.tzintuk, 'sent'); assert.equal(rec.fbTz, 'failed'); assert.equal(rec.lastResult, 'partial'); assert.equal(rec.lockAt, null);
+      // ניסיון חוזר (אותה לחיצה): בלי העלאה, בלי צינתוק רגיל – רק המשוב
+      M.setMode('tzphones', undefined); M.setMode('entries', 'ok');
+      M.state.requests = [];
+      const r2 = await call('sendPromoToLine', 'u_mgr', p);
+      assert.equal(r2.status, 'OK', r2.text);
+      assert.equal(r2.result.action, 'tzintuk-only'); assert.equal(r2.result.fbTz, 'sent'); assert.equal(r2.result.fbTzCount, 2);
+      assert.match(r2.result.message, /הצינתוק לנרשמים כבר נשלח/);
+      assert.equal(tzlTz().length, 0, 'הצינתוק הרגיל לא נשלח שוב');
+      assert.equal(M.calls('UploadTextFile').length, 0); assert.equal(arrTz().length, 1);
+      rec = await readDoc(env, 'yemot_promos/' + p.promoKey);
+      assert.equal(rec.tzintuk, 'sent'); assert.equal(rec.fbTz, 'sent'); assert.equal(rec.lastResult, 'done');
+      // ועכשיו הכול נשלח – ניסיון נוסף לא פונה לימות
+      M.state.requests = [];
+      assert.equal((await call('sendPromoToLine', 'u_mgr', promo({ promoKey: p.promoKey }))).result.action, 'none');
+      assert.equal(M.state.requests.length, 0);
+    });
+  }
+
+  it('שלב 5: מבצע שהצינתוק הרגיל שלו נשלח לפני שהמתג הודלק – ניסיון חוזר שולח רק למשוב', async () => {
+    await fbSetup(['0501111111'], false);
+    const p = promo();
+    assert.equal((await call('sendPromoToLine', 'u_mgr', p)).result.tzintuk, 'sent');
+    await writeDoc(env, 'yemot_state/fblist', { templateId: 900, tzOn: true });
+    M.state.requests = [];
+    const r = await call('sendPromoToLine', 'u_mgr', promo({ promoKey: p.promoKey }));
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.fbTz, 'sent'); assert.equal(r.result.fbTzCount, 1);
+    assert.equal(tzlTz().length, 0); assert.deepEqual(arrTz()[0].body.phones, ['0501111111']);
   });
 
   it('נרמול טלפון ושם', () => {

@@ -345,6 +345,12 @@ async function publishItem(request, key, base, pre) {
     let file = plan.keepPath ? plan.x.file : null;
     let path = plan.keepPath ? plan.x.path : null;
     try {
+      // הגנה (משימה 2026-11-17): ניסיון חוזר לא עולה לנתיב הקודם אם רשומה אחרת (מבצע או פריט) מחזיקה אותו עכשיו – מקצים מספר חדש
+      if (path && !S.fixedName) {
+        const held = async (col) => (await db.collection(col).where('path', '==', path).get()).docs
+          .some((d) => !(col === 'yemot_items' && d.id === itemRef.id) && LY.HOLD_STATUS.includes(d.get('status')));
+        if (await held('yemot_promos') || await held('yemot_items')) { path = null; file = null; }
+      }
       if (!path && S.fixedName) {
         file = voice.fileName(S.fixedName, rendered); path = voice.pathOf(S.ext, file);
         await itemRef.update({ file, path, updatedAt: stamp() });

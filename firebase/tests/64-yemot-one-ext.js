@@ -163,6 +163,32 @@ describe('ימות: כל התוכן בשלוחה אחת (yemot_state/layout)', (
     assert.equal((await readDoc(env, 'yemot_items/it_due_hours_1')).error, 'path-reused');
   });
 
+  it('פריט שנכשל ושומר נתיב: מילוי חורים מעל 999 לא לוקח את המספר שלו; ניסיון חוזר שלו לא דורס מבצע שמחזיק את הנתיב (תיקון בודק, סבב 1)', async () => {
+    await setSingle(true);
+    const now = new Date().toISOString();
+    // א. פריט failed (כשל ודאי) עם נתיב 001 – המספר נחשב תפוס במילוי החורים
+    await writeDoc(env, 'yemot_state/ext-1', { nextNum: 1000, recent: [] });
+    await writeDoc(env, 'yemot_items/t64_failed_keep_a', { slot: 'recipes', ext: '1', status: 'failed', uncertain: false, path: 'ivr2:1/001.tts', file: '001.tts', byUid: 'u_mgr', text: 'מתכון', createdAt: now, updatedAt: now });
+    const p = await core(PROMO, 'sendPromo', 'u_mgr', promo());
+    assert.equal(p.status, 'OK', JSON.stringify(p.error));
+    assert.equal(p.result.file, '002.tts', 'לא 001 – של הפריט שנכשל');
+    // ב. מבצע מחזיק את 003, ופריט שנכשל עם אותו נתיב נשלח שוב – מקבל מספר חדש, קובץ המבצע לא נדרס
+    M.state.dirs['1'].set('003.tts', 'מבצע');
+    await writeDoc(env, 'yemot_state/ext-1', { nextNum: 10, recent: [] });
+    await writeDoc(env, 'yemot_promos/pk_hold_003', { status: 'live', path: 'ivr2:1/003.tts', file: '003.tts', until: addDays(israelDay(), 5), text: 'מבצע', updatedAt: now });
+    const it2 = item('recipes');
+    await writeDoc(env, 'yemot_items/' + it2.requestId, { slot: 'recipes', ext: '1', status: 'failed', uncertain: false, path: 'ivr2:1/003.tts', file: '003.tts', byUid: 'u_mgr', text: 'מתכון', createdAt: now, updatedAt: now });
+    const r = await core(LINE, 'publishItem', 'u_mgr', it2);
+    assert.equal(r.status, 'OK', JSON.stringify(r.error));
+    assert.equal(r.result.path, 'ivr2:1/010.tts');
+    assert.equal(M.state.dirs['1'].get('003.tts'), 'מבצע', 'קובץ המבצע לא נדרס');
+    // ג. בלי רשומה אחרת – ניסיון חוזר עדיין עולה לאותו נתיב (ההתנהגות הקיימת)
+    const it3 = item('recipes');
+    await writeDoc(env, 'yemot_items/' + it3.requestId, { slot: 'recipes', ext: '1', status: 'failed', uncertain: false, path: 'ivr2:1/007.tts', file: '007.tts', byUid: 'u_mgr', text: 'מתכון', createdAt: now, updatedAt: now });
+    const r3 = await core(LINE, 'publishItem', 'u_mgr', it3);
+    assert.equal(r3.status, 'OK', JSON.stringify(r3.error)); assert.equal(r3.result.path, 'ivr2:1/007.tts');
+  });
+
   it('הודעה זמנית בשלוחה 1 יורדת בלילה; הודעה זמנית ישנה בשלוחה 4 – גם', async () => {
     const h4 = await core(LINE, 'publishItem', 'u_mgr', item('hours', { until: israelDay() }));
     await setSingle(true);

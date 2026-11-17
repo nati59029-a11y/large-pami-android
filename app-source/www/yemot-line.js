@@ -90,6 +90,9 @@ const opt=(v,t,s)=>`<button class="opt" data-a="ylGo" data-v="${v}" style="min-h
 // ---------- משבצת במסך הבית ----------
 window.ylTile=()=>`<button class="tile" data-a="go" data-v="yl" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>שלוחות הקו</button>`;
 ACT.ylGo=el=>go('yl',el.dataset.v);
+// כניסת מנהל ל"לקוחות משוב בימות" (yemot-fblist.js, window.yfOpen). בלי הקובץ – לא מוצג.
+const fbOpt=()=>`<button class="opt" data-a="ylFb" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">לקוחות משוב בימות<small>רשימת הטלפונים מהמשוב וצינתוק בתשלום</small></span>${ico('chev')}</button>`;
+ACT.ylFb=()=>{if(window.yfOpen)window.yfOpen()};
 // ---------- המסכים ----------
 V.yl=a=>{a=a||'';
  if(Y.rec&&Y.rec.on&&a!==Y.rec.act)recDiscard();
@@ -101,7 +104,7 @@ function vMain(){const m=isA(),ly=LY();
  ${opt('1',`שלוחה ${xn('recipes')} · מתכונים`,'כתיבה או סריקה מצילום · החדש מושמע ראשון')}
  ${opt('2',`שלוחה ${xn('promos')} · מבצעים`,'בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
  ${opt('3',`שלוחה ${xn('updates')} · עדכונים`,'הקלדה או הקלטה · החדש מושמע ראשון')}
- ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${Y.st?layoutCard():''}`:''}`}}
+ ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${Y.st?layoutCard():''}`:''}`}}
 // כרטיס מנהל: "כל התוכן בשלוחה אחת" (setLineLayout). מוצג רק אחרי שהמצב נטען מהשרת, כדי לא להציג מצב שגוי.
 function layoutCard(){const ly=LY();
  return`<div class="card" id="ylLayout" style="margin-top:12px"><b>כל התוכן בשלוחה אחת</b><p class="note" style="margin:4px 0 10px">${ly.single?`מופעל: מבצעים, מתכונים, עדכונים ושעות – כולם עולים לשלוחה ${esc(ly.ext)}.`:'כבוי: כל סוג תוכן עולה לשלוחה משלו (1 עד 4).'} הודעות שכבר בקו נשארות במקומן עד שהן יורדות. ההחלפה לא מוחקת כלום, ואפשר לחזור בכל רגע.</p>

@@ -58,13 +58,13 @@ function promoExts(layout, promoExt) {
 }
 
 // מספרי הקבצים (001-999) שרשומה כלשהי של האפליקציה מחזיקה בשלוחה ext – פריטים (yemot_items) ומבצעים (yemot_promos),
-// כולל העלאה שמצבה לא ודאי. משמש את מילוי החורים במבצעים (מעל 999), כדי לא לדרוס קובץ של סוג אחר.
+// כולל העלאה שמצבה לא ודאי, וגם רשומה שנכשלה ושומרת נתיב (ניסיון חוזר שלה יעלה לאותו נתיב – keepPath ב-yemot-line.js).
+// משמש את מילוי החורים במבצעים (מעל 999), כדי לא לדרוס קובץ של סוג אחר.
 const HOLD_STATUS = ['live', 'remove-failed', 'uploading', 'failed'];
 async function heldNums(db, ext) {
   const nums = new Set();
   const add = (x) => {
     if (dirOf(x.path) !== String(ext)) return;
-    if (x.status === 'failed' && !x.uncertain) return;
     const m = /\/(\d{3})\.[A-Za-z0-9]+$/.exec(String(x.path));
     if (m) nums.add(Number(m[1]));
   };
@@ -74,4 +74,4 @@ async function heldNums(db, ext) {
   return nums;
 }
 
-module.exports = { LAYOUT_DOC, CONTENT_SLOTS, DEFAULT_EXT, SINGLE_EXTS, DEFAULT_LAYOUT, loadLayout, extOf, slotsOfExt, counterDoc, dirOf, promoExts, heldNums };
+module.exports = { LAYOUT_DOC, CONTENT_SLOTS, DEFAULT_EXT, SINGLE_EXTS, DEFAULT_LAYOUT, loadLayout, extOf, slotsOfExt, counterDoc, dirOf, promoExts, heldNums, HOLD_STATUS };

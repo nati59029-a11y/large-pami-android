@@ -6,7 +6,7 @@
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||!window.ylApi)return;
 const A=window.ylApi;
-const ERR={'auth-failed':'הסיסמה של ימות לא התקבלה. פנו לתמיכה.','no-key':'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.','busy':'סנכרון אחר כבר רץ.','timeout':'ימות לא ענה בזמן.','rate-limit':'ימות מגביל פניות. ננסה שוב בלילה.','template-missing':'הרשימה בימות לא נמצאה.'};
+const ERR={'auth-failed':'הסיסמה של ימות לא התקבלה. פנו לתמיכה.','no-key':'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.','busy':'סנכרון אחר כבר רץ.','timeout':'ימות לא ענה בזמן.','rate-limit':'ימות מגביל פניות. ננסה שוב בלילה.','template-missing':'הרשימה בימות לא נמצאה.','count-mismatch':'ימות לא אישר את כל המספרים. הם יישלחו שוב בריצה הבאה.'};
 const Z={st:null,err:null,loading:false,syncing:false,msg:'',denied:false,tzBusy:false};
 const fdt=iso=>{const d=new Date(iso);return isNaN(d)?'':new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(d)};
 const lastErr=s=>{if(!s)return'';return ERR[s]||(A.he(s)?s:'שגיאה בחיבור לימות')};
