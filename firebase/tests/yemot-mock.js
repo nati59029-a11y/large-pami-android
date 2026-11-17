@@ -54,8 +54,13 @@ function start(port) {
         GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: 'tzl' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       // tzphones (משימה 2026-11-17): מצב נפרד ל-RunTzintuk עם מערך מספרים (צינתוק ללקוחות משוב). לא הוגדר = כמו tzintuk
-      const mode = cmd === 'RunTzintuk' && Array.isArray(body.phones) && state.modes.tzphones ? state.modes.tzphones : state.modes[key];
+      // מערך מצבים (שליחה בקבוצות): מצב לכל קריאת מערך לפי הסדר; אחרי סוף המערך – 'ok'
+      let mode = cmd === 'RunTzintuk' && Array.isArray(body.phones) && state.modes.tzphones ? state.modes.tzphones : state.modes[key];
+      if (Array.isArray(mode)) mode = mode[state.requests.filter((q) => q.cmd === 'RunTzintuk' && Array.isArray(q.body.phones)).length - 1] || 'ok';
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
+      if (mode === 'reset') return req.socket.destroy(); // מנתק בלי תשובה אחרי שהבקשה הגיעה (לא ודאי)
+      // 'okclose': עונה OK ואז השרת נסגר – הקריאה הבאה נכשלת בלי חיבור (ECONNREFUSED, כשל ודאי). הבדיקה מפעילה מחדש (start)
+      if (mode === 'okclose') { res.on('finish', () => { stop(); }); return reply(res, 200, OK({ callerId: '0000000000', callsCount: body.phones.length, errors: {} })); }
       if (mode === 'http500') return reply(res, 500, { responseStatus: 'EXCEPTION' });
       if (mode === 'exception') return reply(res, 200, { responseStatus: 'EXCEPTION', exceptionClass: 'IllegalArgumentException', exceptionMessage: 'bad token ' + auth });
       if (mode === 'error') return reply(res, 200, { yemotAPIVersion: 7, responseStatus: 'ERROR', message: 'token ' + auth + ' is incorrect', messageCode: 1 });
