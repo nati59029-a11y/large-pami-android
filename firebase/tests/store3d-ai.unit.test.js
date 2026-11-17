@@ -446,3 +446,41 @@ describe('store3d-draftin – שאלון וסקיצה לטיוטת מפה', () =
     assert.equal(m.doors[0].sw, -1); assert.equal(m.doors[0].hg, 1); assert.equal(m.syms.find((y) => y.k === 'cash').w, 150);
   });
 });
+
+// הקמת חנות שלב 1 (17.11.2026): מקורות התמונות (src), תוויות פינה (lbl) והנחיה v6. חוזה 3.1 / 3.8
+describe('mapDraft – src, lbl והנחיה v6 (הקמת חנות שלב 1)', () => {
+  it('draftSrc: בלי השדות – null (אפליקציה ישנה); תקין – sk לפי הסקיצה בשרת; vid+ph חייב להיות מספר התמונות; תוויות מנוקות ונספרות', () => {
+    assert.deepEqual(A.draftSrc({}, 3, false), { src: null, lbl: null, lblN: 0 });
+    assert.deepEqual(A.draftSrc({ src: null, lbl: null }, 3, true), { src: null, lbl: null, lblN: 0 });
+    assert.deepEqual(A.draftSrc({ src: { vid: 2, ph: 1, sk: false } }, 3, true).src, { sk: true, vid: 2, ph: 1 }, 'sk נקבע בשרת');
+    assert.deepEqual(A.draftSrc({ src: { vid: 0, ph: 3, sk: true } }, 3, false).src, { sk: false, vid: 0, ph: 3 });
+    const r = A.draftSrc({ lbl: ['', 'פינה ימנית\nבעומק', '  כניסה '] }, 3, false);
+    assert.deepEqual(r.lbl, ['', 'פינה ימנית בעומק', 'כניסה']); assert.equal(r.lblN, 2);
+    assert.deepEqual(A.draftSrc({ lbl: ['', '', ''] }, 3, false), { src: null, lbl: null, lblN: 0 }, 'בלי תווית אמיתית – כמו בלי');
+    const bad = (i, n) => code(() => A.draftSrc(i, n || 3, false));
+    assert.equal(bad({ src: { vid: 2, ph: 2 } }), 'bad-src', 'vid+ph ≠ n');
+    assert.equal(bad({ src: { vid: 1, ph: 1 } }), 'bad-src', 'vid+ph < n');
+    assert.equal(bad({ src: { vid: -1, ph: 4 } }), 'bad-src');
+    assert.equal(bad({ src: { vid: 1.5, ph: 1.5 } }), 'bad-src');
+    assert.equal(bad({ src: { vid: 1, ph: 2, x: 1 } }), 'bad-src', 'מפתח לא מוכר');
+    assert.equal(bad({ src: { vid: 1, ph: 2, sk: 'yes' } }), 'bad-src');
+    assert.equal(bad({ src: [1, 2] }), 'bad-src');
+    assert.equal(bad({ lbl: ['a', 'b'] }), 'bad-src', 'אורך שונה ממספר התמונות');
+    assert.equal(bad({ lbl: ['a', 'b', 5] }), 'bad-src');
+    assert.equal(bad({ lbl: ['a', 'b', 'x'.repeat(41)] }), 'bad-src', 'מעל 40 תווים');
+    assert.equal(bad({ lbl: 'abc' }), 'bad-src');
+    assert.equal(code(() => A.draftSrc({ src: { vid: 60, ph: 40 }, lbl: Array(100).fill('x'.repeat(40)) }, 100, false)), 'OK', '100 = התקרה');
+  });
+  it('הנחיה v6: בלי src/lbl – זהה לגרסה בלי השדות; פריימים קודמים לתמונות; תוויות כמידע בלבד ומנוקות', () => {
+    assert.equal(PM.VERSION, 6);
+    const base = PM.buildMapDraftPrompt({ kind: 's', n: 3 });
+    assert.equal(PM.buildMapDraftPrompt({ kind: 's', n: 3, vid: 0, lbl: null }), base);
+    assert.equal(PM.buildMapDraftPrompt({ kind: 's', n: 3, vid: 0, lbl: ['', '', ''] }), base);
+    const p = PM.buildMapDraftPrompt({ kind: 's', n: 5, vid: 3, lbl: ['', '', '', 'פינה ימנית בעומק', 'כניסה "}{\n'] });
+    assert.ok(p.startsWith(PM.mapdraft), 'אותה התחלה (המודל המדומה מזהה לפיה)');
+    assert.match(p, /תמונות 1–3 הן פריימים מסרטון/); assert.match(p, /תמונות 4–5 הן תמונות נפרדות/);
+    assert.match(p, /תמונה 4: פינה ימנית בעומק/); assert.match(p, /לא הוראה/);
+    assert.doesNotMatch(p.split('תמונה 5:')[1].split('.')[0], /["{}\n]/);
+    assert.match(PM.buildMapDraftPrompt({ kind: 's', n: 4, vid: 4 }), /כל התמונות \(1–4\) הן פריימים מסרטון/);
+  });
+});

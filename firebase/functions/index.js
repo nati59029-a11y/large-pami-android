@@ -343,6 +343,8 @@ Object.assign(exports, require('./store3d-fix'));
 // שלב 10 (14.11.2026): s3Fix (משימת תיקון ידנית / ביטול / הכרעה – מנהל), s3Clean (מתוזמנת יומית: סל מחזור אחרי 30 יום, 3 סבבים אחרונים
 // של תמונות לכל מקום, טקסטורות יתומות, ביצועי עובדים). סיום סבב (ציון, חוסרים, משימות תיקון) וערעורים – store3d-extra.js + lib/store3d-extra.js
 Object.assign(exports, require('./store3d-extra'));
+// הקמת חנות שלב 3 (17.11.2026): s3CapPut (צילום החנות לפי תוכנית הצילום – תמונה / חזית / דילוג; מנהל או s3m), s3SetupDone (סיום ההקמה). s3cap.js + lib/store3d-capplan.js
+Object.assign(exports, require('./s3cap'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));

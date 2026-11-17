@@ -633,6 +633,41 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     const doc2 = await get(`b/${A}/s3draft/${q2}`);
     assert.deepEqual([doc2.info, doc2.sk], [undefined, undefined]);
   });
+  it('mapDraft src/lbl (הקמת חנות שלב 1, 17.11.2026): לא תקין – bad-src לפני המכסה ו-Gemini; תקין – בהנחיה, ב-s3draft (src, lbl=מספר) וב-s3setup (v, st, draftId, src); בלי השדות – s3setup בלי src; שלב מתקדם לא חוזר אחורה', async () => {
+    const IM3 = [IMG, IMG, IMG];
+    await adm.doc(`b/${A}/s3use/d_main`).delete();   // תקרת 5 הקמות ביום – לא תלוי בבדיקות הקודמות
+    const draft = (extra, q) => X.draftCore(db, W(MGR), Object.assign({ qid: q || qid(), br: 'main', kind: 's', imgs: IM3 }, extra), Date.now(), deps());
+    const un = async () => ((await use()) || {}).n || 0;
+    const n0 = GM.state.requests.length, u0 = await un();
+    for (const bad of [{ src: { vid: 1, ph: 1 } }, { src: { vid: 2, ph: 1, zz: 1 } }, { lbl: ['a'] }, { lbl: ['a', 'b', 'x'.repeat(41)] }, { src: 'v' }])
+      assert.equal(await err(draft(bad)), 'bad-src', JSON.stringify(bad).slice(0, 60));
+    assert.deepEqual([GM.state.requests.length - n0, await un()], [0, u0], 'בלי Gemini ובלי מכסה');
+    await adm.doc(`b/${A}/s3setup/s-main`).delete();
+    GM.state.mapdraftSeq = ['mapdraft-ok'];
+    const q1 = qid();
+    assert.equal((await draft({ src: { vid: 2, ph: 1, sk: true }, lbl: ['', '', 'פינה ימנית בעומק'] }, q1)).st, 'ok');
+    const pr = JSON.stringify(GM.state.requests[GM.state.requests.length - 1].body);
+    assert.match(pr, /תמונות 1–2 הן פריימים מסרטון/); assert.match(pr, /תמונה 3: פינה ימנית בעומק/);
+    const d1 = await get(`b/${A}/s3draft/${q1}`);
+    assert.deepEqual([d1.src, d1.lbl], [{ sk: false, vid: 2, ph: 1 }, 1], 'sk לפי הסקיצה בשרת (אין), lbl = כמה עם תווית');
+    const s1 = await get(`b/${A}/s3setup/s-main`);
+    assert.deepEqual([s1.v, s1.st, s1.draftId, s1.src, s1.by], [1, 'draft', q1, { sk: false, vid: 2, ph: 1 }, MGR]);
+    assert.ok(Number.isInteger(s1.upd));
+    // שלב מתקדם (cap) עם שדות של שלבים אחרים: st לא חוזר ל-draft, ושאר השדות לא נוגעים
+    await adm.doc(`b/${A}/s3setup/s-main`).set({ v: 1, st: 'cap', gnote: 'הערה כללית', qr: 1, upd: 1, by: MGR });
+    GM.state.mapdraftSeq = ['mapdraft-ok'];
+    const q2 = qid();
+    assert.equal((await draft({}, q2)).st, 'ok');
+    const d2 = await get(`b/${A}/s3draft/${q2}`);
+    assert.deepEqual([d2.src, d2.lbl], [undefined, undefined], 'אפליקציה ישנה: בלי השדות');
+    const s2 = await get(`b/${A}/s3setup/s-main`);
+    assert.deepEqual([s2.st, s2.draftId, s2.gnote, s2.qr, s2.src], ['cap', q2, 'הערה כללית', 1, undefined], 'בלי src בבקשה – לא נכתב src');
+    // תשובה שבורה – s3setup לא משתנה
+    GM.state.mapdraftSeq = ['not json at all', 'mapdraft-broken'];
+    assert.ok(await err(draft({ src: { vid: 0, ph: 3 } })));
+    assert.equal((await get(`b/${A}/s3setup/s-main`)).draftId, q2);
+    await adm.doc(`b/${A}/s3setup/s-main`).delete();
+  });
 });
 
 // ---------------- הפונקציות (אמולטור הפונקציות – רץ ב-CI) ----------------

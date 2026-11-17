@@ -12,7 +12,9 @@
 //     שלב 20א: בסבב נשלחים להנחיה עד 8 מקטעים מועמדים (שכנים במסלול, רק של העובד, רק עם מידע מהצילום האחרון). ניחוש תקין של המודל
 //     נשמר ב-ai.slot = { s, c }; אם הוא מקטע אחר בביטחון A.SUG_MIN ומעלה – גם ph.sug = { s, c } ו-sug בתשובה (הצעה בלבד, נספר 1 כרגיל).
 //   s3MovePh { run, from, to } – שלב 20ב: העברת תמונה ותוצאה בין מקטעים של אותו עובד בסבב פתוח (בלי AI ובלי מכסה; ראו moveCore).
-//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv?, info?, sketch? }
+//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv?, info?, sketch?, src?, lbl? }
+//     src/lbl (הקמת חנות שלב 1, 17.11.2026, לא חובה): פריימים מסרטון קודמים לתמונות (src.vid + src.ph = מספר התמונות), ותווית פינה לכל
+//     תמונה (עד 40 תווים) – להנחיה בלבד. נשמרים ב-s3draft.src / s3draft.lbl (מספר), ו-s3setup/{mapId} מקבל draftId ו-src (setupDraft).
 //     info/sketch (15.11.2026, לא חובה) = שאלון וסקיצה מבעל החנות (lib/store3d-draftin.js): נתונים מחייבים בהנחיה, ואחרי התשובה –
 //     התאמה למידות, חדרים מהסקיצה והצמדת גופים לשורות. קלט לא תקין = bad-info לפני המכסה. – מנהל או s3m. נספרת כבדיקה אחת
 //     במכסה (וגם בבלם היומי), בלי קשר למספר התמונות (החלטת המשתמש 15.11.2026); בהחזרה מוחזרת בדיקה אחת.
@@ -64,7 +66,7 @@ const DRAFT_MAX_OUT = 65536, DRAFT_RETRY_MIN_MS = 60000;
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const CODE = {
   'bad-img': 'invalid-argument', 'bad-img-count': 'invalid-argument', 'too-big': 'invalid-argument', 'bad-type': 'invalid-argument', 'bad-size': 'invalid-argument', 'bad-slot': 'invalid-argument',
-  's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 's3-adhoc-day': 'resource-exhausted', 'draft-daily': 'resource-exhausted', 'bad-answer': 'internal', 'bad-info': 'invalid-argument',
+  'bad-src': 'invalid-argument', 's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 's3-adhoc-day': 'resource-exhausted', 'draft-daily': 'resource-exhausted', 'bad-answer': 'internal', 'bad-info': 'invalid-argument',
 };
 function toHttps(e) {
   if (e instanceof HttpsError || !e || !CODE[e.code]) return e;
@@ -521,15 +523,25 @@ async function verifyCore(db, who, x, now, deps) {
 }
 
 // ---------------- mapDraft ----------------
+// s3setup/{mapId} אחרי טיוטה (חוזה 3.1): v, draftId, src (רק כשנשלח), upd, by. st = 'draft' רק כשאין עדיין הקמה או שהיא בשלב sketch/draft –
+// שלב מתקדם יותר (notes/qs/cap/done) לא חוזר אחורה. merge: שדות אחרים במסמך (הערות, שאלות, מונים) לא נוגעים.
+function setupDraft(sd, draftId, src, uid, now) {
+  const o = { v: 1, draftId, upd: now, by: uid };
+  if (!sd || !sd.st || sd.st === 'sketch' || sd.st === 'draft') o.st = 'draft';
+  if (src) o.src = src;
+  return o;
+}
 async function draftCore(db, who, input, now, deps) {
   if (typeof input.qid !== 'string' || !C.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
   if (typeof input.br !== 'string' || !C.RE.br.test(input.br)) throw bad('bad-br', 'מזהה הסניף לא תקין');
   if (input.kind !== 's' && input.kind !== 'w') throw bad('bad-kind', 'סוג המפה (חנות/מחסן) לא תקין');
-  let imgs, din;
-  try { imgs = A.draftImgs(input.imgs); din = DI.draftInput(input); } catch (e) { throw toHttps(e); }
+  let imgs, din, sl;
+  try { imgs = A.draftImgs(input.imgs); din = DI.draftInput(input); sl = A.draftSrc(input, imgs.length, !!din.sketch); } catch (e) { throw toHttps(e); }
   const qid = input.qid, br = input.br, kind = input.kind, n = imgs.length;
   // שאלון וסקיצה (לא חובה, 15.11.2026) – נשמרים ב-s3draft כשדות info / sk (חדשים ולא חובה; מסמכים קיימים לא משתנים)
-  const dIn = Object.assign({}, din.info ? { info: din.info } : {}, din.sketch ? { sk: Object.assign({}, din.sketch, { rooms: din.sketch.rooms.map((p) => ({ p })), rows: din.sketch.rows.map((p) => ({ p })) }) } : {});
+  // הקמת חנות שלב 1 (17.11.2026): + src ({sk, vid, ph}) ו-lbl (כמה תמונות עם תווית פינה) – שדות חדשים, רק במסמכים חדשים. התוויות עצמן רק בהנחיה
+  const dIn = Object.assign({}, din.info ? { info: din.info } : {}, din.sketch ? { sk: Object.assign({}, din.sketch, { rooms: din.sketch.rooms.map((p) => ({ p })), rows: din.sketch.rows.map((p) => ({ p })) }) } : {},
+    sl.src ? { src: sl.src } : {}, sl.lblN ? { lbl: sl.lblN } : {});
   if (who.brs && !who.brs.includes(br)) throw bad('other-branch', 'הסניף הזה לא משויך אליך', 'permission-denied');
   const cfg = await mapLib().branchOk(db, who.bizId, br, kind);
   const set = await db.doc('s3set/' + br).get();
@@ -547,7 +559,7 @@ async function draftCore(db, who, input, now, deps) {
     await release(db, who, qid, { br, k: 1, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 200) }, why ? { why } : {}, dIn)) });
     throw e;
   };
-  const prompt = PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n, info: din.info, sketch: din.sketch }), b64s = imgs.map((d) => d.b64);
+  const prompt = PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n, info: din.info, sketch: din.sketch, vid: sl.src ? sl.src.vid : 0, lbl: sl.lbl }), b64s = imgs.map((d) => d.b64);
   const deadline = Date.now() + TIMES.draft.budgetMs;   // תקציב אחד לשני הניסיונות – לא חורגים מ-TIMES.draft
   const ectx = { br, kind, numDir: S.numDir, bizId: who.bizId, uid: who.uid, now, info: din.info, sketch: din.sketch };
   let resp;
@@ -586,9 +598,12 @@ async function draftCore(db, who, input, now, deps) {
   const res = { draftId: qid, st: 'ok', n, conf: d.conf, drop: d.drop, usage: rv.qs.usage };
   try {
     await db.runTransaction(async (tx) => {
+      // הקמת חנות (חוזה 3.1): s3setup/{mapId} – הטיוטה האחרונה ומקורותיה. קריאה לפני כל כתיבה (חוק הטרנזקציה)
+      const sref = db.doc('s3setup/' + kind + '-' + br), so = await tx.get(sref), sd = so.exists ? so.data() : null;
       // 7ב: + conf (0–1) ו-notes (עד 200) – לא חובה בחוזה, נשמרים כשהם קיימים
       tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n }, dIn, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
       tx.update(db.doc('s3qid/' + qid), { res });
+      tx.set(sref, setupDraft(sd, qid, sl.src, who.uid, now), { merge: true });
     });
   } catch (e) {
     logger.error('mapDraft: write failed', { code: e && e.code });

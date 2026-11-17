@@ -98,8 +98,11 @@ async function addEv(k){const t=Date.now();C.tl=mergeTl(C.tl,[{k,t}]);lsS('s3t:'
 const b64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
 /* שלב 11: עזרים לאשף ולכרטיס המדף (הקטנה, בדיקת חדות/חשיכה, base64, מזהה בקשה) */
 U.prep=prep;U.badOf=badOf;U.b64=b64;U.qid=qid;U.blobOf=blobOf;U.decode=decode;
+/* הקמת חנות שלב 3: הוספה לתור ושליחה מיד (rec = {mapId,key,lv,img,th,w,h,at}), ורשימת הצילומים שבתור */
+U.capAdd=async rec=>{await qAdd(Object.assign({},rec,{own:me(),k:'cap',qid:qid(),tries:0}));await recount();flush()};
+U.capQ=async()=>(await qAll()).filter(r=>r.own===me()&&r.k==='cap');
 const sugOk=g=>!!(g&&typeof g.s==='string'&&/^f[0-9]{1,4}-[ab]-[0-9]{1,2}_[atb]$/.test(g.s));
-const PERM=/^(bad-|not-|no-|too-|full$|run-closed|feature-off|stale)/;
+const PERM=/^(bad-|not-|no-|too-|full$|ph-full$|plan-too-big$|run-closed|feature-off|stale)/;
 function mark(run,slot,v){if(run!==C.rid||!slot)return;if(v)C.loc[slot]=v;else delete C.loc[slot];lsS('s3d:'+run,C.loc)}
 async function flush(){
  if(C.fl||!U.feat()||!loggedIn())return;C.fl=1;
@@ -108,6 +111,8 @@ async function flush(){
   for(const r of L){
    try{
     if(r.k==='ev')await U.fn('s3Log',{qid:r.qid,run:r.run,ev:r.ev,at:r.at});
+    /* הקמת חנות שלב 3: צילום לפי תוכנית הצילום (store3d-setupcap.js) – אותו תור, אותו qid בניסיון חוזר */
+    else if(r.k==='cap'){const x=await U.fn('s3CapPut',{qid:r.qid,mapId:r.mapId,key:r.key,op:'ph',lv:r.lv,img:await b64(r.img),th:await b64(r.th)});await qDel(r.id);if(typeof U.onCap==='function')U.onCap(r,x);continue}
     else{const x=await U.fn('shelfCheck',{qid:r.qid,mode:'run',run:r.run,slot:r.slot,at:r.at,src:r.src,rt:r.rt,img:await b64(r.img),th:await b64(r.th)});
      if(r.run===C.rid){if(x&&(x.person||x.st==='person'))C.ph[r.slot]={person:true};else if(C.ph[r.slot])delete C.ph[r.slot];
       /* שלב 20ג: הצעת מקטע (sug) והערת "לא המדף הנכון" (ask) מהתשובה – מוצגות כבאנר */
@@ -115,7 +120,7 @@ async function flush(){
     await qDel(r.id);if(r.k==='ph')mark(r.run,r.slot,'s');
    }catch(e){
     if(e&&e.offline)break;
-    if(PERM.test(e&&e.reason||'')||(r.tries|0)>=20){r.fail=U.errText(e,'השליחה נכשלה');await qPut(r);if(r.k==='ph')mark(r.run,r.slot,'f')}
+    if(PERM.test(e&&e.reason||'')||(r.tries|0)>=20){r.fail=U.errText(e,'השליחה נכשלה');await qPut(r);if(r.k==='ph')mark(r.run,r.slot,'f');if(r.k==='cap'&&typeof U.onCap==='function')U.onCap(r,null,e)}
     else{r.tries=(r.tries|0)+1;await qPut(r);break}
    }
   }

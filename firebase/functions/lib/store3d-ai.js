@@ -66,6 +66,28 @@ function draftImgs(arr) {
   return imgs;
 }
 
+// הקמת חנות שלב 1 (17.11.2026, חוזה 3.8): מקורות התמונות (src) ותוויות פינה (lbl) – לא חובה. n = מספר התמונות אחרי draftImgs.
+// src = { vid: פריימים מסרטון, ph: תמונות נפרדות, sk?: bool } – vid + ph = n בדיוק. הפריימים קודמים לתמונות (1..vid), כך ההנחיה יודעת מה רצף.
+// lbl = רשימה באורך n של מחרוזות 0–40 (תווית פינה, "" = בלי). sk נקבע בשרת לפי הסקיצה שעברה בדיקה (לא לפי הלקוח).
+// מחזיר { src: {sk, vid, ph} | null, lbl: [מחרוזות נקיות] | null, lblN: כמה עם תווית } או זורק fail('bad-src').
+const DRAFT_LBL = 40;
+function draftSrc(input, n, hasSk) {
+  const i = isObj(input) ? input : {};
+  let src = null, lbl = null, lblN = 0;
+  if (i.src !== undefined && i.src !== null) {
+    const o = i.src;
+    if (!isObj(o) || Object.keys(o).some((k) => !['sk', 'vid', 'ph'].includes(k)) || !inR(o.vid, 0, DRAFT.maxImgs) || !inR(o.ph, 0, DRAFT.maxImgs) || o.vid + o.ph !== n || (o.sk !== undefined && typeof o.sk !== 'boolean')) throw fail('bad-src', 'פרטי מקור התמונות לא תקינים');
+    src = { sk: !!hasSk, vid: o.vid, ph: o.ph };
+  }
+  if (i.lbl !== undefined && i.lbl !== null) {
+    if (!Array.isArray(i.lbl) || i.lbl.length !== n || !i.lbl.every((v) => typeof v === 'string' && v.length <= DRAFT_LBL)) throw fail('bad-src', 'תוויות התמונות לא תקינות');
+    lbl = i.lbl.map((v) => str(v, DRAFT_LBL));
+    lblN = lbl.filter(Boolean).length;
+    if (!lblN) lbl = null;
+  }
+  return { src, lbl, lblN };
+}
+
 // ---------- מקום הצילום ----------
 const RE_SLOT = /^(f[0-9]{1,4})-([ab])-([0-9]{1,2})_([atb])$/;
 // map = המפה הנוכחית. מחזיר { bay, fx, lv, hi } או זורק fail('bad-slot').
@@ -448,7 +470,7 @@ const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
-  ADHOC_DAY: 20, DRAFT_DAY_MAX, decodeJpeg, draftImgs, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  ADHOC_DAY: 20, DRAFT_DAY_MAX, DRAFT_LBL, decodeJpeg, draftImgs, draftSrc, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
   SUG_MIN, CANDS, routeSlots, slotCands, slotGuess, moveDone,
   DRAFT_WHY, draftMsg, draftCheck, fitDraft, evalDraft,
   israelMonth, validAt, fail,
