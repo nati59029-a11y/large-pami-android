@@ -340,6 +340,9 @@ async function runSteps(steps, ctx) {
 }
 // היכרות: רשימת הפקדים בדף – בלי ערכים, בלי שדות סיסמה. o.noText (דף לקריאה בלבד): בלי טקסט, בלי aria, בלי אפשרויות בחירה
 // (רק מספרן), ו-href רק כסימן לקישור פנימי – כדי ששמות (למשל עובדים במסך הנוכחות) לא ייכנסו לדוח
+// מילות פעולה של כפתורים (היכרות מסך לקריאה בלבד, o.btn)
+const ACT = /הצג|חפש|חיפוש|יצוא|ייצוא|יצא|אקסל|excel|pdf|csv|הדפס|רענן|סנן|סינון|צור|הפק|בחר|נקה|אפס|קובץ|דוח|היום|אתמול|שבוע|חודש|תאריך|טווח|search|export|print|show|filter/i;
+const DATA = 'table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]';
 function controls(doc, max, o) {
   const noText = !!(o && o.noText);
   const out = [];
@@ -356,12 +359,17 @@ function controls(doc, max, o) {
       delete c.aria; delete c.placeholder;
       if (c.href && c.href !== '(ext)') c.href = '(int)';
       if (tag === 'select') c.optN = (el.options || []).length;
+      // o.btn: גם טקסט של כפתורים שמחוץ לטבלאות ולרשימות (למשל "הצג", "יצוא לאקסל") – לא תוויות, לא אפשרויות, לא שדות
+      if (o.btn && (tag === 'button' || g('role') === 'button' || (tag === 'input' && /^(button|submit)$/i.test(type || ''))) && !(el.closest && el.closest(DATA))) {
+        const t = (tag === 'input' ? norm(el.value) : own(el)).slice(0, 40);
+        if (t && ACT.test(t)) c.text = t; // רק מילות פעולה – כפתור עם שם עובד לא נכנס
+      }
       out.push(c);
       continue;
     }
     // פרטיות (בדיקת אבטחה סבב 1): טקסט רק לכפתורים ולקישורים שמחוץ לטבלאות ולרשימות נתונים (שם יש שמות פריטים ולקוחות);
     // אפשרויות של רשימת בחירה – רק ברשימה קצרה (עד 30, כמו "סוג ייבוא"), אחרת רק המספר. הכול עובר גם את הסינון (sanitize) לפני היציאה
-    const inData = el.closest && el.closest('table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]');
+    const inData = el.closest && el.closest(DATA);
     if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') { const t = inData ? '' : own(el).slice(0, 40); if (t) c.text = t; else if (inData) c.inData = true; }
     if (tag === 'select') { const op = Array.from(el.options || []); if (op.length <= 30) c.options = op.map((o) => norm(o.textContent).slice(0, 60)); else c.optN = op.length; }
     out.push(c);
@@ -377,6 +385,6 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, controls, isLogin, dateFor, fill, cssPath, b64bytes };
+const api = { OPS, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, isLogin, dateFor, fill, cssPath, b64bytes };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);

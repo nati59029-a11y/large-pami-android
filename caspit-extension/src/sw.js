@@ -203,8 +203,16 @@ async function runFlow(tabId, name, vars, files, probe) {
       if (!ok) { out.ok = false; if (out.miss == null) out.miss = i; if (!probe) return out; }
       i++; continue;
     }
+    // בחירת קובץ (0.1.6): מתוך הדף עצמו (MAIN world), עם ניסיונות חלופיים ואבחון – ראו putFile
+    if (s.op === 'setFile' && !probe) {
+      const q = (steps[i + 1] || {}).op === 'queue' ? steps[i + 1] : null;
+      const r = await putFile(tabId, s, q, vars || {}, files && files[s.file]);
+      out.steps.push(Object.assign({ i, op: 'setFile' }, r.rec));
+      if (!r.ok) { out.ok = false; if (out.miss == null) out.miss = i; out.diag = r.diag || ''; return out; }
+      i++; continue;
+    }
     let j = i;
-    while (j < steps.length && (steps[j] || {}).op !== 'nav') j++;
+    while (j < steps.length && (steps[j] || {}).op !== 'nav' && ((steps[j] || {}).op !== 'setFile' || probe || j === i)) j++;
     await guardBo(tabId);
     const r = await inIso(tabId, runFlowIn, [steps.slice(i, j), vars || {}, files || null, !!probe, GUARD]);
     if (!r) { out.ok = false; if (out.miss == null) out.miss = i; return out; }
@@ -219,6 +227,83 @@ async function runFlow(tabId, name, vars, files, probe) {
   }
   await guardBo(tabId);
   return out;
+}
+// ---------- בחירת קובץ בשדה ההעלאה של כספית (0.1.6) ----------
+// תקלה 19.11: מהעולם המבודד הקובץ לא נכנס ל"ממתין לטעינה" (ידנית – כן). עכשיו: (1) בתוך הדף (MAIN world) עם הבנאים של הדף,
+// (2) אם לא נכנס – אירוע גרירה (dragenter/dragover/drop) על השדה, (3) אם עדיין לא – אותו קובץ בסוג application/vnd.ms-excel
+// (כמו ש-Windows מסמן CSV בבחירה ידנית). ניסיון נוסף רק כשהתור עדיין ריק; כל שורה אחרת בתור עוצרת (צעד queue שאחרי).
+// בכישלון: אבחון (כמה שדות קובץ, כמה קבצים נבחרו, accept, הודעות גלויות בדף – מסוננות) בהודעה לשרת ובחלון התוסף.
+const FILE_TRIES = [['change', 'text/csv'], ['drop', 'text/csv'], ['change', 'application/vnd.ms-excel']];
+const setFileMain = (t, f, mode, mime, guard) => {
+  try { const L = location, p = String(L.pathname || ''); if (L.origin !== guard.origin || !(p === guard.path || p.startsWith(guard.path + '/'))) return { wrong: true }; } catch (e) { return { wrong: true }; }
+  const pick = (x) => { if (!x || !x.css) return []; try { return Array.from(document.querySelectorAll(x.css)).filter((e) => String(e.type).toLowerCase() === 'file'); } catch (e) { return []; } };
+  let els = pick(t);
+  if (!els.length) els = pick(t && t.alt);
+  const vis = (e) => e.getClientRects().length > 0;
+  const el = els.find(vis) || els[0];
+  if (!el) return { found: false, n: 0 };
+  const bin = atob(f.b64), u = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+  const dt = new DataTransfer();
+  dt.items.add(new File([u], f.name, { type: mime }));
+  if (mode === 'drop') {
+    for (const ty of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(ty, { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+  } else {
+    try { el.focus(); } catch (e) { /* */ }
+    el.files = dt.files;
+    el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  }
+  return { found: true, n: els.length, vis: vis(el), files: (el.files || []).length };
+};
+// התור "ממתין לטעינה": null = אין כותרת; אחרת [[שם, סוג]]
+const queueIn = (s, guard) => { const S = self.CxSel; if (!S.onPath(window, guard)) return { wrong: true }; const R = S.queueRows(document, s); return { rows: R ? R.map((r) => r.slice(0, 2)) : null }; };
+// אבחון: רק מבנה ומספרים, והודעות גלויות (התראה / שגיאה) – קצרות, מסוננות לפני היציאה
+const fileDiagIn = (t, guard) => {
+  const S = self.CxSel;
+  if (!S.onPath(window, guard)) return { wrong: true };
+  const ins = Array.from(document.querySelectorAll('input[type=file]'));
+  const el = S.find(document, t);
+  const msgs = Array.from(document.querySelectorAll('[role=alert],.alert,.toast,.toasted,.v-toast,.swal2-popup,.invalid-feedback,.text-danger,.error,.el-message,.notification,.noty_body'))
+    .filter((x) => x.getClientRects().length && !(x.closest && x.closest('table'))).map((x) => S.norm(x.textContent).slice(0, 80)).filter(Boolean).slice(0, 3);
+  return { ins: ins.length, vis: ins.filter((x) => x.getClientRects().length).length, files: el ? (el.files || []).length : -1, val: el ? !!el.value : false, accept: el ? String(el.getAttribute('accept') || '').slice(0, 60) : '', multi: !!(el && el.multiple), msgs };
+};
+async function putFile(tabId, s, q, vars, f) {
+  const rec = { found: false, done: false };
+  if (!f) return { ok: false, rec: Object.assign(rec, { err: 'no-file' }) };
+  const tries = q ? FILE_TRIES : FILE_TRIES.slice(0, 1);
+  const log = [];
+  for (let k = 0; k < tries.length; k++) {
+    await guardBo(tabId);
+    if (k) {
+      const Q = await inIso(tabId, queueIn, [q, GUARD]);
+      if (Q && Q.wrong) throw wrongPage();
+      if (Q && Q.rows && Q.rows.length) break; // משהו כבר בתור – לא מוסיפים; הצעד queue יחליט
+    }
+    const [mode, mime] = tries[k];
+    const r = await inMain(tabId, setFileMain, [s.t, f, mode, mime, GUARD]);
+    if (r && r.wrong) throw wrongPage();
+    if (!r || !r.found) return { ok: false, rec: Object.assign(rec, { err: 'no-input' }), diag: 'לא נמצא שדה בחירת קובץ' };
+    rec.found = true; rec.done = true; rec.n = r.n; rec.try = k + 1;
+    log.push(mode + '/' + (mime === 'text/csv' ? 'csv' : 'xls') + ':' + r.files);
+    if (!q) return { ok: true, rec };
+    const end = Date.now() + (k === tries.length - 1 ? 8000 : 6000);
+    for (;;) {
+      await sleep(400);
+      const Q = await inIso(tabId, queueIn, [q, GUARD]);
+      if (Q && Q.wrong) throw wrongPage();
+      const rows = (Q && Q.rows) || [];
+      if (rows.length) { if (k) rec.via = mode + '/' + mime; return { ok: true, rec }; } // שלנו או לא – הצעד queue שאחרי בודק
+      if (Date.now() > end) break;
+    }
+  }
+  // לא נכנס לתור – אבחון. אם בינתיים משהו הופיע בתור – ממשיכים לצעד queue (הוא יאשר או יעצור)
+  const Q = await inIso(tabId, queueIn, [q, GUARD]).catch(() => null);
+  if (Q && Q.rows && Q.rows.length) return { ok: true, rec };
+  const d = (await inIso(tabId, fileDiagIn, [s.t, GUARD]).catch(() => null)) || {};
+  if (d.wrong) throw wrongPage();
+  const diag = S.scrub(`הקובץ לא נכנס ל"ממתין לטעינה" אחרי ${log.length} ניסיונות (${log.join(', ')}) · שדות קובץ: ${d.ins} (גלויים ${d.vis}) · נבחרו: ${d.files} · accept: ${d.accept || '—'}${d.multi ? ' · multiple' : ''}${Q && Q.rows === null ? ' · אין כותרת ממתין' : ''}${(d.msgs || []).length ? ' · הודעה: ' + d.msgs.join(' | ') : ''}`);
+  return { ok: false, rec: Object.assign(rec, { err: 'no-queue' }), diag };
 }
 async function isLoginTab(tabId) {
   const L = (await sel()).login || {};
@@ -407,7 +492,7 @@ async function exportImport(run, kind) {
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
   if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty');
-  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
+  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); if (res && res.diag) throw P.err('selector-miss', ('עדכון ' + (kind === 'new' ? 'פריטים חדשים' : 'מחירים') + ': ' + res.diag).slice(0, 290)); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
   // אחרי "העלה קבצים והרץ טעינה": שורה חדשה (מזהה גדול מהקודם) עם השם שלנו, עד סטטוס סופי. קריאה בלבד, כל 3 שניות
   const r2 = await waitImport(tab, name, res.already ? res.already - 1 : res.hmax || 0, (await sel()).importWaitMs || 600e3);
   const text = `מזהה ${r2.id || '—'} · ${r2.st || ''} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`;
@@ -526,12 +611,12 @@ const menuIn = async (heads, max, guard) => {
   return { links: out };
 };
 // מסך לקריאה בלבד: כתובת, כותרת, פקדים וכותרות הטבלאות (בלי תוכן השורות) – בקריאה אחת, רק אם הדף ב-/bo
-const roIn = (guard) => {
+const roIn = (guard, btn) => {
   const S = self.CxSel;
   if (!S.onPath(window, guard)) return { wrong: true };
   const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
   // פרטיות: בדף לקריאה בלבד (למשל נוכחות) – בלי טקסט של פקדים ובלי אפשרויות של רשימות בחירה (שמות עובדים); רק תגית/סוג/מזהה ומספר אפשרויות
-  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true }), heads };
+  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn }), heads };
 };
 // הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
 function menuPick(links, find) {
@@ -569,7 +654,7 @@ async function runDisc() {
       await guardBo(tab);
       if (!pg.flow) {
         // מסך לקריאה בלבד: בלי צעדים ובלי שום לחיצה – רק פקדים, כותרות טבלה, כתובת וכותרת
-        const r = (await inIso(tab, roIn, [GUARD])) || {};
+        const r = (await inIso(tab, roIn, [GUARD, !!pg.btn])) || {};
         if (r.wrong) throw wrongPage();
         await guardBo(tab);
         rep.pages.push({ name: pg.name, ok: true, ro: true, hash: String(r.hash || '').replace(/\d+/g, '{n}').slice(0, 80), title: String(r.title || '').slice(0, 60), controls: r.controls || [], heads: r.heads || [] });
