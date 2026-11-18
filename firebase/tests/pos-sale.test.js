@@ -495,6 +495,45 @@ describe('POS:W2 – אישור אחראי (ש5) ב-posSale וב-posReturn', () 
     assert.equal((await get('poslog/' + voidAp)).used, false);
   });
 
+  // סבב 3: הקופה בודקת לפני הגבייה עם PC.discAudit – אותו כלל שהשרת מריץ. בכל מקרה: מה שהקופה מאשרת – השרת רושם; מה שהשרת דוחה – הקופה עוצרת לפני הגבייה
+  it('סבב 3 – POC-A ו-POC-B: הקופה (PC.discAudit, כמו ב-pos-sale.js בקופה) מזהה מראש בדיוק את מה שהשרת דוחה, וגם את התיקון', async () => {
+    const PC = require('../functions/lib/pos-calc');
+    const cfg = {}; // poscfg ריק – ברירות המחדל (אחראי עד 10%)
+    const role = (r) => (r === 'manager' ? 'mgr' : 'lead');
+    const apr = async (by, o) => { const r = await auth(CASH, Object.assign({ op: 'approve', act: 'disc', by, pin: PIN[by] }, o)); assert.equal(R(r), 'ok', r.msg); return { id: r.r.ap, role: role(r.r.role), pct: o.pct, ref: o.ref, need: r.r.need }; };
+    const plates = (qty, md) => ({ base: 1250 * qty, pd: 0, md: md || 0, ref: 'l:pa' });
+    const cartOf = (sd, ap) => ({ sd, ap });
+    const off = { off: true, soldAt: Date.now() - 1000 };
+    // POC-A: אחראי אישר 10% (10 ₪) על עגלה של 100 ₪; הוסרו שתי צלחות – העגלה 75 ₪, ההנחה (סכום קבוע) עכשיו 13.3%
+    const a = await apr(LEAD, { pct: 10, ref: 'cart' });
+    assert.equal(PC.discAudit('cashier', [plates(8)], cartOf(1000, a), cfg).ok, true, 'לפני שהעגלה השתנתה – תקין');
+    const pocA = PC.discAudit('cashier', [plates(6)], cartOf(1000, a), cfg);
+    const sA = sale(Object.assign({ lines: [L({ pid: 'pa', n: 'צלחת', unit: 1250, qty: 6 })], manDisc: { amt: 1000, why: 'x', ap: a.id }, pays: [{ m: 'cash', amt: 6500 }] }, off));
+    const srvA = await call('posSale', CASH, sA);
+    assert.equal(pocA.ok, false); assert.equal(R(srvA), pocA.code, 'הקופה והשרת – אותה דחייה'); assert.equal(pocA.code, 'ap-scope'); assert.equal(pocA.at, -1);
+    assert.ok(Math.abs(pocA.pct - 1000 * 100 / 7500) < 1e-9, 'האחוז הנוכחי לבקשת האישור החדש');
+    // התיקון: אישור חדש עם האחוז הנוכחי – מעל 10%, ולכן מנהל
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'disc', by: LEAD, pin: PIN[LEAD], pct: 13.34, ref: 'cart' })), 'need-manager');
+    const a2 = await apr(MGR, { pct: 13.34, ref: 'cart' });
+    assert.equal(PC.discAudit('cashier', [plates(6)], cartOf(1000, a2), cfg).ok, true);
+    const okA = await call('posSale', CASH, Object.assign({}, sA, { reqId: reqId(), manDisc: { amt: 1000, why: 'x', ap: a2.id } }));
+    assert.equal(R(okA), 'ok', okA.msg);
+    // POC-B: אחראי אישר 10% על השורה ועוד 10% על העגלה (אחרי הנחת השורה) – יחד 19%, מעל התקרה של אחראי
+    const l = await apr(LEAD, { pct: 10, ref: 'l:pa' });
+    const c = await apr(LEAD, { pct: 10, ref: 'cart' });
+    const pocB = PC.discAudit('cashier', [Object.assign(plates(8, 1000), { ap: l })], cartOf(900, c), cfg);
+    const sB = sale(Object.assign({ lines: [L({ pid: 'pa', n: 'צלחת', unit: 1250, qty: 8, mdisc: { amt: 1000, why: 'x', ap: l.id } })], manDisc: { amt: 900, why: 'x', ap: c.id }, pays: [{ m: 'cash', amt: 8100 }] }, off));
+    const srvB = await call('posSale', CASH, sB);
+    assert.equal(pocB.ok, false); assert.equal(R(srvB), pocB.code, 'הקופה והשרת – אותה דחייה'); assert.equal(pocB.code, 'disc-over'); assert.equal(pocB.at, -2);
+    assert.ok(Math.abs(pocB.pct - 19) < 1e-9);
+    // התיקון: מנהל מאשר את הנחת העגלה – התפקיד הגבוה ביותר שאישר הוא מנהל, בלי תקרה
+    const c2 = await apr(MGR, { pct: 10, ref: 'cart', need: 'manager' });
+    assert.equal(PC.discAudit('cashier', [Object.assign(plates(8, 1000), { ap: l })], cartOf(900, c2), cfg).ok, true);
+    const okB = await call('posSale', CASH, Object.assign({}, sB, { reqId: reqId(), manDisc: { amt: 900, why: 'x', ap: c2.id } }));
+    assert.equal(R(okB), 'ok', okB.msg);
+    assert.equal((await all('possale')).length, 2, 'רק שתי המכירות המתוקנות נרשמו');
+  });
+
   it('תקרה: אחראי עד 10% – 15% עם אישור אחראי נדחה; posAuth: need:"manager" רק מעלה', async () => {
     const ap = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
     assert.equal(R(await call('posSale', CASH, sale(tray(15, ap)))), 'ap-scope');

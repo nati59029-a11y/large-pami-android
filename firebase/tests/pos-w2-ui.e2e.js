@@ -45,7 +45,7 @@ async function run(width, height) {
       if (fn === 'posAuth' && b.op === 'leads') return { ok: true, staff: [{ uid: 'u_lead', name: 'אבי', role: 'lead', locked: false }, { uid: 'u_mgr', name: 'מירב', role: 'manager', locked: false }] };
       if (fn === 'posAuth' && b.op === 'approve') {
         if (b.pin !== '4826') throw Object.assign(new Error('קוד שגוי. נותרו 4 ניסיונות'), { details: { reason: 'bad-pin' }, code: 'permission-denied' });
-        return { ok: true, ap: 'ApW2test' + String(W.calls.length).padStart(6, '0'), by: b.by, name: 'אבי', role: 'lead', need: 'lead' };
+        return { ok: true, ap: 'ApW2test' + String(W.calls.length).padStart(6, '0'), by: b.by, name: b.by === 'u_mgr' ? 'מירב' : 'אבי', role: b.by === 'u_mgr' ? 'manager' : 'lead', need: b.need === 'manager' ? 'manager' : 'lead' };
       }
       if (fn === 'posSale' && W.rejSale) { W.rejSale = false; throw Object.assign(new Error('פג תוקף האישור (30 דקות) – בקשו אישור חדש'), { details: { reason: 'ap-old' }, code: 'permission-denied' }); }
       if (fn === 'posSale' && b.seq !== W.seq + 1) throw err(b.seq > W.seq + 1 ? 'seq-gap' : 'seq-used', 'מספור');
@@ -187,6 +187,58 @@ async function run(width, height) {
   await page.waitForFunction(() => PosData.net().pending === 0, null, { timeout: 10000 });
   const nos = await page.evaluate(() => window.__w2.calls.filter((c) => c.fn === 'posSale').map((c) => c.b.seq));
   assert.equal(nos[nos.length - 1], 3, tag + ' המכירה הבאה נשלחה עם המספר הבא בשרת (בלי חור): ' + nos.join(','));
+
+  // ---- סבב 3 – POC-A: הנחת עגלה בסכום קבוע (2 ₪ = 10%) אושרה ע"י אחראי, ואז ירדה כמות (13.3%) – לפני הגבייה מתבקש אישור חדש
+  //      עם האחוז הנוכחי (מעל 10% – מנהל), והמכירה נשלחת עם האישור החדש. סירוב – ההנחה יורדת, הקופאי רואה את הסכום החדש, לא גובים ----
+  const sales = async () => page.evaluate(() => window.__w2.calls.filter((c) => c.fn === 'posSale').map((c) => c.b));
+  const approvals = async () => page.evaluate(() => window.__w2.calls.filter((c) => c.fn === 'posAuth' && c.b.op === 'approve').map((c) => c.b));
+  const pin = async () => { await page.waitForSelector('#apPin'); await page.waitForFunction(() => document.querySelectorAll('#apBy option').length >= 1); await page.fill('#apPin', '4826'); await page.click(`${modal} [data-v=ok]`); await page.waitForFunction(() => !document.querySelector('#apPin')); };
+  const cartDisc = async (amt) => { await page.click('#pos [data-pa=disc]'); await page.click(`${modal} [data-sc=all]`); await page.fill('#dAmt', amt); await page.click(`${modal} [data-v=ok]`); };
+  const cash = async () => { await page.click(`${modal} [data-pa=m][data-v=cash]`); await page.click(`${modal} [data-pa=q]`); await page.waitForSelector('#posChg'); };
+  await page.click('#posCats [data-v=drinks]'); await page.waitForFunction(() => document.querySelectorAll('#pos .pos-row').length === 2);
+  const colas = async (n) => { for (let i = 0; i < n; i++) await page.click('#pos .pos-row:has-text("קולה")'); };
+  for (const refuse of [false, true]) {
+    await colas(4); assert.equal(await tot(), '₪20.00', tag);
+    await cartDisc('2');
+    await page.waitForSelector('#apPin'); assert.match(await txt(page, `${modal} h2`), /נדרש אישור אחראי/, tag + ' 10% – אחראי');
+    await pin(); assert.equal(await tot(), '₪18.00', tag);
+    const apLead = await page.evaluate(() => window.POS_DEBUG.S.manDisc.ap);
+    await page.click('#pos [data-pa=qty][data-d="-1"]'); assert.equal(await tot(), '₪13.00', tag + ' העגלה קטנה, ההנחה בסכום קבוע');
+    const n0 = (await sales()).length;
+    await page.click('#posPay');
+    await page.waitForSelector('#apPin');
+    assert.match(await txt(page, `${modal} h2`), /נדרש אישור מנהל/, tag + ' POC-A: 13.3% – אישור חדש של מנהל לפני הגבייה');
+    assert.match(await txt(page, `${modal} .pos-ask`), /13\.3%.*לתשלום: ₪13\.00/, tag + ' האחוז הנוכחי והסכום לתשלום');
+    if (refuse) {
+      await page.click(`${modal} [data-v=no]`); await page.waitForFunction(() => !document.querySelector('#pos .pos-modal'));
+      assert.equal(await tot(), '₪15.00', tag + ' בלי אישור – ההנחה ירדה, הסכום החדש מוצג');
+      assert.match(await txt(page, '#pos .pos-toast.warn'), /הוסרה.*₪15\.00/, tag);
+      assert.equal((await sales()).length, n0, tag + ' לא נשלחה מכירה ולא נפתח תשלום');
+      await page.click('#posPay'); await cash();
+      const s = (await sales()).pop(); assert.deepEqual([s.gross, s.manDisc], [1500, undefined], tag + ' נגבה הסכום החדש, בלי הנחה');
+    } else {
+      await pin();
+      const ap = (await approvals()).pop();
+      assert.deepEqual([ap.by, ap.ref, ap.need, ap.pct], ['u_mgr', 'cart', 'manager', 13.34], tag + ' האישור החדש – לעגלה, לאחוז הנוכחי');
+      await cash();
+      const s = (await sales()).pop();
+      assert.equal(s.gross, 1300, tag); assert.equal(s.manDisc.amt, 200);
+      assert.ok(/^ApW2test/.test(s.manDisc.ap) && s.manDisc.ap !== apLead, tag + ' המכירה נשלחה עם האישור החדש');
+    }
+  }
+  // ---- סבב 3 – POC-B: 10% על שורה (אחראי) ואז 10% על העגלה – ביחד 19%, מעל התקרה של אחראי: חלון האישור של ההנחה השנייה דורש מנהל ----
+  await colas(4); assert.equal(await tot(), '₪20.00', tag);
+  await page.click('#pos [data-pa=disc]'); await page.fill('#dPct', '10'); await page.click(`${modal} [data-v=ok]`);
+  await page.waitForSelector('#apPin'); assert.match(await txt(page, `${modal} h2`), /נדרש אישור אחראי/, tag); await pin();
+  await page.click('#pos [data-pa=disc]'); await page.click(`${modal} [data-sc=all]`); await page.fill('#dPct', '10'); await page.click(`${modal} [data-v=ok]`);
+  await page.waitForSelector('#apPin');
+  assert.match(await txt(page, `${modal} h2`), /נדרש אישור מנהל/, tag + ' POC-B: ההנחה השנייה חורגת מהתקרה המשותפת – מנהל');
+  await pin(); assert.equal(await tot(), '₪16.20', tag);
+  const nB = (await sales()).length;
+  await page.click('#posPay'); await cash();
+  const sB = await sales(); assert.equal(sB.length, nB + 1, tag + ' בלי בקשת אישור נוספת');
+  assert.equal(sB[sB.length - 1].gross, 1620, tag);
+  assert.ok(sB[sB.length - 1].lines[0].mdisc.ap && sB[sB.length - 1].manDisc.ap, tag + ' שני האישורים נשלחו');
 
   // ---- סבב 2 (ליקוי 5): החזרה בלי רשת (אחראי – בלי אישור): בלי קבלה ובלי מגירה; כשהשרת מאשר – הודעה "אפשר להחזיר כסף", קבלה ומגירה ----
   await page.evaluate(async () => { SY.perms = { posMgr: true }; });

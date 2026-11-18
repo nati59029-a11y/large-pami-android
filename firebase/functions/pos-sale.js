@@ -374,43 +374,14 @@ const apPub = (a) => Object.assign({ id: a.id, by: a.by, role: a.role }, a.late 
 // סמכות הנחה ידנית (ב נ7), לכל הנחה בנפרד ולכל המכירה. → { ovr, used:[אישור] }
 // לכל הנחה: מה שהקופאי רשאי בעצמו (PC.discCap) – עובר; אחרת חייב אישור שמכסה אותה (ref, pct, תפקיד, מינימום).
 function discCheck(who, cfg, co, lines, input, apl) {
-  const own = roleOf(who);
+  // סבב 3: הכלל עצמו – PC.discAudit, משותף לקופה (שבודקת אותו לפני הגבייה) ולשרת
   const am = new Map(apl.map((a) => [a.id, a]));
-  const items = [];
-  lines.forEach((l, i) => {
-    const c = co.cl[i];
-    if (!(c.md > 0)) return;
-    const b = c.base - c.pd;
-    items.push({ pct: b > 0 ? c.md * 100 / b : 100, below: co.below.includes(i), ap: l.mdisc && l.mdisc.ap, ref: 'l:' + (l.pid || 'gen') });
-  });
-  if (co.calc.sdisc > 0) {
-    const b = co.cl.reduce((x, c) => x + c.base - c.disc, 0);
-    items.push({ pct: b > 0 ? co.calc.sdisc * 100 / b : 100, below: co.below.some((i) => co.calc.lines[i].sd > 0), ap: input.manDisc && input.manDisc.ap, ref: 'cart' });
-  }
-  let ovr = false, top = own;
-  const used = [];
-  for (const it of items) {
-    if (own === 'mgr') { if (it.below) ovr = true; continue; }
-    const capOwn = PC.discCap(own, cfg);
-    if (it.pct <= capOwn + 1e-9 && !it.below) continue;
-    const a = it.ap ? am.get(it.ap) : null;
-    if (!a) {
-      if (it.below && it.pct <= capOwn + 1e-9) throw deny('below-min', 'מתחת למחיר המינימום – מנהל בלבד');
-      if (!(capOwn > 0)) throw deny('disc-role', 'אין לך הרשאה לתת הנחה ידנית');
-      throw deny('disc-over', `הנחה מעל ${capOwn}% – דורש אישור`, { cap: capOwn });
-    }
-    if (used.includes(a)) throw deny('ap-used', 'אותו אישור לשתי הנחות');
-    if (a.ref !== it.ref) throw deny('ap-scope', 'האישור ניתן להנחה אחרת');
-    if (a.pct == null || it.pct > a.pct + 1e-6) throw deny('ap-scope', `ההנחה גדולה ממה שאושר (${a.pct == null ? 0 : a.pct}%)`, { pct: a.pct });
-    const capAp = PC.discCap(a.role, cfg);
-    if (it.pct > capAp + 1e-9) throw deny('disc-over', `הנחה מעל ${capAp}% – דורש מנהל`, { cap: capAp });
-    if (it.below) { if (!(a.role === 'mgr' && a.need === 'manager')) throw deny('below-min', 'מתחת למחיר המינימום – אישור מנהל מפורש'); ovr = true; }
-    used.push(a);
-    if (RANK[a.role] > RANK[top]) top = a.role;
-  }
-  // כל ההנחות יחד – לא מעל התקרה של התפקיד הגבוה ביותר שאישר (מנהל – בלי תקרה)
-  if (top !== 'mgr' && co.manual > 0) { const cap = PC.discCap(top, cfg); if (co.pct > cap + 1e-9) throw deny(cap > 0 ? 'disc-over' : 'disc-role', cap > 0 ? `הנחה מעל ${cap}% – דורש מנהל` : 'אין לך הרשאה לתת הנחה ידנית', { cap }); }
-  return { ovr, used };
+  const apOf = (id) => (id ? am.get(id) || null : null);
+  const r = PC.discAudit(roleOf(who),
+    co.cl.map((c, i) => ({ base: c.base, pd: c.pd, md: c.md, below: co.below.includes(i), ref: 'l:' + (lines[i].pid || 'gen'), ap: apOf(lines[i].mdisc && lines[i].mdisc.ap) })),
+    { sd: co.calc.sdisc, below: co.below.some((i) => co.calc.lines[i].sd > 0), ap: apOf(input.manDisc && input.manDisc.ap) }, cfg);
+  if (!r.ok) throw deny(r.code, r.msg, r.det);
+  return { ovr: r.ovr, used: r.used };
 }
 
 // ---------- posSale ----------

@@ -128,6 +128,9 @@ async function discount(){const{E,fmt,cfg,modal,parseAmt}=UI();if(!canDisc()||!S
  let amt,pct=null;if(v.pct){pct=Number(v.pct.replace(',','.'));if(!(pct>0&&pct<=100)){UI().toast('אחוז לא תקין','bad');return}amt=PC().pctOf(base,pct)}else{amt=parseAmt(v.amt);if(!(amt>0)){UI().toast('סכום לא תקין','bad');return}}
  if(amt>base){UI().toast('ההנחה גדולה מהסכום','bad');return}
  const eff=base?amt*100/base:0,max=(cfg('discMax')||{}).lead||0;let need=eff>max+1e-9?'mgr':'lead';
+ /* סבב 3: כל ההנחות הידניות יחד (אחרי ההנחה החדשה) מעל התקרה של אחראי – רק מנהל מאשר (כמו בשרת: PosCalc.discAudit) */
+ const tot=t.lines.reduce((s,l)=>s+(v.sc==='line'&&l.key===sel.key?amt:l.mdisc?l.mdisc.amt:0),0)+(v.sc==='all'?amt:S.manDisc?S.manDisc.amt:0),bp=t.lines.reduce((s,l)=>s+l.base-(l.pdisc||0),0);
+ if(bp>0&&tot*100/bp>PC().discCap('lead',dcfg())+1e-9)need='mgr';
  const minOk=v.sc==='line'?(line.unit*line.qty-(line.pdisc||0)-amt)>=(sel.min||0)*line.qty:true;if(!minOk)need='mgr';
  const apRef=v.sc==='line'?'l:'+(sel.gen?'gen':sel.pid):'cart';/* POS:W2: האישור קשור לשורה / לעגלה ולאחוז */
  const ap=await UI().approve({role:role(),need,act:'disc',pct:eff,ref:apRef,text:'הנחה של '+fmt(amt)+(eff?' ('+Math.round(eff*10)/10+'%)':'')});if(!ap.ok)return;
@@ -153,16 +156,38 @@ async function parks(){const{modal,E,fmt,hm}=UI();const L=await D().parked();
 /* ---------- תשלום וסיום ---------- */
 /* POS:W2 (סבב 2): אישור הנחה תקף 30 דקות (לפי שעון השרת) ורק לקופאי שקיבל אותו. לפני התשלום – אישור שפג או של משתמש אחר
    (למשל עגלה מושהית) מתבקש מחדש; בלי אישור – ההנחה יורדת והקופאי רואה את הסכום החדש לפני שגובים */
-const apMeta=(ap,pct,ref,need)=>({ap:ap.ap,apAt:ap.at||Date.now(),apFor:ap.for||'',apPct:pct,apRef:ref,apNeed:need});
-async function apFresh(){const A=root.PosApprove;if(!A||typeof A.fresh!=='function')return true;const{fmt}=UI();let cut=false;
+const apMeta=(ap,pct,ref,need)=>({ap:ap.ap,apAt:ap.at||Date.now(),apFor:ap.for||'',apPct:pct,apRef:ref,apNeed:need,apRole:ap.role==='manager'||ap.role==='mgr'?'mgr':'lead',apMgr:ap.need==='mgr'});
+const AP_KEYS=['ap','apAt','apFor','apPct','apRef','apNeed','apRole','apMgr'];
+async function apFresh(){const A=root.PosApprove;if(!A||typeof A.fresh!=='function')return true;if(!(await apScope()))return false;const{fmt}=UI();let cut=false;
  const L=S.cart.map((l,i)=>l.mdisc&&l.mdisc.ap?{rec:l.mdisc,i}:null).filter(Boolean);if(S.manDisc&&S.manDisc.ap)L.push({rec:S.manDisc,i:-1});
  for(const x of L){if(A.fresh(x.rec))continue;
   const ap=await UI().approve({role:role(),need:x.rec.apNeed||'lead',act:'disc',pct:x.rec.apPct,ref:x.rec.apRef,text:'האישור להנחה של '+fmt(x.rec.amt)+' פג או ניתן למשתמש אחר – נדרש אישור מחדש'});
   if(ap.ok&&ap.ap){Object.assign(x.rec,apMeta(ap,x.rec.apPct,x.rec.apRef,x.rec.apNeed));continue}
-  if(ap.ok){['ap','apAt','apFor','apPct','apRef','apNeed'].forEach(k=>delete x.rec[k]);continue}
+  if(ap.ok){AP_KEYS.forEach(k=>delete x.rec[k]);continue}
   cut=true;if(x.i<0)S.manDisc=null;else{const l=Object.assign({},S.cart[x.i]);delete l.mdisc;S.cart[x.i]=l}}
  if(cut){D().log('discOff',{why:'apExpired'});cart();cust();UI().toast('הנחה בלי אישור תקף הוסרה – בדקו את הסכום ולחצו שוב על תשלום','warn');return false}
- return true}
+ return apScope()}
+/* POS:W2 (סבב 3): לפני התשלום – אותה בדיקת סמכות הנחה שהשרת מריץ (PosCalc.discAudit, אותו קובץ): האחוז הנוכחי לא מעל מה שאושר, האישור
+   לאותה שורה / לעגלה, וכל ההנחות יחד לא מעל התקרה של התפקיד הגבוה ביותר שאישר. העגלה השתנתה אחרי האישור (פריט הוסר, כמות ירדה, נוסף מבצע
+   או לקוח מועדון) או שנוספה הנחה שנייה – מבקשים אישור חדש עם האחוז הנוכחי; בלי אישור – ההנחה יורדת והקופאי רואה את הסכום החדש לפני שגובים */
+const dcfg=()=>({discMax:UI().cfg('discMax'),discRoles:UI().cfg('discRoles')});
+const apOf=r=>r&&r.ap?{id:r.ap,role:r.apRole||(r.apNeed==='mgr'?'mgr':'lead'),pct:typeof r.apPct==='number'?r.apPct:null,ref:r.apRef||null,need:(r.apMgr!=null?r.apMgr:r.apNeed==='mgr')?'manager':null}:null;
+function discIn(t){const rnd=PC().rnd;
+ const L=t.lines.map(l=>{const md=l.mdisc?l.mdisc.amt:0;return{base:l.base,pd:l.pdisc||0,md,ref:'l:'+(l.gen?'gen':l.pid),below:l.min>0&&(md>0||l.sd>0)&&l.fin<rnd(l.min*l.qty),ap:apOf(l.mdisc)}});
+ return{L,c:S.manDisc?{sd:t.sdisc||0,below:L.some((x,i)=>x.below&&t.lines[i].sd>0),ap:apOf(S.manDisc)}:null}}
+function discPct(d,at){if(at>=0){const x=d.L[at],b=x.base-x.pd;return b>0?x.md*100/b:100}const b=d.L.reduce((s,x)=>s+x.base-x.pd-x.md,0);return b>0?d.c.sd*100/b:100}
+async function apScope(){const{fmt}=UI();let last=null;
+ for(let n=0;n<4;n++){const t=calc();if(!t.lines.length)return true;const d=discIn(t);const r=PC().discAudit(role(),d.L,d.c,dcfg());if(r.ok)return true;
+  let at=r.at;if(at===-2)at=d.c&&d.c.sd>0?-1:d.L.map((x,i)=>x.md>0?i:-9).filter(i=>i>=0).pop();if(at==null)return true;
+  const i=at>=0?S.cart.findIndex(l=>l.key===t.lines[at].key):-1,rec=at>=0?(S.cart[i]||{}).mdisc:S.manDisc;if(!rec)return true;
+  const pct=r.at===at?r.pct:discPct(d,at),ref=at>=0?d.L[at].ref:'cart';
+  const need=r.at===-2||r.code==='below-min'||(r.code==='disc-over'&&r.ap)||last===rec?'mgr':'lead';
+  const ap=await UI().approve({role:role(),need,act:'disc',pct:Math.min(100,pct),ref,text:'ההנחה של '+fmt(rec.amt)+' חורגת ממה שאושר (עכשיו '+Math.round(pct*10)/10+'%'+(r.at===-2?' – יחד עם ההנחות האחרות':'')+') – נדרש אישור חדש. לתשלום: '+fmt(t.gross)});
+  if(ap.ok&&ap.ap){Object.assign(rec,apMeta(ap,pct,ref,need));last=rec;D().log('discReAp',{ref,pct,by:ap.by});continue}
+  if(ap.ok&&last!==rec){AP_KEYS.forEach(k=>delete rec[k]);last=rec;continue}
+  if(at<0)S.manDisc=null;else{const l=Object.assign({},S.cart[i]);delete l.mdisc;S.cart[i]=l}
+  D().log('discOff',{why:'apScope',ref});cart();cust();UI().toast('ההנחה חרגה ממה שאושר והוסרה. לתשלום עכשיו: '+fmt(calc().gross)+' – בדקו ולחצו שוב על תשלום','warn');return false}
+ UI().toast('ההנחות לא אושרו – בדקו אותן ולחצו שוב על תשלום','bad');return false}
 async function pay(){const t0=calc();if(!(t0.gross>0)||S.busy)return;/* ס18: אין תשלום בעגלה ריקה */
  if(!(await apFresh()))return;const t=calc();
  /* POS:W2 (איחוד): קופה שנותקה מרחוק / מושבתת / מחכה לאישור מכשיר (ש7) – לא מתחילים תשלום */

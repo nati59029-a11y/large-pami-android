@@ -138,3 +138,38 @@ describe('pos-core – קודי קופה, מזהי מכירה, תרגול ומס
     assert.ok(!K.soldAtOk(1.5, now));
   });
 });
+
+// POS:W2 סבב 3: discAudit – סמכות ההנחות הידניות, אותו כלל בקופה (לפני הגבייה) ובשרת (posSale.discCheck)
+describe('pos-calc – discAudit (POC-A / POC-B מהבדיקה, סבב 2)', () => {
+  const lead = (pct, ref, id) => ({ id: id || 'A' + ref, role: 'lead', pct, ref, need: 'lead' });
+  const mgr = (pct, ref, id) => ({ id: id || 'M' + ref, role: 'mgr', pct, ref, need: 'manager' });
+  it('POC-A: הנחה בסכום קבוע שאושרה כ-10%, והעגלה קטנה – האחוז עולה מעל מה שאושר → ap-scope, עם האחוז הנוכחי', () => {
+    const ap = lead(10, 'cart');
+    assert.equal(P.discAudit('cashier', [{ base: 10000, pd: 0, md: 0, ref: 'l:a' }], { sd: 1000, ap }, {}).ok, true);
+    const r = P.discAudit('cashier', [{ base: 7500, pd: 0, md: 0, ref: 'l:a' }], { sd: 1000, ap }, {});
+    assert.deepEqual([r.ok, r.code, r.at], [false, 'ap-scope', -1]);
+    assert.ok(Math.abs(r.pct - 13.3333333) < 1e-6);
+    // מבצע שנוסף אחרי האישור (pd) מקטין את הבסיס של השורה – אותו דבר בהנחת שורה
+    const l = lead(10, 'l:a');
+    assert.equal(P.discAudit('cashier', [{ base: 10000, pd: 0, md: 1000, ref: 'l:a', ap: l }], null, {}).ok, true);
+    assert.equal(P.discAudit('cashier', [{ base: 10000, pd: 2000, md: 1000, ref: 'l:a', ap: l }], null, {}).code, 'ap-scope');
+    assert.equal(P.discAudit('cashier', [{ base: 10000, pd: 0, md: 1000, ref: 'l:b', ap: l }], null, {}).code, 'ap-scope', 'אישור לשורה אחרת');
+  });
+  it('POC-B: 10% על שורה ועוד 10% על העגלה – כל אחת בתוך מה שאושר, ביחד 19% → disc-over (at −2); אישור מנהל לאחת מהן – עובר', () => {
+    const line = { base: 10000, pd: 0, md: 1000, ref: 'l:a', ap: lead(10, 'l:a') };
+    const r = P.discAudit('cashier', [line], { sd: 900, ap: lead(10, 'cart') }, {});
+    assert.deepEqual([r.ok, r.code, r.at, r.det.cap], [false, 'disc-over', -2, 10]);
+    assert.ok(Math.abs(r.pct - 19) < 1e-9);
+    const ok = P.discAudit('cashier', [line], { sd: 900, ap: mgr(10, 'cart') }, {});
+    assert.deepEqual([ok.ok, ok.top, ok.used.length], [true, 'mgr', 2]);
+    // אחראי שנותן לעצמו 8% + 8% בלי אישור – גם נעצר על התקרה המשותפת
+    assert.equal(P.discAudit('lead', [{ base: 10000, pd: 0, md: 800, ref: 'l:a' }], { sd: 736 }, {}).at, -2);
+  });
+  it('אותו אישור לשתי הנחות, מתחת למינימום, מנהל כקופאי', () => {
+    const a = lead(10, 'l:a', 'X');
+    assert.equal(P.discAudit('cashier', [{ base: 1000, pd: 0, md: 100, ref: 'l:a', ap: a }, { base: 1000, pd: 0, md: 100, ref: 'l:a', ap: a }], null, {}).code, 'ap-used');
+    assert.equal(P.discAudit('cashier', [{ base: 1000, pd: 0, md: 100, ref: 'l:a', below: true, ap: mgr(10, 'l:a') }], null, {}).ovr, true);
+    assert.equal(P.discAudit('cashier', [{ base: 1000, pd: 0, md: 100, ref: 'l:a', below: true, ap: lead(10, 'l:a') }], null, {}).code, 'below-min');
+    assert.deepEqual(P.discAudit('mgr', [{ base: 1000, pd: 0, md: 900, ref: 'l:a', below: true }], { sd: 50 }, {}), { ok: true, ovr: true, used: [], top: 'mgr' });
+  });
+});

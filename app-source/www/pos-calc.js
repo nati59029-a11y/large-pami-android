@@ -135,7 +135,56 @@ function discNeed(pct, cfg) {
   if (pct <= discCap('lead', cfg) + 1e-9) return 'lead';
   return 'manager';
 }
-const api = { VAT0, isAg, rnd, toAg, pctOf, vatIn, vatEx, spread, line, sale, cashRound, change, discCap, discNeed, LEAD_DISC_MAX };
+// POS:W2 (סבב 3): סמכות ההנחות הידניות במכירה – כלל אחד לשרת (posSale) ולקופה (לפני התשלום, כדי שהשרת לא ידחה מכירה שכבר נגבתה).
+//   own – תפקיד הקופאי ('cashier' | 'lead' | 'mgr'). lines – לכל שורה { base, pd, md, ref, below?, ap? } (אגורות: base = מחיר × כמות,
+//   pd = מבצע/קופון, md = הנחה ידנית; ref = 'l:<מוצר>'). cart – { sd, below?, ap? } | null (sd – הנחת העגלה באגורות, ref = 'cart').
+//   ap – האישור שההנחה נושאת: { id, role:'lead'|'mgr', pct, ref, need } (need:'manager' – מנהל אישר במפורש מתחת למחיר המינימום).
+//   האחוז: שורה – md / (base − pd); עגלה – sd / סכום השורות אחרי כל הנחות השורה; סך הכול – (כל הידניות) / סכום השורות אחרי מבצעים.
+//   → { ok:true, ovr, used:[ap], top } | { ok:false, code, msg, det, at (אינדקס שורה / −1 עגלה / −2 סך הכול), pct, ap }
+function discAudit(own, lines, cart, cfg) {
+  const items = [];
+  lines.forEach((l, i) => {
+    if (!(l.md > 0)) return;
+    const b = l.base - l.pd;
+    items.push({ at: i, pct: b > 0 ? l.md * 100 / b : 100, below: !!l.below, ap: l.ap || null, ref: l.ref });
+  });
+  if (cart && cart.sd > 0) {
+    const b = lines.reduce((s, l) => s + l.base - l.pd - (l.md || 0), 0);
+    items.push({ at: -1, pct: b > 0 ? cart.sd * 100 / b : 100, below: !!cart.below, ap: cart.ap || null, ref: 'cart' });
+  }
+  const no = (it, code, msg, det) => ({ ok: false, code, msg, det: det || {}, at: it.at, pct: it.pct, ap: it.ap });
+  let ovr = false, top = own;
+  const used = [];
+  for (const it of items) {
+    if (own === 'mgr') { if (it.below) ovr = true; continue; }
+    const capOwn = discCap(own, cfg);
+    if (it.pct <= capOwn + 1e-9 && !it.below) continue;
+    const a = it.ap;
+    if (!a) {
+      if (it.below && it.pct <= capOwn + 1e-9) return no(it, 'below-min', 'מתחת למחיר המינימום – מנהל בלבד');
+      if (!(capOwn > 0)) return no(it, 'disc-role', 'אין לך הרשאה לתת הנחה ידנית');
+      return no(it, 'disc-over', `הנחה מעל ${capOwn}% – דורש אישור`, { cap: capOwn });
+    }
+    if (used.some((u) => u === a || (u.id && u.id === a.id))) return no(it, 'ap-used', 'אותו אישור לשתי הנחות');
+    if (a.ref !== it.ref) return no(it, 'ap-scope', 'האישור ניתן להנחה אחרת');
+    if (a.pct == null || it.pct > a.pct + 1e-6) return no(it, 'ap-scope', `ההנחה גדולה ממה שאושר (${a.pct == null ? 0 : a.pct}%)`, { pct: a.pct });
+    const capAp = discCap(a.role, cfg);
+    if (it.pct > capAp + 1e-9) return no(it, 'disc-over', `הנחה מעל ${capAp}% – דורש מנהל`, { cap: capAp });
+    if (it.below) { if (!(a.role === 'mgr' && a.need === 'manager')) return no(it, 'below-min', 'מתחת למחיר המינימום – אישור מנהל מפורש'); ovr = true; }
+    used.push(a);
+    if ((a.role === 'mgr' ? 2 : a.role === 'lead' ? 1 : 0) > (top === 'mgr' ? 2 : top === 'lead' ? 1 : 0)) top = a.role;
+  }
+  // כל ההנחות יחד – לא מעל התקרה של התפקיד הגבוה ביותר שאישר (מנהל – בלי תקרה)
+  const manual = lines.reduce((s, l) => s + (l.md || 0), 0) + (cart && cart.sd > 0 ? cart.sd : 0);
+  if (top !== 'mgr' && manual > 0) {
+    const ap = lines.reduce((s, l) => s + l.base - l.pd, 0);
+    const pct = ap > 0 ? manual * 100 / ap : 0;
+    const cap = discCap(top, cfg);
+    if (pct > cap + 1e-9) return no({ at: -2, pct, ap: null }, cap > 0 ? 'disc-over' : 'disc-role', cap > 0 ? `הנחה מעל ${cap}% – דורש מנהל` : 'אין לך הרשאה לתת הנחה ידנית', { cap });
+  }
+  return { ok: true, ovr, used, top };
+}
+const api = { VAT0, isAg, rnd, toAg, pctOf, vatIn, vatEx, spread, line, sale, cashRound, change, discCap, discNeed, discAudit, LEAD_DISC_MAX };
 // שרת (Node) – module.exports; קופה (דפדפן) – window.PosCalc
 if (typeof module === 'object' && module.exports) module.exports = api; else root.PosCalc = api;
 })(typeof self !== 'undefined' ? self : this);
