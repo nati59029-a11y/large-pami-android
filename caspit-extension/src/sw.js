@@ -5,6 +5,7 @@ importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/da
 const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi;
 const VER = chrome.runtime.getManifest().version;
 const CASPIT = 'https://caspit.valu.co.il/';
+const CASPIT_APP = CASPIT + 'bo'; // מערכת הניהול של כספית נמצאת ב-/bo (נבדק מול צילום מסך של בעל העסק, 18.11) – בכתובת אחרת האתר נתקע ב"טוען תוכנה"
 const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות לפני ריצה (רשת, Chrome)
 const TICK_MIN = 15;
 
@@ -95,11 +96,11 @@ async function ownTab(active) {
   if (id) {
     try {
       const t = await chrome.tabs.get(id);
-      if (t && String(t.url || t.pendingUrl || '').startsWith(CASPIT)) { if (active) await chrome.tabs.update(id, { active: true }); return t.id; }
+      if (t && String(t.url || t.pendingUrl || '').startsWith(CASPIT_APP)) { if (active) await chrome.tabs.update(id, { active: true }); return t.id; }
     } catch (e) { /* הלשונית נסגרה */ }
   }
   const S0 = await sel();
-  const t = await chrome.tabs.create({ url: CASPIT + (S0.start || ''), pinned: true, active: !!active });
+  const t = await chrome.tabs.create({ url: CASPIT_APP + (S0.start || ''), pinned: true, active: !!active });
   await chrome.storage.session.set({ tab: t.id });
   await waitLoaded(t.id);
   await ensurePage(t.id);

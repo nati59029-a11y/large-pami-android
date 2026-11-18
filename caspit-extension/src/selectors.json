@@ -1,7 +1,7 @@
 {
   "v": 0,
   "note": "גרסה 0 – ניחוש בלבד (לא מאומת מול כספית). מצב ההיכרות מגלה את הנתיבים והכפתורים האמיתיים, ואז מעדכנים כאן.",
-  "base": "https://caspit.valu.co.il/",
+  "base": "https://caspit.valu.co.il/bo",
   "start": "#/catalogs",
   "login": { "hash": ["#/login", "#/signin", "/login"], "css": "input[type=password]", "shell": { "text": "ממשקים" } },
   "endpoints": {},
