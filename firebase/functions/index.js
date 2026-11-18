@@ -267,6 +267,9 @@ Object.assign(exports, require('./yemot-board'));
 // לקוחות משוב ← רשימת התפוצה "לקוחות משוב" בימות (משימה 2026-11-17, שלב 4): yemotFbList (מנהל)
 Object.assign(exports, require('./yemot-fblist'));
 
+// שליחת צינתוק מ"שלוחות הקו" בלי מבצע (משימה 2026-11-18): sendLineTzintuk (מנהל) – ללקוחות המשוב או לכל הלקוחות
+Object.assign(exports, require('./yemot-tz'));
+
 // ריבוי עסקים (משימה 2026-11-05, שלב 5): פונקציות ניהול – createBusiness, inviteBusinessAdmin,
 // setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken, logBusinessEntry, addStaff, setStaffActive (completeInvite הוסרה בשלב 6ג: כניסה ראשונה במייל המובנה של Firebase)
 Object.assign(exports, require('./business'));

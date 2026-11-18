@@ -34,7 +34,7 @@ const requireFromFunctions = createRequire(path.join(__dirname, '..', 'functions
 const COPY = [
   'admins', 'staff', 'cfg', 'bk', 'chunks', 'inbox', 'app_backup_status',
   'shelf', 'fb', 'tasks', 'supinv', 'appreq', 'closings', 'cashout', 'deposits', 'zlast',
-  'yemot_items', 'yemot_line_backups', 'yemot_hook_usage', 'yemot_lexicon', 'yemot_fbsent', // yemot_fbsent: לקוחות משוב שנשלחו לימות (2026-11-17)
+  'yemot_items', 'yemot_line_backups', 'yemot_hook_usage', 'yemot_lexicon', 'yemot_fbsent', 'yemot_tzsend', // yemot_fbsent: לקוחות משוב שנשלחו לימות (2026-11-17); yemot_tzsend: שליחות צינתוק מהקו (2026-11-18)
   'yemot_promos', 'yemot_state', 'yemot_usage', 'yemot_test', 'voice_usage', 'scan_usage',
   'audit_log', 'table_bases', // אוספים שנמצאו בבדיקה 7.11 – הועברו בהחלטת המשתמש
   'ord', 'prod', 'stockLog', 'ordcfg', 'ordpay', 'private', // הזמנות שלב 1 (2026-11-08): לארג' פעמי ב-legacy כותב לשורש, באותם שמות כמו ב-b/{bizId}

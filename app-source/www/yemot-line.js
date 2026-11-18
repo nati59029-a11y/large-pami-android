@@ -1,6 +1,6 @@
 /* משבצת "שלוחות הקו": שליחת תוכן לשלוחות של הקו הטלפוני (ימות), דרך פונקציות השרת.
    קובץ עצמאי. מחבר את עצמו ל-V.yl ול-window.ylTile, ולא משנה מסכים קיימים (חוץ מהוספת המשבצת עצמה).
-   עובד: שלוחות 1 (מתכונים), 2 (מבצעים), 3 (עדכונים). מנהל: גם 4 (שעות וכתובת), הודעת פתיחה ומילון הגייה.
+   עובד: שלוחות 1 (מתכונים), 2 (מבצעים), 3 (עדכונים). מנהל: גם 4 (שעות וכתובת), הודעת פתיחה, "הגדרות הקו" (מילון הגייה, לקוחות משוב, שלוחה אחת) ו"שליחת צינתוקים".
    ההרשאות נאכפות בשרת ובכללי המסד. כאן רק נוחות: מה מוצג למי.
    בכל מקום שנשלח טקסט: חלון אישור עם "שמע קודם" (yemot-preview.js). מנעול ריצה: לחיצה כפולה = בקשה אחת.
    טיוטות הטקסט נשמרות בזיכרון ובמכשיר עד שליחה מוצלחת, ורענון אוטומטי לא בונה מחדש מסך שיש בו טקסט.
@@ -8,7 +8,7 @@
 (function(){
 'use strict';
 if(typeof V==='undefined'||typeof ACT==='undefined')return;
-const DK=(typeof LK==='function'?LK:(k=>k))('lp-yl-draft'),ID=/^[A-Za-z0-9_-]{8,64}$/,MG=['4','open','lex'];
+const DK=(typeof LK==='function'?LK:(k=>k))('lp-yl-draft'),ID=/^[A-Za-z0-9_-]{8,64}$/,MG=['4','open','lex','cfg'];
 const DEF={recipes:2500,updates:800,hours:600,opening:600,promo:400,lex:8000,recordSec:120,tempMaxDays:60,promoMaxDays:60}; // ברירות מחדל לפי החוזה; השרת מחזיר את הערכים האמיתיים ב-getLineState
 const LEX_DENY='רק מנהל יכול לשנות את מילון ההגייה.';
 const MSG={ // הודעות לפי reason מהשרת (גיבוי, אם ההודעה מהשרת לא בעברית)
@@ -41,7 +41,7 @@ const SLACT={recipes:'1',promos:'2',updates:'3',hours:'4',opening:'open'}; // ש
 const DEXT={recipes:'1',promos:'2',updates:'3',hours:'4'};
 const LY=()=>{const l=Y.st&&Y.st.r&&Y.st.r.layout;return l&&l.exts?l:{single:false,ext:'1',exts:DEXT}};
 const xn=slot=>String(LY().exts[slot]||DEXT[slot]); // מספר השלוחה שאליה עולה סוג התוכן עכשיו
-const lySig=()=>JSON.stringify(LY().exts)+((cur().a||'')===''?(Y.st?'1':'0'):''); // במסך הראשי: גם "נטען" (כרטיס ההגדרה מוצג רק אחרי טעינה)
+const lySig=()=>JSON.stringify(LY().exts)+(['','cfg'].includes(cur().a||'')?(Y.st?'1':'0'):''); // במסך הראשי ובהגדרות הקו: גם "נטען" (כרטיס ההגדרה מוצג רק אחרי טעינה)
 const recMax=slot=>{const m=lim().recordSecBySlot;return(m&&+m[slot])||(slot==='opening'?60:lim().recordSec)};
 const canRec=slot=>{const c=lim().canRecord;if(c&&c[slot]===false)return false;return isA()||['recipes','promos','updates'].includes(slot)}; // נוחות בלבד: ההרשאה נאכפת בשרת
 const modeOf=slot=>Y.modes[slot]||'type';
@@ -93,18 +93,23 @@ ACT.ylGo=el=>go('yl',el.dataset.v);
 // כניסת מנהל ל"לקוחות משוב בימות" (yemot-fblist.js, window.yfOpen). בלי הקובץ – לא מוצג.
 const fbOpt=()=>`<button class="opt" data-a="ylFb" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">לקוחות משוב בימות<small>רשימת הטלפונים מהמשוב וצינתוק בתשלום</small></span>${ico('chev')}</button>`;
 ACT.ylFb=()=>{if(window.yfOpen)window.yfOpen()};
+// כניסת מנהל ל"שליחת צינתוקים" (yemot-fblist.js, window.ytOpen; משימה 2026-11-18). בלי הקובץ – לא מוצג.
+const tzOpt=()=>`<button class="opt" data-a="ylTz" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">שליחת צינתוקים<small>ללקוחות דפי המשוב או לכל הלקוחות · מנהל</small></span>${ico('chev')}</button>`;
+ACT.ylTz=()=>{if(window.ytOpen)window.ytOpen()};
 // ---------- המסכים ----------
 V.yl=a=>{a=a||'';
  if(Y.rec&&Y.rec.on&&a!==Y.rec.act)recDiscard();
  if(MG.includes(a)&&!isA())return{t:'שלוחות הקו',h:'<div class="empty">הפעולה הזו מותרת למנהל בלבד.</div>'};
  getD();setTimeout(()=>ylLoad(a),0);Y.ly=lySig();
- return({'':vMain,'1':vRecipes,'2':vPromos,'3':vUpdates,'4':vHours,open:vOpen,lex:vLex}[a]||vMain)()};
+ return({'':vMain,'1':vRecipes,'2':vPromos,'3':vUpdates,'4':vHours,open:vOpen,lex:vLex,cfg:vCfg}[a]||vMain)()};
 function vMain(){const m=isA(),ly=LY();
  return{t:'שלוחות הקו',s:m?'מנהל':'עובד',h:`<p class="note" style="margin:0 0 12px">בוחרים שלוחה, כותבים או מקליטים, שומעים איך זה ייראה, ורק אחרי אישור זה עולה לקו.${ly.single?` כל התוכן עולה עכשיו לשלוחה ${esc(ly.ext)}, והחדש מושמע ראשון.`:''}</p>${m?'<div id="ylVoice"></div>':''}
  ${opt('1',`שלוחה ${xn('recipes')} · מתכונים`,'כתיבה או סריקה מצילום · החדש מושמע ראשון')}
  ${opt('2',`שלוחה ${xn('promos')} · מבצעים`,'בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
  ${opt('3',`שלוחה ${xn('updates')} · עדכונים`,'הקלדה או הקלטה · החדש מושמע ראשון')}
- ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${Y.st?layoutCard():''}`:''}`}}
+ ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('cfg','הגדרות הקו','מילון הגייה, לקוחות משוב בימות, כל התוכן בשלוחה אחת')}${window.ytOpen?tzOpt():''}`:''}`}}
+// "הגדרות הקו" (מנהל, משימה 2026-11-18): שלושת הכרטיסים שהיו במסך הראשי – בלי שינוי בהתנהגות שלהם
+function vCfg(){return{t:'הגדרות הקו',s:'מנהל',h:`${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${Y.st?layoutCard():'<p class="note">טוען…</p>'}`}}
 // כרטיס מנהל: "כל התוכן בשלוחה אחת" (setLineLayout). מוצג רק אחרי שהמצב נטען מהשרת, כדי לא להציג מצב שגוי.
 function layoutCard(){const ly=LY();
  return`<div class="card" id="ylLayout" style="margin-top:12px"><b>כל התוכן בשלוחה אחת</b><p class="note" style="margin:4px 0 10px">${ly.single?`מופעל: מבצעים, מתכונים, עדכונים ושעות – כולם עולים לשלוחה ${esc(ly.ext)}.`:'כבוי: כל סוג תוכן עולה לשלוחה משלו (1 עד 4).'} הודעות שכבר בקו נשארות במקומן עד שהן יורדות. ההחלפה לא מוחקת כלום, ואפשר לחזור בכל רגע.</p>
@@ -115,7 +120,7 @@ ACT.ylLayout=el=>{if(!isA()||Y.sending)return;const one=el.dataset.v==='1';
   async()=>{if(Y.sending)return;Y.sending=true;
    try{const r=await call('setLineLayout',{single:one,confirm:true});toast(r&&he(r.message)?r.message:'✓ ההגדרה עודכנה');Y.st=null;if(window.ylBoard&&ylBoard.invalidate)ylBoard.invalidate();await state(true)}
    catch(e){toast(errMsg(e))}finally{Y.sending=false}
-   if(here(''))redraw()},one?'כן, הכול לשלוחה 1':'כן, חזור לחלוקה')};
+   if(here('cfg'))redraw()},one?'כן, הכול לשלוחה 1':'כן, חזור לחלוקה')};
 function listHtml(slot){
  if(window.ylBoard)return ylBoard.html(slot); // yemot-board.js: "בקו עכשיו" + "ירדו בשבוע האחרון"
  const L=Y.st&&Y.st.r&&Y.st.r.slots&&Y.st.r.slots[slot];if(!L)return'<p class="note">טוען…</p>';
@@ -128,7 +133,7 @@ function paintVoice(v){const el=document.getElementById('ylVoice'),q=v&&v.quota;
  el.innerHTML=`<div class="card" style="border-color:var(--warn)"><b style="color:var(--warn)">${over?'הקול האנושי הגיע לתקרה החודשית':'הקול האנושי קרוב לתקרה החודשית'}</b><p class="note" style="margin:4px 0 0">נוצלו ${(+q.used).toLocaleString('he-IL')} מתוך ${(+q.limit).toLocaleString('he-IL')} תווים החודש. ${over?'שליחה שלא נכנסת בתקרה תציע לשלוח בקול הממוחשב.':'כשהתקרה תיגמר, שליחה תציע לשלוח בקול הממוחשב.'} התקרה מתחדשת ב-1 לחודש.</p></div>`}
 function paintList(slot){const el=document.getElementById('ylList');if(el)el.innerHTML=listHtml(slot)}
 async function ylLoad(a,force){
- if(a===''){try{const s=await state(force);if(here('')&&isA())paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי. כולם: מבנה השלוחות (התוויות)
+ if(a===''||a==='cfg'){try{const s=await state(force);if(a===''&&here('')&&isA())paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי. כולם: מבנה השלוחות (התוויות)
  if(!here(a)||!['1','2','3','4','open','lex'].includes(a))return;
  const el=document.getElementById('ylList'),fail=e=>{if(!here(a))return;if(window.ylBoard&&ylBoard.slots[a]){toast(errMsg(e));return} // הרשימה של yemot-board.js נשארת במסך
   if(el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
