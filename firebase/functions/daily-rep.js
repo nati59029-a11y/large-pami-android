@@ -53,7 +53,8 @@ async function gate(request, o) {
 // ---------- התראות (FCM). בבדיקות – opts.send מדומה ----------
 async function fcmSendDr(tokens, msg) {
   const { getMessaging } = require('firebase-admin/messaging');
-  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: { k: 'dr', id: String(msg.id) }, android: RM.androidOf('dr_' + msg.id) });
+  const k = msg.k || 'dr'; // רובוט כספית (caspit-bot.js): k:'cx' – פותח את "סנכרון כספית"
+  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: { k, id: String(msg.id) }, android: RM.androidOf(k + '_' + msg.id) });
   return r.responses.map((x, i) => ({ token: tokens[i], ok: x.success, code: x.error && x.error.code }));
 }
 async function pushTo(db, uids, msg, o, bizId) {
@@ -71,10 +72,11 @@ async function pushTo(db, uids, msg, o, bizId) {
   }
   return sent;
 }
+// o.msg (רובוט כספית): { k, id, title, body } במקום הודעת הדיווח היומי
 async function pushMgrs(db, who, id, name, o) {
   const s = await db.collection('admins').limit(MAX_PUSH).get();
   const to = s.docs.map((d) => d.id).filter((u) => u !== who.uid);
-  return pushTo(db, to, { id, title: 'דיווח יומי', body: (name || 'עובד') + ' שלח/ה דיווח יומי – פרטים באפליקציה' }, o, who.bizId);
+  return pushTo(db, to, (o && o.msg) || { id, title: 'דיווח יומי', body: (name || 'עובד') + ' שלח/ה דיווח יומי – פרטים באפליקציה' }, o, who.bizId);
 }
 
 // ---------- מונה העלות: תקציב נפרד (drcfg/cap, drcfg/use), אותו חישוב חודשי/יומי כמו במזכירה (usageOf / costMc) ----------
@@ -396,7 +398,7 @@ exports.drRemind = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 minut
 });
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  submit, mgr, setCfg, setCap, remindBiz, runRemind, reserve, settle, aiParts, audPath,
+  submit, mgr, setCfg, setCap, remindBiz, runRemind, reserve, settle, aiParts, audPath, pushMgrs,
   call: {
     drSubmit: (o) => wrap('drSubmit', (r) => submit(r, o)),
     drMgr: (o) => wrap('drMgr', (r) => mgr(r, o)),

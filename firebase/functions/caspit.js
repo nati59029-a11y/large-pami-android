@@ -35,7 +35,9 @@ const STALE = 'מאז התצוגה המקדימה נשמר סנכרון או ק�
 
 async function mgrW(request) { const w = await O.who(request); if (w.role !== 'manager') throw O.deny('manager-only', 'הפעולה מותרת למנהל בלבד'); return w; }
 const runOf = (v) => { if (typeof v !== 'string' || !RUN_RE.test(v)) throw bad('bad-run', 'מזהה סנכרון לא תקין'); return v; };
-const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null, lastSales: d.lastSales || null }; };
+const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null, lastSales: d.lastSales || null,
+  bot: { newMax: d.bot && Number.isInteger(d.bot.newMax) ? d.bot.newMax : BOT_NEW0 }, cats: Array.isArray(d.cats) ? d.cats : [] }; };
+const BOT_NEW0 = 1; // רובוט כספית: פריטים חדשים לכספית בכל ריצה – 1 (בדיקה ראשונה עם פריט אחד) עד שהמנהל מעלה (החלטות 2, 11)
 const numOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const s = (v, n) => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '').slice(0, n);
 // קלט מהטלפון: רק השדות של groupCat, באורך מוגבל
@@ -49,8 +51,7 @@ function cleanIn(x) {
 }
 
 // cxCfg() → { cfg, items: מספר קודים מקושרים, br: סניף המלאי בפועל (null = צריך לבחור), sa: מנהל־על }
-async function cxCfg(request) {
-  const w = await mgrW(request);
+async function cxCfg(w) {
   const db = T.tdb();
   const [c, n] = await Promise.all([db.doc(CFG).get(), db.collection('cxItem').count().get()]);
   const cfg = cfgOf(c);
@@ -65,11 +66,14 @@ function stockBr(w, cfg) {
 const BK_RE = /^[\p{L}\p{N}-]{1,30}$/u; // מפתח סניף בכספית (CC.brKey)
 const REG_RE = /^[a-z0-9_]{1,20}$/; // קופה בסגירת הקופה (i_yh, i_nl)
 // cxSetCfg({ skip?:[קודים], br?: סניף המלאי, reg?: { <סניף בכספית>: <קופה> | '' } }) – מנהל
-async function cxSetCfg(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
-  onlyKeys(input, ['skip', 'br', 'reg']);
+async function cxSetCfg(w, input) {
+  onlyKeys(input, ['skip', 'br', 'reg', 'newMax']);
   const up = { upd: Date.now(), by: w.uid };
+  // רובוט כספית (שלב B): כמה פריטים חדשים מותר לרובוט לטעון לכספית בריצה אחת (0–50)
+  if (input.newMax !== undefined) {
+    if (!Number.isInteger(input.newMax) || input.newMax < 0 || input.newMax > 50) throw bad('bad-newmax', 'פריטים חדשים בכל ריצה: מספר בין 0 ל-50');
+    up.bot = { newMax: input.newMax };
+  }
   if (input.skip !== undefined) {
     if (!Array.isArray(input.skip) || input.skip.length > 100) throw bad('bad-skip', 'קודים מיוחדים: עד 100');
     up.skip = [...new Set(input.skip.map((x) => s(x, 30).trim()).filter((x) => CC.CODE_RE.test(x)))];
@@ -91,13 +95,11 @@ async function cxSetCfg(request) {
   }
   // mergeFields: כל שדה שנשלח מחליף את הקודם במלואו (מיפוי קופות – בלי שאריות של מפתחות ישנים); שאר ההגדרות לא נוגעות
   await T.tdb().doc(CFG).set(up, { mergeFields: Object.keys(up) });
-  return { ok: true, skip: up.skip, br: up.br, reg: up.reg };
+  return { ok: true, skip: up.skip, br: up.br, reg: up.reg, newMax: up.bot ? up.bot.newMax : undefined };
 }
 
 // cxUpload({ run, part, parts, items }) – חלק מהקטלוג אחרי groupCat בטלפון. ניסיון חוזר של אותו חלק דורס את אותו מסמך.
-async function cxUpload(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
+async function cxUpload(w, input) {
   onlyKeys(input, ['run', 'part', 'parts', 'items', 'kind', 'lines']);
   const run = runOf(input.run);
   const kind = input.kind == null ? 'cat' : input.kind;
@@ -142,9 +144,7 @@ async function loadState(db) {
 }
 
 // cxPreview({ run }) – ניקוי, קישור והשוואה. לא כותב למוצרים. → { cnt, rows, filt, merged, warn }
-async function cxPreview(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
+async function cxPreview(w, input) {
   onlyKeys(input, ['run']);
   const run = runOf(input.run);
   const db = T.tdb();
@@ -206,9 +206,7 @@ async function cxPreview(request) {
 // cxApply({ run, take?:'app'|'cx', skip?:[קודים] }) – אישור. מחולק לחלקים של 200 קודים, כל חלק בטרנזקציה עם סימון done/{k}:
 // ניסיון חוזר / קריאה כפולה לא מכפילים. לפני האישור הראשון בעסק – גיבוי מלא של המוצרים (snapAll → stockBak, אפשר "שחזור מלאי מגיבוי").
 // → { done, next?, res }. done:false = הזמן נגמר; הטלפון קורא שוב עם אותו run (הבחירות נשמרו בקריאה הראשונה).
-async function cxApply(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
+async function cxApply(w, input) {
   onlyKeys(input, ['run', 'take', 'skip', 'qty']);
   const run = runOf(input.run);
   const db = T.tdb();
@@ -259,7 +257,9 @@ async function cxApply(request) {
     const x = await tx.get(ref), c = await tx.get(cref);
     if (x.get('st') === 'done') return;
     tx.update(ref, { st: 'done', doneAt: Date.now() });
-    tx.set(cref, { gen: (c.exists && c.get('gen') || 0) + 1, last: { run, at: Date.now() } }, { merge: true });
+    // cats: זמני 3 הקטלוגים האחרונים (רובוט: "עדיין ממתין לקליטה אחרי 2 קטלוגים" – caspit-bot.js)
+    const cats = (c.exists && Array.isArray(c.get('cats')) ? c.get('cats') : []).slice(-2).concat([Date.now()]);
+    tx.set(cref, { gen: (c.exists && c.get('gen') || 0) + 1, last: { run, at: Date.now() }, cats }, { merge: true });
   });
   O.ixDrop(w);
   const res = (await ref.get()).get('res') || {};
@@ -338,15 +338,17 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen) {
   });
 }
 
-// cxExport({ kind:'price'|'new' }) → { csv, n, rows:[{ c, n, p, cost }] }
+// cxExport({ kind:'price'|'new', max? }) → { csv, n, rows:[{ c, n, p, cost }] }
+// max (רובוט כספית): יותר שורות מ-max → סירוב 'limit' לפני שמשהו מסומן pd / מקבל קוד חדש
 // price: כל קוד מקושר שהמחיר/העלות שלו באפליקציה שונים מהסנכרון האחרון, או שנשלח וטרם נקלט. מסמן pd (ממתין לקליטה).
 // new: מוצרים באפליקציה בלי קוד כספית (זמינים בלבד) מקבלים קוד מ-900000 ומעלה (cxcfg.next), ועוד פריטים חדשים שנשלחו וטרם נקלטו.
 //      זמין רק אחרי סנכרון קטלוג ראשון (כדי לא לתת קוד חדש למוצר שכבר קיים בכספית).
-async function cxExport(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
-  onlyKeys(input, ['kind']);
+async function cxExport(w, input) {
+  onlyKeys(input, ['kind', 'max']);
   if (!['price', 'new'].includes(input.kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
+  if (input.max !== undefined && (!Number.isInteger(input.max) || input.max < 0 || input.max > 100000)) throw bad('bad-max', 'מגבלה לא תקינה');
+  const max = input.max === undefined ? Infinity : input.max;
+  const over = (n) => pre('limit', `${n} ${input.kind === 'new' ? 'פריטים חדשים' : 'שורות מחיר'} – מעל המגבלה (${max}). לא סומן ולא נשלח דבר; המנהל בודק באפליקציה.`);
   const db = T.tdb();
   const S = await loadState(db);
   const oc = await db.doc('ordcfg/main').get();
@@ -367,6 +369,7 @@ async function cxExport(request) {
       if (ac != null) Object.assign(u, { 'co.pd': ac, 'co.ab': ac });
       ups.push([db.doc('cxItem/' + c), u]);
     }
+    if (rows.length > max) throw over(rows.length);
     for (let i = 0; i < ups.length; i += 400) { const b = db.batch(); ups.slice(i, i + 400).forEach(([rf, u]) => b.update(rf, u)); await b.commit(); }
     if (ups.length) await bumpGen(db); // תצוגה מקדימה שנעשתה לפני הקובץ – מיושנת (ליקוי 4)
     return { csv: CC.csvPrice(rows, vat), n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })) };
@@ -376,6 +379,7 @@ async function cxExport(request) {
   // ליקוי 6: תפוסים = cxItem + כל הקודים שהופיעו בקטלוג (cxcfg/seen).
   const linked = new Set([...S.X.values()].map((x) => x.pid).filter(Boolean));
   const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && p.on !== false).map(([id]) => id);
+  if (max !== Infinity) { const pend = [...S.X.values()].filter((x) => x.nw && S.P.has(x.pid)).length; if (cand.length + pend > max) throw over(cand.length + pend); }
   let added = 0, made = [];
   if (cand.length) {
     await db.runTransaction(async (tx) => {
@@ -415,9 +419,7 @@ async function cxExport(request) {
 async function bumpGen(db) { await db.runTransaction(async (tx) => { const c = cfgOf(await tx.get(db.doc(CFG))); tx.set(db.doc(CFG), { gen: c.gen + 1 }, { merge: true }); }); }
 
 // cxDnOk({ pid }) – "נבדק": מסיר את הסימון "שם כפול – לבדוק" (dn) מהמוצר (החלטה 10). מנהל בלבד.
-async function cxDnOk(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
+async function cxDnOk(w, input) {
   onlyKeys(input, ['pid']);
   const pid = idOf(input.pid, 'מוצר');
   const ref = T.tdb().doc('prod/' + pid);
@@ -427,9 +429,8 @@ async function cxDnOk(request) {
 }
 
 // cxHist({ pid }) → { codes:[קודי כספית], log:[{ k, old, new, src, at }] } – היסטוריית מחיר ועלות למוצר (30 אחרונים)
-async function cxHist(request) {
-  await mgrW(request);
-  const input = inputObject(request);
+async function cxHist(w, input) {
+  void w;
   onlyKeys(input, ['pid']);
   const pid = idOf(input.pid, 'מוצר');
   const db = T.tdb();
@@ -706,9 +707,7 @@ const dayIdOf = (g) => CC.dayId(g.bk, g.d);
 // A3: מסך "מכירות כספית" (מנהל בלבד, החלטה 5) – סיכומים יומיים, שורות, תיקון כמות "לא בטוח". לא יוצר הכנסות.
 // =====================================================================================================
 // cxSales({ from, to }) – עד 92 ימים → { days:[cxDay בלי it], items:{ קוד:{ n, cat, sp?, v:{ i:[q,r,a,ds,u] } } }, cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
-async function cxSales(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
+async function cxSales(w, input) {
   onlyKeys(input, ['from', 'to']);
   const from = CC.dateOf(input.from), to = CC.dateOf(input.to);
   if (!from || !to || from !== input.from || to !== input.to || from > to) throw bad('bad-range', 'טווח תאריכים לא תקין');
@@ -721,9 +720,8 @@ async function cxSales(request) {
   return { days, items, cats: Object.fromEntries(ct.docs.map((d) => [d.id, d.get('name') || ''])), cfg: { reg: cfg.reg, br: stockBr(w, cfg), lastSales: cfg.lastSales }, sa: !!w.superadmin };
 }
 // cxLines({ bd } | { c, days:[d] } | { un:true } | { id }) → { tx:[{ id, d, tx, bk, bn, lines }] } – השורות שמאחורי מספר (החלטה 12)
-async function cxLines(request) {
-  await mgrW(request);
-  const input = inputObject(request);
+async function cxLines(w, input) {
+  void w;
   onlyKeys(input, ['bd', 'c', 'days', 'un', 'id']);
   const db = T.tdb();
   let docs = [];
@@ -747,9 +745,7 @@ async function cxLines(request) {
   return { tx };
 }
 // cxFix({ id, k, q }) – אישור / תיקון כמות של שורה (בעיקר "לא בטוח"). ההפרש יורד/עולה במלאי ונרשם בתנועות; הסיכום היומי מתעדכן.
-async function cxFix(request) {
-  const w = await mgrW(request);
-  const input = inputObject(request);
+async function cxFix(w, input) {
   onlyKeys(input, ['id', 'k', 'q']);
   if (typeof input.id !== 'string' || !TXID_RE.test(input.id) || typeof input.k !== 'string' || input.k.length > 200) throw bad('bad-id', 'שורה לא תקינה');
   const q1 = nOr(input.q, -100000, 100000);
@@ -793,7 +789,35 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
+// שלב B (רובוט כספית): כל פונקציה היא ליבה (w, input); הטלפון נכנס דרך mgrW (מנהל), הרובוט – caspit-bot.js עם זהות סינתטית.
+// מנעול משותף (b/{bizId}/private/cxbot.lock, 30 דקות): אישור ויצוא מהטלפון לא רצים בזמן שהרובוט באמצע (ולהפך).
+const LOCK_MS = 30 * 60e3;
+const lockRef = (bizId) => require('firebase-admin/firestore').getFirestore().doc(`b/${bizId}/private/cxbot.lock`);
+async function lockTake(bizId, owner) {
+  const ref = lockRef(bizId);
+  await ref.firestore.runTransaction(async (tx) => {
+    const x = await tx.get(ref), now = Date.now();
+    if (x.exists && x.get('o') !== owner && (x.get('exp') || 0) > now) throw pre('busy', String(x.get('o') || '').startsWith('bot:') ? 'הרובוט במחשב החנות מסנכרן עכשיו מול כספית. נסו שוב בעוד כמה דקות.' : 'מנהל אחר שומר עכשיו סנכרון כספית. נסו שוב בעוד כמה דקות.');
+    tx.set(ref, { o: owner, exp: now + LOCK_MS, at: now });
+  });
+}
+async function lockFree(bizId, owner) {
+  const ref = lockRef(bizId);
+  await ref.firestore.runTransaction(async (tx) => { const x = await tx.get(ref); if (x.exists && x.get('o') === owner) tx.delete(ref); });
+}
+const LOCKED = ['cxApply', 'cxExport'];
 const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix };
 const BIG = ['cxPreview', 'cxApply', 'cxExport']; // ~9,000 מוצרים
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, loadState, applyPart, applySalesPart, PV_PART, SPV } });
+async function phone(k, request) {
+  const w = await mgrW(request);
+  const input = k === 'cxCfg' ? {} : inputObject(request);
+  if (!LOCKED.includes(k) || !w.bizId) return FNS[k](w, input);
+  const me = 'u:' + w.uid;
+  await lockTake(w.bizId, me);
+  let r;
+  try { r = await FNS[k](w, input); } catch (e) { await lockFree(w.bizId, me).catch(() => {}); throw e; }
+  if (k === 'cxExport' || (r && r.done)) await lockFree(w.bizId, me);
+  return r;
+}
+for (const k of Object.keys(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, (request) => phone(k, request)));
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });

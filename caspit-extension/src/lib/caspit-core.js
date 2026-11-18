@@ -278,14 +278,19 @@ function parseSales(rows, det) {
     n++;
     const d = dateOf(get(r, 'd')), c = str(get(r, 'c')).slice(0, 40), tx = txKey(get(r, 'tx'));
     const a = num(get(r, 'a')), ds0 = str(get(r, 'ds')) === '' ? 0 : num(get(r, 'ds')), w0 = str(get(r, 'w')) === '' ? null : num(get(r, 'w'));
-    const why = !d ? 'date' : !tx ? 'tx' : !c ? 'code' : Number.isNaN(a) || Math.abs(a) > 1000000 ? 'amount' : Number.isNaN(ds0) ? 'disc' : '';
+    // אותם גבולות כמו בשרת (cleanLine): שורה פגומה מסומנת כאן ולא מכשילה חלק שלם של 1,000 שורות
+    const why = !d ? 'date' : !tx ? 'tx' : !c ? 'code' : Number.isNaN(a) || Math.abs(a) > 1000000 ? 'amount' : Number.isNaN(ds0) || Math.abs(ds0) > 1000000 ? 'disc' : w0 != null && !Number.isNaN(w0) && w0 > 100000 ? 'weight' : '';
     if (why) { bad.push({ r: i + 1, why }); continue; }
-    const bn = hk(get(r, 'bn')).slice(0, 60), bk = brKey(get(r, 'bno'), bn);
-    lines.push({ d, c, n: hk(get(r, 'n')).slice(0, 80), tx, bk, bn, w: w0 != null && !Number.isNaN(w0) && w0 > 0 ? Math.round(w0 * 1000) / 1000 : null, ds: r2(ds0), a: r2(a) });
+    const bn = hk(get(r, 'bn')).slice(0, 60), bno = str(get(r, 'bno')).replace(/\D/g, ''), bk = brKey(bno, bn);
+    const o = { d, c, n: hk(get(r, 'n')).slice(0, 80), tx, bk, bn, w: w0 != null && !Number.isNaN(w0) && w0 > 0 ? Math.round(w0 * 1000) / 1000 : null, ds: r2(ds0), a: r2(a) };
+    if (!bno) o.bkn = true; // אין מספר סניף – המפתח לפי השם; השרת ממיר למספר הסניף המוכר (cxcfg.bkn), כדי שאותה מכירה לא תקבל מזהה אחר
+    lines.push(o);
   }
   return { lines, bad, rows: n };
 }
-const SBAD = { date: 'תאריך לא תקין', tx: 'בלי מספר עסקה', code: 'בלי קוד פריט', amount: 'פדיון לא תקין', disc: 'הנחה לא תקינה' };
+const SBAD = { date: 'תאריך לא תקין', tx: 'בלי מספר עסקה', code: 'בלי קוד פריט', amount: 'פדיון לא תקין', disc: 'הנחה לא תקינה', weight: 'משקל לא תקין' };
+// כמות שסימנה הפוך לפדיון (מכירה עם כמות שלילית / החזרה עם כמות חיובית) – נדחית. 0 = בלי תנועת מלאי (מותר)
+const qSignOk = (a, q) => !(q > 0 && a < 0) && !(q < 0 && a > 0);
 // קיבוץ לעסקאות + מפתח שורה (קוד|פדיון|הנחה|מופע). → [{ id, bk, bn, d, tx, L:[{ ...line, k }] }] (לפי סדר ההופעה)
 function salesGroup(lines) {
   const by = new Map();
@@ -375,7 +380,12 @@ function recon(days, reg, zc, th, regs) {
   for (const z of zc || []) {
     if (!z || !z.d || !z.reg) continue;
     const c = cell(z.d, z.reg); c.z = r2(c.z + (+z.amt || 0)); c.zs.push(z);
-    if (z.od && z.od !== z.d) c.span = true;
+    if (z.od && z.od !== z.d) {
+      c.span = true;
+      // תיקון סבב 1: סגירה שנפתחה ביום אחר – גם יום הפתיחה וכל יום שבין הפתיחה לסגירה (לאותה קופה) "לא ניתן להשוות",
+      // כי חלק מהכסף של הימים האלה נמצא בסגירה של יום אחר (עד 31 ימים אחורה)
+      if (z.od < z.d) for (let d = z.od, k = 0; d < z.d && k < 31; d = addDay(d, 1), k++) { const s = cell(d, z.reg); s.span = true; (s.sx || (s.sx = [])).push(z); }
+    }
   }
   const dset = [...new Set([...by.values()].map((c) => c.d).concat([...un.keys()]))].sort().reverse();
   const stOf = (c) => {
@@ -397,9 +407,35 @@ function recon(days, reg, zc, th, regs) {
     return { d, regs: regsD, tot, un: un.get(d) || [] };
   });
 }
+function addDay(d, n) { const t = new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5); return t.toISOString().slice(0, 10); }
+// תשובת cxSales בצורה קומפקטית (תיקון סבב 1 – גודל): days בלי it, ו-items: { קוד:{ n, cat, sp?, v:{ <מספר יום ברשימה>: [q, r, a, ds, u] } } }.
+// packDays בשרת, unpackDays בטלפון (מחזיר מסמכי cxDay רגילים ל-aggDays/recon).
+function packDays(docs) {
+  const days = [], items = {};
+  (docs || []).forEach((x, i) => {
+    const { it, ...rest } = x; days.push(rest);
+    for (const [c, v] of Object.entries(it || {})) {
+      if (!v) continue;
+      const o = items[c] || (items[c] = { n: v.n || '', cat: v.cat || '', v: {} });
+      if (v.n) o.n = v.n; if (v.cat) o.cat = v.cat; if (v.sp) o.sp = true;
+      o.v[i] = [+v.q || 0, +v.r || 0, +v.a || 0, +v.ds || 0, +v.u || 0];
+    }
+  });
+  return { days, items };
+}
+function unpackDays(p) {
+  const D = ((p && p.days) || []).map((x) => Object.assign({}, x, { it: {} }));
+  for (const [c, o] of Object.entries((p && p.items) || {})) for (const [i, a] of Object.entries(o.v || {})) {
+    const x = D[+i]; if (!x) continue;
+    x.it[c] = Object.assign({ n: o.n, cat: o.cat, q: a[0], r: a[1], a: a[2], ds: a[3], u: a[4] }, o.sp ? { sp: true } : {});
+  }
+  return D;
+}
+// טווח תאריכים לחלקים של עד n ימים (cxSales מקבל עד 92 ימים בבקשה)
+function chunks(from, to, n) { const out = []; let a = from; while (a <= to) { let b = addDay(a, (n || 92) - 1); if (b > to) b = to; out.push([a, b]); a = addDay(b, 1); } return out; }
 const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
 
-const api = { SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
+const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);

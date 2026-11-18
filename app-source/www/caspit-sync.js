@@ -6,7 +6,8 @@
    רכיבי העיצוב הקיימים בלבד (.card .btn .chip .li .tag .note .kg .k .empty .f). משתמש ב: V, ACT, CHG, FRM, fnCall, esc, ils, toast, dlg, closeDlg, ask,
    rerender, readTable, parseCsv, saveFile, fd, SY, CaspitCore.
    A2 (17.11): קובץ שזוהה כ"דוח מכירות לפריטים" עובר ל-caspit-sales.js (window.cxSalesFile → מסך cxSalesPv). CSV נקרא כבייטים ומפוענח
-   ב-CaspitCore.decode (UTF-8, ואם לא – windows-1255, כמו שכספית מוציאה), גם בקטלוג. */
+   ב-CaspitCore.decode (UTF-8, ואם לא – windows-1255, כמו שכספית מוציאה), גם בקטלוג.
+   שלב B (18.11): כרטיס "רובוט – מחשב החנות" – caspit-bot.js (window.cxBotCardH). */
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||typeof CaspitCore==='undefined')return;
@@ -31,13 +32,14 @@ V.cxSync=()=>{const T='סנכרון כספית';if(!ok())return{t:T,h:'<div clas
  if(X.st==='busy')return{t:T,s:'רגע…',h:`<div class="card"><p id="cxprog" style="margin:0">${esc(X.prog||'עובד…')}</p><p class="note">אל תסגרו את האפליקציה עד שהפעולה מסתיימת.</p></div>`};
  if(X.st==='pv')return{t:T,s:'תצוגה מקדימה – עוד לא נשמר כלום',h:pvH()};
  if(X.st==='done')return{t:T,s:'נשמר',h:doneH()};
- if(!X.cfg){cfgLoad();}
+ if(!X.cfg){cfgLoad();if(window.cxBotReset)cxBotReset()}
  const c=X.cfg&&X.cfg.cfg,last=c&&c.last;
  return{t:T,s:'קטלוג ומחירים מול כספית',h:`<div class="card"><h3 style="margin-top:0">קובץ מכספית</h3><p class="note" style="margin-top:0">מוציאים מכספית את "קטלוג פריטים" או "דוח מכירות לפריטים" (Excel או CSV) ובוחרים אותו כאן. הסוג מזוהה לבד. לפני שמשהו נשמר תוצג תצוגה מקדימה לאישור.</p>
  <label class="btn w" style="display:flex;align-items:center;justify-content:center;min-height:48px">בחירת קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="cxFile" style="position:absolute;opacity:0;width:1px;height:1px"></label>
  <button class="btn g w" style="min-height:48px;margin-top:8px" data-a="go" data-v="cxSales">מכירות כספית והתאמה לסגירת קופה</button>
  <p class="note">${X.cfg?X.cfg.err?esc(X.cfg.err):last?'סנכרון אחרון: '+esc(new Date(last.at).toLocaleString('he-IL'))+' · '+nf(X.cfg.items)+' קודים מקושרים':'עוד לא היה סנכרון. בסנכרון הראשון כל הקטלוג נקלט כמוצרים, עם כמות 0 ("לא נספר").':'טוען…'}</p></div>
  ${expH(!!last)}
+ ${typeof window.cxBotCardH==='function'?window.cxBotCardH():''}
  <details class="card"><summary style="min-height:44px;display:flex;align-items:center"><b>הגדרות</b></summary><form data-f="cxCfgF"><label class="f"><span>קודים מיוחדים שלא נקלטים כמוצרים (מופרדים בפסיק)</span><input name="skip" dir="ltr" value="${esc(((c&&c.skip)||C.SKIP).join(', '))}"></label><p class="note" style="margin-top:0">למשל 1000 פריט כללי, 9999 תשלום חוב. בשלב הבא גם לא ישנו מלאי.</p><button class="btn g w">שמירה</button></form></details>`}};
 
 const expH=has=>`<div class="card"><h3 style="margin-top:0">קבצים לכספית</h3><p class="note" style="margin-top:0">שינויים שנעשו באפליקציה יוצאים לכספית בקובץ. טוענים אותו בכספית במסך ייבוא הפריטים (בפעם הראשונה – לנסות עם פריט אחד).</p>

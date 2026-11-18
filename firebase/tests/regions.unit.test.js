@@ -15,7 +15,7 @@ const hook = require(path.join(FN_DIR, 'yemot-hook.js')); // tzintukJoin מוש�
 const R = require(path.join(FN_DIR, 'lib', 'region.js'));
 
 const BOTH = ['europe-west1', 'us-central1'];
-const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks', 's3Rounds', 's3Clean', 'arFile', 'arRemind', 'secMediaClean', 'pushAct', 'drRemind'];
+const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks', 's3Rounds', 's3Clean', 'arFile', 'arRemind', 'secMediaClean', 'pushAct', 'drRemind', 'cxBotWatch'];
 const ep = (f) => f && f.__endpoint;
 const regions = (f) => [].concat(ep(f).region || []);
 const entries = Object.entries(ex).filter(([, f]) => ep(f));
@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'drRemind', 'expirePromosOnLine', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -90,6 +90,13 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.ok(e.timeoutSeconds > 60 && e.timeoutSeconds <= 540);
     assert.ok(ep(ex.startImport).callableTrigger);
     assert.deepEqual(regions(ex.startImport), BOTH);
+  });
+
+  it('רובוט כספית (18.11.2026): cxBot – onRequest ב-europe-west1 בלבד (כתובת קבועה בתוסף); cxBotWatch – מתוזמנת ב-us-central1 בלבד; cxBotTok/cxBotDisc – onCall בשני האזורים', () => {
+    assert.ok(ep(ex.cxBot).httpsTrigger, 'cxBot היא onRequest');
+    assert.deepEqual(regions(ex.cxBot), ['europe-west1']);
+    assert.ok(ep(ex.cxBotWatch).scheduleTrigger, 'cxBotWatch מתוזמנת');
+    for (const n of ['cxBotTok', 'cxBotDisc']) assert.deepEqual(regions(ex[n]), BOTH, n);
   });
 
   it('אין פונקציה שאינה onCall ביותר מאזור אחד', () => {

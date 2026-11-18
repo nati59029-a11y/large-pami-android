@@ -19,7 +19,7 @@
 - ריצה אחת בכל רגע. שגיאת רשת/שרת: ניסיון חוזר אחרי 1, 4, 15 דקות. צריך התחברות לכספית → דיווח (פעם ביום) והבדיקה הבאה מנסה שוב.
 - לשונית כספית ייעודית של התוסף (מוצמדת, לא פעילה). התוסף לא נוגע בלשוניות של בעל העסק ולא ממלא סיסמה.
 
-## חוזה cxBot (לצד השרת – טרם מומש)
+## חוזה cxBot (צד השרת: `firebase/functions/caspit-bot.js`, בדיקות: `firebase/tests/caspit-bot.test.js`)
 `POST <functions>/cxBot`, `Authorization: Bearer <bizId>.<32B base64url>`, `Content-Type: application/json`.
 גוף: `{ op, ver, ...שדות }`. תשובה: `{ ok:true, ... }`, או `{ ok:false, reason, msg }` (msg בעברית).
 סטטוס: 401/403 → החיבור בוטל (התוסף מפסיק); 429 → מגבלה; 5xx → ניסיון חוזר; 4xx עם `reason` → לפי reason.
@@ -34,6 +34,8 @@
 | `export` | `kind:'new'\|'price'`, `max`, `log` | `n, csv, rows` (כמו cxExport). **מומלץ שהשרת יסרב לפני סימון pd אם n > max** – התוסף מסרב לטעון לכספית מעל המגבלה |
 | `importResult` | `run, kind, n, ok, text (≤500), hash` | `{ok:true}` |
 | `report` | ריצה: `run, kind:'run', st, err?, steps, info`. היכרות: `kind:'disc', data` (מסונן, ≤1MB) | `{ok:true}` |
+
+השרת: היום האחרון שנקלט (`lastSales`) מתקדם לפי `report` – רק ימים מתוך `days` של ה-hello, ברצף מההתחלה, שמופיעים ב-`info.sales` (גם יום בלי מכירות). `export` מעל המגבלה → `reason:'limit'` לפני שמשהו מסומן. `apply`/`export` בזמן שמנהל שומר בטלפון → `reason:'busy'` (ניסיון חוזר).
 
 `run` של upload/preview/apply הוא מזהה משנה שהתוסף יוצר לכל קטלוג/יום (`/^[A-Za-z0-9_-]{8,40}$/`); `log` = `runId` מ-hello.
 מגבלות בתוסף: ≤500 שורות מחיר, ≤50 פריטים חדשים (או `limits.newMax` אם נמוך יותר), אחרת עוצר עם `limit` ומדווח.

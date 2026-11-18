@@ -14,6 +14,8 @@ on:
       - '.github/workflows/**'
       # תוסף כספית למחשב (נבנה ב-caspit-ext.yml) – לא משנה את האפליקציה, לא בונה ולא מפרסם APK
       - 'caspit-extension/**'
+      - 'docs/caspit-extension-install.md'
+      - 'scripts/sync-ext-core.js'
   workflow_dispatch:
     inputs:
       publish:
