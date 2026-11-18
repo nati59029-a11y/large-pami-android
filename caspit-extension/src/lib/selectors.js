@@ -7,7 +7,7 @@
 'use strict';
 const OPS = new Set(['nav', 'waitFor', 'click', 'select', 'setDate', 'setFile', 'text']);
 const CLICKABLE = 'button,a,[role=button],[role=menuitem],[role=tab],[role=option],li,input[type=button],input[type=submit],label,span,div';
-const norm = (s) => String(s == null ? '' : s).replace(/[‎‏]/g, '').replace(/[”“״"]/g, '"').replace(/\s+/g, ' ').trim();
+const norm = (s) => String(s == null ? '' : s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\u00a0/g, ' ').replace(/[”“״"]/g, '"').replace(/\s+/g, ' ').trim();
 const own = (el) => norm(el.innerText != null && el.innerText !== '' ? el.innerText : el.textContent);
 function visible(el) {
   if (!el) return false;
@@ -98,11 +98,21 @@ async function choose(doc, el, option, ctx) {
     setValue(el, o.value, ctx.win);
     return true;
   }
+  // רשימה נפתחת (למשל vue-multiselect בכספית – נפתחת ב-focus, לא בלחיצה): לוחצים, מפקסים, ומחכים שהאפשרויות יצוירו
   el.click();
+  try { el.focus(); } catch (e) { /* */ }
+  fire(el, 'focus', ctx.win);
   await ctx.sleep(300);
-  const o = await waitFind(doc, { text: option, tag: '[role=option],li,a,button,span,div,mat-option' }, 4000, ctx.sleep, ctx.now);
+  const box = (el.closest && el.closest('.multiselect,[role=combobox],[role=listbox]')) || doc;
+  const T = { text: option, tag: '.multiselect__option,[role=option]' };
+  let o = await waitFind(box, T, 3000, ctx.sleep, ctx.now);
+  if (!o) o = await waitFind(doc, { text: option, tag: '.multiselect__option,[role=option],li,a,button,span,div,mat-option' }, 2000, ctx.sleep, ctx.now);
   if (!o) return false;
-  o.click();
+  // vue-multiselect: הבחירה ב-span.multiselect__option (לחיצה על פנימי עולה אליו); mousedown לפני – כמו עכבר אמיתי
+  const tgt = (o.closest && o.closest('.multiselect__option')) || o;
+  fire(tgt, 'mousedown', ctx.win);
+  tgt.click();
+  await ctx.sleep(300);
   return true;
 }
 // guard = { origin, path }: הדף חייב להיות באותו מקור, ובנתיב path (או מתחתיו)
@@ -111,11 +121,13 @@ function onPath(win, g) {
 }
 // לוח שנה (vuejs-datepicker, כמו בדוח המכירות של כספית): השדה לקריאה בלבד – פותחים את הלוח, עוברים לחודש הנכון ולוחצים על היום.
 // הכותרת "נובמבר 2026" / "November 2026" / "11/2026". כפתורי החודש (prev/next) מתהפכים ב-RTL – לכן בודקים אחרי כל לחיצה לאן הלכנו.
-const MONTHS = [['ינואר', 'jan'], ['פברואר', 'feb'], ['מרץ', 'mar'], ['אפריל', 'apr'], ['מאי', 'may'], ['יוני', 'jun'], ['יולי', 'jul'], ['אוגוסט', 'aug'], ['ספטמבר', 'sep'], ['אוקטובר', 'oct'], ['נובמבר', 'nov'], ['דצמבר', 'dec']];
+// שמות מלאים או מקוצרים ("נוב 2026" בכספית, עם/בלי גרש): מילה של 3 אותיות לפחות שהיא תחילת שם החודש
+const MONTHS = [['ינואר', 'january'], ['פברואר', 'february'], ['מרץ', 'march'], ['אפריל', 'april'], ['מאי', 'may'], ['יוני', 'june'], ['יולי', 'july'], ['אוגוסט', 'august'], ['ספטמבר', 'september'], ['אוקטובר', 'october'], ['נובמבר', 'november'], ['דצמבר', 'december']];
 function monthYear(txt) {
-  const t = norm(txt).toLowerCase(), y = /(\d{4})/.exec(t);
+  const t = norm(txt).toLowerCase().replace(/[׳'`"״.]/g, ''), y = /(\d{4})/.exec(t);
   if (!y) return null;
-  let m = MONTHS.findIndex(([he, en]) => t.includes(he) || t.includes(en));
+  const words = t.split(/[^a-z\u05d0-\u05ea]+/).filter((w) => w.length >= 3);
+  let m = MONTHS.findIndex((names) => words.some((w) => names.some((nm) => nm.startsWith(w))));
   if (m < 0) { const n = /(\d{1,2})\s*[/.-]\s*\d{4}/.exec(t); m = n ? +n[1] - 1 : -1; }
   return m >= 0 && m < 12 ? { y: +y[1], m } : null;
 }
@@ -149,8 +161,9 @@ async function pickCal(doc, el, day, cfg, C) {
   const cells = all(c, K.day).filter((x) => visible(x) && !/\b(blank|disabled)\b/.test(String(x.className)) && own(x) === String(D));
   if (cells.length !== 1) return false;
   cells[0].click(); await C.sleep(300);
-  const n = (String(el.value || '').match(/\d+/g) || []).map(Number);
-  return n.includes(D) && n.includes(Y) && n.includes(M);
+  // אימות: היום והשנה בשדה, והחודש – כמספר או כשם ("17 נוב 2026")
+  const v = String(el.value || ''), n = (v.match(/\d+/g) || []).map(Number), my = monthYear(v);
+  return n.includes(D) && n.includes(Y) && (n.includes(M) || !!(my && my.m === M - 1));
 }
 async function setDateAny(doc, el, day, s, C) {
   if (el.readOnly || (el.closest && el.closest((s.cal && s.cal.root) || CAL.root))) return pickCal(doc, el, day, s.cal, C);

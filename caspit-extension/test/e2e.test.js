@@ -225,7 +225,7 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.ok(!imp.controls.some((c) => c.type === 'password'));
   assert.ok(imp.probe.every((p) => !p.done || ['nav', 'waitFor', 'text', 'select'].includes(p.op)), 'no change made on csv-imports: ' + JSON.stringify(imp.probe));
   // היכרות v2: אפשרויות רשימת סוג הקובץ, ואחרי בחירה (רק לחשיפה) – שדה הקובץ וכפתור הטעינה; אף קובץ לא הועלה
-  assert.deepEqual(imp.peek[0].items, ['טעינת פריטים חדשים', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים', 'טעינת לקוחות']);
+  assert.deepEqual(imp.peek[0].items, ['טעינת פריטים חדשים', 'טעינת מועדון לקוחות', 'טעינת לקוחות הקפה', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים', 'עדכון מחיר בחנות', 'עדכון פריטים', 'טעינת פריטים חדשים מנטפוס']);
   assert.ok(imp.controls.some((c) => c.text === 'טען קובץ'), 'כפתור הטעינה נחשף');
   assert.ok(!imp.probe.some((p) => (p.op === 'setFile' || p.op === 'click') && p.done), 'בלי קובץ ובלי לחיצה על טעינה');
   const sp = rep.pages[2];
