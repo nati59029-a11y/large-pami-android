@@ -7,6 +7,10 @@
 // tkDue חייב לתת בדיוק את אותו ערך כמו באפליקציה: סימון "באיחור" בחוקים נבדק מול due של המשימה.
 
 const TZ = 'Asia/Jerusalem';
+// שבת וחג (18.11.2026, התראות משימות – tasks-push.js): חלון "שקט" בשעון ישראל. ערב שבת/חג מ-QUIET_FROM_H, ועד QUIET_TO_H במוצאי שבת/חג.
+// בעל העסק רשאי לשנות את השעות (מספרים שלמים 0–23).
+const QUIET_FROM_H = 13;
+const QUIET_TO_H = 21;
 // העתק מדויק של TK_OFF באפליקציה (לוח החגים של המשימות)
 const TK_OFF = { Elul: [29], Tishri: [1, 2, 9, 10, 14, 15, 16, 17, 18, 19, 20, 21, 22], Nisan: [14, 15, 16, 17, 18, 19, 20, 21], Sivan: [5, 6] };
 // התאריך העברי של יום גרגוריאני: מחשבים על 12:00 UTC של אותו יום, עם timeZone UTC – אותו יום עברי כמו 12:00 מקומי באפליקציה
@@ -57,6 +61,30 @@ function isHoliday(o) {
   } catch (e) { /* כמו באפליקציה: כשל בלוח העברי = לא חג */ }
   return (HC[k] = h);
 }
+// שבת או יום טוב בישראל (לא חול המועד ולא ערב חג): ראש השנה (א'–ב' תשרי), יום כיפור (י'), סוכות (ט"ו), שמיני עצרת (כ"ב),
+// פסח (ט"ו וכ"א ניסן), שבועות (ו' סיוון). אותו פענוח של הלוח העברי כמו isHoliday; כשל = לא יום מנוחה (מלבד שבת).
+const YT = { Tishri: [1, 2, 10, 15, 22], Nisan: [15, 21], Sivan: [6] };
+const RC = {};
+function isRest(o) {
+  if (weekday(o) === 6) return true;
+  const k = keyOf(o);
+  if (k in RC) return RC[k];
+  let r = false;
+  try {
+    const p = HEB.formatToParts(new Date(Date.UTC(o.y, o.m, o.d, 12)));
+    const m = (p.find((x) => x.type === 'month') || {}).value, dd = +((p.find((x) => x.type === 'day') || {}).value);
+    r = (YT[m] || []).includes(dd);
+  } catch (e) { r = false; }
+  return (RC[k] = r);
+}
+// רגע t בתוך חלון השקט? היום יום מנוחה ועוד לא QUIET_TO_H, או מחר יום מנוחה וכבר QUIET_FROM_H (שעון ישראל)
+function quietAt(t) {
+  const w = wall(t);
+  if (isRest(w) && w.hh < QUIET_TO_H) return true;
+  const n = new Date(Date.UTC(w.y, w.m, w.d + 1));
+  return w.hh >= QUIET_FROM_H && isRest({ y: n.getUTCFullYear(), m: n.getUTCMonth(), d: n.getUTCDate() });
+}
+
 // יום עסקים – בדיוק כמו tkBiz באפליקציה
 function tkBiz(o) { return weekday(o) <= 4 && !isHoliday(o); }
 
@@ -113,4 +141,4 @@ function nextAt(rule, from) {
   return 0;
 }
 
-module.exports = { TZ, TK_OFF, wall, zoned, tkBiz, isHoliday, tkDue, dayMatches, decide, nextAt, dayStr, ymdOf };
+module.exports = { TZ, TK_OFF, QUIET_FROM_H, QUIET_TO_H, isRest, quietAt, wall, zoned, tkBiz, isHoliday, tkDue, dayMatches, decide, nextAt, dayStr, ymdOf };
