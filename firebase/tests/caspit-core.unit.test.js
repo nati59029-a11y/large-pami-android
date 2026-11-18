@@ -287,6 +287,12 @@ describe('סיכום תקופה והתאמה (A3)', () => {
     assert.deepEqual(u[1].un, [{ bk: '7700', bn: 'ב', net: 50 }]);
     assert.equal(u[1].regs[0].st, 'noz');
   });
+  it('recon: סגירה במבנה של סבב 4 (#123: ספירת שטרות cnt, cash, co) – אותה התאמה בדיוק', () => {
+    const reg = { 6200: 'i_yh', 7700: 'i_nl' };
+    const zc = [{ id: 'z1', reg: 'i_yh', d: '2026-11-16', od: '2026-11-16', amt: 85 }, { id: 'z2', reg: 'i_nl', d: '2026-11-16', od: '', amt: 30 }];
+    const zc4 = zc.map((z) => Object.assign({ cnt: { 200: '1', 0.5: '3' }, cash: { c: 300, o: 301, a: 0, p: 0 }, co: { z: 1, s: 1, ids: ['x'], ok: 1, done: 0 }, dk: -2 }, z));
+    assert.deepEqual(C.recon(DAYS, reg, zc4, 10, ['i_yh', 'i_nl']), C.recon(DAYS, reg, zc, 10, ['i_yh', 'i_nl']).map((d) => Object.assign(d, { regs: d.regs.map((c) => Object.assign(c, { zs: c.zs.map((z) => zc4.find((y) => y.id === z.id)) })) })));
+  });
   it('ביצועים: 30 ימים × 2 סניפים × 600 מוצרים – סיכום מתחת ל-300ms', () => {
     const D = [];
     for (let d = 1; d <= 30; d++) for (const bk of ['6200', '7700']) { const it = {}; for (let i = 0; i < 600; i++) it[String(300000 + i)] = { n: 'מוצר ' + i, cat: 'k' + (i % 20), q: 2, r: 0, a: 20, ds: 0, u: 0 }; D.push({ d: '2026-11-' + String(d).padStart(2, '0'), bk, bn: bk, gross: 12000, ret: 0, disc: 0, ntx: 100, nl: 600, sp: 0, un: 0, it }); }

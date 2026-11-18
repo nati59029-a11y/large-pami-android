@@ -263,9 +263,11 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   await sleep(600);
   const pq = QLOG.filter((q) => q.who === 'w1' && q.c === 'ptk').pop();
   check('31א העובד שולף ptk רק של עצמו (owner == uid)', !!pq && pq.where[0] === 'owner' && /w1/.test(pq.where[2]), pq);
+  if (await wp.$('[data-a=tkwAll]')) { await wp.click('[data-a=tkwAll]'); await sleep(300); } // סבב 4: לעובד תמיד משימה אחת – "כל המשימות" פותח את הרשימה
   const wopen = await txt(wp, '#main');
   check('31ב הפרטית של העובד ברשימה עם תג פרטית; הפרטית של w2/המנהל/אחרים לא מופיעה', /להזמין חלב לעצמי/.test(wopen) && /פרטית/.test(wopen) && /תזכורת פרטית של עובד/.test(wopen) && !/פרטית של עובד אחר/.test(wopen));
   await shot(wp, shots, 'w-tk');
+  if (!(await wp.$(`#ptc-${wpk[0]}`)) && (await wp.$('[data-a=tkwAll]'))) { await wp.click('[data-a=tkwAll]'); await sleep(300); } // סבב 4: לעובד תמיד משימה אחת – "כל המשימות" פותח את הרשימה
   if (!(await wp.$(`#ptc-${wpk[0]}`))) { await wp.click(`[data-a=tkwOpen]:has-text("להזמין חלב לעצמי")`); await sleep(400); } // סבב 1: ב"אחר כך" שורה אחת – פותחים
   await wp.click(`#ptc-${wpk[0]} [data-a=ptDone]`); await sleep(600);
   await wp.click('[data-a=tkTab][data-v=done]'); await sleep(400);

@@ -20,16 +20,20 @@ if (mode === 'legacy') {
   /* main כבר כולל את קריאות הזיהוי (אחרי המיזוג של ריבוי עסקים), לכן מסננים אותן משני הצדדים */
   /* cfg/zc (סף פער מזומן, #117–#118): אחרי שנכנס ל-main גם main קורא אותו – מסננים משני הצדדים (17.11.2026) */
   const zcT = (r) => r.method === 'GET' && /\/documents\/cfg\/zc$/.test(new URL(r.url).pathname);
-  const A = A0.filter((r) => !ident(r) && !zcT(r));
+  /* סבב 4 (18.11.2026): תבניות משימה בענן – המנהל קורא את רשימת tkt בכניסה לטופס "משימה חדשה" (GET של האוסף, עד 5 דקות). אחרי שנכנס ל-main גם main קורא אותו – מסננים משני הצדדים */
+  const tkT = (r) => r.method === 'GET' && /\/documents\/(b\/[^/]+\/)?tkt$/.test(new URL(r.url).pathname);
+  /* סבב 3 (קבוצות, #122): אחרי שנכנס ל-main גם main שולח את שאילתת grp של העובד – מסננים משני הצדדים (18.11.2026); בענף נבדקת בחריג הצר למטה */
+  const grT = (r) => r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && /"collectionId":"grp"/.test(r.body || '');
+  const A = A0.filter((r) => !ident(r) && !zcT(r) && !tkT(r) && !grT(r));
   const idn = B.filter(ident); let B2 = B.filter((r) => !ident(r));
   /* סבב 2 (17.11.2026): סף פער מזומן משותף – המנהל קורא את cfg/zc (GET בלבד). חריג צר: רק GET של המסמך הזה, לכל היותר פעם אחת למשתמש, ורק אצל מנהל */
   const zcR = B2.filter(zcT); B2 = B2.filter((r) => !zcT(r));
   if (zcR.some((r) => r.who !== 'm@x.co') || new Set(zcR.map((r) => r.who + '|' + r.step)).size !== zcR.length) { console.log('נכשל: קריאת cfg/zc לא צפויה', zcR.map((r) => r.who + '|' + r.step)); fail++; }
+  /* סבב 4: חריג צר – רק GET של רשימת tkt (בלי מסמך מסוים), רק אצל מנהל, לכל היותר פעם אחת למשתמש בכל שלב */
+  const tkR = B2.filter(tkT); B2 = B2.filter((r) => !tkT(r));
+  if (tkR.some((r) => r.who !== 'm@x.co') || new Set(tkR.map((r) => r.who + '|' + r.step)).size !== tkR.length) { console.log('נכשל: קריאת רשימת tkt לא צפויה', tkR.map((r) => r.who + '|' + r.step)); fail++; }
   /* סבב 3 (17.11.2026): קבוצות התכתבות – העובד מושך את רשימת הקבוצות שהוא חבר בהן (runQuery על grp, mem ARRAY_CONTAINS ה-uid שלו). חריג צר: רק השאילתה הזו, רק עם ה-uid של המשתמש עצמו, לכל היותר פעם אחת לשלב */
-  const grT = (r) => r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && /"collectionId":"grp"/.test(r.body || '');
   const grR = B2.filter(grT); B2 = B2.filter((r) => !grT(r));
-  /* 18.11.2026 (אחרי המיזוג של #121/#122 ל-main): גם main שולח את שאילתת grp בכניסה – מוציאים אותה גם מצד main (אותו תנאי grOk נבדק בענף) */
-  for (let i = A.length - 1; i >= 0; i--) if (grT(A[i])) A.splice(i, 1);
   const grOk = (r) => { try { const q = JSON.parse(r.body).structuredQuery; const f = q.where.fieldFilter; return f.field.fieldPath === 'mem' && f.op === 'ARRAY_CONTAINS' && f.value.stringValue === r.who.split('@')[0]; } catch (e) { return false; } };
   if (grR.some((r) => !grOk(r)) || new Set(grR.map((r) => r.who + '|' + r.step)).size !== grR.length) { console.log('נכשל: שאילתת grp לא צפויה', grR.map((r) => r.who + '|' + r.step + '|' + r.body)); fail++; }
   console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);

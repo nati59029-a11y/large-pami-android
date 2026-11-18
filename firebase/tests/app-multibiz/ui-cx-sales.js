@@ -85,7 +85,7 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   check('7 מסך סיום: משבצות + "למסך המכירות"', fine(p2) && /המכירות נשמרו/.test(p2.text) && /שורות שנקלטו\s*4/.test(p2.text) && /למסך המכירות/.test(p2.text), { small: p2.small });
 
   // 8. מסך "מכירות כספית"
-  await page.evaluate(() => { S.zc = S.zc || []; S.zc.push({ id: 'zq1', reg: 'i_yh', d: '2026-11-16', tm: '21:00', od: '2026-11-16', otm: '08:00', no: '55', by: 'דנה', at: 1, tx: ['ztx1', 'ztx2'] }, { id: 'zq2', reg: 'i_nl', d: '2026-11-16', tm: '21:05', od: '2026-11-15', no: '56', by: 'רון', at: 1, tx: ['ztx3'] });
+  await page.evaluate(() => { S.zc = S.zc || []; S.zc.push({ id: 'zq1', reg: 'i_yh', d: '2026-11-16', tm: '21:00', od: '2026-11-16', otm: '08:00', no: '55', by: 'דנה', at: 1, tx: ['ztx1', 'ztx2'], cash: { c: 300, o: 300, a: 0, p: 0 }, cnt: { 200: '1', 100: '1' } /* סבב 4 (#123): ספירת שטרות בסגירה – לא משנה את ההתאמה */ }, { id: 'zq2', reg: 'i_nl', d: '2026-11-16', tm: '21:05', od: '2026-11-15', no: '56', by: 'רון', at: 1, tx: ['ztx3'] });
     S.tx.push({ id: 'ztx1', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 300, note: 'סגירת קופה', pays: [] }, { id: 'ztx2', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 143.6, note: 'סגירת קופה', pays: [] }, { id: 'ztx3', t: 'inc', cat: 'i_nl', date: '2026-11-16', amt: 13, note: 'סגירת קופה', pays: [] }); });
   await page.click('[data-a=cxGoSales]'); await H.settle(page, 300);
   await page.click('[data-a=cxYPer][data-k=week]'); await H.settle(page, 800);
