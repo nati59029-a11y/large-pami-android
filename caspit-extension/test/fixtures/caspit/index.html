@@ -2,10 +2,12 @@
 <html dir="rtl" lang="he">
 <head><meta charset="utf-8"><title>כספית (דמה לבדיקות)</title></head>
 <body>
-<!-- כספית מדומה לבדיקות התוסף בלבד: נתיבי # כמו בכספית, הורדות דרך XHR/fetch + blob + a.download, וסודות "שתולים" לבדיקת הניקוי -->
+<!-- כספית מדומה לבדיקות התוסף בלבד, במבנה של המשרד האחורי האמיתי (/bo, דוח היכרות 18.11): קטלוג – 4 כפתורי יצוא ומשימה (job) → get_job_result;
+     דוח מכירות – לוח שנה בסגנון vuejs-datepicker (שדה לקריאה בלבד, כפתורי חודש הפוכים ב-RTL) + "צור קובץ"; ייבוא – vue-multiselect #job_type, ושדה הקובץ מופיע רק אחרי הבחירה.
+     נתיבי # כמו בכספית, הורדות דרך XHR/fetch + blob + a.download, וסודות "שתולים" לבדיקת הניקוי -->
 <header id="hdr" hidden>
   <span id="mnu" role="button">ממשקים</span>
-  <div id="sub" hidden><a href="#/reports/items-sales">דוח מכירות לפריטים</a></div>
+  <div id="sub" hidden><a href="#/sales-items-reports">דוח מכירות לפריטים</a></div>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -18,8 +20,43 @@ document.cookie = 'ASP.NET_SessionId=SESSIONabc123def456; path=/';
 window.ev = [];
 function dl(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); ev.push('dl:' + name); }
 document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
+const HE_M = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const pad = (n) => String(n).padStart(2, '0');
+// משימה של כספית: POST (run-as-job) → { job_id } ואחר כך הקובץ מ-get_job_result
+function job(url, body, filename) {
+  fetch(url + '?token=Zx9kQ2mP7vL4nR8sT1wY6bC3', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK, 'run-as-job': 'true', 'channel-name': 'c1' }, body: JSON.stringify(body || {}) })
+    .then((r) => r.json()).then(() => setTimeout(() => {
+      const x = new XMLHttpRequest();
+      x.open('GET', '/bo/files/get_job_result?filename=' + encodeURIComponent(filename));
+      x.setRequestHeader('Authorization', TOK);
+      x.responseType = 'blob';
+      x.onload = () => dl(x.response, filename);
+      x.send();
+    }, 400));
+}
+// לוח שנה בסגנון vuejs-datepicker: input לקריאה בלבד; .prev מקדם חודש ו-.next מחזיר (כמו ב-RTL)
+function datePicker(host, init) {
+  host.innerHTML = '<div class="vdp-datepicker rtl"><div><input class="form-control vue-field-undisable" type="text" readonly></div><div class="vdp-datepicker__calendar" style="display:none"></div></div>';
+  const inp = host.querySelector('input'), cal = host.querySelector('.vdp-datepicker__calendar');
+  let v = init, view = new Date(init.getFullYear(), init.getMonth(), 1);
+  const show = () => { inp.value = pad(v.getDate()) + '/' + pad(v.getMonth() + 1) + '/' + v.getFullYear(); };
+  const draw = () => {
+    const y = view.getFullYear(), m = view.getMonth(), n = new Date(y, m + 1, 0).getDate(), off = new Date(y, m, 1).getDay();
+    cal.innerHTML = '<header><span class="prev">&lt;</span><span class="day__month_btn up">' + HE_M[m] + ' ' + y + '</span><span class="next">&gt;</span></header><div>'
+      + Array.from({ length: off }, () => '<span class="cell day blank"></span>').join('') + Array.from({ length: n }, (_, k) => '<span class="cell day">' + (k + 1) + '</span>').join('') + '</div>';
+    cal.querySelector('.prev').onclick = (e) => { e.stopPropagation(); view = new Date(y, m + 1, 1); draw(); };
+    cal.querySelector('.next').onclick = (e) => { e.stopPropagation(); view = new Date(y, m - 1, 1); draw(); };
+    cal.querySelectorAll('.cell.day:not(.blank)').forEach((c) => { c.onclick = (e) => { e.stopPropagation(); v = new Date(y, m, +c.textContent); show(); cal.style.display = 'none'; }; });
+  };
+  inp.onclick = (e) => { e.stopPropagation(); draw(); cal.style.display = 'block'; };
+  document.addEventListener('click', () => { cal.style.display = 'none'; });
+  show();
+  return () => v;
+}
 function render() {
   const h = location.hash || '#/';
+  // מדמה את כספית האמיתית: מסך מסוים (redir) / כל טעינה (redirLoad) מעבירים אל מחוץ למשרד האחורי (/bo) – לקופה
+  if (localStorage.getItem('redirLoad') === '1' || (localStorage.getItem('redir') && h.startsWith(localStorage.getItem('redir')))) { location.href = '/' + h.slice(2).split('/')[0] + h; return; }
   const app = document.getElementById('app');
   document.getElementById('hdr').hidden = !authed();
   document.getElementById('sub').hidden = true;
@@ -30,35 +67,35 @@ function render() {
   }
   fetch('/api/me?token=Zx9kQ2mP7vL4nR8sT1wY6bC3', { headers: { Authorization: TOK } }).then((r) => r.json()).then((j) => { window.me = j; });
   if (h.startsWith('#/catalogs')) {
-    app.innerHTML = `<h1>קטלוג פריטים</h1><button id="x">${V() === 'new' ? 'שמירת קובץ' : 'ייצוא לאקסל'}</button><table><tr><td>כרטיס 4580123412341234</td></tr></table>`;
-    document.getElementById('x').onclick = () => {
-      const x = new XMLHttpRequest();
-      x.open('GET', '/api/catalogs/export?branch=1&token=Zx9kQ2mP7vL4nR8sT1wY6bC3');
-      x.setRequestHeader('Authorization', TOK);
-      x.responseType = 'blob';
-      x.onload = () => dl(x.response, 'catalog.xlsx');
-      x.send();
-    };
-  } else if (h.startsWith('#/reports/items-sales')) {
-    app.innerHTML = '<h1>דוח מכירות לפריטים</h1><input id="from" placeholder="מתאריך"><input id="to" placeholder="עד תאריך"><button id="run">הפק דוח</button><div id="tbl"></div><button id="xl">ייצוא לאקסל</button>';
-    document.getElementById('run').onclick = () => { document.getElementById('tbl').textContent = 'הדוח מוכן'; ev.push('run'); };
-    document.getElementById('xl').onclick = async () => {
-      const q = new URLSearchParams({ from: document.getElementById('from').value, to: document.getElementById('to').value });
-      const r = await fetch('/api/reports/items-sales?' + q, { headers: { Authorization: TOK } });
-      dl(await r.blob(), 'items-sales.csv');
-    };
+    const B = ['יצוא לאקסל', 'יצוא לספירת מלאי', V() === 'new' ? 'שמירת קובץ' : 'יצוא כולל ברקודים', 'יצוא לשרת משקלים'];
+    app.innerHTML = '<div id="catalog-index"><header class="row catalog-index-header"><div class="col-xs-12 col-sm-9">' + B.map((b, k) => '<button class="btn btn-success" data-k="' + k + '">' + b + '</button>').join('') + '</div></header><table><tr><td>כרטיס 4580123412341234</td></tr></table></div>';
+    app.querySelectorAll('#catalog-index button').forEach((b) => { b.onclick = () => { ev.push('cat:' + b.dataset.k); if (b.dataset.k === '0') job('/bo/merkaz/items/report.xlsx', {}, 'catalogs.xlsx'); if (b.dataset.k === '2') job('/bo/merkaz/items/full_report.xlsx', { include_store_price: false }, 'catalogs_with_barcodes.xlsx'); }; });
+  } else if (h.startsWith('#/sales-items-reports')) {
+    app.innerHTML = '<div class="panel panel-default"><div class="panel-body"><div class="form-group row"><form class="form-inline col-sm-5"><div class="form-group title-on-top"><label>מתאריך</label><div class="vue-field-value" id="dfrom"></div></div><div class="form-group title-on-top"><label>עד תאריך</label><div class="vue-field-value" id="dto"></div></div></form><div class="col-sm-7 align-center"><button type="button" class="btn btn-success" id="mk">צור קובץ</button></div></div></div></div>';
+    const now = new Date(), f = datePicker(document.getElementById('dfrom'), now), t = datePicker(document.getElementById('dto'), now);
+    document.getElementById('mk').onclick = () => { const a = f(), b = t(); const k = (d) => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()); ev.push('mk:' + k(a) + '-' + k(b)); job('/bo/merkaz/reports/sales_items', { from: k(a), to: k(b) }, 'sales_items_' + k(a) + '_' + k(b) + '.csv'); };
   } else if (h.startsWith('#/csv-imports')) {
-    app.innerHTML = `<h1>ייבוא קבצים</h1><label>סוג <select id="t"><option value="">בחר</option><option value="new">טעינת פריטים חדשים</option><option value="price">עדכון מחיר לצרכן ו/או מחיר עלות לפריטים</option><option value="cust">טעינת לקוחות</option></select></label>
-      <input type="file" id="f"><label>סיסמת מנהל <input type="password" id="mp" value="hunter2pass"></label><input id="note" value="owner-secret-value">
-      <button id="go">טען קובץ</button><div class="result" role="alert"></div>`;
-    document.getElementById('go').onclick = async () => {
-      const t = document.getElementById('t').value, f = document.getElementById('f').files[0];
-      if (!t || !f) { document.querySelector('.result').textContent = 'שגיאה: חסר סוג או קובץ'; return; }
-      const text = await f.text();
-      const r = await fetch('/api/csv-imports', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK }, body: JSON.stringify({ type: t, name: f.name, text }) });
-      const j = await r.json();
-      setTimeout(() => { document.querySelector('.result').textContent = `הטעינה הסתיימה: ${j.n} פריטים נטענו`; }, 300);
-    };
+    fetch('/bo/merkaz/upload_csv_index', { headers: { Authorization: TOK } });
+    const O = [['new', 'טעינת פריטים חדשים'], ['price', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים'], ['cust', 'טעינת לקוחות']];
+    app.innerHTML = '<div class="csv-import-form app-page"><div class="form-group title-on-top"><label>בחר סוג קובץ טעינה</label><div class="multiselect"><div class="multiselect__tags"><input id="job_type" type="text" class="multiselect__input" placeholder="בחר"></div><div class="multiselect__content-wrapper" style="display:none"><ul class="multiselect__content">'
+      + O.map(([v, t]) => '<li class="multiselect__element"><span class="multiselect__option" data-v="' + v + '"><span>' + t + '</span></span></li>').join('') + '</ul></div></div></div><div id="more"></div>'
+      + '<label>סיסמת מנהל <input type="password" id="mp" value="hunter2pass"></label><input id="note" value="owner-secret-value"><div class="result" role="alert"></div></div>';
+    const wrap = app.querySelector('.multiselect__content-wrapper'), jt = document.getElementById('job_type');
+    let t = '';
+    jt.addEventListener('focus', () => { wrap.style.display = 'block'; });
+    jt.addEventListener('click', () => { wrap.style.display = 'block'; });
+    jt.addEventListener('keydown', (e) => { if (e.key === 'Escape') wrap.style.display = 'none'; });
+    app.querySelectorAll('.multiselect__option').forEach((o) => { o.onclick = (e) => { e.stopPropagation(); t = o.dataset.v; jt.value = o.textContent; wrap.style.display = 'none'; ev.push('type:' + t);
+      document.getElementById('more').innerHTML = '<input type="file" id="f" style="display:none"><label for="f" class="btn btn-default">בחר קובץ</label> <button id="go" class="btn btn-primary">טען קובץ</button>';
+      document.getElementById('go').onclick = async () => {
+        const f = document.getElementById('f').files[0];
+        if (!t || !f) { document.querySelector('.result').textContent = 'שגיאה: חסר סוג או קובץ'; return; }
+        const text = await f.text();
+        const r = await fetch('/bo/merkaz/upload_csv', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK }, body: JSON.stringify({ type: t, name: f.name, text }) });
+        const j = await r.json();
+        setTimeout(() => { document.querySelector('.result').textContent = `הטעינה הסתיימה: ${j.n} פריטים נטענו`; }, 300);
+      }; }; });
+    document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
   } else {
     app.innerHTML = '<h1>ראשי</h1>';
   }

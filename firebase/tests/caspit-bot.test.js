@@ -373,6 +373,12 @@ describe('רובוט כספית – cxBotWatch', () => {
     r = await BOT.runWatch({ now: t11 + 3600e3, send });
     assert.deepEqual(r[A], [], 'פעם ביום');
     assert.equal(r[B], undefined, 'עסק בלי מחשב מחובר – לא נבדק');
+    // התוסף עצר בדף שאינו המשרד האחורי (wrong-page) – התראה, פעם ביום
+    await adm().doc(`b/${A}/private/cxbot`).set({ lr: { id: 'r3', at: t11 + 2 * 3600e3, st: 'fail', code: 'wrong-page', msg: '', step: 'exportNew' } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual((await BOT.runWatch({ now: t11 + 3 * 3600e3, send }))[A], ['wrong-page']);
+    assert.match(PUSH[0].body, /התוסף הגיע לדף שאינו המשרד האחורי של כספית ועצר/);
+    assert.deepEqual((await BOT.runWatch({ now: t11 + 4 * 3600e3, send }))[A], [], 'פעם ביום');
     // יום אחרי: סנכרן עד אתמול – אין "לא סנכרן"; היום האחרון שלשום → "לא סנכרן הלילה" (הרגיל)
     await adm().doc(`b/${A}/private/cxbot`).set({ sd: '2026-11-20', lr: null }, { merge: true });
     assert.deepEqual((await BOT.runWatch({ now: at('2026-11-21', 11), send }))[A].filter((k) => k.startsWith('nosync')), []);

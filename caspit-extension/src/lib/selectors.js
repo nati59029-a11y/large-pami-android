@@ -1,6 +1,6 @@
 // תוסף כספית – מריץ צעדי מסך (selectors.json) בתוך הלשונית של כספית, בעולם המבודד של התוסף (לא נגיש לדף).
 // סט צעדים קבוע בלבד: nav | waitFor | click | select | setDate | setFile | text. אין הרצת קוד מהקובץ.
-// מטרה (t): { css, text, textAny:[], aria, tag, nth, alt:{מטרה חלופית} } – קודם css/aria, אחר כך טקסט מדויק, ואז טקסט מוכל. רק רכיבים גלויים.
+// מטרה (t): { css, text, textAny:[], aria, tag, nth, hidden, alt:{מטרה חלופית} } (hidden: גם רכיב מוסתר – רק לשדה קובץ) – קודם css/aria, אחר כך טקסט מדויק, ואז טקסט מוכל. רק רכיבים גלויים.
 // מצב probe (היכרות): מבצע רק nav וצעדים שמסומנים safe; צעד submit לעולם לא מבוצע; מדווח לכל צעד אם נמצא.
 // לעולם לא ממלא סיסמה או שם משתמש: setDate/setFile מסרבים לשדות סיסמה, ואין צעד "הקלדה" כללי.
 (function (root) {
@@ -32,7 +32,7 @@ function find(doc, t) {
   if (!t || typeof t !== 'object') return null;
   const nth = Number.isInteger(t.nth) ? t.nth : 0;
   let list = [];
-  if (t.css) list = all(doc, t.css).filter(visible);
+  if (t.css) list = all(doc, t.css).filter(t.hidden ? Boolean : visible);
   if (!list.length && t.aria) list = all(doc, '[aria-label]').filter((el) => norm(el.getAttribute('aria-label')).includes(norm(t.aria))).filter(visible);
   const texts = t.text ? [t.text] : Array.isArray(t.textAny) ? t.textAny : [];
   if (!list.length && texts.length) { list = byText(doc, texts, t.tag, true); if (!list.length) list = byText(doc, texts, t.tag, false); }
@@ -105,6 +105,77 @@ async function choose(doc, el, option, ctx) {
   o.click();
   return true;
 }
+// guard = { origin, path }: הדף חייב להיות באותו מקור, ובנתיב path (או מתחתיו)
+function onPath(win, g) {
+  try { const L = win.location, p = String(L.pathname || ''); return L.origin === g.origin && (p === g.path || p.startsWith(g.path + '/')); } catch (e) { return false; }
+}
+// לוח שנה (vuejs-datepicker, כמו בדוח המכירות של כספית): השדה לקריאה בלבד – פותחים את הלוח, עוברים לחודש הנכון ולוחצים על היום.
+// הכותרת "נובמבר 2026" / "November 2026" / "11/2026". כפתורי החודש (prev/next) מתהפכים ב-RTL – לכן בודקים אחרי כל לחיצה לאן הלכנו.
+const MONTHS = [['ינואר', 'jan'], ['פברואר', 'feb'], ['מרץ', 'mar'], ['אפריל', 'apr'], ['מאי', 'may'], ['יוני', 'jun'], ['יולי', 'jul'], ['אוגוסט', 'aug'], ['ספטמבר', 'sep'], ['אוקטובר', 'oct'], ['נובמבר', 'nov'], ['דצמבר', 'dec']];
+function monthYear(txt) {
+  const t = norm(txt).toLowerCase(), y = /(\d{4})/.exec(t);
+  if (!y) return null;
+  let m = MONTHS.findIndex(([he, en]) => t.includes(he) || t.includes(en));
+  if (m < 0) { const n = /(\d{1,2})\s*[/.-]\s*\d{4}/.exec(t); m = n ? +n[1] - 1 : -1; }
+  return m >= 0 && m < 12 ? { y: +y[1], m } : null;
+}
+const CAL = { root: '.vdp-datepicker', cal: '.vdp-datepicker__calendar', head: 'header .day__month_btn,header span:not(.prev):not(.next)', prev: '.prev', next: '.next', day: '.cell.day' };
+async function pickCal(doc, el, day, cfg, C) {
+  const K = Object.assign({}, CAL, cfg || {});
+  const [Y, M, D] = String(day).split('-').map(Number);
+  const box = (el.closest && el.closest(K.root)) || doc;
+  el.click(); fire(el, 'focus', C.win);
+  const calOf = () => all(box, K.cal).find(visible);
+  let c = null;
+  for (let k = 0; k < 20 && !c; k++) { c = calOf(); if (!c) await C.sleep(150); }
+  if (!c) return false;
+  const head = () => { const h = c.querySelector(K.head); return h ? monthYear(own(h)) : null; };
+  const want = Y * 12 + (M - 1);
+  let btn = null;
+  for (let k = 0; k < 30; k++) {
+    const h = head();
+    if (!h) return false;
+    const diff = want - (h.y * 12 + h.m);
+    if (!diff) break;
+    if (!btn) btn = diff < 0 ? K.prev : K.next;
+    const b = c.querySelector(btn);
+    if (!b) return false;
+    b.click(); await C.sleep(200);
+    const h2 = head();
+    if (h2 && Math.abs(want - (h2.y * 12 + h2.m)) > Math.abs(diff)) btn = btn === K.prev ? K.next : K.prev; // הכיוון הפוך (RTL)
+  }
+  const h = head();
+  if (!h || h.y * 12 + h.m !== want) return false;
+  const cells = all(c, K.day).filter((x) => visible(x) && !/\b(blank|disabled)\b/.test(String(x.className)) && own(x) === String(D));
+  if (cells.length !== 1) return false;
+  cells[0].click(); await C.sleep(300);
+  const n = (String(el.value || '').match(/\d+/g) || []).map(Number);
+  return n.includes(D) && n.includes(Y) && n.includes(M);
+}
+async function setDateAny(doc, el, day, s, C) {
+  if (el.readOnly || (el.closest && el.closest((s.cal && s.cal.root) || CAL.root))) return pickCal(doc, el, day, s.cal, C);
+  setValue(el, dateFor(el, day, s.fmt), C.win);
+  return true;
+}
+// היכרות: פותחים רכיב (רשימה נפתחת / לוח שנה) רק כדי לראות מה יש בו, רושמים טקסטים ומבנה, וסוגרים (Escape + לחיצה ריקה על הרקע). לא בוחרים כלום.
+async function peek(doc, p, C) {
+  const out = { found: false };
+  const el = find(doc, p.open);
+  if (!el || isPass(el)) return out;
+  out.found = true; out.el = desc(el);
+  el.click(); fire(el, 'focus', C.win);
+  await C.sleep(p.ms || 600);
+  const box = p.within ? (el.closest && el.closest(p.within)) || doc : doc;
+  out.items = all(box, p.items || '[role=option],li').filter(visible).slice(0, p.max || 40).map((x) => own(x).slice(0, 60)).filter(Boolean);
+  if (p.struct) {
+    const s = all(box, p.struct).find(visible);
+    if (s) out.struct = { css: cssPath(s), cls: String(s.className || '').slice(0, 80), kids: Array.from(s.querySelectorAll('*')).slice(0, 30).map((k) => String(k.tagName).toLowerCase() + (k.className && typeof k.className === 'string' ? '.' + k.className.trim().split(/\s+/).slice(0, 3).join('.') : '') + (k.children.length ? '' : ':' + own(k).slice(0, 20))) };
+  }
+  try { el.dispatchEvent(new (C.win.KeyboardEvent || C.win.Event)('keydown', { key: 'Escape', bubbles: true })); el.blur && el.blur(); } catch (e) { /* */ }
+  fire(doc.body, 'mousedown', C.win); fire(doc.body, 'click', C.win);
+  await C.sleep(200);
+  return out;
+}
 // מריץ את הצעדים. ctx: { doc, win, vars, files:{name:{name,mime,b64}}, probe, sleep, now, onCapture(i) }
 // → { ok, steps:[{ i, op, found, done, el }], miss: i | null, text }
 async function runSteps(steps, ctx) {
@@ -117,6 +188,8 @@ async function runSteps(steps, ctx) {
     const rec = { i, op: s.op, found: false, done: false };
     res.steps.push(rec);
     if (!OPS.has(s.op)) { rec.err = 'bad-op'; res.ok = false; res.miss = i; break; }
+    // שמירה (בעל העסק, 18.11): רק במערכת הניהול של כספית (/bo). קופת המכירה (שורש האתר) – לא נוגעים בכלל
+    if (ctx.guard && !onPath(ctx.win, ctx.guard)) { rec.err = 'wrong-page'; res.ok = false; res.wrong = true; res.miss = i; break; }
     if (s.op === 'nav') {
       const h = fill(s.hash || '', ctx.vars);
       if (!/^#\/[\w\-/?=&.%]*$/.test(h)) { rec.err = 'bad-hash'; res.ok = false; res.miss = i; break; }
@@ -141,7 +214,7 @@ async function runSteps(steps, ctx) {
     } else if (s.op === 'select') {
       if (!(await choose(doc, el, fill(s.option, ctx.vars), C))) { rec.err = 'no-option'; res.ok = false; res.miss = i; break; }
     } else if (s.op === 'setDate') {
-      setValue(el, dateFor(el, fill(s.value, ctx.vars), s.fmt), ctx.win);
+      if (!(await setDateAny(doc, el, fill(s.value, ctx.vars), s, C))) { rec.err = 'no-date'; res.ok = false; res.miss = i; break; }
     } else if (s.op === 'setFile') {
       const f = ctx.files && ctx.files[s.file];
       const W = ctx.win;
@@ -186,6 +259,6 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, norm, find, runSteps, controls, isLogin, dateFor, fill, cssPath, b64bytes };
+const api = { OPS, norm, find, onPath, runSteps, peek, monthYear, pickCal, controls, isLogin, dateFor, fill, cssPath, b64bytes };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);
