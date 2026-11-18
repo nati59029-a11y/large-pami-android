@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>סנכרון כספית – הגדרות</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body class="opt">
+<h1><img src="icon.png" alt="">סנכרון כספית – חיבור והגדרות</h1>
+<div class="card">
+  <div class="st"><span class="dot" id="dot"></span><div><b id="stT">טוען…</b><p class="note" id="stN"></p></div></div>
+</div>
+<div class="card" id="connC">
+  <h2>חיבור לאפליקציה</h2>
+  <p class="note">באפליקציה: סנכרון כספית ← רובוט ← "חיבור מחשב". מעתיקים את הקוד ומדביקים כאן. הקוד מוצג פעם אחת בלבד – אל תשלחו אותו לאף אחד.</p>
+  <label for="tok" class="note">הקוד מהאפליקציה</label>
+  <textarea id="tok" spellcheck="false" autocomplete="off" aria-label="הקוד מהאפליקציה"></textarea>
+  <button class="btn" id="connect">חבר</button>
+</div>
+<div class="card hide" id="discC">
+  <h2>מחובר</h2>
+  <dl>
+    <dt>עסק</dt><dd id="biz">—</dd>
+    <dt>שעת סנכרון יומית</dt><dd id="at">—</dd>
+    <dt>הסנכרון הבא</dt><dd id="next">—</dd>
+    <dt>סנכרון אחרון שהצליח</dt><dd id="last">—</dd>
+  </dl>
+  <button class="btn d" id="disconnect">ניתוק המחשב הזה</button>
+</div>
+<div class="card">
+  <h2>חשוב לדעת</h2>
+  <p class="note">התוסף עובד רק כש-Chrome פתוח והמחשב דולק. אם המחשב היה כבוי בשעת הסנכרון – הסנכרון ירוץ כמה דקות אחרי שהמחשב וה-Chrome נפתחים.</p>
+  <p class="note">צריך להיות מחוברים לכספית ב-Chrome הזה. התוסף לעולם לא מקליד סיסמה. אם החיבור לכספית פג – תופיע הודעה, ואחרי שתתחברו הסנכרון ימשיך לבד.</p>
+  <p class="note">גרסה <span id="ver"></span> · שרת: <span id="be"></span></p>
+</div>
+<p class="msg" id="msg" role="status" aria-live="polite"></p>
+<script src="lib/plan.js"></script>
+<script src="ui.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

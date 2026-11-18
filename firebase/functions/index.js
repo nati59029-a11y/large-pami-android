@@ -358,3 +358,7 @@ Object.assign(exports, require('./s3capai'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));
+// סנכרון כספית A1 (17.11.2026): cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist – מנהל בלבד (caspit.js)
+Object.assign(exports, require('./caspit'));
+// רובוט כספית – שלב B (18.11.2026): cxBotTok, cxBotDisc (מנהל / מנהל־על), cxBot (HTTP לתוסף Chrome, europe-west1), cxBotWatch (מתוזמנת, us-central1) – caspit-bot.js
+Object.assign(exports, require('./caspit-bot'));
