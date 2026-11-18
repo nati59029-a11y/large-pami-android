@@ -197,6 +197,8 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     assert.equal(a2.res.lines || 0, 0); assert.equal(await q('cx400001'), q0 - 2, 'אין הורדה כפולה');
     const bd = await bot(TOK, { op: 'upload', run: rid('cs'), kind: 'sales', day: today, part: 0, parts: 1, lines, ver: '0.1.0' });
     assert.equal(bd.body.reason, 'bad-day', 'היום (לא שלם) – לא');
+    const mm = await bot(TOK, { op: 'upload', run: rid('cs'), kind: 'sales', day: BOT.addDays(yday, -1), part: 0, parts: 1, lines, ver: '0.1.0' });
+    assert.equal(mm.body.reason, 'day-mismatch', 'שורות מיום אחר מהיום שנשלח – נדחות');
   });
 
   it('דיווח ריצה: היום האחרון שנקלט מתקדם רק לפי הימים שהשרת ביקש; המנעול משתחרר; hello הבא – בלי ימים', async () => {
@@ -214,6 +216,14 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     assert.equal((await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).get('imp.price.n'), 2);
     const i = await ok('cxBotTok', MGR, { op: 'info' });
     assert.ok(i.runs.length >= 2); assert.equal(i.sd, yday);
+    // info גדול: נשמרים רק ימים תקינים; דיווח פגום – המנעול משתחרר בכל זאת
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: ['x'.repeat(9000), yday, 5], big: 'y'.repeat(9000) } });
+    assert.deepEqual((await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).get('info'), { days: [yday] });
+    const L = adm().doc(`b/${A}/private/cxbot.lock`);
+    await L.set({ o: 'bot:' + (await dev()).id, exp: Date.now() + 600e3, at: 1 });
+    const br = await bot(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', zz: 1, ver: '0.1.0' });
+    assert.equal(br.body.reason, 'bad-field');
+    assert.equal((await L.get()).exists, false, 'המנעול שוחרר גם בדיווח שנדחה');
   });
 
   it('export מעל המגבלה – סירוב לפני סימון pd / קוד חדש; newMax מהאפליקציה', async () => {
@@ -268,9 +278,23 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     const r = await bot(TOK, { op: 'cfg', ver: '0.1.0' });
     assert.equal(r.code, 429); assert.equal(r.body.reason, 'rate');
     await U.set({ day, n: 0, runs: 0 });
-    for (let i = 0; i < 30; i++) await bot('nope', { op: 'cfg' }, { ip: '10.9.9.9' });
-    assert.equal((await bot(TOK, { op: 'cfg', ver: '0.1.0' }, { ip: '10.9.9.9' })).code, 429, 'IP חסום גם עם אסימון תקין');
-    await okb(TOK, { op: 'cfg' }, { ip: '10.9.9.8' });
+    // התוקף מחליף את הערך השמאלי ב-X-Forwarded-For בכל בקשה; הערך הימני (שהתשתית מוסיפה) – אותו
+    for (let i = 0; i < 30; i++) await bot('nope', { op: 'cfg' }, { ip: `1.2.3.${i}, 10.9.9.9` });
+    const blocked = await bot('nope2', { op: 'cfg' }, { ip: '8.8.8.8, 10.9.9.9' });
+    assert.equal(blocked.code, 429, 'זיוף הערך השמאלי לא עוקף את המגבלה');
+    assert.equal(blocked.body.reason, 'rate');
+    // אסימון תקין לא נחסם לעולם בגלל המונה – גם מאותה כתובת, וגם כשמישהו "מתחזה" לכתובת של החנות
+    await okb(TOK, { op: 'cfg' }, { ip: '10.9.9.9' });
+    await okb(TOK, { op: 'cfg' }, { ip: '6.6.6.6, 10.9.9.9' });
+    assert.equal(BOT.clientIp({ headers: { 'x-forwarded-for': 'evil, 1.1.1.1 , 10.9.9.9' } }), '10.9.9.9');
+    assert.equal(BOT.clientIp({ headers: {}, ip: '5.5.5.5' }), '5.5.5.5');
+  });
+
+  it('מוני הכישלונות: מספר מסמכים קבוע גם עם אלפי כתובות מזויפות', async () => {
+    for (let i = 0; i < 300; i += 30) await Promise.all(Array.from({ length: 30 }, (_, k) => bot('zz', { op: 'cfg' }, { ip: `9.${i}.${k}.1` })));
+    const ids = (await adm().collection('cxbot_fail').get()).docs.map((d) => d.id);
+    assert.ok(ids.length <= BOT.FAIL_BUCKETS, String(ids.length));
+    assert.ok(ids.every((x) => /^b\d{1,2}$/.test(x)), ids.join(','));
   });
 
   it('דוח היכרות: נשמר בחלקים; רק מנהל־על צופה ומוריד; גדול מ-1MB נדחה', async () => {

@@ -10,6 +10,7 @@
 - `src/lib/` – `days.js` (isDue / nextAt / ימים להבאה), `plan.js`, `sanitize.js`, `selectors.js` (מריץ צעדי מסך), `util.js` (sha256, CSV/Excel), `api.js` (לקוח cxBot),
   ו-`caspit-core.js` + `xlsx.full.min.js` – עותקים זהים לאפליקציה (נבדק ב-`scripts/sync-ext-core.js`).
 - `src/content/hook-main.js` (בתוך הדף) + `bridge.js` – תפיסת קובץ שכספית מורידה, בלי הרשאת downloads, רק כשהתוסף "דרוך" עם nonce.
+- אבטחה: האסימון נשמר ב-`chrome.storage.local` ונקרא רק ב-service worker; סקריפטי התוכן לא קוראים אחסון, וה-SW מבקש `setAccessLevel(TRUSTED_CONTEXTS)` (ב-local – אם נתמך, לא מאומת). `hook-main.js` לוקח הפניות נקיות (postMessage, btoa, Blob.arrayBuffer, addEventListener) כבר ב-document_start. בדוח ההיכרות אין טקסט של קישורים בתוך טבלאות, ואין אפשרויות של רשימות בחירה ארוכות (מעל 30).
 - `src/selectors.json` – נתונים בלבד (צעדים: nav/waitFor/click/select/setDate/setFile/text). **גרסה 0 = ניחוש**; מצב ההיכרות מגלה את הערכים האמיתיים.
 - `build.js` – `node caspit-extension/build.js --backend prod|test [--zip]` → `dist/<backend>/` (+zip). בודק הרשאות ו-eval לפני בנייה.
 

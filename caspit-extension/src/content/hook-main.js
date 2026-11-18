@@ -12,11 +12,17 @@
   const FILE_CT = /spreadsheet|excel|ms-excel|csv|octet-stream|vnd\.openxmlformats/i;
   const AUTH_H = /^(authorization|x-[\w-]*token[\w-]*|x-csrf-token|x-xsrf-token)$/i;
   const origin = location.origin;
+  // הפניות "נקיות" שנלקחות מיד בטעינה (document_start, לפני כל סקריפט של הדף): סקריפט של הדף שיחליף אחר כך את
+  // window.postMessage / btoa / Blob.arrayBuffer / addEventListener לא יראה את ה-nonce ולא יחליף את הקובץ
+  const RA = Reflect.apply;
+  const post = window.postMessage.bind(window), b64enc = window.btoa.bind(window), fromCC = String.fromCharCode;
+  const blobBuf = Blob.prototype.arrayBuffer, addEv = EventTarget.prototype.addEventListener;
+  const isBlob = (x) => x instanceof Blob;
 
   const tmplPath = (u) => {
     try {
       const x = new URL(u, location.href);
-      const p = x.pathname.split('/').map((s) => (/^\d+$/.test(s) ? '{n}' : /^\d{4}-\d{2}-\d{2}/.test(s) ? '{date}' : /^[0-9a-f-]{16,}$/i.test(s) ? '{id}' : s.length > 40 ? '{s}' : s)).join('/');
+      const p = x.pathname.split('/').map((s) => (/^\d+$/.test(s) ? '{n}' : /^\d{4}-\d{2}-\d{2}/.test(s) ? '{date}' : /^[0-9a-f-]{16,}$/i.test(s) ? '{id}' : s.length > 40 || /[^\x20-\x7e]|%[89a-f]/i.test(s) ? '{s}' : s)).join('/');
       const q = [...x.searchParams.keys()].slice(0, 30).map((k) => {
         const v = x.searchParams.get(k) || '';
         const t = v === '' ? 'empty' : /^\d+$/.test(v) ? 'n' : /^\d{4}-\d{2}-\d{2}|^\d{1,2}[/.]\d{1,2}[/.]\d{2,4}/.test(v) ? 'date' : /^(true|false)$/i.test(v) ? 'bool' : 's';
@@ -40,16 +46,16 @@
   const b64 = (buf) => {
     const u = new Uint8Array(buf);
     let s = '';
-    for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
-    return btoa(s);
+    for (let i = 0; i < u.length; i += 0x8000) s += RA(fromCC, null, u.subarray(i, i + 0x8000));
+    return b64enc(s);
   };
   async function send(blobOrBuf, name, mime, via) {
     const n = armed;
     if (!n) return false;
-    const buf = blobOrBuf instanceof Blob ? await blobOrBuf.arrayBuffer() : blobOrBuf;
+    const buf = isBlob(blobOrBuf) ? await RA(blobBuf, blobOrBuf, []) : blobOrBuf;
     if (!buf || buf.byteLength > MAX_FILE) return false;
     sent++;
-    window.postMessage({ __cx: 'hook', nonce: n, kind: 'file', name: String(name || 'file').slice(0, 120), mime: String(mime || '').slice(0, 100), size: buf.byteLength, via, b64: b64(buf) }, origin);
+    post({ __cx: 'hook', nonce: n, kind: 'file', name: String(name || 'file').slice(0, 120), mime: String(mime || '').slice(0, 100), size: buf.byteLength, via, b64: b64(buf) }, origin);
     return true;
   }
 
@@ -75,11 +81,11 @@
     if (armed && isDl(this)) { grab(this); return; }
     return oClick.apply(this, arguments);
   };
-  window.addEventListener('click', (e) => {
+  RA(addEv, window, ['click', (e) => {
     if (!armed) return;
     const a = e.target && e.target.closest ? e.target.closest('a') : null;
     if (isDl(a)) { e.preventDefault(); e.stopImmediatePropagation(); grab(a); }
-  }, true);
+  }, true]);
   // 3) window.open של קובץ
   const oOpen = window.open;
   window.open = function (u) {
@@ -118,7 +124,7 @@
   };
   X.send = function () {
     const x = this, c = x.__cx, t0 = Date.now();
-    if (c) x.addEventListener('loadend', () => {
+    if (c) RA(addEv, x, ['loadend', () => {
       try {
         const ct = x.getResponseHeader('content-type') || '', cd = x.getResponseHeader('content-disposition') || '';
         const isFile = /attachment/i.test(cd) || FILE_CT.test(ct);
@@ -132,7 +138,7 @@
         }
         rec(Object.assign({ m: c.m, st: x.status, ct: ct.split(';')[0].slice(0, 60), sz, ms: Date.now() - t0, file: isFile || undefined, rh: c.hn.slice(0, 20), keys, via: 'xhr' }, tmplPath(c.u)));
       } catch (e) { /* */ }
-    });
+    }]);
     return oSend.apply(this, arguments);
   };
   // נקודת קצה של כספית מתוך הדף (selectors.json → endpoints). רק אותו מקור, רק GET/POST, עם כותרת ההרשאה שהדף עצמו שלח

@@ -168,8 +168,11 @@ function controls(doc, max) {
     const type = g('type'); if (type) c.type = type;
     for (const k of ['name', 'id', 'aria-label', 'placeholder', 'role', 'href']) { const v = g(k); if (v) c[k === 'aria-label' ? 'aria' : k] = String(v).slice(0, 80); }
     if (c.href && !/^#/.test(c.href)) c.href = '(ext)';
-    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') { const t = own(el).slice(0, 40); if (t) c.text = t; }
-    if (tag === 'select') c.options = Array.from(el.options || []).slice(0, 50).map((o) => norm(o.textContent).slice(0, 60));
+    // פרטיות (בדיקת אבטחה סבב 1): טקסט רק לכפתורים ולקישורים שמחוץ לטבלאות ולרשימות נתונים (שם יש שמות פריטים ולקוחות);
+    // אפשרויות של רשימת בחירה – רק ברשימה קצרה (עד 30, כמו "סוג ייבוא"), אחרת רק המספר. הכול עובר גם את הסינון (sanitize) לפני היציאה
+    const inData = el.closest && el.closest('table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]');
+    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') { const t = inData ? '' : own(el).slice(0, 40); if (t) c.text = t; else if (inData) c.inData = true; }
+    if (tag === 'select') { const op = Array.from(el.options || []); if (op.length <= 30) c.options = op.map((o) => norm(o.textContent).slice(0, 60)); else c.optN = op.length; }
     out.push(c);
   }
   return out;

@@ -14,6 +14,7 @@ const HTML = `<!doctype html><html dir="rtl"><body>
 <button aria-label="סגור חלון">x</button>
 <select id="kind"><option value="">בחר</option><option value="1">טעינת פריטים חדשים</option><option value="2">עדכון מחיר לצרכן ו/או מחיר עלות לפריטים</option></select>
 <div id="dd" role="combobox">בחר סוג</div><ul id="opts" hidden><li role="option">אפשרות א</li><li role="option">אפשרות ב</li></ul>
+<table><tr><td><a href="#/cust/7">ישראל ישראלי</a></td></tr></table>
 <input type="date" id="from"><input type="text" id="to" placeholder="עד תאריך">
 <input type="file" id="f"><button id="go">טען קובץ</button><div id="res" role="alert"></div>
 <form><input name="user" value="owner1"><input type="password" name="pw" value="secret1"></form>
@@ -119,6 +120,7 @@ test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה
   assert.ok(!c.some((x) => x.type === 'password'));
   assert.ok(c.find((x) => x.tag === 'select').options.includes('טעינת פריטים חדשים'));
   assert.ok(c.find((x) => x.text === 'ייצוא לאקסל'));
+  assert.ok(!s.includes('ישראל ישראלי') && c.some((x) => x.inData), 'טקסט בתוך טבלה (שמות) לא נאסף');
   assert.equal(await page.evaluate(() => window.CxSel.isLogin(document, window, {})), true);
   // שדה סיסמה בתוך המערכת המחוברת (יש תפריט "ממשקים") – לא דף התחברות
   assert.equal(await page.evaluate(() => window.CxSel.isLogin(document, window, { shell: { text: 'ממשקים' } })), false);

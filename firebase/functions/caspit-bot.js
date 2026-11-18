@@ -34,8 +34,9 @@ const MIN_VER = '0.1.0';
 const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult'];
 const MAX_BODY = 10 * 1024 * 1024;
 const DISC_MAX = 1024 * 1024;
-const DISC_PART = 400000;
+const DISC_PART = 300000; // תווים; גם ב-3 בייטים לתו – פחות מ-1MiB למסמך
 const CALLS_DAY = 600, RUNS_DAY = 10, FAIL_IP_DAY = 30;
+const FAIL_BUCKETS = 64; // מוני כישלונות: מספר קבוע של מסמכים (cxbot_fail/b0..b63) – כתובת מזויפת לא יוצרת מסמכים חדשים
 const LIM = { price: 500, newMax: 50 };
 const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
@@ -132,12 +133,20 @@ async function cxBotDisc(w, input) {
 }
 
 // ---------- מגבלות ----------
-async function ipBlocked(ipH, day) {
-  const s = await getFirestore().doc('cxbot_fail/' + ipH).get();
+// כתובת הלקוח: הערך הימני ביותר ב-X-Forwarded-For – זה שהתשתית של Google (Cloud Run, שעליו רצות פונקציות v2) מוסיפה בסוף;
+// הערכים משמאל נשלטים בידי הלקוח. (הנחה לפי מקורות משניים, לא מתיעוד רשמי – לא מאומת.) בלי הכותרת – req.ip.
+// גם אם ההנחה שגויה: המונה רק מאט ניסיונות כושלים – בקשה עם אסימון תקין לעולם לא נחסמת בגללו.
+function clientIp(req) {
+  const xs = String((req.headers || {})['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean);
+  return xs.length ? xs[xs.length - 1] : String(req.ip || '');
+}
+const failRef = (ip) => getFirestore().doc('cxbot_fail/b' + (parseInt(sha('cxip:' + ip).slice(0, 8), 16) % FAIL_BUCKETS));
+async function ipBlocked(ip, day) {
+  const s = await failRef(ip).get();
   return s.exists && s.get('day') === day && (s.get('n') || 0) >= FAIL_IP_DAY;
 }
-async function ipFail(ipH, day) {
-  const ref = getFirestore().doc('cxbot_fail/' + ipH);
+async function ipFail(ip, day) {
+  const ref = failRef(ip);
   await ref.firestore.runTransaction(async (tx) => { const s = await tx.get(ref); const n = s.exists && s.get('day') === day ? s.get('n') || 0 : 0; tx.set(ref, { day, n: n + 1 }); });
 }
 // מונה יומי לעסק: פניות וריצות (hello במצב sync). מעל המגבלה → false
@@ -181,6 +190,8 @@ const OPF = {
     if (kind === 'sales') {
       O.onlyKeys(b, ['run', 'kind', 'day', 'part', 'parts', 'lines']);
       if (typeof b.day !== 'string' || !CX.DATE_RE.test(b.day) || b.day >= ilDay(x.now)) throw bad('bad-day', 'יום מכירות לא תקין (רק ימים שלמים)');
+      // כל שורה – מהיום שנשלח (ולכן רק ימים שלמים)
+      if (Array.isArray(b.lines) && b.lines.some((l) => !l || typeof l !== 'object' || l.d !== b.day)) throw bad('day-mismatch', 'שורת מכירה מיום אחר מהיום שנשלח');
       return CX.FNS.cxUpload(w, pick(b, ['run', 'kind', 'part', 'parts', 'lines']));
     }
     O.onlyKeys(b, ['run', 'part', 'parts', 'items']);
@@ -234,6 +245,12 @@ const OPF = {
       return { id };
     }
     if (b.kind !== 'run') throw bad('bad-kind', 'סוג דיווח לא תקין');
+    // דיווח ריצה שנכשל (קלט פגום, תקלה) – המנעול של הרובוט משתחרר בכל זאת
+    try { return await reportRun(w, b, x, o); } catch (er) { await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {}); throw er; }
+  },
+};
+async function reportRun(w, b, x, o) {
+  {
     O.onlyKeys(b, ['run', 'kind', 'st', 'err', 'steps', 'info']);
     if (typeof b.run !== 'string' || !SRUN_RE.test(b.run)) throw bad('bad-run', 'מזהה ריצה לא תקין');
     const st = ['ok', 'fail', 'needs-login', 'wait', 'run'].includes(b.st) ? b.st : 'fail';
@@ -247,9 +264,10 @@ const OPF = {
     });
     const info = b.info && typeof b.info === 'object' && !Array.isArray(b.info) ? b.info : {};
     let lite = JSON.parse(JSON.stringify(info));
-    if (JSON.stringify(lite).length > 8000) lite = { days: Array.isArray(info.days) ? info.days.slice(0, MAX_DAYS) : [] };
+    if (JSON.stringify(lite).length > 8000) lite = { days: (Array.isArray(info.days) ? info.days : []).filter((d) => typeof d === 'string' && CX.DATE_RE.test(d)).slice(0, MAX_DAYS) };
     const ref = runRef(b.run), rs = await ref.get();
-    await ref.set(Object.assign({ st, err: e, steps, info: lite, end: x.now, ver: x.ver, dev: x.dev.id }, rs.exists ? {} : { at: x.now, d: ilDay(x.now), days: [] }), { merge: true });
+    const rv = Object.assign({ st, err: e, steps, info: lite, end: x.now, ver: x.ver, dev: x.dev.id }, rs.exists ? {} : { at: x.now, d: ilDay(x.now), days: [] });
+    await ref.set(rv, { mergeFields: Object.keys(rv) }); // כל שדה מוחלף במלואו (info בלי שאריות מדיווח קודם)
     // היום האחרון שנקלט (sd): ימים שהשרת ביקש ב-hello, ברצף מההתחלה, שהתוסף דיווח שהושלמו (info.sales[day]) – רק ימים שלמים
     const asked = rs.exists && Array.isArray(rs.get('days')) ? rs.get('days') : [];
     const done = info.sales && typeof info.sales === 'object' ? info.sales : {};
@@ -263,8 +281,8 @@ const OPF = {
     if (st !== 'run' && st !== 'wait') await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {});
     if (e && e.code === 'needs-login') await alertBiz(w.bizId, ['needs-login'], x.now, o).catch((er) => logger.warn('cxBot: alert failed', { name: er && er.name }));
     return { sd: up.sd || sd };
-  },
-};
+  }
+}
 
 // ---------- נקודת הקצה ----------
 const STATUS = { 'invalid-argument': 400, 'failed-precondition': 409, 'not-found': 404, 'resource-exhausted': 429, unauthenticated: 401, 'already-exists': 409, aborted: 409, 'permission-denied': 409 };
@@ -283,12 +301,14 @@ async function handle(req, res, opts) {
   if (size > MAX_BODY) return no(413, 'too-big', 'הבקשה גדולה מדי');
   if (!/^application\/json\b/i.test(String(h['content-type'] || ''))) return no(415, 'bad-type', 'נדרש JSON');
   const now = o.now || Date.now(), day = ilDay(now);
-  const ip = String(h['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || '';
-  const ipH = sha('cxip:' + ip).slice(0, 32);
-  if (await ipBlocked(ipH, day)) { logger.warn('cxBot: rejected', { reason: 'ip-limit' }); return no(429, 'rate', 'יותר מדי ניסיונות כושלים. נסו שוב מחר.'); }
   const m = /^Bearer\s+(\S{1,200})$/.exec(String(h.authorization || ''));
   const v = m ? await verify(m[1]) : null;
-  if (!v) { await ipFail(ipH, day); logger.warn('cxBot: rejected', { reason: 'bad-token' }); return no(401, 'auth', 'החיבור לאפליקציה בוטל או לא תקין. יש לחבר מחדש עם קוד חדש מהאפליקציה.'); }
+  // מגבלת ניסיונות כושלים – רק אחרי שהאימות נכשל (אסימון תקין לא נחסם לעולם בגלל המונה)
+  if (!v) {
+    const ip = clientIp(req);
+    if (await ipBlocked(ip, day)) { logger.warn('cxBot: rejected', { reason: 'ip-limit' }); return no(429, 'rate', 'יותר מדי ניסיונות כושלים. נסו שוב מחר.'); }
+    await ipFail(ip, day); logger.warn('cxBot: rejected', { reason: 'bad-token' }); return no(401, 'auth', 'החיבור לאפליקציה בוטל או לא תקין. יש לחבר מחדש עם קוד חדש מהאפליקציה.');
+  }
   const biz = await T.loadBiz(v.bizId);
   if (!biz || biz.status !== 'active' || !biz.features.orders) { logger.warn('cxBot: rejected', { reason: 'biz-off', biz: v.bizId }); return no(403, 'biz-off', 'העסק לא פעיל או שתוספת ההזמנות כבויה'); }
   const b = req.body;
@@ -419,4 +439,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });

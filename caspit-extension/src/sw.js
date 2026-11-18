@@ -8,6 +8,9 @@ const CASPIT = 'https://caspit.valu.co.il/';
 const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות לפני ריצה (רשת, Chrome)
 const TICK_MIN = 15;
 
+// האסימון ב-storage.local: מגבילים את האחסון להקשרים של התוסף בלבד (לא לסקריפטי התוכן בלשונית כספית), אם הדפדפן תומך
+// (setAccessLevel נתמך בוודאות ב-storage.session; ב-local – לא מאומת, ולכן בניסיון בלבד). סקריפטי התוכן (bridge.js, selectors.js) לא קוראים אחסון בכלל.
+for (const a of ['local', 'session']) { try { const p = chrome.storage[a].setAccessLevel && chrome.storage[a].setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }); if (p && p.catch) p.catch(() => {}); } catch (e) { /* לא נתמך */ } }
 const get = (k) => chrome.storage.local.get(k).then((o) => o[k]);
 const set = (o) => chrome.storage.local.set(o);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
