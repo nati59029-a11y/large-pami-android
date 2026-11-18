@@ -102,7 +102,7 @@ const CODE_RE = /^[0-9]{12}$/;
 const CPN_RE = /^[A-Za-z0-9_-]{3,40}$/;
 const DAY = 86400000;
 
-// 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm). מנהל עם posMgr = 'mgr', מנהל עם pos בלבד = 'cashier'. פעולות ניהול (o.mgr) – כל מנהל, כמו היום.
+// 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm). מנהל עם posMgr = 'mgr', מנהל עם pos בלבד = 'cashier'. פעולות ניהול (o.mgr) – כל מנהל, כמו היום, חוץ מהנפקת כרטיס מתנה / פתק זיכוי (giftIn – posMgr).
 const roleOf = (who) => (hasPerm(who, 'posMgr') ? (who.role === 'manager' ? 'mgr' : 'lead') : 'cashier');
 const RANK = { cashier: 0, lead: 1, mgr: 2 };
 const atLeast = (who, r) => RANK[roleOf(who)] >= RANK[r];
@@ -1018,6 +1018,8 @@ async function giftIn(request) {
   if (!['get', 'issue', 'restore', 'sell'].includes(op)) throw bad('bad-op', 'פעולה לא מוכרת');
   if (op === 'sell' && (K.isPractice(input.reqId) || K.isPractice(input.dev))) throw bad('practice', 'פעולת תרגול לא נשלחת לשרת');
   const { who, db } = await gate(request, { mgr: op === 'issue' });
+  // 18.11.2026 (הכרעת בעל העסק): הנפקת כרטיס מתנה (sell) / פתק זיכוי (issue) – מנהל רק עם posMgr (מנהל־על תמיד, hasPerm). עובד – כמו היום. קופונים וצפייה (posMgrRd) – בלי שינוי
+  if ((op === 'issue' || op === 'sell') && who.role === 'manager' && !hasPerm(who, 'posMgr')) throw deny('not-posmgr', 'הנפקת כרטיס מתנה או פתק זיכוי – למנהל עם הרשאת ניהול קופה בלבד');
   keysOk(input, ['op', 'code', 'type', 'amt', 'cust', 'why', 'reqId', 'dev', 'inst', 'pays', 'chg']);
   noCard(input);
   const cfg = await cfgOf(db);

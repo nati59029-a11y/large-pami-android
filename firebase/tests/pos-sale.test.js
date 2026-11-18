@@ -850,6 +850,26 @@ describe('קופה למנהל – רק לפי המתג שמנהל־על הדלי
     assert.equal(R(await call('posSale', MGR0, sale())), 'not-pos');
   });
 
+  it('הנפקת כרטיס מתנה / פתק זיכוי: מנהל בלי posMgr נדחה; עם posMgr ומנהל־על – מצליח; קופון – כל מנהל', async () => {
+    const issue = { op: 'issue', type: 'voucher', amt: 500, why: 'פתק ישן' };
+    const gsell = () => ({ op: 'sell', reqId: reqId(), dev: 'K1', inst: INST1, amt: 1000, pays: [{ m: 'cash', amt: 1000 }] });
+    for (const perms of [undefined, { pos: true, posMgr: false }]) {
+      if (perms) await set(`admins/${MGR0}`, { perms }, true);
+      assert.equal(R(await call('posGift', MGR0, issue)), 'not-posmgr');
+      assert.equal(R(await call('posGift', MGR0, gsell())), perms ? 'not-posmgr' : 'not-pos'); // בלי מתג בכלל – אין קופה
+    }
+    assert.equal((await all('posgift')).length, 0);
+    // קופון – כל מנהל, כמו היום
+    assert.equal(R(await call('posCouponUse', MGR0, { op: 'issue', cust: 'c1', disc: { type: 'pct', pct: 10 } })), 'ok');
+    // posMgr דלוק – מצליח
+    await set(`admins/${MGR0}`, { perms: { pos: true, posMgr: true } }, true);
+    assert.equal(R(await call('posGift', MGR0, issue)), 'ok');
+    assert.equal(R(await call('posGift', MGR0, gsell())), 'ok');
+    assert.equal(R(await call('posGift', MGR, issue)), 'ok');
+    assert.equal(R(await call('posGift', SUPER, Object.assign({ bizId: A }, issue))), 'ok');
+    assert.equal((await all('posgift')).length, 4);
+  });
+
   it('מנהל־על שנכנס לעסק – כמו היום: מוכר ומאשר כמנהל בלי מתג', async () => {
     assert.equal(R(await call('posSale', SUPER, Object.assign(sale(), { bizId: A }))), 'ok');
   });
