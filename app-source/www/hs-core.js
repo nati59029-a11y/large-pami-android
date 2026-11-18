@@ -58,6 +58,7 @@ function hAdd(h, e) { const a = (Array.isArray(h) ? h : []).concat([e]); return 
 // forSup(items, supId) → הפריטים הפתוחים של הספק: המשויכים אליו ואחריהם כל הפריטים הכלליים (all: true = "מופיע לכל הספקים")
 function forSup(items, supId) {
   const L = (Array.isArray(items) ? items : []).filter((x) => x && x.st === 'open');
+  if (!ID.test(String(supId || ''))) return [];
   const own = L.filter((x) => !x.gen && Array.isArray(x.sups) && x.sups.includes(supId)).map((it) => ({ it, all: false }));
   const gen = L.filter((x) => x.gen).map((it) => ({ it, all: true }));
   return own.concat(gen);
@@ -71,11 +72,12 @@ function groups(items, sups, so, PM) {
   const G = new Map();
   const get = (id, name, known) => { if (!G.has(id)) G.set(id, { id, name, known, L: [], O: [] }); return G.get(id); };
   const open = (Array.isArray(items) ? items : []).filter((x) => x && x.st === 'open');
-  open.forEach((x) => { if (x.gen) return; (x.sups || []).forEach((id, i) => { const s = S.find((y) => y.id === id); get(id, s ? s.name : clean((x.supN || [])[i], 60) || id, !!s); }); });
+  // מזהה ספק מהענן נכנס לנתיב (hsph/{id}) – רק מזהה בתבנית מותרת
+  open.forEach((x) => { if (x.gen || !Array.isArray(x.sups)) return; x.sups.forEach((id, i) => { if (typeof id !== 'string' || !ID.test(id)) return; const s = S.find((y) => y.id === id); get(id, s ? s.name : clean((x.supN || [])[i], 60) || id, !!s); }); });
   (Array.isArray(so) ? so : []).forEach((r) => { const nm = clean(r && r.sup, 60); if (!nm) return; const s = byKey.get(keyOf(nm, PM)); (s ? get(s.id, s.name, true) : get(nameId(nm), nm, false)).O.push(r); });
   const out = [...G.values()];
   out.forEach((g) => { g.L = forSup(open, g.id); });
-  return out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'he'));
+  return out.filter((g) => ID.test(g.id)).sort((a, b) => String(a.name).localeCompare(String(b.name), 'he'));
 }
 
 // הצעת ספקים לשם מוצר. ctx: { idx: אינדקס של xIndex (שמות מוצרים מחשבוניות), items: פריטי חוסרים קיימים (כל מצב),
@@ -101,7 +103,7 @@ function suggest(name, ctx, PM) {
   const R = new Map();
   const put = (id, src, s) => { const nm = nameOf(id); if (!nm) return; const r = R.get(id); if (!r || s > r.s) R.set(id, { id, name: nm, src, s }); };
   const nk = keyOf(n, PM);
-  (Array.isArray(ctx.items) ? ctx.items : []).forEach((x) => { if (x && !x.gen && x.nk === nk) (x.sups || []).forEach((id) => put(id, 'prev', 3)); });
+  (Array.isArray(ctx.items) ? ctx.items : []).forEach((x) => { if (x && !x.gen && x.nk === nk && Array.isArray(x.sups)) x.sups.forEach((id) => { if (typeof id === 'string' && ID.test(id)) put(id, 'prev', 3); }); });
   if (PM && ctx.idx) PM.search(ctx.idx, n, { limit: 40, min: MIN }).forEach((h) => put(h.p.sup, 'inv', h.s));
   const cidx = ctx.cidx || (Array.isArray(ctx.prods) ? catIndex(ctx.prods, S, PM) : null);
   if (PM && cidx) PM.search(cidx, n, { limit: 20, min: MIN }).forEach((h) => put(h.p.sup, 'cat', h.s));
@@ -121,6 +123,6 @@ function custText(it, biz) {
   return 'שלום' + nm + ',\nהמוצר "' + (it && it.n || '') + '" שביקשת הגיע' + (biz ? ' ל' + biz : ' לחנות') + '.\nאפשר לבוא לאסוף. תודה!';
 }
 
-const api = { WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, waText, custText, intl, phOk, nameId, keyOf, fmtQ };
+const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, waText, custText, intl, phOk, nameId, keyOf, fmtQ };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.HsCore = api;
 })(typeof self !== 'undefined' ? self : this);

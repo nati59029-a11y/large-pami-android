@@ -767,7 +767,7 @@ service cloud.firestore {
     // מחיקה אמיתית – מנהל בלבד (אין כזו בממשק). שדות: n (1..80), nk (מפתח מנורמל, עד 200), gen (פריט כללי), sups / supN (מזהי ושמות ספקים, עד 10;
     // בפריט כללי – ריקים), why ('store' | 'order' | 'both'), q? (מספר מעל 0 עד 100,000), cust? { nm עד 60, ph ספרות עד 15, cid? },
     // ord? { id, no }, np (0 | 1 – יש תמונה), st ('open' | 'arr' | 'del'), by (uid), byN (השם – isMyName), t (זמן אמת), ub? / ut? (מי ומתי עדכן), h? (היסטוריה, עד 30).
-    // יצירה: st 'open', by = הכותב, בלי ub / ut. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
+    // יצירה: st 'open', by = הכותב, בלי ub / ut / h. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
     // hsr/{id}/p/1: תמונה { img, t, uid } (jpeg / png / webp, 100 עד 900,000 תווים) – יצירה בלבד, בלי עדכון (החלפה = מחיקה ויצירה). מחיקה – הצוות.
     // hsph/{supId}: טלפון ספק { ph (9..15 ספרות), n (שם הספק), byN, t } – נשמר בפעם הראשונה ששולחים לספק בוואטסאפ.
     // hsx/{supId}: שמות מוצרים מחשבוניות ספק { n, it (רשימה, עד 3000), t } – להצעת ספק. קריאה – הצוות; כתיבה – מנהל או עובד עם prc (בלי מחירים).
@@ -775,13 +775,41 @@ service cloud.firestore {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      // 19.11.2026 (בדיקת אבטחה): כל איבר ב-sups הוא מזהה בתבנית מותרת וכל איבר ב-supN שם עד 60 תווים – בדיקה לפי אינדקס (עד 10).
+      function sidOk(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^[A-Za-z0-9_-]{1,80}$')); }
+      function snOk(l, i) { return l.size() <= i || (l[i] is string && l[i].size() <= 60); }
+      function supsOk(d) {
+        return d.sups is list && d.supN is list && d.sups.size() <= 10 && d.supN.size() == d.sups.size()
+          && sidOk(d.sups, 0) && sidOk(d.sups, 1) && sidOk(d.sups, 2) && sidOk(d.sups, 3) && sidOk(d.sups, 4)
+          && sidOk(d.sups, 5) && sidOk(d.sups, 6) && sidOk(d.sups, 7) && sidOk(d.sups, 8) && sidOk(d.sups, 9)
+          && snOk(d.supN, 0) && snOk(d.supN, 1) && snOk(d.supN, 2) && snOk(d.supN, 3) && snOk(d.supN, 4)
+          && snOk(d.supN, 5) && snOk(d.supN, 6) && snOk(d.supN, 7) && snOk(d.supN, 8) && snOk(d.supN, 9);
+      }
+      // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
+      // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
+      // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
+      function hNewOk(e) {
+        return e is map && e.keys().hasAll(['k', 't', 'byN', 'u']) && e.keys().hasOnly(['k', 't', 'byN', 'u'])
+          && e.u == request.auth.uid && isMyName(e.byN) && e.t == request.resource.data.ut
+          && ((request.resource.data.st == 'arr' && e.k == 'man') || (request.resource.data.st == 'del' && e.k == 'del')
+            || (request.resource.data.st == 'open' && e.k in ['undo', 'res']));
+      }
+      function hAppOk(o, n) {
+        return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && hNewOk(n[n.size() - 1])
+          && (o.size() == 0 || (o.size() < 30 ? n[0:o.size()] == o : n[0:29] == o[1:30]));
+      }
+      function hUpdOk() {
+        return request.resource.data.st == resource.data.st
+          ? request.resource.data.get('h', []) == resource.data.get('h', [])
+          : hAppOk(resource.data.get('h', []), request.resource.data.get('h', []));
+      }
       function itOk(d) {
         return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
           && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h'])
           && d.n is string && d.n.size() > 0 && d.n.size() <= 80
           && d.nk is string && d.nk.size() <= 200
           && d.gen is bool
-          && d.sups is list && d.sups.size() <= 10 && d.supN is list && d.supN.size() <= 10
+          && supsOk(d)
           && (d.gen == false || d.sups.size() == 0)
           && d.why in ['store', 'order', 'both']
           && (!d.keys().hasAny(['q']) || (d.q is number && d.q > 0 && d.q <= 100000))
@@ -798,9 +826,9 @@ service cloud.firestore {
       }
       allow read: if (isStaff());
       allow create: if lpW() && (isStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
-        && !nw().keys().hasAny(['ub', 'ut']));
+        && !nw().keys().hasAny(['ub', 'ut', 'h']));
       allow update: if lpW() && (isStaff() && itOk(nw()) && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
-        && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0));
+        && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
       allow delete: if lpW() && (isManager());
 
       match /p/{pid} {
@@ -2383,7 +2411,7 @@ service cloud.firestore {
       // מחיקה אמיתית – מנהל בלבד (אין כזו בממשק). שדות: n (1..80), nk (מפתח מנורמל, עד 200), gen (פריט כללי), sups / supN (מזהי ושמות ספקים, עד 10;
       // בפריט כללי – ריקים), why ('store' | 'order' | 'both'), q? (מספר מעל 0 עד 100,000), cust? { nm עד 60, ph ספרות עד 15, cid? },
       // ord? { id, no }, np (0 | 1 – יש תמונה), st ('open' | 'arr' | 'del'), by (uid), byN (השם – isMyName), t (זמן אמת), ub? / ut? (מי ומתי עדכן), h? (היסטוריה, עד 30).
-      // יצירה: st 'open', by = הכותב, בלי ub / ut. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
+      // יצירה: st 'open', by = הכותב, בלי ub / ut / h. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
       // hsr/{id}/p/1: תמונה { img, t, uid } (jpeg / png / webp, 100 עד 900,000 תווים) – יצירה בלבד, בלי עדכון (החלפה = מחיקה ויצירה). מחיקה – הצוות.
       // hsph/{supId}: טלפון ספק { ph (9..15 ספרות), n (שם הספק), byN, t } – נשמר בפעם הראשונה ששולחים לספק בוואטסאפ.
       // hsx/{supId}: שמות מוצרים מחשבוניות ספק { n, it (רשימה, עד 3000), t } – להצעת ספק. קריאה – הצוות; כתיבה – מנהל או עובד עם prc (בלי מחירים).
@@ -2391,13 +2419,41 @@ service cloud.firestore {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        // 19.11.2026 (בדיקת אבטחה): כל איבר ב-sups הוא מזהה בתבנית מותרת וכל איבר ב-supN שם עד 60 תווים – בדיקה לפי אינדקס (עד 10).
+        function sidOk(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^[A-Za-z0-9_-]{1,80}$')); }
+        function snOk(l, i) { return l.size() <= i || (l[i] is string && l[i].size() <= 60); }
+        function supsOk(d) {
+          return d.sups is list && d.supN is list && d.sups.size() <= 10 && d.supN.size() == d.sups.size()
+            && sidOk(d.sups, 0) && sidOk(d.sups, 1) && sidOk(d.sups, 2) && sidOk(d.sups, 3) && sidOk(d.sups, 4)
+            && sidOk(d.sups, 5) && sidOk(d.sups, 6) && sidOk(d.sups, 7) && sidOk(d.sups, 8) && sidOk(d.sups, 9)
+            && snOk(d.supN, 0) && snOk(d.supN, 1) && snOk(d.supN, 2) && snOk(d.supN, 3) && snOk(d.supN, 4)
+            && snOk(d.supN, 5) && snOk(d.supN, 6) && snOk(d.supN, 7) && snOk(d.supN, 8) && snOk(d.supN, 9);
+        }
+        // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
+        // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
+        // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
+        function hNewOk(e) {
+          return e is map && e.keys().hasAll(['k', 't', 'byN', 'u']) && e.keys().hasOnly(['k', 't', 'byN', 'u'])
+            && e.u == request.auth.uid && isMyName(e.byN) && e.t == request.resource.data.ut
+            && ((request.resource.data.st == 'arr' && e.k == 'man') || (request.resource.data.st == 'del' && e.k == 'del')
+              || (request.resource.data.st == 'open' && e.k in ['undo', 'res']));
+        }
+        function hAppOk(o, n) {
+          return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && hNewOk(n[n.size() - 1])
+            && (o.size() == 0 || (o.size() < 30 ? n[0:o.size()] == o : n[0:29] == o[1:30]));
+        }
+        function hUpdOk() {
+          return request.resource.data.st == resource.data.st
+            ? request.resource.data.get('h', []) == resource.data.get('h', [])
+            : hAppOk(resource.data.get('h', []), request.resource.data.get('h', []));
+        }
         function itOk(d) {
           return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
             && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h'])
             && d.n is string && d.n.size() > 0 && d.n.size() <= 80
             && d.nk is string && d.nk.size() <= 200
             && d.gen is bool
-            && d.sups is list && d.sups.size() <= 10 && d.supN is list && d.supN.size() <= 10
+            && supsOk(d)
             && (d.gen == false || d.sups.size() == 0)
             && d.why in ['store', 'order', 'both']
             && (!d.keys().hasAny(['q']) || (d.q is number && d.q > 0 && d.q <= 100000))
@@ -2414,9 +2470,9 @@ service cloud.firestore {
         }
         allow read: if feat('suppliers') && (bStaff());
         allow create: if feat('suppliers') && (bStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
-          && !nw().keys().hasAny(['ub', 'ut']));
+          && !nw().keys().hasAny(['ub', 'ut', 'h']));
         allow update: if feat('suppliers') && (bStaff() && itOk(nw()) && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
-          && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0));
+          && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
         allow delete: if feat('suppliers') && (bMgr());
 
         match /p/{pid} {

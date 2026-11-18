@@ -79,6 +79,15 @@ describe('חוסרים – hs-core', () => {
     assert.equal(C.nameId('ספק חדש'), C.nameId('  ספק   חדש '));
   });
 
+  it('מזהה ספק מהענן שאינו בתבנית מותרת (../ וכו׳) לא נהיה קבוצה ולא מוצע – לא נכנס לנתיב', () => {
+    const L = [it_('a', { sups: ['../../cats/X', 's1', { a: 1 }], supN: ['רע', 'תנובה', 'x'] })];
+    const G = C.groups(L, SUPS, [], PM);
+    assert.deepEqual(J(G.map((g) => g.id)), ['s1']);
+    assert.equal(C.forSup(L, '../../cats/X').length, 0);
+    const r = C.suggest('מוצר a', { items: [it_('p', { nk: PM.key('מוצר a'), sups: ['../x', 's2'] })], sups: SUPS.concat([{ id: '../x', name: 'רע' }]) }, PM);
+    assert.deepEqual(J(r.map((x) => x.id)), ['s2']);
+  });
+
   it('suggest: ספק מחשבוניות קודמות (hsx), מבחירה קודמת ומהקטלוג; מוצר לא מוכר – אין הצעה', () => {
     const idx = C.xIndex([{ id: 's1', it: [PM.key('חלב תנובה 3% 1 ליטר'), PM.key('קוטג 5%')] }, { id: 's2', it: [PM.key('שוקו בשקית')] }], PM);
     const r1 = C.suggest('חלב 3%', { idx, sups: SUPS }, PM);

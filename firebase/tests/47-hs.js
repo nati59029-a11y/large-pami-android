@@ -36,6 +36,10 @@ for (const E of ENVS) {
     const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
 
     before(async () => { env = await H.getEnv(); });
+    // שינוי מצב כמו האפליקציה: רשומה אחת נוספת בסוף h, בשם המבצע, t = ut (קורא את המסמך הנוכחי בלי כללים)
+    let lastUt = 0;
+    const cur = async () => { let v; await prep(async (d) => { v = (await d.doc(R('hsr/h1')).get()).data(); }); return v; };
+    const stUpd = async (u, st, k) => { const o = await cur(), ut = Math.max(Date.now(), (o.ut || 0) + 1, lastUt + 1); lastUt = ut; return { st, ub: u, ut, h: (o.h || []).concat([{ k, t: ut, byN: u, u }]) }; };
     beforeEach(async () => {
       await H.seed(env);
       await prep(async (d) => {
@@ -62,7 +66,7 @@ for (const E of ENVS) {
     it('hsr: יצירה – מנהל ועובד, בשמם, st=open, זמן אמת; שדות וערכים נבדקים', async () => {
       for (const u of [E.mgr, E.e1]) {
         await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u)));
-        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u, { gen: true, sups: [], supN: [], why: 'both', q: 2.5, cust: { nm: 'דני', ph: '0501234567', cid: 'c1' }, ord: { id: 'o1', no: 7 }, np: 1, h: [] })));
+        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u, { gen: true, sups: [], supN: [], why: 'both', q: 2.5, cust: { nm: 'דני', ph: '0501234567', cid: 'c1' }, ord: { id: 'o1', no: 7 }, np: 1 })));
       }
       const e = fs(E.e1), N = () => R('hsr/' + fresh('n'));
       await assertFails(e.doc(N()).set(item(E.e1, { x: 1 })), 'שדה לא מוכר');
@@ -82,7 +86,17 @@ for (const E of ENVS) {
       await assertFails(e.doc(N()).set(item(E.e1, { ord: { id: '../x', no: 1 } })));
       await assertFails(e.doc(N()).set(item(E.e1, { np: 2 })));
       await assertFails(e.doc(N()).set(item(E.e1, { ub: E.e1, ut: Date.now() })), 'ub רק בעדכון');
-      await assertFails(e.doc(N()).set(item(E.e1, { h: Array.from({ length: 31 }, () => ({ k: 'man' })) })));
+      // בדיקת אבטחה 19.11 – ליקויים 2 ו-3: איברי sups / supN נבדקים; h לא נשלח ביצירה (גם לא ריק, גם לא "בשם המנהל")
+      await assertFails(e.doc(N()).set(item(E.e1, { h: [] })), 'h ביצירה');
+      await assertFails(e.doc(N()).set(item(E.e1, { h: [{ k: 'arr', byN: E.mgr }] })), 'היסטוריה מזויפת ביצירה');
+      await assertFails(e.doc(N()).set(item(E.e1, { sups: ['../cats/x?a=1'], supN: ['רע'] })), 'מזהה ספק עם נתיב');
+      await assertFails(e.doc(N()).set(item(E.e1, { sups: ['a/b'], supN: ['רע'] })), 'מזהה ספק עם /');
+      await assertFails(e.doc(N()).set(item(E.e1, { sups: [{ a: 1 }], supN: ['x'] })), 'מפה במקום מזהה');
+      await assertFails(e.doc(N()).set(item(E.e1, { sups: ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's/0'], supN: Array(10).fill('x') })), 'האיבר העשירי נבדק');
+      await assertFails(e.doc(N()).set(item(E.e1, { supN: ['x'.repeat(61)] })), 'שם ספק ארוך');
+      await assertFails(e.doc(N()).set(item(E.e1, { supN: [5] })), 'שם ספק לא מחרוזת');
+      await assertFails(e.doc(N()).set(item(E.e1, { sups: ['s1', 's2'], supN: ['תנובה'] })), 'sups ו-supN באותו אורך');
+      await assertSucceeds(e.doc(N()).set(item(E.e1, { sups: ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's_0'], supN: Array(10).fill('x'.repeat(60)) })));
       for (const u of [E.off, E.out]) await assertFails(fs(u).doc(N()).set(item(u)));
       if (E.foreign) await assertFails(fs(E.foreign).doc(N()).set(item(E.foreign)));
     });
@@ -90,10 +104,10 @@ for (const E of ENVS) {
     it('hsr: עריכה, "הגיע", מחיקה רכה ושחזור – מנהל ועובד אחר; by/byN/t לא משתנים; ub בשם המעדכן', async () => {
       for (const u of [E.mgr, E.e2]) {
         await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { n: 'חלב 1%', sups: ['s1', 's2'], supN: ['תנובה', 'טרה'], q: 3 })));
-        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'arr', h: [{ k: 'man', t: Date.now(), byN: u }] })));
-        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'open' })));
-        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'del' })));
-        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'open' })));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'arr', 'man')));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'open', 'undo')));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'del', 'del')));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'open', 'res')));
       }
       const e = fs(E.e2);
       await assertFails(e.doc(R('hsr/h1')).update({ st: 'arr' }), 'בלי ub/ut');
@@ -104,6 +118,34 @@ for (const E of ENVS) {
       await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { t: Date.now() })), 't לא משתנה');
       await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { st: 'gone' })));
       await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { z: 1 })));
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { sups: ['../cats/x'], supN: ['רע'] })), 'עריכה עם מזהה ספק עם נתיב');
+    });
+
+    it('hsr: היסטוריה (h) – רק רשומה אחת בסוף, בשם המבצע, בזמן העדכון ומתאימה למעבר; אי אפשר לזייף, לשנות או למחוק', async () => {
+      const e = fs(E.e2), doc = e.doc(R('hsr/h1'));
+      await assertFails(doc.update(upd(E.e2, { st: 'arr' })), 'שינוי מצב בלי רשומה');
+      let ut = Date.now();
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: [{ k: 'man', t: ut, byN: E.mgr, u: E.mgr }] }), 'רשומה בשם המנהל');
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: [{ k: 'man', t: ut, byN: E.e2, u: E.mgr }] }), 'u של אחר');
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: [{ k: 'man', t: ut - 5000, byN: E.e2, u: E.e2 }] }), 't שונה מ-ut');
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: [{ k: 'del', t: ut, byN: E.e2, u: E.e2 }] }), 'k לא מתאים למעבר');
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: [{ k: 'man', t: ut, byN: E.e2, u: E.e2, x: 1 }] }), 'שדה נוסף ברשומה');
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: [{ k: 'man', t: ut, byN: E.e2, u: E.e2 }, { k: 'man', t: ut, byN: E.e2, u: E.e2 }] }), 'שתי רשומות');
+      await assertSucceeds(doc.update(await stUpd(E.e2, 'arr', 'man')));
+      const h1 = (await cur()).h;
+      ut = Math.max(Date.now(), lastUt) + 5;
+      await assertFails(doc.update({ st: 'open', ub: E.e2, ut, h: [{ k: 'undo', t: ut, byN: E.e2, u: E.e2 }] }), 'מחיקת הרשומה הקודמת');
+      await assertFails(doc.update({ st: 'open', ub: E.e2, ut, h: [Object.assign({}, h1[0], { byN: E.mgr }), { k: 'undo', t: ut, byN: E.e2, u: E.e2 }] }), 'שינוי רשומה קודמת');
+      await assertFails(doc.update({ ub: E.e2, ut, h: [] }), 'ריקון ההיסטוריה');
+      await assertFails(doc.update({ ub: E.e2, ut, h: [Object.assign({}, h1[0], { byN: E.mgr, u: E.mgr })] }), 'שינוי רשומה בלי שינוי מצב');
+      await assertSucceeds(doc.update({ st: 'open', ub: E.e2, ut, h: h1.concat([{ k: 'undo', t: ut, byN: E.e2, u: E.e2 }]) }));
+      // 30 רשומות: הראשונה נחתכת והשאר זהות
+      const full = Array.from({ length: 30 }, (_, i) => ({ k: 'man', t: i, byN: E.mgr, u: E.mgr }));
+      await prep((d) => d.doc(R('hsr/h1')).update({ h: full, st: 'open' }));
+      ut = Math.max(Date.now(), lastUt) + 10;
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: full.concat([{ k: 'man', t: ut, byN: E.e2, u: E.e2 }]) }), '31 רשומות');
+      await assertFails(doc.update({ st: 'arr', ub: E.e2, ut, h: full.slice(2).concat([{ k: 'man', t: 0, byN: E.mgr, u: E.mgr }, { k: 'man', t: ut, byN: E.e2, u: E.e2 }]) }), 'חיתוך לא נכון');
+      await assertSucceeds(doc.update({ st: 'arr', ub: E.e2, ut, h: full.slice(1).concat([{ k: 'man', t: ut, byN: E.e2, u: E.e2 }]) }));
       for (const u of [E.off, E.out]) await assertFails(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'arr' })));
       if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsr/h1')).update(upd(E.foreign, { st: 'arr' })));
     });

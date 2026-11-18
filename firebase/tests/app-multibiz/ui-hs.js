@@ -146,7 +146,7 @@ const posts = () => LOG.filter((l) => l.m === 'POST' && l.R === '/hsr');
   const nid = Object.keys(DB.hsr).find((k) => DB.hsr[k].n.stringValue === 'חלב 3% ליטר');
   LOG.length = 0; await mp.click(`[data-a=hsArr][data-id=${nid}]`); await waitFor(() => mp.evaluate(() => !!document.querySelector('#dlg[open] [data-a=hsCustWa]')));
   const pa = LOG.find((l) => l.m === 'PATCH' && l.R === '/hsr/' + nid);
-  check('11 "הגיע": PATCH רק st, h, ub, ut; st=arr, ub=m, h עם k=man', pa && pa.q.split('&').map((s) => s.split('=')[1]).sort().join() === 'h,st,ub,ut' && pa.body.fields.st.stringValue === 'arr' && pa.body.fields.ub.stringValue === 'm' && pa.body.fields.h.arrayValue.values.slice(-1)[0].mapValue.fields.k.stringValue === 'man', pa && pa.q);
+  check('11 "הגיע": PATCH רק st, h, ub, ut; st=arr, ub=m, h עם k=man, u=m ו-t=ut', pa && pa.q.split('&').map((s) => s.split('=')[1]).sort().join() === 'h,st,ub,ut' && pa.body.fields.st.stringValue === 'arr' && pa.body.fields.ub.stringValue === 'm' && pa.body.fields.h.arrayValue.values.slice(-1)[0].mapValue.fields.k.stringValue === 'man' && pa.body.fields.h.arrayValue.values.slice(-1)[0].mapValue.fields.u.stringValue === 'm' && pa.body.fields.h.arrayValue.values.slice(-1)[0].mapValue.fields.t.integerValue === pa.body.fields.ut.integerValue, pa && pa.q);
   await mp.evaluate(() => { window.__wa = []; }); await mp.click('#dlg [data-a=hsCustWa]'); await waitFor(() => mp.evaluate(() => window.__wa.length >= 1));
   const cw = await mp.evaluate(() => window.__wa[0] || '');
   check('11א הודעה ללקוח: wa.me/972507654321 עם "שלום דני" ושם המוצר', /^https:\/\/wa\.me\/972507654321\?text=/.test(cw) && /שלום דני/.test(decodeURIComponent(cw)) && /חלב 3% ליטר/.test(decodeURIComponent(cw)), cw);

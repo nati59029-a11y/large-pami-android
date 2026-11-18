@@ -151,7 +151,7 @@ ACT.hsRe=()=>{HS.at=0;HS.err='';HS.arr=null;HS.del=null;HS.so=null;HS.off=0;hsLo
 CHG.hsSel=el=>{HS.sel=idOk(el.value)?el.value:'';rerender()};
 
 /* ---------- מצב: הגיע / החזר / מחיקה רכה / שחזור ---------- */
-async function setSt(id,stN,k){const x=find(id);if(!x)return false;const ut=nextUt(x),ub=fbBy().slice(0,100),h=C.hAdd(x.h,{k,t:ut,byN:ub});
+async function setSt(id,stN,k){const x=find(id);if(!x)return false;const ut=nextUt(x),ub=fbBy().slice(0,100),h=C.hAdd(x.h,{k,t:ut,byN:ub,u:SY.uid});/* הכללים: רשומה אחת בסוף, בשם המבצע, t = ut */
  try{await fsx('/hsr/'+id+'?'+mask(['st','h','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds({st:stN,h,ub,ut})})})}catch(e){err(e);return false}
  const from=x.st;Object.assign(x,{st:stN,h,ub,ut});HS.mv[id]=x;/* נשאר זמין לפעולות (למשל הודעה ללקוח) גם כשרשימת היעד עוד לא נטענה */
  const lk=s=>s==='open'?'L':s;if(HS[lk(from)])HS[lk(from)]=HS[lk(from)].filter(y=>y.id!==id);if(HS[lk(stN)])HS[lk(stN)]=[x].concat(HS[lk(stN)].filter(y=>y.id!==id));
@@ -179,7 +179,7 @@ ACT.hsImgShare=el=>{const du=HS.img[el.dataset.id]||(HS.f&&HS.f.img);if(du)dxSha
 const blank=()=>({id:'',n:'',sups:[],gen:false,why:'store',q:'',custOn:false,cust:{nm:'',ph:''},ord:null,img:null,imgDel:false,np:0,busy:0,touched:false,auto:false});
 ACT.hsNew=()=>{if(!on())return;HS.f=blank();xLoad();go('hsEd','')};
 ACT.hsEdit=el=>{const x=find(el.dataset.id);if(!x)return;
- HS.f=Object.assign(blank(),{id:x.id,n:x.n,sups:(x.sups||[]).map((id,i)=>({id,name:(x.supN||[])[i]||supName(id)||id})),gen:!!x.gen,why:x.why||'store',q:x.q?String(x.q):'',
+ HS.f=Object.assign(blank(),{id:x.id,n:x.n,sups:(Array.isArray(x.sups)?x.sups:[]).map((id,i)=>({id,name:String((x.supN||[])[i]||supName(id)||id)})).filter(s=>typeof s.id==='string'&&idOk(s.id)),gen:!!x.gen,why:x.why||'store',q:x.q?String(x.q):'',
   custOn:!!(x.cust&&(x.cust.nm||x.cust.ph)),cust:Object.assign({nm:'',ph:''},x.cust||{}),ord:x.ord&&x.ord.id?{id:x.ord.id,no:x.ord.no||0}:null,np:x.np?1:0,touched:true});
  xLoad();if(x.np)imgGet(x.id).then(imgPaint);go('hsEd',x.id)};
 function sugList(){const f=HS.f;if(!f)return[];const n=String(f.n||'').trim();if(n.length<2||!PM())return[];
@@ -272,14 +272,14 @@ FRM.hsSave=async()=>{const f=HS.f;if(!f||f.busy||!on())return;
  HS.f=null;tilePaint();toast(imgErr?'הפריט נשמר, אבל התמונה לא עלתה':'נשמר');goBack()};
 
 /* ---------- שליחה לספק: וואטסאפ (טלפון נשמר בפעם הראשונה), קובץ להדפסה ושיתוף ---------- */
-async function phGet(id){if(id in HS.ph)return HS.ph[id];try{const d=DEC(await fsx('/hsph/'+id));HS.ph[id]=typeof d.ph==='string'?d.ph:''}catch(e){HS.ph[id]=''}return HS.ph[id]}
+async function phGet(id){if(!idOk(id))return '';if(id in HS.ph)return HS.ph[id];try{const d=DEC(await fsx('/hsph/'+id));HS.ph[id]=typeof d.ph==='string'?d.ph:''}catch(e){HS.ph[id]=''}return HS.ph[id]}
 function phDlg(g,send){dlg(`<h3>הטלפון של ${esc(g.name)}</h3><p class="note">נשמר לפעם הבאה, לכל הצוות.</p><label class="f"><span>טלפון (וואטסאפ)</span><input id="hsPh" type="tel" inputmode="tel" maxlength="20" value="${esc(HS.ph[g.id]||'')}" autocomplete="off"></label>
  <div class="row"><button type="button" class="btn grow" data-a="hsPhSave" data-id="${esc(g.id)}" data-send="${send?1:''}">${send?'שמירה ושליחה':'שמירה'}</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}
 const waSend=(g,ph)=>window.open('https://wa.me/'+C.intl(ph)+'?text='+encodeURIComponent(C.waText(g,'')),'_system');
-ACT.hsWa=async el=>{const g=HS.G[el.dataset.id];if(!g)return;if(!g.L.length&&!g.O.length)return toast('אין פריטים לשלוח לספק הזה');
+ACT.hsWa=async el=>{const g=HS.G[el.dataset.id];if(!g||!idOk(g.id))return;if(!g.L.length&&!g.O.length)return toast('אין פריטים לשלוח לספק הזה');
  const ph=await phGet(g.id);if(ph&&C.phOk(ph))return waSend(g,ph);phDlg(g,true)};
-ACT.hsPhEd=el=>{const g=HS.G[el.dataset.id];if(g)phDlg(g,false)};
-ACT.hsPhSave=async el=>{const g=HS.G[el.dataset.id],i=document.getElementById('hsPh');if(!g||!i)return;const v=i.value;if(!C.phOk(v))return toast('מספר טלפון לא תקין');
+ACT.hsPhEd=el=>{const g=HS.G[el.dataset.id];if(g&&idOk(g.id))phDlg(g,false)};
+ACT.hsPhSave=async el=>{const g=HS.G[el.dataset.id],i=document.getElementById('hsPh');if(!g||!i||!idOk(g.id))return;/* המזהה נכנס לנתיב – רק תבנית מותרת */const v=i.value;if(!C.phOk(v))return toast('מספר טלפון לא תקין');
  const ph=C.intl(v),send=!!el.dataset.send;el.disabled=true;
  try{await fsx('/hsph/'+g.id,{method:'PATCH',body:JSON.stringify({fields:flds({ph,n:String(g.name||'').slice(0,60),byN:fbBy().slice(0,100),t:Date.now()})})});toast('הטלפון נשמר')}
  catch(e){toast(e&&e.code===403?'הטלפון לא נשמר (החוסרים יופעלו בקרוב)':'הטלפון לא נשמר: '+tkErr(e))}
@@ -293,7 +293,7 @@ function pdfPages(g){const W=1240,H=1754,M=90,LH=60,out=[];let c,x,y;
  const rows=g.L.map(r=>'• '+r.it.n+(r.it.q?' – כמות '+C.fmtQ(r.it.q):'')).concat(g.O.map(o=>'• '+String(o.n||'')+(typeof o.qty==='number'?' – כמות '+C.fmtQ(o.qty):'')));
  x.font='40px Arial, sans-serif';rows.forEach(t=>{if(y+LH>H-M){np();x.font='40px Arial, sans-serif'}x.fillText(fit(t,W-2*M),W-M,y+44);y+=LH});
  return out.map(cv=>cv.toDataURL('image/jpeg',.85))}
-ACT.hsPdf=async el=>{const g=HS.G[el.dataset.id],k=el.dataset.k;if(!g)return;if(!g.L.length&&!g.O.length)return toast('אין פריטים לספק הזה');
+ACT.hsPdf=async el=>{const g=HS.G[el.dataset.id],k=el.dataset.k;if(!g||!idOk(g.id))return;if(!g.L.length&&!g.O.length)return toast('אין פריטים לספק הזה');
  toast('מכין קובץ…');
  try{const pdf=await mkScanPdf(pdfPages(g)),name='LargePami_order_'+new Date().toISOString().slice(0,10)+'.pdf',Cp=window.Capacitor,nat=Cp&&Cp.isNativePlatform&&Cp.isNativePlatform();
   if(k==='print'){if(nat&&Cp.Plugins.PdfPrint){let s='';for(let i=0;i<pdf.length;i+=8192)s+=String.fromCharCode.apply(null,pdf.subarray(i,i+8192));await Cp.Plugins.PdfPrint.print({name,data:btoa(s)})}else window.open(URL.createObjectURL(new Blob([pdf],{type:'application/pdf'})),'_blank')}
