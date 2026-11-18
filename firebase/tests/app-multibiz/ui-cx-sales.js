@@ -1,6 +1,6 @@
 'use strict';
 // סנכרון כספית A2/A3 (caspit-sales.js): קליטת דוח מכירות (windows-1255), תצוגה מקדימה, תיקון "לא בטוח", אישור;
-// מסך "מכירות כספית": תקופה, סיכומים, מוצרים, קופות, קטגוריות, התאמה מול סגירת קופה, שורות "לא בטוח", מקור הכנסות (מנהל־על).
+// מסך "מכירות כספית": תקופה, סיכומים, מוצרים, קופות, קטגוריות, התאמה מול סגירת קופה, שורות "לא בטוח"; בלי הגדרת מקור הכנסות.
 // רשת מדומה, נתונים מומצאים. שימוש: node ui-cx-sales.js <www-dir> [out.json] [shots-dir]. מסך טלפון קטן (360×740).
 const fs = require('fs');
 const path = require('path');
@@ -20,7 +20,8 @@ const DAYS = [
   { d: '2026-11-16', bk: '6200', bn: 'יהודה הנשיא', gross: 443.6, ret: 0, disc: 0, ntx: 3, nl: 4, sp: 23.6, un: 0, it: { 400001: it('כוס נייר', 'k1', 2, 0, 20, 0), 400003: it('מפית', 'k2', 40, 0, 400, 0), 1000: it('פריט כללי', '', 0, 0, 23.6, 0, 1) } },
   { d: '2026-11-16', bk: '7700', bn: 'נחל לכיש', gross: 13, ret: 0, disc: 0, ntx: 1, nl: 1, sp: 0, un: 1, it: { 400002: it('צלחת', 'k1', 1, 0, 13, 1) } },
   { d: '2026-11-17', bk: '6200', bn: 'יהודה הנשיא', gross: 0, ret: 10, disc: 0, ntx: 1, nl: 1, sp: 0, un: 0, it: { 400001: it('כוס נייר', 'k1', 0, 1, -10, 0) } }];
-const SALES = { days: DAYS, cats: { k1: 'כלים', k2: 'נייר' }, cfg: { reg: { 6200: 'i_yh', 7700: 'i_nl' }, inc: 'zc', br: '_', lastSales: { run: 'r', at: Date.UTC(2026, 10, 17, 10) } }, sa: true };
+const CC = require('../../functions/lib/caspit-core.js');
+const SALES = { ...CC.packDays(DAYS), cats: { k1: 'כלים', k2: 'נייר' }, cfg: { reg: { 6200: 'i_yh', 7700: 'i_nl' }, br: '_', lastSales: { run: 'r', at: Date.UTC(2026, 10, 17, 10) } }, sa: true };
 const TX = { tx: [{ id: '6200_20261116_9001', d: '2026-11-16', tx: '9001', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 'a', c: '400001', n: 'כוס נייר', a: 20, ds: 0, q: 2, qs: 'sure' }, { k: 'b', c: '1000', n: 'פריט כללי', a: 23.6, ds: 0, q: null, qs: 'skip' }] }] };
 const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '7700', bn: 'נחל לכיש', lines: [{ k: '400002|13|0|0', c: '400002', n: 'צלחת', a: 13, ds: 0, q: 1, qs: 'unsure', why: 'frac', P: 10 }] }] };
 
@@ -41,7 +42,7 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
     const R = { cxCfg: { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa: false }, cxUpload: { ok: true }, cxPreview: PV,
-      cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 } }, cxSales: SALES,
+      cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 }, ix: [0, 1, 2, 3] }, cxSales: SALES,
       cxLines: d && d.un ? UN : TX, cxFix: { ok: true, q: 2, delta: 1, qs: 'own' }, cxSetCfg: { ok: true, reg: d && d.reg }, getCosts: { cost: {} } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
@@ -148,7 +149,12 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   const fx = calls.find((x) => x.n === 'cxFix');
   check('21 תיקון: cxFix עם מזהה העסקה, מפתח השורה וכמות 2', fx && fx.d.id === '7700_20261116_9002' && fx.d.k === '400002|13|0|0' && fx.d.q === 2, fx && fx.d);
   const st = await q();
-  check('22 מקור ההכנסות (מנהל־על): "סגירת קופה (פעיל)", "דוח מכירות כספית" לא זמין', /מקור ההכנסות \(מנהל־על\)/.test(st.text) && (await page.evaluate(() => { const b = [...document.querySelectorAll('[role=radio]')]; return b.length === 2 && b[1].disabled && /פעיל/.test(b[0].textContent); })), st.text.slice(-300));
+  check('22 אין כרטיס "מקור ההכנסות" (ההכנסות רק מסגירת הקופה)', !/מקור ההכנסות/.test(st.text) && (await page.evaluate(() => document.querySelectorAll('[role=radio]').length)) === 0);
+  await goV('more'); await H.settle(page, 500);
+  const mo = await q();
+  check('22ב תפריט "עוד" (מנהל): קיצור "מכירות כספית" שפותח את המסך', /מכירות כספית/.test(mo.text) && fine(mo), { small: mo.small });
+  await page.click('[data-a=go][data-v=cxSales]'); await H.settle(page, 500);
+  check('22ג הקיצור פותח את מסך המכירות', await page.evaluate(() => cur().v === 'cxSales'));
   check('23 בלי שגיאות JavaScript', page.__errors.length === 0, page.__errors.slice(0, 3));
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

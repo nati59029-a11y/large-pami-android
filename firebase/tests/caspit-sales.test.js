@@ -3,7 +3,7 @@
 //   - כמות מחושבת (בטוח / לפי הנחה / לא בטוח), החזרה מעלה מלאי, קוד מיוחד וקוד לא מוכר – בלי מלאי אבל בסיכום.
 //   - תצוגה מקדימה לא כותבת. העלאה חוזרת / דוח חופף / סדר שורות אחר – לא סופרים פעמיים. אישור כפול / חלק חוזר – לא מכפילים.
 //   - שתי קופות בכספית → סניף מלאי אחד; לכל שורה נשמר הסניף בכספית. cxDay, cxSales, cxLines, cxFix (תיקון "לא בטוח").
-//   - הרשאות: מנהל בלבד; מקור ההכנסות – מנהל־על בלבד, ו"כספית כמקור" חסום עד שיוחלט. אין סניף מלאי → האישור נחסם.
+//   - הרשאות: מנהל בלבד. אין סניף מלאי → האישור נחסם. אין יצירת הכנסות ואין הגדרת מקור הכנסות (החלטת בעל העסק 18.11).
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -112,6 +112,7 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
     const a = await ok('cxApply', MGR, { run: run1, qty: { 9: 2 } }); // שורה 9 (מוצר ג, אין מחיר) – בעל העסק תיקן ל-2
     assert.equal(a.done, true);
     assert.deepEqual([a.res.lines, a.res.stock, a.res.skip, a.res.nolink, a.res.unsure, a.res.tx], [11, 9, 1, 1, 1, 4]);
+    assert.deepEqual(a.ix, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); // מה שנשמר בפועל – למסך הסיום
     assert.equal(await q(A, 'p1'), 5 - 4 - 1 - 1); // עסקה 5001: 2+1+1, 5002: 1 (הנחה), 7001: 1 (לא בטוח)
     assert.equal(await q(A, 'p2'), -2 + 1 - 1);
     assert.equal(await q(A, 'p3'), -2);
@@ -170,14 +171,17 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
   it('cxSales: ימים בטווח, קטגוריות, הגדרות; cxLines לפי יום+סניף, לפי מוצר, ו"לא בטוח"', async () => {
     const s = await ok('cxSales', MGR, { from: '2026-11-16', to: '2026-11-17' });
     assert.equal(s.days.length, 3);
+    assert.ok(!s.days[0].it && s.items['300001']); // צורה קומפקטית
     assert.equal(s.cats.k1, 'קטגוריה א');
-    assert.equal(s.cfg.inc, 'zc'); assert.equal(s.sa, false);
-    const T = CC.aggDays(s.days);
+    assert.equal(s.cfg.inc, undefined); assert.equal(s.sa, false);
+    const T = CC.aggDays(CC.unpackDays(s));
     assert.deepEqual([T.gross, T.ret, T.disc, T.net, T.ntx, T.un], [140.1, 4.5, 3, 132.6, 5, 1]);
     const it1 = T.items.find((x) => x.c === '300001');
     assert.deepEqual([it1.q, it1.r, it1.a], [9, 0, 87]);
     assert.equal((await ok('cxSales', MGR, { from: '2026-11-17', to: '2026-11-17' })).days.length, 1);
     assert.equal((await call('cxSales', MGR, { from: '2026-11-17', to: '2026-11-16' })).reason, 'bad-range');
+    assert.equal((await call('cxSales', MGR, { from: '2026-01-01', to: '2026-04-02' })).status, 'OK'); // 92 ימים
+    assert.equal((await call('cxSales', MGR, { from: '2026-01-01', to: '2026-04-03' })).reason, 'bad-range'); // 93 – הטלפון מבקש בחלקים
     const bd = await ok('cxLines', MGR, { bd: '6200_20261116' });
     assert.deepEqual(bd.tx.map((x) => x.tx).sort(), ['5001', '5002']);
     const pc = await ok('cxLines', MGR, { c: '300001', days: ['2026-11-16', '2026-11-17'] });
@@ -201,22 +205,56 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
     d = await day('7700_20261116');
     assert.equal(d.it['300001'].q, 2); assert.equal(d.un, 0);
     assert.equal((await call('cxFix', MGR, { id, k: '999999|5|0|0', q: 1 })).reason, 'no-stock-line');
+    assert.equal((await call('cxFix', MGR, { id, k, q: -1 })).reason, 'bad-sign'); // מכירה עם כמות שלילית – נדחה
+    assert.equal(await q(A, 'p1'), -5);
   });
   it('החוקים: cxTx ו-cxDay סגורים לקריאה ולכתיבה ישירה – גם למנהל', async () => {
     await assertFails(db(MGR).doc(`b/${A}/cxTx/6200_20261116_5001`).get());
     await assertFails(db(MGR).doc(`b/${A}/cxDay/6200_20261116`).get());
     await assertFails(db(MGR).doc(`b/${A}/cxDay/x`).set({ d: 'x' }));
   });
-  it('הגדרות: מיפוי סניף כספית → קופה (מחליף את הקודם); מקור הכנסות – מנהל־על בלבד, "כספית" חסום', async () => {
+  it('הגדרות: מיפוי סניף כספית → קופה (מחליף את הקודם); אין פונקציית מקור הכנסות', async () => {
     await ok('cxSetCfg', MGR, { reg: { 6200: 'i_yh', 7700: 'i_nl' } });
     await ok('cxSetCfg', MGR, { reg: { 6200: 'i_yh', 7700: '' } });
     assert.deepEqual((await ok('cxCfg', MGR)).cfg.reg, { 6200: 'i_yh' });
     assert.equal((await call('cxSetCfg', MGR, { reg: { 'a/b': 'i_yh' } })).reason, 'bad-reg');
-    assert.equal((await call('cxSetInc', MGR, { src: 'zc' })).reason, 'super-only');
-    assert.equal((await call('cxSetInc', SA, { src: 'cx' })).reason, 'cx-inc-not-ready');
-    assert.equal((await ok('cxSetInc', SA, { src: 'zc' })).inc, 'zc');
+    assert.equal(FX.cxSetInc, undefined); // החלטת בעל העסק 18.11: אין הגדרת מקור הכנסות – ההכנסות רק מסגירת הקופה
     assert.equal((await ok('cxSales', SA, { from: '2026-11-16', to: '2026-11-16' })).sa, true);
     assert.equal((await ok('cxCfg', MGR)).cfg.skip.length, 5); // שאר ההגדרות לא נמחקו
+  });
+  it('תיקון סבב 1: שורה פגומה בחלק מדולגת ונספרת; מספר סניף חסר → לפי השם שנלמד; ספירת מלאי ידנית → אזהרה; כמות בסימן הפוך – לא מתקבלת', async () => {
+    const good = CC.parseSales([HDR, L('18/11/2026', 'מוצר א', '300001', '6001', Y, 10), L('18/11/2026', 'מוצר א', '300001', '6002', ['סניף בדיקה א', ''], 10), L('18/11/2026', 'מוצר ב', '300002', '6003', Y, 4.5)]).lines;
+    assert.equal(good[1].bkn, true); assert.equal(good[1].bk, CC.brKey('', 'סניף בדיקה א'));
+    // מוצר ב נספר ידנית ב-19.11 (אחרי המכירות של 18.11)
+    await ok('stockSet', MGR, { reqId: 'reqcxsset1zz', pid: 'p2', qty: 7 });
+    await adm().collection(`b/${A}/stockLog`).where('why', '==', 'set').get().then((sn) => Promise.all(sn.docs.map((d) => d.ref.update({ at: Date.parse('2026-11-19T10:00:00Z') }))));
+    const id = run();
+    const up = await ok('cxUpload', MGR, { run: id, kind: 'sales', part: 0, parts: 1, lines: good.concat([{ d: '2026-11-18', c: '300001', tx: '6004', bk: '6200', a: 5, ds: 5e9 }]) });
+    assert.deepEqual([up.n, up.bad], [3, 1]);
+    const pv = await ok('cxPreview', MGR, { run: id });
+    assert.deepEqual([pv.cnt.badSrv, pv.cnt.bkLeft, pv.cnt.pc], [1, 0, 1]);
+    assert.ok(pv.rows.every((r) => r[7] === '6200')); // אותו מפתח סניף גם בלי עמודת המספר
+    assert.equal(pv.rows.find((r) => r[3] === '300002')[12], '2026-11-19');
+    const p1 = await q(A, 'p1'), p2 = await q(A, 'p2');
+    const a = await ok('cxApply', MGR, { run: id, qty: { 0: -3, 2: 0 } }); // 0: סימן הפוך – מתעלמים; 2: נכלל בספירה → 0
+    assert.equal(a.res.lines, 3);
+    assert.equal(await q(A, 'p1'), p1 - 2);
+    assert.equal(await q(A, 'p2'), p2);
+    assert.equal((await adm().doc(`b/${A}/cxcfg/main`).get()).get('bkn')[CC.brKey('', 'סניף בדיקה א')], '6200');
+  });
+  it('תיקון סבב 1: קישור קוד→מוצר השתנה בין התצוגה לאישור → stale, ההרצה חוזרת לתצוגה, ואחרי תצוגה חוזרת – המלאי יורד מהמוצר החדש', async () => {
+    const id = await send(MGR, [HDR, L('20/11/2026', 'מוצר א', '300001', '6100', Y, 10)]);
+    await ok('cxPreview', MGR, { run: id });
+    await adm().doc(`b/${A}/cxItem/300001`).update({ pid: 'p2' });
+    const p1 = await q(A, 'p1'), p2 = await q(A, 'p2');
+    assert.equal((await call('cxApply', MGR, { run: id })).reason, 'stale');
+    assert.equal((await adm().doc(`b/${A}/cxRun/${id}`).get()).get('st'), 'pv');
+    assert.equal(await q(A, 'p1'), p1);
+    const pv = await ok('cxPreview', MGR, { run: id });
+    assert.equal(pv.rows[0][8], 'unsure'); // 10 / 4.5 – לא שלם
+    await ok('cxApply', MGR, { run: id });
+    assert.equal(await q(A, 'p1'), p1); assert.equal(await q(A, 'p2'), p2 - 2);
+    await adm().doc(`b/${A}/cxItem/300001`).update({ pid: 'p1' });
   });
   it('עסק עם כמה סניפים: בלי סניף מלאי – האישור נחסם; אחרי בחירה – המלאי יורד בסניף שנבחר', async () => {
     const id = await send(MB, [HDR, L(D1, 'מוצר א', '300001', '9001', Y, 20)]);

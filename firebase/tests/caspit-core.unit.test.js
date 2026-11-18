@@ -272,16 +272,16 @@ describe('סיכום תקופה והתאמה (A3)', () => {
     assert.deepEqual(C.itemList(T.items, 'q', 'מוצר ב').map((x) => x.c), ['300002']);
     assert.deepEqual(C.itemList(T.items, 'q', '1000').map((x) => x.c), ['1000']);
   });
-  it('recon: תואם, פער מתחת/מעל הסף, אין סגירה, סגירה שנפתחה ביום אחר, סניף לא ממופה, סך יומי', () => {
+  it('recon: תואם, פער מתחת/מעל הסף, אין סגירה, סניף לא ממופה, סך יומי', () => {
     const reg = { 6200: 'i_yh', 7700: 'i_nl' };
-    const zc = [{ id: 'z1', reg: 'i_yh', d: '2026-11-16', od: '2026-11-16', amt: 85 }, { id: 'z2', reg: 'i_nl', d: '2026-11-16', od: '', amt: 30 }, { id: 'z3', reg: 'i_yh', d: '2026-11-17', od: '2026-11-16', amt: 30 }];
+    const zc = [{ id: 'z1', reg: 'i_yh', d: '2026-11-16', od: '2026-11-16', amt: 85 }, { id: 'z2', reg: 'i_nl', d: '2026-11-16', od: '', amt: 30 }, { id: 'z3', reg: 'i_yh', d: '2026-11-17', od: '2026-11-17', amt: 25 }]; // סגירה שחוצה ימים – בבדיקות של תיקון סבב 1
     const R = C.recon(DAYS, reg, zc, 10, ['i_yh', 'i_nl']);
     assert.deepEqual(R.map((x) => x.d), ['2026-11-17', '2026-11-16']);
     const d16 = R[1];
     assert.deepEqual(d16.regs.map((c) => [c.reg, c.cx, c.z, c.st, c.gap]), [['i_yh', 85, 85, 'ok', 0], ['i_nl', 50, 30, 'over', 20]]);
     assert.deepEqual([d16.tot.cx, d16.tot.z, d16.tot.st, d16.tot.gap], [135, 115, 'over', 20]);
-    assert.deepEqual(R[0].regs.map((c) => c.st), ['span', 'none']);
-    assert.equal(R[0].tot.st, 'part');
+    assert.deepEqual(R[0].regs.map((c) => [c.st, c.gap]), [['gap', 5], ['none', null]]);
+    assert.equal(R[0].tot.st, 'gap');
     assert.equal(C.recon(DAYS, reg, zc, 0, ['i_yh', 'i_nl'])[1].regs[1].st, 'gap'); // בלי סף – פער רגיל
     const u = C.recon(DAYS, { 6200: 'i_yh' }, [], 0, ['i_yh', 'i_nl']);
     assert.deepEqual(u[1].un, [{ bk: '7700', bn: 'ב', net: 50 }]);
@@ -294,5 +294,40 @@ describe('סיכום תקופה והתאמה (A3)', () => {
     const T = C.aggDays(D); const L = C.itemList(T.items, 'a', 'מוצר 5');
     assert.equal(T.items.length, 600); assert.ok(L.length > 0);
     assert.ok(Date.now() - t0 < 300, 'זמן: ' + (Date.now() - t0));
+  });
+});
+
+describe('תיקון סבב 1 (A2/A3)', () => {
+  it('recon: סגירה שנפתחה ב-16 ונסגרה ב-17 → גם יום 16 (יום הפתיחה) "לא ניתן להשוות", לא פער מזויף (התרחיש של הבודק)', () => {
+    const days = [{ d: '2026-11-16', bk: '6200', gross: 1000, ret: 0, disc: 0 }];
+    const zc = [{ id: 'A', reg: 'i_yh', d: '2026-11-16', od: '2026-11-16', amt: 600 }, { id: 'B', reg: 'i_yh', d: '2026-11-17', od: '2026-11-16', amt: 900 }];
+    const R = C.recon(days, { 6200: 'i_yh' }, zc, 10, ['i_yh', 'i_nl']);
+    const d16 = R.find((x) => x.d === '2026-11-16'), d17 = R.find((x) => x.d === '2026-11-17');
+    assert.equal(d16.regs[0].st, 'span'); assert.equal(d16.regs[0].gap, null); assert.equal(d16.tot.st, 'part');
+    assert.deepEqual(d16.regs[0].sx.map((z) => z.id), ['B']);
+    assert.equal(d17.regs[0].st, 'span');
+    assert.equal(d16.regs[1].st, 'none'); // רק הקופה של הסגירה מושפעת
+  });
+  it('recon: סגירה שחוצה כמה ימים – כל יום שבין הפתיחה לסגירה "לא ניתן להשוות"', () => {
+    const R = C.recon([{ d: '2026-11-15', bk: '1', gross: 50 }], { 1: 'i_nl' }, [{ id: 'C', reg: 'i_nl', d: '2026-11-17', od: '2026-11-14', amt: 10 }], 0, ['i_yh', 'i_nl']);
+    assert.deepEqual(R.map((x) => [x.d, x.regs[1].st]), [['2026-11-17', 'span'], ['2026-11-16', 'span'], ['2026-11-15', 'span'], ['2026-11-14', 'span']]);
+  });
+  it('packDays/unpackDays: אותו סיכום אחרי דחיסה; chunks של עד 92 ימים', () => {
+    const D = [{ d: '2026-11-16', bk: '1', bn: 'א', gross: 30, ret: 5, disc: 1, ntx: 2, nl: 3, sp: 0, un: 1, it: { 10: { n: 'x', cat: 'k', q: 3, r: 1, a: 25, ds: 1, u: 1 }, 1000: { n: 'כללי', cat: '', q: 0, r: 0, a: 0, ds: 0, u: 0, sp: true } } }];
+    const p = C.packDays(D);
+    assert.ok(!p.days[0].it);
+    assert.deepEqual(C.aggDays(C.unpackDays(JSON.parse(JSON.stringify(p)))), C.aggDays(D));
+    assert.deepEqual(C.chunks('2026-01-01', '2026-01-01', 92), [['2026-01-01', '2026-01-01']]);
+    const ch = C.chunks('2026-01-01', '2026-12-31', 92);
+    assert.equal(ch.length, 4); assert.equal(ch[0][1], '2026-04-02'); assert.equal(ch[3][1], '2026-12-31');
+  });
+  it('parseSales: אותם גבולות כמו בשרת (הנחה/משקל) → שורה פגומה; בלי מספר סניף → bkn', () => {
+    const p = C.parseSales([SH, sl('16/11/2026', '1', '9', '10', '2000000'), sl('16/11/2026', '1', '9', '10', '0', ['סניף א', ''])]);
+    assert.deepEqual(p.bad, [{ r: 2, why: 'disc' }]);
+    assert.equal(p.lines[0].bkn, true); assert.equal(p.lines[0].bk, 'סניף-א');
+  });
+  it('qSignOk: מכירה – חיובי או 0, החזרה – שלילי או 0', () => {
+    assert.ok(C.qSignOk(10, 2) && C.qSignOk(10, 0) && C.qSignOk(-10, -1) && C.qSignOk(-10, 0));
+    assert.ok(!C.qSignOk(10, -1) && !C.qSignOk(-10, 1));
   });
 });
