@@ -7,6 +7,7 @@
 //   posOps({ op:'hw', dev, inst, hwSt, qLen?, qOldest?, ver? })  (posHwStatus)  הקופה עצמה: מצב הציוד והתור, למנהל (posdev.hwSt, hwAt)
 //   posOps({ op:'err', sev, code, msg, ctx?, dev?, ver? })       (posErrLog)     כל מי שמוכר: יומן תקלות poserr – טכני בלבד (מספרים ארוכים ומיילים נמחקים)
 //   posOps({ op:'conf', id, pick:'a'|'b' })            (posConfResolve) מנהל: הכרעה בהתנגשות posconf
+//   posOps({ op:'apChk', sale })                       POS:W2 מנהל: מכירה עם הנחה באישור שפג תוקפו (possale.apLate) – "נבדק" (possale.apChk{by,at})
 //   posOps({ op:'manual', dev, inst, realAt, why, lines, reqId }) (posManualSale) מנהל (manEntry:'mgr'): מכירה אחרי תקלה דרך posSale,
 //                                                      עם soldAt = השעה האמיתית, ואחר כך possale.man{by,why,realAt}
 // posOpsWatch (מתוזמן, כל 30 דקות): תור ישן מ-qStaleH שעות או ארוך מ-qWarnCnt, ותקלות חמורות שלא נשלחו → התראה (Push) לבעל העסק;
@@ -178,6 +179,23 @@ async function confOp(db, who, input) {
   return { ok: true, id: input.id, pick: input.pick };
 }
 
+// ---------- POS:W2: מכירה עם אישור מאוחר (apLate) – המנהל מסמן "נבדק" ----------
+async function apChkOp(db, who, input) {
+  if (typeof input.sale !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(input.sale)) throw bad('bad-input', 'קלט לא תקין');
+  const ref = db.doc('possale/' + input.sale);
+  return db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw nf('no-sale', 'המכירה לא נמצאה');
+    if (s.get('apLate') !== true) throw pre('not-late', 'במכירה הזו אין אישור מאוחר לבדיקה');
+    const c = s.get('apChk');
+    if (c && c.by) return { ok: true, sale: input.sale, dup: true };
+    const now = Date.now();
+    tx.update(ref, { apChk: { by: who.uid, at: now } });
+    log(tx, db, { kind: 'apChk', sale: input.sale, by: who.uid });
+    return { ok: true, sale: input.sale };
+  });
+}
+
 // ---------- הזנה ידנית אחרי תקלה ----------
 async function manualOp(request, db, who, input, cfg) {
   if (cfg.manEntry === 'off' || cfg.manEntry === 'none') throw pre('man-off', 'הזנה ידנית כבויה בעסק הזה'); // POS:W2: בסכמה של ש4 כבוי = 'none'
@@ -202,13 +220,14 @@ async function manualOp(request, db, who, input, cfg) {
 async function ops(request) {
   const input = inputObject(request);
   const op = input.op;
-  const OPS = ['approve', 'kill', 'unkill', 'hw', 'err', 'conf', 'manual'];
+  const OPS = ['approve', 'kill', 'unkill', 'hw', 'err', 'conf', 'manual', 'apChk'];
   if (!OPS.includes(op)) throw bad('bad-op', 'פעולה לא מוכרת');
-  const mgrOps = ['approve', 'kill', 'unkill', 'conf', 'manual'];
+  const mgrOps = ['approve', 'kill', 'unkill', 'conf', 'manual', 'apChk'];
   const { who, db } = await gate(request, mgrOps.includes(op) ? { mgr: true } : { sell: true });
   if (op === 'hw') return hwOp(db, who, input);
   if (op === 'err') return errOp(db, who, input);
   if (op === 'conf') return confOp(db, who, input);
+  if (op === 'apChk') return apChkOp(db, who, input);
   if (op === 'manual') return manualOp(request, db, who, input, await cfgOf(db));
   return devOp(db, who, op, input.dev);
 }

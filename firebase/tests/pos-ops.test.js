@@ -152,6 +152,19 @@ describe('posOps – התנגשויות והזנה ידנית (O15, O9)', () => 
     assert.equal(R(await call(OP, 'posOps', MGR, { op: 'conf', id: 'c1', pick: 'a' })), 'conf-done');
     assert.equal(R(await call(OP, 'posOps', MGR, { op: 'conf', id: 'nope', pick: 'a' })), 'no-conf');
   });
+  it('POS:W2 אישור מאוחר: מנהל מסמן "נבדק" (apChk) – רק למכירה עם apLate, פעם אחת; קופאי – לא', async () => {
+    await prep((d) => d.doc(`b/${A}/possale/K1-000009`).set({ gross: 9000, at: 2, apLate: true }));
+    assert.equal(R(await call(OP, 'posOps', CASH, { op: 'apChk', sale: 'K1-000009' })), 'not-manager');
+    assert.equal(R(await call(OP, 'posOps', MGR, { op: 'apChk', sale: 'old1' })), 'not-late');
+    assert.equal(R(await call(OP, 'posOps', MGR, { op: 'apChk', sale: 'nope' })), 'no-sale');
+    assert.equal(R(await call(OP, 'posOps', MGR, { op: 'apChk', sale: '../x' })), 'bad-input');
+    assert.equal(R(await call(OP, 'posOps', MGR, { op: 'apChk', sale: 'K1-000009' })), 'ok');
+    const s = await get(`b/${A}/possale/K1-000009`);
+    assert.equal(s.apChk.by, MGR); assert.equal(s.apLate, true); assert.equal(s.gross, 9000);
+    const again = await call(OP, 'posOps', OWN, { op: 'apChk', sale: 'K1-000009' });
+    assert.equal(R(again), 'ok'); assert.equal(again.r.dup, true);
+    assert.equal((await get(`b/${A}/possale/K1-000009`)).apChk.by, MGR);
+  });
   it('מכירה ידנית: מנהל, עם השעה האמיתית והסיבה; אותו reqId פעמיים = מכירה אחת; קופאי – לא', async () => {
     const realAt = Date.now() - 3 * 3600e3;
     const body = { op: 'manual', dev: 'K1', inst: INST1, realAt, why: 'הפסקת חשמל', lines: [{ n: 'לחם אחיד', qty: 2, unit: 690 }], reqId: reqId() };

@@ -58,7 +58,9 @@ function create(deps) {
     QK = k;
     Q = OFF.queue({
       store, key: k, now, timer: deps.timer, online: deps.online,
-      send: (it) => deps.call(it.fn, it.payload),
+      // POS:W2 (הכרעה 18.11): מכירה שנשלחת שוב מהתור (ניסיון שני ומעלה, או שחיכתה בתור יותר מדקה) – rs:true. השרת מקבל בה אישור הנחה
+      // שהיה תקף ברגע המכירה גם אם עברו 30 דקות עד שהגיעה (נרשמת עם apLate לבדיקת מנהל). מכירה מקוונת רגילה – בלי rs, כמו קודם
+      send: (it) => deps.call(it.fn, it.kind === 'sale' && (it.tries > 1 || now() - (it.at || now()) > 60000) ? Object.assign({}, it.payload, { rs: true }) : it.payload),
       asideKey: (deps.key || 'lp-pos').replace(/^lp-pos/, 'lp-pos-err') + ':' + (dev() || 'T'),
       aside: (it, e) => {
         const rs = reasonOf(e);

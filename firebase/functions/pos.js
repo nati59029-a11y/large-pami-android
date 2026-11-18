@@ -199,7 +199,8 @@ async function saleIn(request) {
   // תרגול – נדחה לפני כל דבר אחר (גם לפני הרשאות), כדי שאף מכירת תרגול לא תיגע במונה
   if (K.isPractice(input.reqId) || K.isPractice(input.dev)) throw bad('practice', 'מכירת תרגול לא נשלחת לשרת');
   const { who, db } = await gate(request, { sell: true });
-  for (const k of Object.keys(input)) if (!['reqId', 'dev', 'inst', 'lines', 'disc', 'dpct', 'vm', 'soldAt', 'seq', 'gross', 'off'].includes(k)) throw bad('bad-input', 'קלט לא תקין');
+  // POS:W2: rs (שליחה חוזרת מהתור, pos-data.js) – מתקבל ולא בשימוש בשלד הזה (pos-sale.js משתמש בו לאישור הנחה מאוחר)
+  for (const k of Object.keys(input)) if (!['reqId', 'dev', 'inst', 'lines', 'disc', 'dpct', 'vm', 'soldAt', 'seq', 'gross', 'off', 'rs'].includes(k)) throw bad('bad-input', 'קלט לא תקין');
   if (!K.isReq(input.reqId)) throw bad('bad-req', 'מזהה בקשה לא תקין');
   if (!K.isDev(input.dev)) throw bad('bad-dev', 'קוד קופה לא תקין');
   if (!K.isInst(input.inst)) throw bad('bad-inst', 'מזהה מכשיר לא תקין');

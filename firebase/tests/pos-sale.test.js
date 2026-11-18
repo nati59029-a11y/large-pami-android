@@ -503,13 +503,14 @@ describe('POS:W2 – אישור אחראי (ש5) ב-posSale וב-posReturn', () 
     assert.equal(R(await auth(CASH, { op: 'approve', act: 'disc', pct: 5, by: LEAD, pin: PIN[LEAD], need: 'manager' })), 'need-manager');
   });
 
-  it('ליקוי 2: תוקף 30 דקות לפי שעון השרת – גם כש-soldAt נשלח ליד זמן האישור; אישור שנוצר אחרי המכירה – נדחה; בן 29 דקות למכירה שנשמרה קודם – עובר', async () => {
+  it('ליקוי 2: תוקף 30 דקות לפי שעון השרת – מכירה מקוונת נדחית גם כש-soldAt נשלח ליד זמן האישור; אישור שנוצר אחרי המכירה – נדחה; בן 29 דקות למכירה שנשמרה קודם – עובר', async () => {
     const old = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
     await age(old, 5 * DAY);
-    assert.equal(R(await call('posSale', CASH, sale(tray(10, old, { soldAt: Date.now() - 5 * DAY + 1000, off: true })))), 'ap-old');
+    assert.equal(R(await call('posSale', CASH, sale(tray(10, old, { soldAt: Date.now() - 5 * DAY + 1000 })))), 'ap-old');
     const o31 = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
     await age(o31, 31 * 60000);
-    assert.equal(R(await call('posSale', CASH, sale(tray(10, o31, { soldAt: Date.now() - 31 * 60000 + 5000, off: true })))), 'ap-old');
+    assert.equal(R(await call('posSale', CASH, sale(tray(10, o31, { soldAt: Date.now() - 31 * 60000 + 5000 })))), 'ap-old');
+    assert.equal(R(await call('posSale', CASH, sale(tray(10, o31, { soldAt: Date.now() - 31 * 60000 + 5000, off: false, rs: false })))), 'ap-old');
     const late = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
     assert.equal(R(await call('posSale', CASH, sale(tray(10, late, { soldAt: Date.now() - 10 * 60000, off: true })))), 'ap-bad', 'האישור ניתן אחרי רגע המכירה');
     const ok = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
@@ -519,6 +520,70 @@ describe('POS:W2 – אישור אחראי (ש5) ב-posSale וב-posReturn', () 
     const ra = await appr(CASH, LEAD, 'ret', { ref: r.r.id, amt: 9000 });
     await age(ra, 31 * 60000);
     assert.equal(R(await call('posReturn', CASH, { reqId: reqId(), dev: 'K1', inst: INST1, why: 'x', tag: true, sale: r.r.id, items: [{ i: 0, qty: 1 }], aps: [ra] })), 'ap-old');
+  });
+
+  // הכרעת בעל העסק (18.11): מכירה שנגבתה בלי רשת עם אישור שהיה תקף ברגע המכירה, והגיעה אחרי 30 דקות – נרשמת עם apLate
+  it('אישור מאוחר: מכירה מהתור (off / rs) עם אישור שהיה תקף ברגע המכירה – נרשמת עם מסמך ומספור רגילים, apLate, התראה למנהל; מעל 72 שעות – apCrit', async () => {
+    const a = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    await age(a, 50 * 60000);
+    const r = await call('posSale', CASH, sale(tray(10, a, { soldAt: Date.now() - 40 * 60000, off: true })));
+    assert.equal(R(r), 'ok', r.msg);
+    assert.ok(r.r.docs.length >= 1, 'מסמך מס רשמי'); assert.equal(r.r.seq, 1);
+    const s = await get('possale/' + r.r.id);
+    assert.equal(s.apLate, true); assert.equal(s.apCrit, undefined); assert.equal(s.chk, undefined);
+    assert.deepEqual(s.aps, [{ id: a, by: LEAD, role: 'lead', apLate: true }]);
+    assert.equal((await get('poslog/' + a)).used, true);
+    const errs = (await all('poserr')).filter((e) => e.code === 'AP_LATE');
+    assert.equal(errs.length, 1); assert.equal(errs[0].sev, 'crit'); assert.equal(errs[0].sent, false); assert.equal(errs[0].ctx.sale, r.r.id);
+    assert.ok((await all('poslog')).some((x) => x.act === 'apLate' && x.sale === r.r.id));
+    // שליחה חוזרת מהתור (rs) של מכירה שהייתה מקוונת – גם מתקבלת
+    const b = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    await age(b, 45 * 60000);
+    const r2 = await call('posSale', CASH, sale(tray(10, b, { soldAt: Date.now() - 44 * 60000, rs: true })));
+    assert.equal(R(r2), 'ok', r2.msg); assert.equal((await get('possale/' + r2.r.id)).apLate, true);
+    // 5 ימים – נרשמת, אבל לבדיקה דחופה
+    const c = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    await age(c, 5 * DAY);
+    const r3 = await call('posSale', CASH, sale(tray(10, c, { soldAt: Date.now() - 5 * DAY + 60000, off: true })));
+    assert.equal(R(r3), 'ok', r3.msg);
+    const s3 = await get('possale/' + r3.r.id);
+    assert.equal(s3.apLate, true); assert.equal(s3.apCrit, true);
+    assert.equal((await all('poserr')).filter((e) => e.code === 'AP_LATE72').length, 1);
+    // אישור שכבר לא היה תקף ברגע המכירה (soldAt אחרי 30 דקות מהאישור) – נדחה גם מהתור
+    const d = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    await age(d, 60 * 60000);
+    assert.equal(R(await call('posSale', CASH, sale(tray(10, d, { soldAt: Date.now() - 25 * 60000, off: true })))), 'ap-old');
+    assert.equal((await get('poslog/' + d)).used, false);
+  });
+
+  it('אישור מאוחר – השרת לא מוותר: אחרי soldAt נדחה; אחוז נמוך יותר נדחה; אישור שנוצל נדחה; קופאי אחר נדחה; מקוונת רגילה עם אישור ישן נדחית', async () => {
+    const q = (ap, pct, o) => sale(tray(pct, ap, Object.assign({ soldAt: Date.now() - 40 * 60000, off: true }, o || {})));
+    // נוצר אחרי soldAt (יותר מ-2 דקות)
+    const after = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    await age(after, 35 * 60000);
+    assert.equal(R(await call('posSale', CASH, q(after, 10))), 'ap-bad');
+    // אחוז נמוך מההנחה
+    const low = await appr(CASH, LEAD, 'disc', { pct: 5, ref: 'cart' });
+    await age(low, 50 * 60000);
+    assert.equal(R(await call('posSale', CASH, q(low, 10))), 'ap-scope');
+    // אישור שכבר נוצל
+    const used = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    assert.equal(R(await call('posSale', CASH, sale(tray(10, used)))), 'ok');
+    await age(used, 50 * 60000);
+    assert.equal(R(await call('posSale', CASH, q(used, 10))), 'ap-used');
+    // אישור שניתן לקופאי אחר
+    const other = await appr(LEAD, MGR, 'disc', { pct: 10, ref: 'cart' });
+    await age(other, 50 * 60000);
+    assert.equal(R(await call('posSale', CASH, q(other, 10))), 'ap-bad');
+    // אותו אישור ישן, מכירה מקוונת רגילה (בלי off ובלי rs) – נדחית כמו קודם
+    const old = await appr(CASH, LEAD, 'disc', { pct: 10, ref: 'cart' });
+    await age(old, 50 * 60000);
+    assert.equal(R(await call('posSale', CASH, q(old, 10, { off: false }))), 'ap-old');
+    assert.equal((await get('poslog/' + old)).used, false);
+    for (const x of [after, low, other]) assert.equal((await get('poslog/' + x)).used, false);
+    assert.ok((await all('possale')).every((x) => !x.apLate), 'שום מכירה מאוחרת לא נרשמה');
+    // rs שאינו בוליאני – קלט לא תקין
+    assert.equal(R(await call('posSale', CASH, q(old, 10, { rs: 1 }))), 'bad-input');
   });
 
   it('אישור של עסק אחר – לא נמצא בעסק הזה ונדחה', async () => {

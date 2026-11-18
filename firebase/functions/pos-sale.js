@@ -11,7 +11,7 @@
 //   • אין נתוני כרטיס: רק last4 (4 ספרות), appr, brand, inst, tx, src, term, termNo, ref, reqId. כל רצף של 13–19 ספרות שעובר Luhn – נדחה.
 //
 // פונקציות (onCall):
-//   posSale({ reqId, dev, inst, soldAt, lines, pays, chg?, debt?, cust?, manDisc?, cpns?, promoOff?, note?, docAs?, alloc?, cashOk?, seq?, gross?, off?, aps? })
+//   posSale({ reqId, dev, inst, soldAt, lines, pays, chg?, debt?, cust?, manDisc?, cpns?, promoOff?, note?, docAs?, alloc?, cashOk?, seq?, gross?, off?, rs?, aps? })
 //     lines: [{ pid?, n, bc?, cat?, qty, unit, mdisc?{amt|pct, why?}, noPromo?, stk?, free? }] – unit באגורות (מחיר מחירון; הנחת מבצע מחושבת בשרת).
 //     pays: [{ m, amt, ref?, reqId?, + card: last4, appr, brand?, inst?, tx?, src?, term?, termNo? · check: chk{no,bank}, due?, post? · gift/voucher: code }]
 //     → { id, seq, gross, paid, chg, debt, docs:[{t,id,no}], warn[], dup? }
@@ -328,17 +328,25 @@ function compute(lines, input, cfg, promos, prods, cp, ctx) {
 // האישור קשור למה שאושר (סבב 2): הנחה – pct ≥ ההנחה בפועל, ref = 'l:<מוצר>' / 'cart'; החזרה – ref = מספר המכירה ('noRcpt' בלי קבלה),
 // amt ≥ סכום ההחזרה. התפקיד – של מי שאישר; תקרות לפי PC.discCap (אותו כלל כמו posAuth). מתחת למחיר מינימום – רק אישור מנהל שנוצר
 // עם need:'manager' ומכסה את ההנחה (אז נרשם discOvr). אישור משמש פעם אחת: מסומן used בטרנזקציה של הפעולה.
-// מכירה שהגיעה מהתור אחרי יותר מ-30 דקות – נדחית (ap-old) והקופה מעבירה אותה ל"מכירות שנדחו" (הכרעה בצד הבטוח, ראו pos-data.js).
+// מכירה שהגיעה אחרי יותר מ-30 דקות מהאישור (הכרעת בעל העסק, 18.11 – שינוי להכרעה הקודמת שדחתה אותה):
+//   • מכירה מקוונת רגילה (לא off ולא שליחה חוזרת מהתור – rs) – נדחית (ap-old), כמו קודם.
+//   • מכירה שכבר נגבתה בלי רשת (off:true) או שנשלחה שוב מהתור (rs:true) – נרשמת כרגיל (מסמך ומספור רגילים), אם האישור היה תקף ברגע
+//     המכירה: soldAt − at ≤ 30 דקות (וכמו תמיד: at ≤ soldAt + 2 דקות, אותו עסק, אותו קופאי, לא נוצל, ref ו-pct מכסים). האישור מסומן
+//     late, המכירה apLate:true (לבדיקת מנהל – posOps op:'apChk' מסמן "נבדק"), ונכתבת תקלה חמורה (poserr, sev:'crit') שמתריעה לבעל
+//     העסק ולמנהלים (posOpsWatch). מעל 72 שעות מיצירת האישור (שעון השרת) – גם apCrit:true (בדיקה דחופה).
+//   סיכון ידוע (לא נפתר): soldAt, off ו-rs מגיעים מהמכשיר, ושעון המכשיר אפשר לזייף. הבקרה – הסימון וההתראה למנהל.
 const AP_RE = /^[A-Za-z0-9]{10,40}$/;
 const AP_WIN = 30 * 60000;
 const AP_SKEW = 2 * 60000; // הפרש שעונים מותר בין המכשיר לשרת (soldAt מול זמן יצירת האישור)
 const AP_ROLE = { manager: 'mgr', lead: 'lead' };
+const AP_CRIT = 72 * 3600000; // אישור מאוחר מעל 72 שעות (שעון השרת) – המכירה נרשמת, ההנחה לבדיקה דחופה
 function apsIn(v) {
   if (v == null) return [];
   if (!Array.isArray(v) || v.length > 5 || v.some((x) => typeof x !== 'string' || !AP_RE.test(x)) || new Set(v).size !== v.length) throw bad('bad-ap', 'אישור לא תקין');
   return v;
 }
-// snaps – poslog/{ap}. → { role, list:[{ id, by, role, need, pct, amt, ref }] }. soldAt – רק במכירה.
+// snaps – poslog/{ap}. → { role, list:[{ id, by, role, need, pct, amt, ref, late?, crit? }] }. soldAt – רק במכירה.
+// late – מכירה שנגבתה בלי רשת / נשלחה שוב מהתור: אישור שעבר 30 דקות לפי שעון השרת מתקבל אם היה תקף ברגע המכירה (soldAt − at ≤ 30 דקות)
 // soft – בדיקה מקדימה מחוץ לטרנזקציה: אישור שנוצל לא נדחה כאן (שליחה חוזרת של אותו reqId מחזירה את התוצאה הראשונה – בטרנזקציה)
 function apsCheck(snaps, who, act, now, o) {
   o = o || {};
@@ -348,16 +356,21 @@ function apsCheck(snaps, who, act, now, o) {
     const v = x.exists ? x.data() : null;
     if (!v || v.k !== 'appr' || v.act !== act || v.for !== who.uid || !AP_ROLE[v.role] || typeof v.at !== 'number' || v.at > now + 60000) throw deny('ap-bad', 'האישור לא תקף');
     if (v.used === true && !o.soft) throw deny('ap-used', 'האישור כבר נוצל');
-    if (now - v.at > AP_WIN) throw deny('ap-old', 'פג תוקף האישור (30 דקות) – בקשו אישור חדש');
     if (o.soldAt != null && v.at > o.soldAt + AP_SKEW) throw deny('ap-bad', 'האישור ניתן אחרי המכירה');
+    let late = false;
+    if (now - v.at > AP_WIN) {
+      if (!(o.late && o.soldAt != null && o.soldAt - v.at <= AP_WIN)) throw deny('ap-old', 'פג תוקף האישור (30 דקות) – בקשו אישור חדש');
+      late = true;
+    }
     const r = AP_ROLE[v.role];
     if (!role || RANK[r] > RANK[role]) role = r;
-    list.push({ id: x.id, by: String(v.by || '').slice(0, 128), role: r, need: v.need || null, pct: typeof v.pct === 'number' ? v.pct : null, amt: Number.isInteger(v.amt) ? v.amt : null, ref: typeof v.ref === 'string' ? v.ref : null });
+    list.push(Object.assign({ id: x.id, by: String(v.by || '').slice(0, 128), role: r, need: v.need || null, pct: typeof v.pct === 'number' ? v.pct : null, amt: Number.isInteger(v.amt) ? v.amt : null, ref: typeof v.ref === 'string' ? v.ref : null },
+      late ? { late: true } : {}, late && now - v.at > AP_CRIT ? { crit: true } : {}));
   }
   return { role, list };
 }
 const apUse = (tx, db, list, o) => { for (const a of list) tx.update(db.doc('poslog/' + a.id), Object.assign({ used: true, usedAt: Date.now() }, o)); };
-const apPub = (a) => ({ id: a.id, by: a.by, role: a.role });
+const apPub = (a) => Object.assign({ id: a.id, by: a.by, role: a.role }, a.late ? { apLate: true } : {}, a.crit ? { apCrit: true } : {});
 // סמכות הנחה ידנית (ב נ7), לכל הנחה בנפרד ולכל המכירה. → { ovr, used:[אישור] }
 // לכל הנחה: מה שהקופאי רשאי בעצמו (PC.discCap) – עובר; אחרת חייב אישור שמכסה אותה (ref, pct, תפקיד, מינימום).
 function discCheck(who, cfg, co, lines, input, apl) {
@@ -401,7 +414,7 @@ function discCheck(who, cfg, co, lines, input, apl) {
 }
 
 // ---------- posSale ----------
-const SALE_KEYS = ['reqId', 'dev', 'inst', 'lines', 'pays', 'chg', 'debt', 'cust', 'manDisc', 'cpns', 'promoOff', 'note', 'docAs', 'alloc', 'cashOk', 'vm', 'soldAt', 'seq', 'gross', 'off'];
+const SALE_KEYS = ['reqId', 'dev', 'inst', 'lines', 'pays', 'chg', 'debt', 'cust', 'manDisc', 'cpns', 'promoOff', 'note', 'docAs', 'alloc', 'cashOk', 'vm', 'soldAt', 'seq', 'gross', 'off', 'rs'];
 async function saleIn(request) {
   const input = inputObject(request);
   if (K.isPractice(input.reqId) || K.isPractice(input.dev)) throw bad('practice', 'מכירת תרגול לא נשלחת לשרת');
@@ -413,6 +426,7 @@ async function saleIn(request) {
   if (!K.soldAtOk(input.soldAt, now)) throw bad('bad-time', 'שעון המכשיר לא תקין');
   if (input.seq != null && K.seqCheck(0, input.seq) === 'bad') throw bad('bad-seq', 'מספר מכירה לא תקין');
   if (input.gross != null && !isAg(input.gross)) throw bad('bad-input', 'סכום לא תקין');
+  if (input.rs != null && typeof input.rs !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
   const lines = linesIn(input.lines);
   if (input.manDisc != null) {
     if (!isObj(input.manDisc)) throw bad('bad-disc', 'הנחה לא תקינה');
@@ -447,7 +461,8 @@ async function saleIn(request) {
     const [m, s] = snaps;
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res') || { id: m.get('sale'), seq: m.get('seq'), gross: m.get('gross') }); return; }
     // POS:W2: אישור הנחה (ש5) – אחרי בדיקת הכפילות (שליחה חוזרת של מכירה שכבר נרשמה מחזירה אותה, גם כשהאישור כבר נוצל)
-    const ap = apsCheck(snaps.slice(snaps.length - apIds.length), who, 'disc', now, { soldAt: input.soldAt });
+    // אישור שפג תוקפו עד שהמכירה הגיעה – מתקבל רק במכירה שכבר נגבתה בלי רשת (off) או שנשלחה שוב מהתור (rs)
+    const ap = apsCheck(snaps.slice(snaps.length - apIds.length), who, 'disc', now, { soldAt: input.soldAt, late: input.off === true || input.rs === true });
     const d = devOk(s, input.inst, cfg);
     const prods = {};
     pids.forEach((p, i) => { const x = snaps[2 + i]; if (x.exists) prods[p] = x.data(); });
@@ -471,6 +486,7 @@ async function saleIn(request) {
     const co = compute(lines, input, cfg, promos, prods, cp, { at: input.soldAt, club: !!(cd && cd.club), grp: cd && cd.grp, promoOff });
     const dc = discCheck(who, cfg, co, lines, input, ap.list);
     const ovr = dc.ovr ? 'ovr' : null;
+    const apLate = dc.used.some((a) => a.late), apCrit = dc.used.some((a) => a.crit);
     const calc = co.calc;
     // סכום מהמכשיר שונה: מכירה מקוונת – נדחית (המכשיר מחשב מחדש). מכירה בלי רשת (off) – כבר נמסרה ללקוח: נשמרת לבדיקת מנהל (chk), בלי מסמך
     let gross = calc.gross, chk = null;
@@ -548,7 +564,7 @@ async function saleIn(request) {
       retQty: co.lines.map(() => 0), retAmt: co.lines.map(() => 0), retByM: {}, soldAt: input.soldAt, at: now, off: input.off === true,
     }, cust ? { cust, custName: String((cd && (cd.bn || cd.name)) || '').slice(0, 80) } : {}, note ? { note } : {}, md ? { manDisc: md } : {},
     chk ? Object.assign({ chk: true }, chk) : {}, priceChk.length ? { chkPrice: priceChk.slice(0, 50) } : {}, warn.length ? { warn } : {}, ovr ? { discOvr: true } : {},
-    promoOff.length ? { promoOff } : {}, dc.used.length ? { aps: dc.used.map(apPub) } : {});
+    promoOff.length ? { promoOff } : {}, dc.used.length ? { aps: dc.used.map(apPub) } : {}, apLate ? { apLate: true } : {}, apCrit ? { apCrit: true } : {});
     // ---- כתיבות ----
     B.flush();
     tx.create(db.doc('possale/' + id), doc);
@@ -569,6 +585,13 @@ async function saleIn(request) {
     tx.set(mark, { kind: 'sale', sale: id, seq, gross, at: now, res: out });
     if (cashLog) log(tx, db, { act: 'cashMax', sale: id, dev: input.dev, br, by: who.uid, amt: cashNet, note: String(cfg.cashMaxMode) });
     if (ovr) log(tx, db, { act: 'discOvr', sale: id, dev: input.dev, br, by: who.uid, note: 'מתחת למחיר מינימום' });
+    if (apLate) {
+      // הנחה באישור שפג תוקפו עד שהמכירה הגיעה – ביומן, ותקלה חמורה (poserr crit) שמתריעה לבעל העסק ולמנהלים (posOpsWatch)
+      const note = apCrit ? 'אישור הנחה בן יותר מ-72 שעות – בדיקה דחופה' : 'אישור הנחה שפג תוקפו עד שהמכירה הגיעה לשרת';
+      log(tx, db, { act: 'apLate', sale: id, dev: input.dev, br, by: who.uid, note });
+      tx.create(db.collection('poserr').doc(), { sev: 'crit', code: apCrit ? 'AP_LATE72' : 'AP_LATE', msg: note + ' (מכירה ' + id + ')', ctx: { sale: id, aps: dc.used.filter((a) => a.late).map((a) => a.id).join(',').slice(0, 120) },
+        at: now, by: who.uid, dev: input.dev, sent: false });
+    }
     if (promoOff.length) log(tx, db, { act: 'promoOff', sale: id, dev: input.dev, br, by: who.uid, note: promoOff.join(',').slice(0, 200) });
     if (debtWarn) log(tx, db, { act: 'creditOver', sale: id, dev: input.dev, br, by: who.uid, amt: debt });
     res = Object.assign({ ok: true }, out);

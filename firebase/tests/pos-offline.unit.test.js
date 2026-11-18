@@ -346,7 +346,7 @@ describe('pos-data – מכירה בלי רשת וסנכרון (מול החוז�
 describe('POS:W2 – תור מכירות והחזרות: דחייה לא עוצרת, החזרה ממתינה לא נספרת', () => {
   function rig() {
     const S = server();
-    const R = { rets: new Map(), n: 0, saleDown: false };
+    const R = { rets: new Map(), n: 0, saleDown: false, sent: [] };
     const errOf = (reason, code) => { const e = new Error(reason); e.code = code || 'failed-precondition'; e.details = { reason }; return e; };
     S.posReturn = (d) => {
       if (R.rets.has(d.reqId)) return Object.assign({ dup: true }, R.rets.get(d.reqId));
@@ -366,6 +366,7 @@ describe('POS:W2 – תור מכירות והחזרות: דחייה לא עוצ�
         if (!net.up) throw offErr();
         const d = JSON.parse(JSON.stringify(data));
         if (fn === 'posSale') {
+          R.sent.push(d);
           if (R.saleDown) throw errOf('internal', 'unavailable');
           if (d.note === 'OLD') throw errOf('ap-old', 'permission-denied');
           return S.posSale(d);
@@ -382,6 +383,18 @@ describe('POS:W2 – תור מכירות והחזרות: דחייה לא עוצ�
   const sl = (note) => ({ lines: [{ pid: 'p1', name: 'חלב', price: 690, qty: 1, total: 690 }], total: 690, pays: [{ m: 'cash', amt: 690 }], note: note || '' });
   const retOf = (s, o) => Object.assign({ sale: s.id, saleReq: s.reqId, saleNo: s.no, items: [{ i: 0, qty: 1 }], why: 'לא מתאים', tag: true, refunds: [{ m: 'cash', amt: 690 }], lines: [{ pid: 'p1', qty: 1 }], total: 690, wait: 300 }, o || {});
   const drainAll = async (D) => { for (let i = 0; i < 300 && (D.net().pending || D.retPending()); i++) { await D.flush(); await new Promise((r) => setTimeout(r, 3)); } };
+
+  it('אישור מאוחר (הכרעה 18.11): שליחה ראשונה מקוונת – בלי rs; שליחה חוזרת מהתור – rs:true (השרת מקבל בה אישור שהיה תקף ברגע המכירה)', async () => {
+    const { R, D } = rig();
+    await D.saveSale(sl()); await drainAll(D);
+    assert.equal(R.sent.length, 1); assert.equal(R.sent[0].rs, undefined); assert.equal(R.sent[0].off, false);
+    R.saleDown = true;
+    await D.saveSale(sl()); await D.flush();
+    R.saleDown = false; await drainAll(D);
+    const two = R.sent.filter((x) => x.seq === 2);
+    assert.ok(two.length >= 2, 'נשלחה פעמיים'); assert.equal(two[0].rs, undefined); assert.equal(two[two.length - 1].rs, true);
+    assert.equal(D.net().pending, 0);
+  });
 
   it('ליקוי 3: מכירה שהשרת דחה בגלל אישור – יוצאת ל"מכירות שנדחו" (lp-pos-err), נורית אדומה, הודעה, והמכירות שאחריה נשלחות ברצף בלי חור', async () => {
     const { S, D, net, ev } = rig();
