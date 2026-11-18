@@ -64,7 +64,10 @@ test.before(async () => {
   execFileSync(process.execPath, [path.join(__dirname, '../build.js'), '--backend', 'local', '--api', `http://127.0.0.1:${srv.port}/cxBot`, '--out', ext], { stdio: 'pipe' });
   ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     channel: 'chromium', headless: true, acceptDownloads: true,
-    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
+    // כספית האמיתית לא נגישה בבדיקה: בלשונית שהתוסף פותח, הבקשה הראשונה לפעמים יוצאת לפני שה-route מחובר. בסביבת הפיתוח
+    // האתר חסום (דף שגיאה → התוסף טוען מחדש → הדמה), אבל ב-GitHub הוא נטען באמת (דף של Cloudflare) והבדיקה נכשלה.
+    // מפנים את הכתובת ל-127.0.0.1 (חיבור נדחה) – אותה התנהגות בכל מקום
+    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--host-resolver-rules=MAP caspit.valu.co.il 127.0.0.1'],
   });
   await ctx.route('https://caspit.valu.co.il/**', caspitRoute);
   sw = ctx.serviceWorkers()[0] || (await ctx.waitForEvent('serviceworker'));
@@ -104,7 +107,8 @@ test('חיבור לכספית פג → "צריך התחברות", בלי למל�
   let t0 = Date.now();
   await pop.click('#sync');
   let s = await waitRun(t0);
-  assert.equal(s.st.lastRun.st, 'needs-login', JSON.stringify(s.st.lastRun));
+  const diag = async () => { const p = caspitPage(); return p ? { url: p.url(), body: (await p.evaluate(() => document.body && document.body.innerText).catch(() => '?') || '').slice(0, 300) } : { pages: ctx.pages().map((x) => x.url()) }; };
+  assert.equal(s.st.lastRun.st, 'needs-login', JSON.stringify(s.st.lastRun) + ' ' + JSON.stringify(await diag()));
   const cp = caspitPage();
   assert.ok(cp, 'extension opened its own Caspit tab');
   assert.equal(await cp.evaluate(() => document.getElementById('p').value + document.getElementById('u').value), '');

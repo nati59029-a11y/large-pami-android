@@ -146,6 +146,18 @@ async function isLoginTab(tabId) {
   const L = (await sel()).login || {};
   return inIso(tabId, (cfg) => self.CxSel.isLogin(document, window, cfg), [L]);
 }
+// כספית היא אפליקציית דף אחד שמציירת את המסך אחרי הטעינה (במחשב איטי / רשת איטית – כמה שניות). מחכים עד שרואים
+// דף התחברות או את המערכת המחוברת (login.shell), עד ms. בדיקה שנכשלה באמצע ניווט – ננסה שוב בסבב הבא. → { login, shell } או {} אם לא הוכרע
+async function loginState(tabId, ms) {
+  const L = (await sel()).login || {};
+  const end = Date.now() + (ms || 20e3);
+  for (;;) {
+    const r = await inIso(tabId, (cfg) => ({ login: self.CxSel.isLogin(document, window, cfg), shell: !!(cfg.shell && self.CxSel.find(document, cfg.shell)) }), [L]).catch(() => null);
+    if (r && (r.login || r.shell)) return r;
+    if (Date.now() > end) return r || {};
+    await sleep(1000);
+  }
+}
 
 // ---------- תפיסת קובץ שכספית מורידה ----------
 const waiting = new Map();
@@ -215,8 +227,9 @@ const STEP = {
     await waitLoaded(tab);
     await ensurePage(tab);
     const ok = await chrome.tabs.sendMessage(tab, { t: 'cx-ping' }).catch(() => null);
-    // דף התחברות או לשונית בלי הגשר → טוענים מחדש פעם אחת (אולי בעל העסק כבר התחבר בלשונית אחרת)
-    if (!ok || (await isLoginTab(tab))) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); if (await isLoginTab(tab)) throw P.err('needs-login'); }
+    // דף התחברות או לשונית בלי הגשר → טוענים מחדש פעם אחת (אולי בעל העסק כבר התחבר בלשונית אחרת).
+    // מחכים שהמסך יצויר (loginState) – בדיקה מיידית במחשב איטי ראתה דף ריק והמשיכה כאילו מחוברים
+    if (!ok || (await loginState(tab)).login) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); if ((await loginState(tab)).login) throw P.err('needs-login'); }
     run.tab = tab;
     return {};
   },
