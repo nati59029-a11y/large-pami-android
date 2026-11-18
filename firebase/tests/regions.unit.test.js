@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'drRemind', 'expirePromosOnLine', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'drRemind', 'expirePromosOnLine', 'posBackupDaily', 'posOpsWatch', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
