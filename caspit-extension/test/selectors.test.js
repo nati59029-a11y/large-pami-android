@@ -124,8 +124,8 @@ test('guard: דף שאינו המשרד האחורי (/bo) – אף צעד לא 
 });
 
 test('monthYear: עברית, אנגלית, מספרים', async () => {
-  const r = await page.evaluate(() => [window.CxSel.monthYear('נובמבר 2026'), window.CxSel.monthYear('January 2027'), window.CxSel.monthYear('3/2026'), window.CxSel.monthYear('xx')]);
-  assert.deepEqual(r, [{ y: 2026, m: 10 }, { y: 2027, m: 0 }, { y: 2026, m: 2 }, null]);
+  const r = await page.evaluate(() => [window.CxSel.monthYear('נובמבר 2026'), window.CxSel.monthYear('January 2027'), window.CxSel.monthYear('3/2026'), window.CxSel.monthYear('xx'), window.CxSel.monthYear('נוב 2026'), window.CxSel.monthYear('דצמ׳ 2026'), window.CxSel.monthYear('\u200fינו 2027'), window.CxSel.monthYear('מאי 2026'), window.CxSel.monthYear('Nov 2026')]);
+  assert.deepEqual(r, [{ y: 2026, m: 10 }, { y: 2027, m: 0 }, { y: 2026, m: 2 }, null, { y: 2026, m: 10 }, { y: 2026, m: 11 }, { y: 2027, m: 0 }, { y: 2026, m: 4 }, { y: 2026, m: 10 }]);
 });
 
 test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה שדה סיסמה', async () => {

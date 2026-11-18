@@ -20,7 +20,7 @@ document.cookie = 'ASP.NET_SessionId=SESSIONabc123def456; path=/';
 window.ev = [];
 function dl(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); ev.push('dl:' + name); }
 document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
-const HE_M = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const HE_M = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ']; // כמו בכספית: "נוב 2026"
 const pad = (n) => String(n).padStart(2, '0');
 // משימה של כספית: POST (run-as-job) → { job_id } ואחר כך הקובץ מ-get_job_result
 function job(url, body, filename) {
@@ -43,7 +43,8 @@ function datePicker(host, init) {
   const draw = () => {
     const y = view.getFullYear(), m = view.getMonth(), n = new Date(y, m + 1, 0).getDate(), off = new Date(y, m, 1).getDay();
     cal.innerHTML = '<header><span class="prev">&lt;</span><span class="day__month_btn up">' + HE_M[m] + ' ' + y + '</span><span class="next">&gt;</span></header><div>'
-      + Array.from({ length: off }, () => '<span class="cell day blank"></span>').join('') + Array.from({ length: n }, (_, k) => '<span class="cell day">' + (k + 1) + '</span>').join('') + '</div>';
+      + '<span class="cell day-header">א</span><span class="cell day-header">ב</span><span class="cell day-header">ג</span><span class="cell day-header">ד</span><span class="cell day-header">ה</span><span class="cell day-header">ו</span><span class="cell day-header">ש</span>'
+      + Array.from({ length: off }, () => '<span class="cell day blank"></span>').join('') + Array.from({ length: n }, (_, k) => { const wd = (off + k) % 7, cur = new Date(y, m, k + 1); return '<span class="cell day' + (wd >= 5 ? ' weekend' : '') + (+cur === +new Date(v.getFullYear(), v.getMonth(), v.getDate()) ? ' selected' : '') + '">' + (k + 1) + '</span>'; }).join('') + '</div>';
     cal.querySelector('.prev').onclick = (e) => { e.stopPropagation(); view = new Date(y, m + 1, 1); draw(); };
     cal.querySelector('.next').onclick = (e) => { e.stopPropagation(); view = new Date(y, m - 1, 1); draw(); };
     cal.querySelectorAll('.cell.day:not(.blank)').forEach((c) => { c.onclick = (e) => { e.stopPropagation(); v = new Date(y, m, +c.textContent); show(); cal.style.display = 'none'; }; });
@@ -76,14 +77,13 @@ function render() {
     document.getElementById('mk').onclick = () => { const a = f(), b = t(); const k = (d) => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()); ev.push('mk:' + k(a) + '-' + k(b)); job('/bo/merkaz/reports/sales_items', { from: k(a), to: k(b) }, 'sales_items_' + k(a) + '_' + k(b) + '.csv'); };
   } else if (h.startsWith('#/csv-imports')) {
     fetch('/bo/merkaz/upload_csv_index', { headers: { Authorization: TOK } });
-    const O = [['new', 'טעינת פריטים חדשים'], ['price', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים'], ['cust', 'טעינת לקוחות']];
+    const O = [['new', 'טעינת פריטים חדשים'], ['club', 'טעינת מועדון לקוחות'], ['cust', 'טעינת לקוחות הקפה'], ['price', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים'], ['sprice', 'עדכון מחיר בחנות'], ['upd', 'עדכון פריטים'], ['newnp', 'טעינת פריטים חדשים מנטפוס']];
     app.innerHTML = '<div class="csv-import-form app-page"><div class="form-group title-on-top"><label>בחר סוג קובץ טעינה</label><div class="multiselect"><div class="multiselect__tags"><input id="job_type" type="text" class="multiselect__input" placeholder="בחר"></div><div class="multiselect__content-wrapper" style="display:none"><ul class="multiselect__content">'
-      + O.map(([v, t]) => '<li class="multiselect__element"><span class="multiselect__option" data-v="' + v + '"><span>' + t + '</span></span></li>').join('') + '</ul></div></div></div><div id="more"></div>'
+      + O.map(([v, t]) => '<li class="multiselect__element"><span class="multiselect__option" data-v="' + v + '"><span>\u00a0' + t + ' </span></span></li>').join('') + '</ul></div></div></div><div id="more"></div>'
       + '<label>סיסמת מנהל <input type="password" id="mp" value="hunter2pass"></label><input id="note" value="owner-secret-value"><div class="result" role="alert"></div></div>';
     const wrap = app.querySelector('.multiselect__content-wrapper'), jt = document.getElementById('job_type');
     let t = '';
     jt.addEventListener('focus', () => { wrap.style.display = 'block'; });
-    jt.addEventListener('click', () => { wrap.style.display = 'block'; });
     jt.addEventListener('keydown', (e) => { if (e.key === 'Escape') wrap.style.display = 'none'; });
     app.querySelectorAll('.multiselect__option').forEach((o) => { o.onclick = (e) => { e.stopPropagation(); t = o.dataset.v; jt.value = o.textContent; wrap.style.display = 'none'; ev.push('type:' + t);
       document.getElementById('more').innerHTML = '<input type="file" id="f" style="display:none"><label for="f" class="btn btn-default">בחר קובץ</label> <button id="go" class="btn btn-primary">טען קובץ</button>';
