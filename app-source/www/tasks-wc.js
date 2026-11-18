@@ -159,7 +159,7 @@ function wkView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=a
  const allBtn=`<button class="btn g w" data-a="tkwAll" style="margin:4px 0 10px">כל המשימות (${A.length})</button>`;
  if(!all1){
   if(W.fin&&nx)h+=`<div class="card" id="tkw-fin" style="border-color:var(--inc);border-width:2px;text-align:center;padding:22px 14px"><div style="font-size:2rem;color:var(--inc)">✓</div><div style="font-weight:700;font-size:1.15rem;margin:6px 0">בוצע</div><div class="note" style="white-space:pre-wrap;margin:0 0 14px">${esc(W.fin)}</div><button class="btn w" data-a="tkwNext" style="min-height:52px;font-size:1.05rem;font-weight:700;background:var(--acc);color:var(--onacc);border-color:var(--acc)">הבאה ›</button></div>`+allBtn;
-  else if(nx){W.fin='';h+=`<div class="mh"><span>המשימה הנוכחית</span></div>`+(nx.k==='t'?nowCard(nx.o):one(nx))+(A.length>1?allBtn:'')}
+  else if(nx){W.fin='';h+=`<div class="mh"><span>המשימה הנוכחית</span></div>`+(nx.k==='t'?nowCard(nx.o):one(nx))+(A.length>1||S.length?allBtn:'')}
   else{W.fin='';h+=`<div class="card" id="tkw-empty" style="text-align:center;padding:26px 14px"><div style="font-size:2rem;color:var(--inc)">✓</div><div style="font-weight:700;font-size:1.15rem;margin-top:6px">${F.q||F.c||F.t?'אין תוצאות לסינון הזה.':'אין משימות כרגע ✓'}</div></div>`+tail()}
   return h+more}
  W.fin='';
@@ -179,11 +179,11 @@ async function apLoad(t){const A=W.ap;if(!A||!t||A.im[t.id]!==undefined)return;A
  try{const r=await fsx('/tasks/'+t.id+'/p?pageSize=20');((r&&r.documents)||[]).forEach(d=>{const pid=idOf(d),u=gv(d,'img');if(/^w[1-5]$/.test(pid)&&imgOk(u))L.push({pid,img:u})});L.sort((a,b)=>a.pid.localeCompare(b.pid));
   if(!L.length&&t.pr==='1'){const d=await fsx('/tasks/'+t.id),u=gv(d,'img');if(u&&imgOk(u))L.push({pid:'w1',img:u})}A.im[t.id]=L}
  catch(e){A.im[t.id]=[];A.er[t.id]=tkErr(e)}
- if(W.ap===A)apShow()}
+ if(W.ap===A&&!A.rj)apShow()}
 function apShow(){const A=W.ap;if(!A)return;const n=A.ids.length;
  while(A.i<n&&!tkGet(A.ids[A.i]))A.i++;
  const fin=()=>{const rest=A.ids.filter(id=>{const t=tkGet(id);return t&&t.st==='wait'&&!A.rtn.includes(id)}),m=rest.length;
-  dlg(`<h3>סיימת לעבור על המשימות</h3><p class="note">${A.rtn.length?'הוחזרו לעובד: '+A.rtn.length+'. ':''}${m?'נשארו '+m+' משימות מאושרות לאישור.':'אין עוד משימות שממתינות לאישור.'}</p><div class="row">${m?`<button class="btn grow" data-a="tkwApAll">אשר את כל השאר (${m})</button>`:''}<button class="btn g grow" data-a="tkwApX">סגור</button></div>`);$('#dlg').classList.add('wide')};
+  dlg(`<h3>סיימת לעבור על המשימות</h3><p class="note">${A.rtn.length?'הוחזרו לעובד: '+A.rtn.length+'. ':''}${m?'נשארו '+m+' משימות לאישור.':'אין עוד משימות שממתינות לאישור.'}</p><div class="row">${m?`<button class="btn grow" data-a="tkwApAll">אשר את כל השאר (${m})</button>`:''}<button class="btn g grow" data-a="tkwApX">סגור</button></div>`);$('#dlg').classList.add('wide')};
  if(A.i>=n)return fin();
  const t=tkGet(A.ids[A.i]);apLoad(t);if(A.i+1<n){const t2=tkGet(A.ids[A.i+1]);if(t2)apLoad(t2)}
  const im=A.im[t.id],imH=im===undefined||im===null?'<p class="note">טוען תמונות…</p>':im.length?im.map((x,k)=>`<img src="${esc(x.img)}" alt="תמונת ביצוע ${k+1}" style="width:100%;display:block;border-radius:8px;margin-bottom:8px">`).join(''):`<p class="note">${A.er[t.id]?esc(A.er[t.id]):'אין תמונות במשימה הזו.'}</p>`;

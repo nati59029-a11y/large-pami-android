@@ -617,16 +617,17 @@ service cloud.firestore {
           && nw().txt is string && nw().txt.size() >= 1 && nw().txt.size() <= 500
           && nw().t is int
           && nw().get('to', []) is list && nw().get('to', []).size() <= 300
+          && (nw().get('to', []).size() == 0 || nw().get('to', []).join('\n').split('\n') == nw().get('to', []))
           && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
-          && nw().get('dk', '') is string && nw().get('dk', '').size() <= 10
-          && nw().get('pri', '') is string && nw().get('pri', '').size() <= 1
+          && nw().get('dk', '') in ['', 'td', 'tm', 'none', 'd3', 'at']
+          && nw().get('pri', '') in ['', 'h', 'l']
           && nw().get('cat', '') is string && nw().get('cat', '').size() <= 30
           && nw().get('est', 0) is int && nw().get('est', 0) >= 0 && nw().get('est', 0) <= 1440
-          && nw().get('ck', []) is list && nw().get('ck', []).size() <= 20
+          && tkCkOk(nw().get('ck', []))
           && nw().get('im', 0) is int && nw().get('im', 0) >= 0 && nw().get('im', 0) <= 1
           && nw().get('by', '') is string && nw().get('by', '').size() <= 100;
       }
-      allow read: if lpW() && (isManager());
+      allow read: if isManager();
       allow create, update: if lpW() && (isManager() && tOk());
       allow delete: if lpW() && (isManager());
       match /p/{pid} {
@@ -638,7 +639,7 @@ service cloud.firestore {
             && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
             && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
         }
-        allow read: if lpW() && (isManager());
+        allow read: if isManager();
         allow create: if lpW() && (isManager() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/tkt/$(id)));
         allow update: if false;
         allow delete: if lpW() && (isManager());
@@ -2150,12 +2151,13 @@ service cloud.firestore {
             && nw().txt is string && nw().txt.size() >= 1 && nw().txt.size() <= 500
             && nw().t is int
             && nw().get('to', []) is list && nw().get('to', []).size() <= 300
+          && (nw().get('to', []).size() == 0 || nw().get('to', []).join('\n').split('\n') == nw().get('to', []))
             && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
-            && nw().get('dk', '') is string && nw().get('dk', '').size() <= 10
-            && nw().get('pri', '') is string && nw().get('pri', '').size() <= 1
+            && nw().get('dk', '') in ['', 'td', 'tm', 'none', 'd3', 'at']
+            && nw().get('pri', '') in ['', 'h', 'l']
             && nw().get('cat', '') is string && nw().get('cat', '').size() <= 30
             && nw().get('est', 0) is int && nw().get('est', 0) >= 0 && nw().get('est', 0) <= 1440
-            && nw().get('ck', []) is list && nw().get('ck', []).size() <= 20
+            && tkCkOk(nw().get('ck', []))
             && nw().get('im', 0) is int && nw().get('im', 0) >= 0 && nw().get('im', 0) <= 1
             && nw().get('by', '') is string && nw().get('by', '').size() <= 100;
         }

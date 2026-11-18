@@ -77,7 +77,7 @@ for (const E of ENVS) {
 
     it('נחסם: תבנית פגומה (טקסט ריק / ארוך, np גדול, שדה זר, ck ארוך, im לא תקין)', async () => {
       const m = fs(E.mgr);
-      for (const [i, o] of [{ txt: '' }, { txt: 'א'.repeat(501) }, { np: 4 }, { np: -1 }, { zz: 1 }, { ck: Array(21).fill('x') }, { im: 2 }, { est: 5000 }, { cat: 'x'.repeat(31) }].entries())
+      for (const [i, o] of [{ txt: '' }, { txt: 'א'.repeat(501) }, { np: 4 }, { np: -1 }, { zz: 1 }, { ck: Array(21).fill('x') }, { im: 2 }, { est: 5000 }, { cat: 'x'.repeat(31) }, { ck: [5, { a: 1 }] }, { ck: ['x'.repeat(121)] }, { ck: [''] }, { to: [1, 2] }, { to: ['a\nb'] }, { dk: 'zzz' }, { pri: 'x' }, { pri: 'hh' }].entries())
         await assertFails(m.doc(R('tkt/bad' + i)).set(tpl(o)));
       await assertFails(m.doc(R('tkt/bad_t')).set({ txt: 'בלי זמן' }));
     });

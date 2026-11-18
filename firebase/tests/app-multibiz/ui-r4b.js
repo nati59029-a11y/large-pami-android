@@ -11,7 +11,7 @@ const S = (v) => ({ stringValue: String(v) }), I = (v) => ({ integerValue: Strin
 const T0 = H.T0, D1 = 864e5, H1 = 36e5;
 const DOCS = 'projects/demo-largpeami/databases/(default)/documents/';
 const IMG = 'data:image/jpeg;base64,' + 'QUJD'.repeat(120);
-let DB, LOG, K403 = false;
+let DB, LOG, K403 = false, HOLD = null;
 const reset = () => { DB = { tasks: {}, ptk: {}, rtk: {}, rq: {}, staff: {}, tkt: {} }; LOG = []; };
 const docOf = (col, id) => ({ name: DOCS + col + '/' + id, fields: DB[col][id], createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
 const MINE = new Set(['tasks', 'ptk', 'rtk', 'rq']);
@@ -47,7 +47,7 @@ async function mockCloud(ctx, who) {
       return route.fallback();
     }
     // תמונות משימה (tasks/{id}/p)
-    if (s[0] === 'tasks' && s[2] === 'p' && s.length === 3 && m === 'GET') { const col = 'tasks/' + s[1] + '/p'; DB[col] = DB[col] || {}; return ok({ documents: Object.keys(DB[col]).map((k) => docOf(col, k)) }); }
+    if (s[0] === 'tasks' && s[2] === 'p' && s.length === 3 && m === 'GET') { if (HOLD && s[1] === 'a3') await HOLD; const col = 'tasks/' + s[1] + '/p'; DB[col] = DB[col] || {}; return ok({ documents: Object.keys(DB[col]).map((k) => docOf(col, k)) }); }
     const col = s[0], id = s[1];
     if (!MINE.has(col) || s.length > 2) return route.fallback();
     if (m === 'GET') return id ? (DB[col][id] ? ok(docOf(col, id)) : err(404, 'NOT_FOUND')) : ok({ documents: Object.keys(DB[col]).map((k) => docOf(col, k)) });
@@ -78,8 +78,9 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   seedBase();
   task('t1', { txt: S('לסדר את המדף'), due: I(T0 + H1) });
   task('t2', { txt: S('לנקות את הדלפק'), due: I(T0 + 2 * D1) });
+  task('t3', { txt: S('משימה שנדחתה'), due: I(T0 + 3 * D1) });
   let w = await open('w-r4b', 'w1@x.co'); let wp = w.page;
-  await wp.evaluate(() => { window.drPin = () => '<div class="card" id="pin-x">דיווח יומי – נעוץ</div>'; go('tk'); }); await sleep(1100);
+  await wp.evaluate(() => { localStorage.setItem(LK('lp-snz-' + SY.uid), JSON.stringify({ 't:t3': Date.now() + 36e5 })); window.drPin = () => '<div class="card" id="pin-x">דיווח יומי – נעוץ</div>'; go('tk'); }); await sleep(1100);
   let t = await txt(wp, '#main');
   const one = await wp.evaluate(() => ({ cards: document.querySelectorAll('#main [id^=tkc-]').length, first: (document.querySelector('#main [id^=tkc-]') || {}).id, pinFirst: !!document.querySelector('#pin-x') && !!(document.querySelector('#pin-x').compareDocumentPosition(document.querySelector('#main [id^=tkc-]')) & Node.DOCUMENT_POSITION_FOLLOWING), btn: (document.querySelector('[data-a=tkwAll]') || {}).innerText || '' }));
   check('1 לעובד משימה אחת במסך (הדחופה ביותר), בלי רשימת "אחר כך"', one.cards === 1 && one.first === 'tkc-t1' && /לסדר את המדף/.test(t) && !/לנקות את הדלפק/.test(t) && !/אחר כך/.test(t), one);
@@ -100,6 +101,7 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   check('3א נכתב PATCH למשימה t1 (st=done)', LOG.some((l) => l.m === 'PATCH' && l.col === 'tasks' && l.id === 't1' && l.f.st && l.f.st.stringValue === 'done'));
   await shot(wp, shots, 'r4-ב-מסך-עובד-בוצע');
   await wp.click('[data-a=tkwNext]'); await sleep(400);
+  check('4ב נשארה משימה פעילה אחת ויש משימה שנדחתה: "כל המשימות" מוצג ופותח אותה', /כל המשימות \(1\)/.test(await txt(wp, '#main')));
   check('4 "הבאה ›": המשימה הבאה במסך מלא', (await wp.evaluate(() => (document.querySelector('#main [id^=tkc-]') || {}).id)) === 'tkc-t2' && !(await wp.$('#tkw-fin')));
   await wp.click('#tkc-t2 [data-a=tkDone]'); await yes(wp);
   await waitFor(() => wp.evaluate(() => !!document.getElementById('tkw-empty')));
@@ -125,10 +127,13 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   check('7 מעבר ברצף: משימה 1 מתוך 3 עם התמונה בגדול (הוותיקה ביותר קודם)', /משימה 1 מתוך 3/.test(d) && /a1/.test(d) && im1 === 1, d.slice(0, 120));
   await shot(mp, shots, 'r4-ב-מנהל-עבור-ואשר');
   check('7א אין כפתור "אשר את כל השאר" לפני שעברו על כולן', !/אשר את כל השאר/.test(d));
+  let rel; HOLD = new Promise((r) => { rel = r; });
   await mp.click('#dlg [data-a=tkwApNext]'); await waitFor(async () => /משימה 2 מתוך 3/.test(await dtxt(mp)));
   LOG.length = 0;
   await mp.click('#dlg [data-a=tkwApRj]'); await sleep(200);
-  await mp.fill('#dlg textarea[name=note]', 'התמונה מטושטשת'); await mp.click('#dlg form[data-f=tkApRej] button.r');
+  await mp.fill('#dlg textarea[name=note]', 'התמונה מטושטשת');
+  rel(); HOLD = null; await sleep(900);
+  check('7ב טעינת תמונות מסתיימת בזמן שהמנהל מקליד הערה ב"החזר לעובד": ההערה נשמרת והטופס נשאר פתוח', (await mp.evaluate(() => (document.querySelector('#dlg textarea[name=note]') || {}).value)) === 'התמונה מטושטשת'); await mp.click('#dlg form[data-f=tkApRej] button.r');
   await waitFor(async () => /משימה 3 מתוך 3/.test(await dtxt(mp)) && LOG.some((l) => l.m === 'PATCH' && l.col === 'tasks' && l.id === 'a2'));
   const rj = LOG.find((l) => l.m === 'PATCH' && l.col === 'tasks' && l.id === 'a2');
   check('8 "החזר לעובד" למשימה אחת: אותה כתיבה כמו ההחזרה הקיימת (st=open, note, rt=1, wp=0, בלי אישור)', !!rj && rj.f.st.stringValue === 'open' && rj.f.note.stringValue === 'התמונה מטושטשת' && rj.f.rt.stringValue === '1' && rj.f.wp.integerValue === '0' && rj.f.sub.integerValue === '0', rj && rj.f);
