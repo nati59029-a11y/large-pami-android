@@ -58,7 +58,11 @@ ACT.yfTzOk=()=>{closeDlg();setTz(true)};
 /* "שליחת צינתוקים" (מנהל, משימה 2026-11-18): צינתוק בלי מבצע, דרך sendLineTzintuk בשרת. חושף window.ytOpen().
    fb = רק ללקוחות דפי המשוב (בתשלום). all = הרשימה החינמית (כולל מי שנרשם בעצמו בקו) + לקוחות משוב שאינם בה.
    לפני שליחה: preview מהשרת (כמה בפועל ועלות משוערת) בחלון אישור. requestId נשמר עד תשובה ודאית – ניסיון חוזר לא שולח פעמיים. */
-const TZ={busy:false,res:null,req:null,denied:false};
+const TZ={busy:false,res:null,req:null,denied:false,cont:null}; // req = בקשה שלא קיבלה תשובה ודאית (אותו מזהה בניסיון הבא); cont = שליחה שאפשר להשלים (partial/failed)
+const TZ_MS=330000; // ארוך מזמן הריצה של השרת (300 שניות)
+const hhmm=iso=>{const d=new Date(iso);return isNaN(d)?'':new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'}).format(d)};
+// תשובה ודאית מהשרת (עם סטטוס שאינו תקלה כללית) – אפשר לשכוח את המזהה. בלי סטטוס (5xx בלי JSON, פסק זמן, ניתוק) – שומרים אותו.
+const sure=e=>!!(e&&e.status&&!['INTERNAL','UNAVAILABLE','UNKNOWN','DEADLINE_EXCEEDED'].includes(e.status));
 const TZN={fb:'ללקוחות דפי המשוב',all:'לכל הלקוחות'};
 const TZST={done:'נשלח',partial:'נשלח חלקית',failed:'לא נשלח',uncertain:'לא ידוע אם נשלח',capped:'לא נשלח – מעל המכסה','not-sent':'לא נשלח'};
 const n0=v=>Number.isFinite(+v)?+v:0;
@@ -69,13 +73,13 @@ function tzHtml(){
  <button class="opt" data-a="ytAsk" data-v="fb" style="min-height:84px"${TZ.busy?' disabled':''}><span style="font-size:1.1rem;font-weight:800">צינתוק ללקוחות דפי משוב<small>רק למי שברשימה "לקוחות משוב" · בתשלום</small></span>${ico('chev')}</button>
  <button class="opt" data-a="ytAsk" data-v="all" style="min-height:84px"${TZ.busy?' disabled':''}><span style="font-size:1.1rem;font-weight:800">צינתוק לכל הלקוחות<small>כולל מי שנרשם בעצמו בקו · כל מספר מקבל אחד</small></span>${ico('chev')}</button>
  <p class="note" id="ytMsg" role="status" style="margin:8px 0"></p>
- ${R?`<div class="card" id="ytRes"><b id="ytResH"></b><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">${num('נשלחו',n0(R.sent))}${num('נכשלו',n0(R.failed))}${num('לא ודאי',n0(R.uncertain))}</div><p class="note" id="ytResM" style="margin:8px 0 0"></p></div>`:''}`}
+ ${R?`<div class="card" id="ytRes"><b id="ytResH"></b><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">${num('נשלחו',n0(R.sent))}${num('נכשלו',n0(R.failed))}${num('לא ודאי',n0(R.uncertain))}</div><p class="note" id="ytResM" style="margin:8px 0 0"></p>${TZ.cont&&R.requestId===TZ.cont.id?`<button class="btn grow" data-a="ytCont" style="margin-top:10px"${TZ.busy?' disabled':''}>השלם את מי שלא קיבל</button>`:''}</div>`:''}`}
 function tzPaint(msg){const el=document.getElementById('ytBox');if(!el)return;el.innerHTML=tzHtml();
  const t=(id,v)=>{const x=document.getElementById(id);if(x)x.textContent=v};
  t('ytMsg',msg||'');
  const R=TZ.res;if(R){t('ytResH',`${TZN[R.target]||''}: ${TZST[R.status]||''}${R.duplicate?' (כבר טופל קודם)':''}`);t('ytResM',A.he(R.message)?R.message:'')}}
 V.ytz=()=>{if(!A.isMgr())return{t:'שליחת צינתוקים',h:'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>'};setTimeout(()=>tzPaint(),0);return{t:'שליחת צינתוקים',s:'מנהל',h:'<div id="ytBox"><p class="note">טוען…</p></div>'}};
-window.ytOpen=()=>{if(!A.isMgr()){A.toast('המסך הזה פתוח למנהל בלבד.');return}TZ.res=null;TZ.denied=false;go('ytz')};
+window.ytOpen=()=>{if(!A.isMgr()){A.toast('המסך הזה פתוח למנהל בלבד.');return}if(!TZ.cont)TZ.res=null;TZ.denied=false;go('ytz')}; // שליחה שאפשר להשלים נשארת מוצגת גם אחרי יציאה וחזרה
 ACT.ytAsk=async el=>{
  const target=el&&el.dataset&&el.dataset.v;if(!TZN[target]||TZ.busy)return;
  TZ.busy=true;tzPaint('בודק כמה מספרים יקבלו…');let p=null,msg='';
@@ -88,15 +92,23 @@ ACT.ytAsk=async el=>{
   :`<p style="margin:0 0 6px">יקבלו: <b>${esc(String(total))}</b> מספרים${target==='all'?` (חינם: ${esc(String(free))}, בתשלום: ${esc(String(paid))})`:' (כולם בתשלום)'}.</p>
   <p class="note" style="margin:0 0 6px">עלות משוערת: ${esc(String(n0(p.cost)))} יחידות – 0.1 יחידה לכל מספר בתשלום, לפי התיעוד של ימות.${target==='all'&&free?' הרשימה החינמית – בלי עלות.':''}</p>
   ${p.listReady===false?'<p class="note" style="margin:0 0 6px">רשימת "לקוחות משוב" עוד לא נוצרה בימות.</p>':''}
+  ${p.recent&&p.recent.at?`<p class="note" style="color:var(--warn);margin:0 0 6px">נשלח כבר צינתוק היום ב-${esc(hhmm(p.recent.at))} ל-${esc(String(n0(p.recent.sent)))} מספרים. שליחה חדשה תגיע שוב לכולם.</p>`:''}
   ${p.capped?`<p class="note" style="color:var(--bad);margin:0 0 6px">מעל המכסה (${esc(String(n0(p.max)))} מספרים בתשלום בשליחה אחת). אי אפשר לשלוח.</p>`:''}`;
  dlg(`<h3>צינתוק ${TZN[target]}?</h3>${body}<div class="row">${total>0&&!p.capped?`<button type="button" class="btn grow" data-a="ytOk">כן, שלח צינתוק</button>`:''}<button type="button" class="btn g grow" data-a="ytNo">ביטול</button></div>`)};
 ACT.ytNo=()=>{closeDlg();TZ.ask=null};
-ACT.ytOk=async()=>{
- const q=TZ.ask;closeDlg();TZ.ask=null;if(!q||TZ.busy)return;
- if(!TZ.req||TZ.req.target!==q.target)TZ.req={target:q.target,id:'tz_'+A.rand()};
- TZ.busy=true;tzPaint('שולח…');let msg='';
- try{TZ.res=await A.call('sendLineTzintuk',{action:'send',target:q.target,requestId:TZ.req.id},300000);TZ.req=null;A.toast(A.he(TZ.res&&TZ.res.message)?TZ.res.message:'✓ נשלח')}
- catch(e){msg=A.errMsg(e);if(!(e&&(e.timeout||e.offline)))TZ.req=null; // פסק זמן/ניתוק: אותו מזהה בניסיון הבא – השרת לא ישלח פעמיים
+async function tzSend(target,id,resume){
+ TZ.req={target,id,resume};TZ.busy=true;tzPaint(resume?'משלים…':'שולח…');let msg='';
+ try{const r=await A.call('sendLineTzintuk',Object.assign({action:'send',target,requestId:id},resume?{resume:true}:{}),TZ_MS);
+  TZ.res=r;TZ.req=null;TZ.cont=r&&['partial','failed'].includes(r.status)?{target,id}:null; // אפשר להשלים רק את מי שלא קיבל, עם אותו מזהה
+  A.toast(A.he(r&&r.message)?r.message:'✓ נשלח')}
+ catch(e){msg=A.errMsg(e);if(sure(e))TZ.req=null; // בלי תשובה ודאית: אותו מזהה בניסיון הבא – השרת לא ישלח פעמיים
   if(e&&e.status==='PERMISSION_DENIED')TZ.denied=true;A.toast(msg)}
- finally{TZ.busy=false}tzPaint(msg)};
+ finally{TZ.busy=false}tzPaint(msg)}
+ACT.ytOk=()=>{
+ const q=TZ.ask;closeDlg();TZ.ask=null;if(!q||TZ.busy)return;
+ const k=TZ.req&&TZ.req.target===q.target&&!TZ.req.resume?TZ.req:null; // בקשה קודמת בלי תשובה ודאית – אותו מזהה
+ tzSend(q.target,k?k.id:'tz_'+A.rand(),false)};
+ACT.ytCont=()=>{const c=TZ.cont;if(!c||TZ.busy)return;
+ dlg(`<h3>להשלים את השליחה?</h3><p class="note" style="margin:0 0 12px">יישלח רק למי שלא קיבל בשליחה הזו. מי שכבר קיבל לא יקבל שוב ולא ייגבה עליו תשלום נוסף.</p><div class="row"><button type="button" class="btn grow" data-a="ytContOk">כן, השלם</button><button type="button" class="btn g grow" data-a="ytNo">ביטול</button></div>`)};
+ACT.ytContOk=()=>{closeDlg();const c=TZ.cont;if(!c||TZ.busy)return;tzSend(c.target,c.id,true)};
 })();

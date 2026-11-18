@@ -215,6 +215,90 @@ describe('ימות 2026-11-18: שליחת צינתוקים מהקו (sendLineTzi
     assert.equal(r2.status, 'OK', r2.text); assert.equal(r2.result.status, 'done'); assert.equal(r2.result.sent, 4);
   });
 
+  // ---------------- סבב 2: דיווח אמת בכשל, והשלמה בלי חיוב כפול ----------------
+  it('סבב 2: הקריאה החוזרת של הרשימה נכשלה אחרי הבדיקה המקדימה – failed (לא done), "לא נשלח"; השלמה עם אותו requestId שולחת', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    M.setMode('entries', ['ok', 'error']); // הבדיקה המקדימה עוברת, הקריאה בתוך fbTzintuk נכשלת (בוודאות לא יצא צינתוק)
+    const id = rid();
+    const r = await call('u_mgr', { action: 'send', target: 'fb', requestId: id });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.status, 'failed'); assert.equal(r.result.sent, 0); assert.equal(r.result.failed, 4); assert.equal(r.result.uncertain, 0);
+    assert.match(r.result.message, /לא נשלח צינתוק ל-4 מספרים/);
+    assert.equal(arrTz().length, 0);
+    assert.equal((await readDoc(env, 'yemot_tzsend/' + id)).status, 'failed');
+    // ניסיון חוזר רגיל עם אותו מזהה – לא שולח; השלמה – שולחת לכולם (אף אחד לא קיבל)
+    const d = await call('u_mgr', { action: 'send', target: 'fb', requestId: id });
+    assert.equal(d.result.duplicate, true); assert.equal(arrTz().length, 0);
+    const c = await call('u_mgr', { action: 'send', target: 'fb', requestId: id, resume: true });
+    assert.equal(c.status, 'OK', c.text); assert.equal(c.result.status, 'done'); assert.equal(c.result.sent, 4); assert.equal(c.result.resumed, true);
+    assert.equal(arrTz().length, 1);
+    // השלמה של שליחה שהסתיימה – נדחית
+    const n = await call('u_mgr', { action: 'send', target: 'fb', requestId: id, resume: true });
+    assert.equal(n.status, 'OK', n.text); assert.equal(n.result.duplicate, true); assert.equal(arrTz().length, 1);
+    const x = await call('u_mgr', { action: 'send', target: 'fb', requestId: rid(), resume: true });
+    assert.equal(x.status, 'FAILED_PRECONDITION', x.text); assert.equal(x.error.details.reason, 'nothing-to-resume');
+  });
+
+  it('סבב 2: partial (הקבוצה השנייה לא יצאה) – השלמה שולחת רק לחסרים, כל מספר פעם אחת; המונה החודשי 603', async () => {
+    const max = (await call('u_mgr', { action: 'preview', target: 'fb' })).result.max;
+    if (max < 603) return; // מכסה מקומית נמוכה (.env.local) – הבדיקה רלוונטית רק במכסה 1500
+    await fbSetup(env, nums(603));
+    M.setMode('tzphones', ['okclose']);
+    const id = rid();
+    let r;
+    try { r = await call('u_mgr', { action: 'send', target: 'fb', requestId: id }); } finally { await M.stop(); await M.start(PORT); }
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.status, 'partial'); assert.equal(r.result.sent, 500); assert.equal(r.result.failed, 103);
+    assert.match(r.result.message, /אפשר להשלים/);
+    const first = arrTz()[0].body.phones;
+    M.setMode('tzphones', undefined); M.state.requests = [];
+    const c = await call('u_mgr', { action: 'send', target: 'fb', requestId: id, resume: true });
+    assert.equal(c.status, 'OK', c.text); assert.equal(c.result.status, 'done'); assert.equal(c.result.sent, 603); assert.equal(c.result.paidSent, 603);
+    assert.equal(arrTz().length, 1); const rest = arrTz()[0].body.phones;
+    assert.equal(rest.length, 103); assert.ok(!rest.some((p) => first.includes(p)), 'אף מספר לא נשלח פעמיים');
+    assert.deepEqual(first.concat(rest).sort(), nums(603));
+    assert.deepEqual((await readDoc(env, 'yemot_state/fblist')).tzMonth, { month: monthNow(), count: 603 });
+  });
+
+  it('סבב 2: all – החינמי נכשל בוודאות והבתשלום הצליח: partial; השלמה שולחת רק את החינמי (tzl:), בלי בתשלום', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    await writeDoc(env, 'yemot_test/fault', { at: 'tz-free-before' });
+    const id = rid();
+    let r;
+    try { r = await call('u_mgr', { action: 'send', target: 'all', requestId: id }); } finally { await writeDoc(env, 'yemot_test/fault', { at: 'none' }); }
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.status, 'partial'); assert.equal(r.result.freeTz, 'failed'); assert.equal(r.result.failed, 3); assert.equal(r.result.paidSent, 3);
+    assert.equal(tzlTz().length, 0); assert.equal(arrTz().length, 1);
+    M.state.requests = [];
+    const c = await call('u_mgr', { action: 'send', target: 'all', requestId: id, resume: true });
+    assert.equal(c.status, 'OK', c.text); assert.equal(c.result.status, 'done'); assert.equal(c.result.sent, 6); assert.equal(c.result.freeTz, 'sent');
+    assert.equal(tzlTz().length, 1); assert.equal(arrTz().length, 0, 'הבתשלום לא נשלח שוב');
+    assert.deepEqual((await readDoc(env, 'yemot_state/fblist')).tzMonth, { month: monthNow(), count: 3 });
+  });
+
+  it('סבב 2: all – החינמי הצליח והבתשלום נכשל בוודאות: השלמה שולחת רק את הבתשלום, בלי tzl: שוב', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    M.setMode('entries', ['ok', 'error']);
+    const id = rid();
+    const r = await call('u_mgr', { action: 'send', target: 'all', requestId: id });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.status, 'partial'); assert.equal(r.result.freeTz, 'sent'); assert.equal(r.result.sent, 3); assert.equal(r.result.failed, 3);
+    M.setMode('entries', 'ok'); M.state.requests = [];
+    const c = await call('u_mgr', { action: 'send', target: 'all', requestId: id, resume: true });
+    assert.equal(c.status, 'OK', c.text); assert.equal(c.result.status, 'done'); assert.equal(c.result.sent, 6);
+    assert.equal(tzlTz().length, 0, 'החינמי לא נשלח שוב'); assert.equal(arrTz().length, 1);
+    assert.deepEqual(arrTz()[0].body.phones.slice().sort(), ['0501111111', '0504444444', '0771234567']);
+  });
+
+  it('סבב 2: preview מחזיר recent – שליחה מהשעה האחרונה (מתי ולכמה)', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    const p0 = await call('u_mgr', { action: 'preview', target: 'all' });
+    assert.equal(p0.status, 'OK', p0.text);
+    await call('u_mgr', { action: 'send', target: 'fb', requestId: rid() });
+    const p = await call('u_mgr', { action: 'preview', target: 'all' });
+    assert.ok(p.result.recent && p.result.recent.sent === 4 && typeof p.result.recent.at === 'string', JSON.stringify(p.result.recent));
+  });
+
   it('כללים: yemot_tzsend ו-yemot_state/tzsend סגורים לאפליקציה (שורש ו-b/)', async () => {
     await writeDoc(env, 'yemot_tzsend/r1', { status: 'done' });
     await writeDoc(env, 'yemot_state/tzsend', { lockAt: null });
