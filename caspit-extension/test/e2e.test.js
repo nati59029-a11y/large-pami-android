@@ -17,6 +17,9 @@ const fake = require('./fixtures/fake-cxbot.js');
 const EXT_ID = 'mianlmahikfdnffiipdfpojnfjhcipbp';
 const TOKEN = 'testbiz1.' + 'Q'.repeat(43);
 const FIXTURE = fs.readFileSync(path.join(__dirname, 'fixtures/caspit/index.html'));
+const POS = '<!doctype html><html dir="rtl"><body><h1>טוען תוכנה</h1><button id="x">ייצוא לאקסל</button><a href="#/catalogs">ממשקים</a><select><option>טעינת פריטים חדשים</option></select><input type="file">'
+  + '<script>window.posHits=0;document.addEventListener("click",()=>{window.posHits++;localStorage.setItem("posHits",String(+(localStorage.getItem("posHits")||0)+1))},true);'
+  + 'document.addEventListener("change",()=>localStorage.setItem("posHits",String(+(localStorage.getItem("posHits")||0)+1)),true)</script></body></html>';
 const SECRETS = ['SESSIONabc123def456', 'eyJhbGciOiJIUzI1NiJ9', 'Zx9kQ2mP7vL4nR8sT1wY6bC3', 'owner@example.co.il', '052-1234567', '4580123412341234', 'hunter2pass', 'owner-secret-value'];
 
 let ctx, srv, sw, tmp, ext;
@@ -27,7 +30,9 @@ const days = [D.addDays(today, -2), D.addDays(today, -1)];
 async function caspitRoute(route) {
   const u = new URL(route.request().url());
   const p = u.pathname;
-  if (p === '/' || p === '/index.html') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: FIXTURE });
+  // המשרד האחורי של כספית: /bo#/... (כמו באתר האמיתי). כל נתיב אחר – "קופת המכירה" המדומה, שסופרת כל לחיצה (אסור שהתוסף ייגע בה)
+  if (p === '/bo' || p === '/bo/') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: FIXTURE });
+  if (!p.startsWith('/api/')) return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: POS });
   if (p === '/api/me') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ email: 'owner@example.co.il', phone: '052-1234567', token: 'Zx9kQ2mP7vL4nR8sT1wY6bC3', items: [{ id: 4580123412341234, name: 'x' }] }) });
   if (p === '/api/catalogs/export') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': 'attachment; filename="catalog.xlsx"' }, body: Buffer.from(fx.catalogXlsx(X)) });
   if (p === '/api/reports/items-sales') {
@@ -56,6 +61,7 @@ async function waitFor(fn, ms, what) {
 // מחכה שריצה שהתחילה אחרי t0 תסתיים
 const waitRun = (t0) => waitFor(async () => { const s = await store(); return s.st && s.st.lastRun && s.st.lastRun.at > t0 ? s : null; }, 240e3, 'run end');
 const caspitPage = () => ctx.pages().find((p) => p.url().startsWith('https://caspit.valu.co.il/'));
+const posHits = (p) => p.evaluate(() => +(localStorage.getItem('posHits') || 0));
 
 test.before(async () => {
   srv = await fake.start({ token: TOKEN, days: days.concat([today]) });
@@ -232,6 +238,53 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const sent = srv.ops('report').at(-1);
   assert.equal(sent.kind, 'disc');
   for (const x of SECRETS) assert.ok(!JSON.stringify(sent).includes(x), 'leaked to server ' + x);
+  await pop.close();
+});
+
+test('שמירה: כספית מעבירה לקופה (לא /bo) → wrong-page מיד, בלי שום לחיצה בקופה; דיווח לשרת; בלי ניסיון חוזר', async () => {
+  const cp = caspitPage();
+  assert.match(cp.url(), /^https:\/\/caspit\.valu\.co\.il\/bo#\//, 'הלשונית של התוסף במשרד האחורי');
+  await cp.evaluate(() => localStorage.setItem('posHits', '0'));
+  // כמו התקלה האמיתית: מסך הייבוא מעביר ל-/csv-imports#/csv-imports (לא במשרד האחורי)
+  await cp.evaluate(() => localStorage.setItem('redir', '#/csv-imports'));
+  srv.exportN.new = 1;
+  await sw.evaluate(async () => { const { impHash } = await chrome.storage.local.get('impHash'); await chrome.storage.local.set({ impHash: {} }); void impHash; });
+  let t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  let s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'wrong-page', JSON.stringify(s.st.lastRun));
+  assert.equal(s.st.lastRun.st, 'fail');
+  assert.equal(srv.ops('report').at(-1).err.code, 'wrong-page');
+  assert.equal(await sw.evaluate(async () => !!(await chrome.alarms.get('retry'))), false);
+  let pos = ctx.pages().find((p) => /caspit\.valu\.co\.il\/(?!bo)/.test(p.url()));
+  assert.ok(pos, 'הלשונית הגיעה לקופה המדומה');
+  assert.equal(await posHits(pos), 0, 'אף לחיצה / שינוי בקופה');
+  // לשונית שכבר בקופה (שורש האתר): התוסף לא משתמש בה – פותח לשונית חדשה במשרד האחורי; ואם גם היא עוברת לקופה – עוצר מיד
+  await pos.evaluate(() => { localStorage.removeItem('redir'); localStorage.setItem('redirLoad', '1'); });
+  await pos.goto('https://caspit.valu.co.il/');
+  t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'wrong-page', JSON.stringify(s.st.lastRun));
+  assert.equal(s.st.lastRun.step, 'login');
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
+  await pos.evaluate(() => localStorage.removeItem('redirLoad'));
+  srv.exportN.new = 1;
+});
+
+test('היכרות לא יוצאת מהמשרד האחורי: מסך שמעביר לקופה → wrong-page, בלי לחיצות', async () => {
+  const anyPage = ctx.pages().find((p) => p.url().startsWith('https://caspit.valu.co.il/'));
+  await anyPage.evaluate(() => { localStorage.setItem('redir', '#/csv-imports'); localStorage.setItem('posHits', '0'); });
+  await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
+  const pop = await ctx.newPage();
+  await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+  await pop.click('#disc');
+  const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 180e3, 'discovery');
+  assert.equal(s.discSt.st, 'fail');
+  assert.equal(s.disc.rep.err.code, 'wrong-page');
+  assert.deepEqual(s.disc.rep.pages.map((p) => p.name), ['catalogs'], 'עצר לפני שאסף משהו מהקופה');
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
+  await anyPage.evaluate(() => localStorage.removeItem('redir')).catch(() => {});
   await pop.close();
 });
 
