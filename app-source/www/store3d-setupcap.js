@@ -160,6 +160,7 @@ V.st3k=()=>{const T='צילום החנות';
  h+=`<p class="note s3note">הסדר המומלץ: דלת, קירות עם כיוון השעון, גופים לפי המספור, דלתות וקופות, רצפה ותקרה. אפשר לבחור כל פריט.</p>`;
  for(const g of rooms){const rm=(K.map.rooms||[]).find(r=>r.id===g.r),o=K.open===g.r,gd=g.L.filter(doneOf).length;
   h+=`<div class="s3g"><button class="hd" data-a="s3cpRoom" data-r="${esc2(g.r)}" aria-expanded="${o}"><span>${esc2(rm&&rm.name||'חדר')}</span><span>${gd}/${g.L.length}</span></button>${o?`<div class="s3kcc">${g.L.map(it=>`<button type="button" class="${stOf(it)}${it.key===K.cur?' cur':''}" data-a="s3cpSel" data-k="${esc2(it.key)}" aria-label="${esc2(PL.label(it,K.map))}">${esc2(chipTx(it))}</button>`).join('')}</div>`:''}</div>`}
+ if(typeof ACT.s3ffOpen==='function')h+=`<div class="row s3row"><button class="btn g" data-a="s3ffOpen">צילום חופשי של קיר (ניסיון)</button></div>`;/* ניסוי: store3d-freewall.js */
  h+=`<div class="row s3row"><button class="btn" data-a="s3cpDone" ${dn===N&&!qn?'':'disabled'}>סיום ההקמה</button><button class="btn g" data-a="s3cpBack">מפת החנות</button></div>`;
  if(dn<N)h+=`<p class="note s3note">"סיום ההקמה" ייפתח כשכל פריט יושלם או ידולג עם סיבה (חסרים ${N-dn}).</p>`;
  return{t:T,h:h+'</div>'}};
