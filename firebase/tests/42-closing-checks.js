@@ -1,14 +1,14 @@
 'use strict';
 // סגירת קופה – שרשרת הבדיקות (17.11): בדיקות 1–4, שורת התוצאה וסף הפער בשקלים.
 // הפונקציות נלקחות כמו שהן מ-www/index.html שב-large-pami-android-project.zip (כמו 41-closing-logic), ורצות ב-vm בלי דפדפן ובלי אמולטור:
-// zcCalc (e1/d1/d2), zcRes/zcResT (תוצאה עם כיוון), zcThr/zcGap/zcNeed (סף – כבוי כברירת מחדל), zc3 (פתקים), zsDep4 (הפקדות, שתי הקופות יחד).
+// zcCntSum / zcCalc(ks/dk) – ספירת שטרות ומטבעות (סבב 4, חובה), zcCalc (e1/d1/d2), zcRes/zcResT (תוצאה עם כיוון), zcThr/zcGap/zcNeed (סף – כבוי כברירת מחדל), zc3 (פתקים), zsDep4 (הפקדות, שתי הקופות יחד).
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { appSourceLines } = require('./helpers');
 
-const PARTS = ['const s_=', 'const rnd=', 'function pNum(', 'var ZPAY=', 'function zcN(', 'function zcCalc(', 'function zcRes(', 'const zcResT=', 'const ZCTK=', 'const zcThrC=', 'const zcThr=',
+const PARTS = ['const s_=', 'const rnd=', 'function pNum(', 'var ZPAY=', 'var ZCNT=', 'function zcCntSum(', 'function zcN(', 'function zcCalc(', 'function zcRes(', 'const zcResT=', 'const ZCTK=', 'const zcThrC=', 'const zcThr=',
   'function zcGap(', 'function zcNeed(', 'function zc3(', 'function dpAiChk(', 'function zsDepAuto(', 'function zsOf(', 'function zsDep4(', 'function zsDep4H('];
 
 function load() {
@@ -20,7 +20,7 @@ function load() {
     return L.slice(i, j).join('\n');
   });
   const pre = 'var S={zc:[]};const LS={};var localStorage={getItem:k=>k in LS?LS[k]:null,setItem:(k,v)=>{LS[k]=String(v)},removeItem:k=>{delete LS[k]}};const LK=k=>k;const ils=n=>(Math.round((n||0)*100)/100).toFixed(2),cat=()=>true,zcRegOk=()=>true,zcDup=()=>null,zcNsNeed=()=>[],dfmt=d=>d,esc=t=>String(t);\n';
-  const post = '\n;({S,localStorage,ZCTK,zcCalc,zcRes,zcResT,zcThr,zcGap,zcNeed,zc3,zsDep4,zsDep4H})';
+  const post = '\n;({S,localStorage,ZCTK,ZCNT,zcCntSum,zcCalc,zcRes,zcResT,zcThr,zcGap,zcNeed,zc3,zsDep4,zsDep4H})';
   return vm.runInNewContext(pre + chunks.join('\n') + post, {}, { filename: 'index.html (חלקים)' });
 }
 // טופס סגירה תקין: סכום השורות = סה"כ, קרן 1500 + 2350 − 1400 = 2450
@@ -142,5 +142,55 @@ describe('סגירת קופה – שרשרת הבדיקות (index.html)', () =>
     D.C[2].dp = 'p1'; D.P.p1.a = 1400.5; assert.doesNotMatch(T(D), /ממתין/);   // מאוזן
     D.P.p1.st = 'rej'; x = M.zsDep4(D); assert.equal(x.r, 0);           // הפקדה שנדחתה – לא נספרת
     x = M.zsDep4({ L: [], C: [], P: {}, DC: [] }); assert.equal(x.k, 'inc'); assert.equal(x.e, 0);
+  });
+  it('סבב 4: ספירת שטרות ומטבעות – סכום באגורות, ריק = 0, כמות שלילית / לא שלמה אסורה', () => {
+    const M = load();
+    assert.deepEqual([...M.ZCNT], [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.1]);
+    let K = M.zcCntSum({ 200: 3, 100: '1', 0.5: '3', 0.1: '7' });
+    assert.equal(K.s, 702.2); assert.equal(K.n, 4); assert.equal(K.bad.length, 0);
+    assert.deepEqual({ ...K.m }, { 200: 3, 100: 1, 0.5: 3, 0.1: 7 });              // המפה לשמירה – מספרים שלמים בלבד
+    assert.equal(M.zcCntSum({ 0.1: 3 }).s, 0.3);                                      // בלי שגיאת נקודה צפה (0.30000000000000004)
+    assert.equal(M.zcCntSum({ 0.1: 1, 0.5: 1, 1: 1, 2: 1, 5: 1, 10: 1, 20: 1, 50: 1, 100: 1, 200: 1 }).s, 388.6);
+    K = M.zcCntSum({ 200: '', 100: ' ', 50: null }); assert.equal(K.n, 0); assert.equal(K.s, 0); // ריק = 0 ולא נספר
+    K = M.zcCntSum({ 200: '0' }); assert.equal(K.n, 1); assert.equal(K.s, 0);          // 0 מפורש = נספר
+    for (const v of ['-1', -1, '1.5', 2.5, 'abc', '1e3', '+3', '100001']) {
+      K = M.zcCntSum({ 200: v, 100: 1 }); assert.deepEqual([...K.bad], ['200'], String(v)); assert.equal(K.m[200], undefined, String(v));
+    }
+    for (const v of [undefined, null, 'x', [], 5]) { K = M.zcCntSum(v); assert.equal(K.n, 0); assert.equal(K.s, 0); }
+    assert.equal(M.zcCntSum({ 7: 5, 300: 1 }).n, 0);                                  // ערכים שאינם שטר / מטבע – מתעלמים
+  });
+  it('סבב 4: הספירה מול "סך כל המזומן בקופה" – ks/dk, חוסר בשורת התוצאה, בסף; סגירה בלי cnt – כמו קודם', () => {
+    const M = load();
+    const cnt = { 200: 12, 20: 2, 5: 1, 0.5: 1 };                                    // 2445.50 מול 2450 בדוח – חוסר 4.50
+    let c = M.zcCalc(F({}), 'i_nl', cnt);
+    assert.equal(c.ks, 2445.5); assert.equal(c.dk, -4.5);
+    assert.equal(M.zcRes(c).k, 'bad'); assert.equal(M.zcRes(c).a, 4.5);
+    assert.equal(M.zcGap(c), 4.5);
+    c = M.zcCalc(F({}), 'i_nl', { 200: 12, 20: 2, 5: 2 });                           // 2450 – תואם
+    assert.equal(c.dk, 0); assert.equal(M.zcRes(c).k, 'inc');
+    c = M.zcCalc(F({}), 'i_nl', { 200: 12, 50: 1 });                                  // 2400 + 50 = 2450 – תואם
+    assert.equal(c.dk, 0);
+    c = M.zcCalc(F({}), 'i_nl', { 200: 13 });                                         // 2600 – עודף 150
+    assert.equal(c.dk, 150); assert.equal(M.zcRes(c).k, 'warn');
+    // בלי cnt (סגירה ישנה): השדות החדשים null, וכל השאר זהה בדיוק
+    const old = M.zcCalc(F({}), 'i_nl'), neu = M.zcCalc(F({}), 'i_nl', { 200: 12, 20: 2, 5: 2 });
+    assert.equal(old.ks, null); assert.equal(old.dk, null);
+    for (const k of ['rows', 'P', 'tot', 'inc', 'sumOk', 'c', 'o', 'a', 'p', 'lvl', 'dateWarn', 'e1', 'd1', 'd2']) assert.deepEqual(neu[k], old[k], k);
+    assert.equal(M.zcRes(old).k, 'inc');
+    assert.equal(M.zcCalc(F({}), 'i_nl', {}).ks, null);                               // לא נספר – לא ניתן לבדוק
+    assert.equal(M.zcCalc(F({}), 'i_nl', { 200: '-3' }).ks, null);                    // כמות לא תקינה – לא נכנס לחישוב
+    assert.equal(M.zcCalc(F({ drawer: '' }), 'i_nl', { 200: 1 }).dk, null);           // אין סכום בדוח – אין פער
+    // הסף בשקלים חל גם על פער הספירה (חוסר 4.50 מעל סף 3)
+    const nk = () => [...M.zcNeed({ reg: 'i_nl', f: F({}), c: M.zcCalc(F({}), 'i_nl', cnt), ack: 1, id: 'x' })];
+    M.S.zcThr = 3; assert.equal(nk().length, 1); assert.match(nk()[0], /\(4\.50, הסף 3\.00\)/);
+    M.S.zcThr = 5; assert.deepEqual(nk(), []);
+    delete M.S.zcThr;
+  });
+  it('סבב 4: "חובה" – אין שדה ממולא או יש כמות לא תקינה ← אי אפשר לשלוח (התנאי שב-FRM.zcSend)', () => {
+    const M = load();
+    const canSend = (cnt) => { const K = M.zcCntSum(cnt || {}); return !K.bad.length && K.n > 0; };
+    assert.equal(canSend({}), false); assert.equal(canSend(undefined), false); assert.equal(canSend({ 200: '' }), false);
+    assert.equal(canSend({ 200: '-1' }), false); assert.equal(canSend({ 200: 3, 1: '0.5' }), false);
+    assert.equal(canSend({ 200: 0 }), true); assert.equal(canSend({ 0.1: 4 }), true);
   });
 });
