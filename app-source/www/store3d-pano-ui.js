@@ -16,7 +16,11 @@ const P={step:'',cap:null,x:0,y:0,yaw:0,tx:null,ty:null,sel:'',edit:'',qid:'',la
 U.P360=P;
 const RE_P=/^b\/([^/]+)\/store3d\/[a-z0-9_]{2,20}\/pano\/[sw]-[a-z0-9_]{2,20}\/p[0-9]{1,4}_[0-9]{1,4}(_s)?\.jpg$/;
 const okP=p=>{if(typeof p!=='string'||p.length>300||p.indexOf('..')>=0)return false;const m=RE_P.exec(p);return !!m&&(!(SY&&SY.bizId)||m[1]===SY.bizId)};
-const load=p=>okP(p)&&window.Store3D&&typeof Store3D.blob==='function'?Store3D.blob(p):Promise.reject(new Error('path'));
+const load0=p=>okP(p)&&window.Store3D&&typeof Store3D.blob==='function'?Store3D.blob(p,true):Promise.reject(new Error('path'));
+/* אבחון: כשההורדה נחסמה בטלפון (Failed to fetch) – בדיקה אם השרת עונה בכלל (בלי פרטי כניסה, תשובה סגורה) */
+const load=p=>load0(p).catch(async e=>{if(e&&e.offline&&!e.probe&&typeof STB==='function'){e.probe=1;let r='';
+  try{await fetch(STB()+'/'+encodeURIComponent(p)+'?alt=media',{mode:'no-cors',cache:'no-store'});r='השרת עונה'}catch(x){r='השרת לא עונה'}
+  e.raw=(e.raw||'')+' · '+r}throw e});/* true: "נסו שוב" מוריד שוב באמת (בלי חסימה של דקה אחרי כשל) */
 U.panoLoad=load;/* לבדיקות */
 const norm360=a=>Math.round((((a%360)+360)%360)*10)/10;
 const brg=(ax,ay,bx,by)=>norm360(Math.atan2(bx-ax,-(by-ay))*180/Math.PI);
