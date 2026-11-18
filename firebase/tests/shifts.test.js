@@ -7,13 +7,16 @@
 //   4. shTick: משימה ב-tasks רק כשהמשמרת מתחילה (פעם אחת); תזכורת אחת שעה לפני גם אחרי 3 ריצות; התראת חורים אחת ב-07:00, למנהלים בלבד;
 //      בשבת – לא נשלח כלום. נתונים קיימים (tasks, staff, admins) לא משתנים.
 //   5. legacy (לארג' פעמי בשורש): המשמרות נשמרות בשורש.
+//   6. (סבב בדיקה 1) העברת משימות שממתינות ב"רק הפעם", "מכאן והלאה" (גם החלפת יום) ושינוי תאריך – בלי איבוד ובלי כפילות;
+//      בידוד מול עסק B פעיל עם תוספת המשימות; משמרת שחוצה חצות ב-shTick; skip ישן לא נמחק; "מכאן והלאה" לתאריך מוקדם – bad-day;
+//      עריכה/מחיקה של מופע שעבר – bad-day; שתי עריכות "רק הפעם" במקביל; תזכורת למשמרת בשבת – נשלחת בשישי לפני החלון.
 const { describe, it, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
-const A = 'biz-sh', OFF = 'biz-shoff';
-const M1 = 'sh_m1', E1 = 'sh_e1', E2 = 'sh_e2', EX = 'sh_ex', EOFF = 'sh_eoff', LM = 'sh_lm', LE = 'sh_le';
+const A = 'biz-sh', B = 'biz-sh2', OFF = 'biz-shoff';
+const MB = 'sh_mb', EB = 'sh_eb', M1 = 'sh_m1', E1 = 'sh_e1', E2 = 'sh_e2', EX = 'sh_ex', EOFF = 'sh_eoff', LM = 'sh_lm', LE = 'sh_le';
 const P = 'b/' + A + '/';
 const HRS = [{ s: '08:00', e: '20:00' }, { s: '08:00', e: '20:00' }, { s: '08:00', e: '20:00' }, { s: '08:00', e: '20:00' }, { s: '08:00', e: '20:00' }, { s: '08:00', e: '14:00' }, null];
 const FULL = { incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, shf: true };
@@ -30,7 +33,7 @@ const IL = (day, hm) => { const [y, m, d] = day.split('-').map(Number); return T
 // יום שני–רביעי בעתיד (לפחות 3 ימים מהיום), שאינו חג – כדי שהשעון המדומה של shTick לא ייפול בחלון השקט
 function workDay(minAhead) {
   let d = SC.addDays(SC.todayOf(Date.now()), minAhead || 3);
-  for (let i = 0; i < 60; i++, d = SC.addDays(d, 1)) if ([1, 2, 3].includes(SC.weekdayOf(d)) && !TK.quietAt(IL(d, '06:00')) && !TK.quietAt(IL(d, '12:00'))) return d;
+  for (let i = 0; i < 60; i++, d = SC.addDays(d, 1)) if ([1, 2, 3].includes(SC.weekdayOf(d)) && !SC.quiet(IL(SC.addDays(d, -1), '22:00')) && !SC.quiet(IL(d, '06:00')) && !SC.quiet(IL(d, '23:00'))) return d;
   throw new Error('no work day');
 }
 const tick = (now) => SH.runTick({ now, send });
@@ -41,13 +44,15 @@ async function seed() {
   await prep(async (d) => {
     const b = d.batch();
     const biz = (id, tasks) => b.set(d.doc('b/' + id), { name: id, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: { tasks } });
-    biz(A, true); biz(OFF, false);
+    biz(A, true); biz(B, true); biz(OFF, false);
+    b.set(d.doc(`b/${B}/admins/${MB}`), { email: 'mb@x.example' });
+    b.set(d.doc(`b/${B}/staff/${EB}`), { name: 'עובד ב', role: 'employee', active: true });
     b.set(d.doc(`${P}admins/${M1}`), { email: 'm1@x.example' });
     b.set(d.doc(`${P}staff/${E1}`), { name: 'דנה', role: 'employee', active: true, perms: FULL });
     b.set(d.doc(`${P}staff/${E2}`), { name: 'יוסי', role: 'employee', active: true });
     b.set(d.doc(`${P}staff/${EX}`), { name: 'מושבת', role: 'employee', active: false });
     b.set(d.doc(`b/${OFF}/staff/${EOFF}`), { name: 'אחר', role: 'employee', active: true });
-    for (const [u, bz, role] of [[M1, A, 'admin'], [E1, A, 'worker'], [E2, A, 'worker'], [EX, A, 'worker'], [EOFF, OFF, 'worker']]) {
+    for (const [u, bz, role] of [[M1, A, 'admin'], [E1, A, 'worker'], [E2, A, 'worker'], [EX, A, 'worker'], [EOFF, OFF, 'worker'], [MB, B, 'admin'], [EB, B, 'worker']]) {
       b.set(d.doc('users/' + u), { bizId: bz, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
     }
     b.set(d.doc(`${P}push_tokens/${M1}`), { pushTokens: ['tokM1'] });
@@ -241,6 +246,11 @@ describe('shTick – משימות, תזכורת, חורים', () => {
     await tick(IL(S, '07:05'));
     await tick(IL(S, '09:05'));
     assert.equal(PUSH.length, 0);
+    // התזכורת למשמרת של שבת לא נעלמת: נשלחה (פעם אחת) ביום שישי לפני תחילת החלון (14:00)
+    const F = SC.addDays(S, -1);
+    await tick(IL(F, '13:35')); await tick(IL(F, '13:45')); await tick(IL(F, '14:05'));
+    assert.equal(PUSH.length, 1);
+    assert.match(PUSH[0].msg.body, /מחר ב-10:00/);
   });
 });
 
@@ -254,5 +264,96 @@ describe('legacy – לארג\' פעמי בשורש', () => {
     const t = await call(LM, { op: 'task', occ: s.r.id + '_' + D, txt: 'בדיקה' });
     await tick(IL(D, '10:05'));
     assert.deepEqual((await get('tasks/sh-' + t.r.id)).to, [LE]);
+  });
+});
+
+describe('סבב בדיקה 1 – העברת משימות, בידוד, חצות, היסטוריה, מקביליות', () => {
+  beforeEach(seed);
+  const shft = async (id) => get(P + 'shft/' + id);
+  const waitCount = async () => (await list(P + 'shft')).filter((x) => x.st === 'wait').length;
+  it('"רק הפעם": המשימה עוברת למופע המחליף; skip ישן נשמר', async () => {
+    const D = workDay(), D1 = SC.addDays(D, 7);
+    const s = await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: true, u: E2 });
+    await prep((d) => d.doc(P + 'shf/' + s.r.id).update({ skip: ['2020-01-01'] }));
+    const t = await call(M1, { op: 'task', occ: s.r.id + '_' + D1, txt: 'א' });
+    const o = await call(M1, { op: 'save', id: s.r.id, day: D1, mode: 'one', d: D1, s: '12:00', e: '18:00', fx: false, u: E2 });
+    assert.ok(o.ok, o.msg);
+    assert.equal((await shft(t.r.id)).occ, o.r.id + '_' + D1);
+    assert.deepEqual((await get(P + 'shf/' + s.r.id)).skip, ['2020-01-01', D1]);
+    assert.equal(await waitCount(), 1);
+    await tick(IL(D1, '12:01'));
+    assert.deepEqual((await get(P + 'tasks/sh-' + t.r.id)).to, [E2]);
+  });
+  it('"מכאן והלאה" עם החלפת יום: המשימות עוברות למופע המקביל באותו שבוע; תאריך מוקדם מהמופע – bad-day', async () => {
+    const D = workDay(), D1 = SC.addDays(D, 7), D2 = SC.addDays(D, 14);
+    const s = await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: true, u: E2 });
+    const t1 = await call(M1, { op: 'task', occ: s.r.id + '_' + D1, txt: '1' });
+    const t2 = await call(M1, { op: 'task', occ: s.r.id + '_' + D2, txt: '2' });
+    assert.equal((await call(M1, { op: 'save', id: s.r.id, day: D1, mode: 'fwd', d: SC.addDays(D1, -1), s: '10:00', e: '18:00', fx: true, u: E2 })).reason, 'bad-day');
+    const N1 = SC.addDays(D1, 1);
+    const f = await call(M1, { op: 'save', id: s.r.id, day: D1, mode: 'fwd', d: N1, s: '10:00', e: '18:00', fx: true, u: E2 });
+    assert.ok(f.ok, f.msg);
+    assert.equal((await shft(t1.r.id)).occ, f.r.id + '_' + N1);
+    assert.equal((await shft(t2.r.id)).occ, f.r.id + '_' + SC.addDays(D2, 1));
+    assert.equal(await waitCount(), 2);
+  });
+  it('חד־פעמית: שינוי תאריך מעביר את המשימה', async () => {
+    const D = workDay(), N = SC.addDays(D, 2);
+    const s = await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: false, u: E2 });
+    const t = await call(M1, { op: 'task', occ: s.r.id + '_' + D, txt: 'א' });
+    assert.ok((await call(M1, { op: 'save', id: s.r.id, d: N, s: '10:00', e: '18:00', fx: false, u: E2 })).ok);
+    assert.equal((await shft(t.r.id)).occ, s.r.id + '_' + N);
+    assert.equal(await waitCount(), 1);
+  });
+  it('עריכה ומחיקה של מופע שעבר – bad-day', async () => {
+    const today = SC.todayOf(Date.now()), past = SC.addDays(today, -7);
+    await prep((d) => d.doc(P + 'shf/old').set({ u: E2, nm: 'יוסי', fx: true, wd: SC.weekdayOf(past), from: SC.addDays(past, -7), to: '', skip: [], s: '10:00', e: '12:00', nt: '' }));
+    assert.equal((await call(M1, { op: 'save', id: 'old', day: past, mode: 'one', d: today, s: '10:00', e: '12:00', fx: false })).reason, 'bad-day');
+    assert.equal((await call(M1, { op: 'del', id: 'old', day: past, mode: 'fwd' })).reason, 'bad-day');
+    assert.equal((await get(P + 'shf/old')).to, '');
+  });
+  it('שתי עריכות "רק הפעם" במקביל: שני התאריכים ב-skip, בלי מופע כפול', async () => {
+    const D = workDay(), D1 = SC.addDays(D, 7), D2 = SC.addDays(D, 14);
+    const s = await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: true, u: E2 });
+    const [a, b] = await Promise.all([
+      call(M1, { op: 'save', id: s.r.id, day: D1, mode: 'one', d: D1, s: '11:00', e: '18:00', fx: false, u: E2 }),
+      call(E1, { op: 'save', id: s.r.id, day: D2, mode: 'one', d: D2, s: '12:00', e: '18:00', fx: false, u: E2 })]);
+    assert.ok(a.ok && b.ok, (a.msg || '') + (b.msg || ''));
+    assert.deepEqual((await get(P + 'shf/' + s.r.id)).skip.slice().sort(), [D1, D2].sort());
+    for (const [day, hh] of [[D1, '11:00'], [D2, '12:00']]) {
+      const w = (await call(M1, { op: 'week', from: SC.weekStart(day) })).r.occ;
+      assert.deepEqual(w.map((o) => o.s), [hh]);
+    }
+  });
+  it('בידוד: מנהל של עסק B (פעיל, עם תוספת המשימות) לא רואה ולא נוגע במשמרות של A', async () => {
+    const D = workDay();
+    const s = await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: false, u: E2 });
+    const w = await call(MB, { op: 'week', from: SC.weekStart(D) });
+    assert.ok(w.ok, w.msg);
+    assert.deepEqual(w.r.occ, []);
+    assert.ok(!w.r.staff.some((x) => x.uid === E2 || x.uid === M1));
+    assert.equal((await call(MB, { op: 'save', d: D, s: '10:00', e: '18:00', fx: false, u: E2 })).reason, 'bad-user');
+    assert.equal((await call(MB, { op: 'task', occ: s.r.id + '_' + D, txt: 'x' })).reason, 'no-occ');
+    assert.equal((await call(MB, { op: 'del', id: s.r.id })).reason, 'no-shift');
+    assert.equal((await call(MB, { op: 'week', bizId: A })).reason, 'foreign-biz');
+    assert.ok(await get(P + 'shf/' + s.r.id));
+  });
+  it('shTick על משמרת שחוצה חצות (00:30–06:00): תזכורת ב-23:35 של היום הקודם, המשימה נחשפת ב-00:30', async () => {
+    const D = workDay(), N = SC.addDays(D, 1);
+    const s = await call(M1, { op: 'save', d: N, s: '00:30', e: '06:00', fx: false, u: E2 });
+    const t = await call(M1, { op: 'task', occ: s.r.id + '_' + N, txt: 'לילה' });
+    await tick(IL(D, '23:25'));
+    assert.equal(PUSH.length, 0);
+    await tick(IL(D, '23:35'));
+    assert.equal(PUSH.length, 1);
+    await tick(IL(N, '00:25'));
+    assert.equal(await get(P + 'tasks/sh-' + t.r.id), null);
+    await tick(IL(N, '00:35'));
+    assert.ok(await get(P + 'tasks/sh-' + t.r.id));
+    // ומשמרת 20:00–02:00: המשימה נחשפת ב-20:00 ולא נוצרת שוב אחרי חצות
+    const s2 = await call(M1, { op: 'save', d: N, s: '20:00', e: '02:00', fx: false, u: E2 });
+    const t2 = await call(M1, { op: 'task', occ: s2.r.id + '_' + N, txt: 'ערב' });
+    await tick(IL(N, '20:05')); await tick(IL(SC.addDays(N, 1), '00:15'));
+    assert.equal((await list(P + 'tasks')).filter((x) => x.id === 'sh-' + t2.r.id).length, 1);
   });
 });

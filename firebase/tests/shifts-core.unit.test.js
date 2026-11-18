@@ -1,6 +1,7 @@
 'use strict';
 // משמרות (שלב 3, 18.11.2026) – בדיקות יחידה לליבה הטהורה (functions/lib/shifts-core.js), בלי אמולטור:
-// פריסת משמרות קבועות (from/to/skip), משמרת שחוצה חצות, מעבר לשעון קיץ/חורף, חורים בשעות הפעילות, חלון התזכורת, התראת 07:00, בדיקת קלט.
+// פריסת משמרות קבועות (from/to/skip), משמרת שחוצה חצות, מעבר לשעון קיץ/חורף, חורים בשעות הפעילות, חלון התזכורת, התראת 07:00,
+// חלון השקט בשבת וחג (תזכורת שלא נעלמת), skip שלא נמחק, מופע מקביל, בדיקת קלט.
 // הרצה: node --test tests/shifts-core.unit.test.js
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -133,9 +134,61 @@ describe('shifts-core – תזכורת והתראת הבוקר', () => {
     assert.equal(SC.holesDue(SC.cfgOf({}), IL('2026-11-18', '07:05')).go, false);
     assert.equal(SC.holesDue(SC.cfgOf({ hrs: HRS, at: '06:30' }), IL('2026-11-18', '06:35')).go, true);
   });
-  it('שבת: בחלון השקט (TK.quietAt) – shTick לא שולח', () => {
-    assert.equal(TK.quietAt(IL('2026-11-21', '07:05')), true);
-    assert.equal(TK.quietAt(IL('2026-11-18', '07:05')), false);
+  it('חלון השקט: שישי 14:00 עד מוצאי שבת 21:00 (שעון ישראל)', () => {
+    assert.equal(SC.quiet(IL('2026-11-20', '13:59')), false);
+    assert.equal(SC.quiet(IL('2026-11-20', '14:00')), true);
+    assert.equal(SC.quiet(IL('2026-11-21', '07:05')), true);
+    assert.equal(SC.quiet(IL('2026-11-21', '20:59')), true);
+    assert.equal(SC.quiet(IL('2026-11-21', '21:00')), false);
+    assert.equal(SC.quiet(IL('2026-11-18', '07:05')), false);
+    assert.deepEqual(SC.quietWin(IL('2026-11-21', '10:00')), [IL('2026-11-20', '14:00'), IL('2026-11-21', '21:00')]);
+  });
+  it('חג צמוד לשבת: חלון אחד רצוף (ראש השנה תשפ"ח, 2–3.10.2027 + שבת 2.10)', () => {
+    const w = SC.quietWin(IL('2027-10-02', '12:00'));
+    assert.equal(w[0], IL('2027-10-01', '14:00'));
+    assert.equal(w[1], IL('2027-10-03', '21:00'));
+  });
+  it('תזכורת שנופלת בחלון לא נעלמת: שישי 15:00 – לפני 14:00; שבת בבוקר – שישי לפני 14:00; מוצאי שבת 21:30 – מ-21:00', () => {
+    const at = (d, s) => SC.expand([one('X', { d, s, e: '06:00' })], d, 1)[0];
+    const fri = at('2026-11-20', '15:00');
+    assert.equal(SC.remDue(fri, IL('2026-11-20', '13:35')), true);
+    assert.equal(SC.remDue(fri, IL('2026-11-20', '14:05')), false);
+    const f2 = at('2026-11-20', '14:59'); // השעה שלפני מתחילה דקה לפני החלון – עדיין חצי שעה לשלוח
+    assert.equal(SC.remDue(f2, IL('2026-11-20', '13:40')), true);
+    const sat = at('2026-11-21', '10:00');
+    assert.equal(SC.remDue(sat, IL('2026-11-20', '13:40')), true);
+    assert.equal(SC.remDue(sat, IL('2026-11-21', '09:05')), false);
+    const mo = at('2026-11-21', '21:30');
+    assert.equal(SC.remDue(mo, IL('2026-11-21', '20:35')), false);
+    assert.equal(SC.remDue(mo, IL('2026-11-21', '21:05')), true);
+    const late = at('2026-11-21', '23:00');
+    assert.equal(SC.remDue(late, IL('2026-11-21', '22:05')), true);
+    assert.equal(SC.remDue(at('2026-11-20', '12:00'), IL('2026-11-20', '11:05')), true);
+  });
+});
+
+describe('shifts-core – skip ומופע מקביל', () => {
+  it('addSkip לא מוחק תאריכים ישנים; מגבלה רק על עתידיים; מעל 400 – רק מלפני שנה, ו-from עולה', () => {
+    const r = SC.addSkip({ from: '2020-01-01', skip: ['2020-01-08', '2026-10-07'] }, '2026-11-25', '2026-11-18');
+    assert.deepEqual(r, { skip: ['2020-01-08', '2026-10-07', '2026-11-25'], from: '2020-01-01' });
+    const fut = Array.from({ length: 60 }, (_, i) => SC.addDays('2026-11-18', 7 * i));
+    assert.equal(SC.addSkip({ from: '2026-01-01', skip: fut }, SC.addDays('2026-11-18', 7 * 60), '2026-11-18').err, true);
+    const old = Array.from({ length: 401 }, (_, i) => SC.addDays('2010-01-06', 7 * i));
+    const p = SC.addSkip({ from: '2010-01-06', skip: old }, '2026-11-25', '2026-11-18');
+    assert.equal(p.from, '2025-11-17');
+    assert.ok(p.skip.every((x) => x >= '2025-11-17') && p.skip.includes('2026-11-25'));
+    // מופע שבוטל לפני הגבול לא חוזר: הוא לפני from
+    assert.equal(SC.appliesOn({ id: 'A', fx: true, wd: 3, from: p.from, to: '', s: '08:00', e: '10:00', skip: p.skip }, '2015-01-07'), false);
+  });
+  it('sameWeek: המופע המקביל באותו שבוע (ראשון–שבת)', () => {
+    assert.equal(SC.sameWeek('2026-11-18', 1), '2026-11-16');
+    assert.equal(SC.sameWeek('2026-11-21', 0), '2026-11-15');
+  });
+  it('בעיה שהבודק מצא: "רק הפעם" ישן נשמר – בשבוע ההוא רק המחליפה', () => {
+    const r1 = SC.addSkip({ from: '2026-09-02', skip: [] }, '2026-10-07', '2026-10-01');
+    const r2 = SC.addSkip(Object.assign({ from: r1.from }, { skip: r1.skip }), '2026-11-25', '2026-11-18');
+    const occ = SC.expand([fixed('A', { from: '2026-09-02', skip: r2.skip }), one('B', { d: '2026-10-07', of: 'A' })], '2026-10-04', 7);
+    assert.deepEqual(occ.map((o) => o.id), ['B_2026-10-07']);
   });
 });
 

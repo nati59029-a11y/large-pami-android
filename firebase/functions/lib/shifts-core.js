@@ -107,8 +107,53 @@ function holes(day, hrs, occs) {
 }
 const holesTxt = (hs) => hs.map(([a, b]) => hmOf(a) + '–' + hmOf(b)).join(', ');
 
-// תזכורת לעובד: מהשעה שלפני ההתחלה ועד ההתחלה
-const remDue = (occ, now, min) => !!occ.u && now >= occ.start - (min || REM_MIN) * 60000 && now < occ.start;
+// ---------- שבת וחג: חלון שקט שמרני – מערב שבת/חג QS:00 ועד מוצאי שבת/חג QE:00 (שעון ישראל), כולל רצף של כמה ימי מנוחה ----------
+const QS = 14, QE = 21;
+const REM_PRE = 30 * 60000; // תזכורת שנופלת בחלון, למשמרת בתוכו: נשלחת בחצי השעה שלפני תחילת החלון
+const restDay = (day) => { const p = parts(day); return TK.isRest({ y: p.y, m: p.m, d: p.d }); };
+const atHM = (day, hm) => { const p = parts(day); return TK.zoned(p.y, p.m, p.d, hmMin(hm) / 60 | 0, hmMin(hm) % 60); };
+function quiet(t) {
+  const day = todayOf(t), hh = TK.wall(t).hh;
+  if (restDay(day) && hh < QE) return true;
+  return hh >= QS && restDay(addDays(day, 1));
+}
+// [תחילת החלון, סופו] של החלון שבו נמצא t (t בתוך חלון)
+function quietWin(t) {
+  const day = todayOf(t);
+  const D = restDay(day) && TK.wall(t).hh < QE ? day : addDays(day, 1);
+  let F = D, L = D;
+  for (let i = 0; i < 10 && restDay(addDays(F, -1)); i++) F = addDays(F, -1);
+  for (let i = 0; i < 10 && restDay(addDays(L, 1)); i++) L = addDays(L, 1);
+  return [atHM(addDays(F, -1), String(QS).padStart(2, '0') + ':00'), atHM(L, String(QE) + ':00')];
+}
+// חלון השליחה של התזכורת [מ, עד): בדרך כלל השעה שלפני ההתחלה. נופלת בחלון השקט –
+//   משמרת שמתחילה עד סוף החלון (שישי אחר הצהריים / שבת): לפני תחילת החלון; משמרת במוצאי שבת: מסוף החלון ועד ההתחלה.
+function remWin(occ, min) {
+  const r = occ.start - (min || REM_MIN) * 60000;
+  const q = quiet(r) ? r : quiet(occ.start - 60000) ? occ.start - 60000 : 0;
+  if (!q) return [r, occ.start];
+  const [ws, we] = quietWin(q);
+  if (occ.start <= we) return [Math.min(r, ws - REM_PRE), ws];
+  return [we, occ.start];
+}
+const remDue = (occ, now, min) => { if (!occ.u || now >= occ.start || quiet(now)) return false; const [a, b] = remWin(occ, min); return now >= a && now < b; };
+
+// ---------- skip ("רק הפעם"): לא מוחקים תאריכים (היסטוריה והשוואת נוכחות). עד MAX_SKIP תאריכים עתידיים.
+// מעל SKIP_KEEP תאריכים – תאריכים מלפני יותר משנה יוצאים, ו-from עולה לאותו יום (כדי שמופע שבוטל לא יחזור). { skip, from } או { err }
+const SKIP_KEEP = 400;
+function addSkip(def, day, today) {
+  let skip = [...new Set((Array.isArray(def.skip) ? def.skip : []).filter(isDay).concat([day]))].sort();
+  if (skip.filter((x) => x >= today).length > MAX_SKIP) return { err: true };
+  let from = def.from;
+  if (skip.length > SKIP_KEEP) {
+    const cut = addDays(today, -366);
+    skip = skip.filter((x) => x >= cut);
+    if (!isDay(from) || from < cut) from = cut;
+  }
+  return { skip, from };
+}
+// המופע המקביל באותו שבוע (ראשון–שבת) ביום wd
+const sameWeek = (day, wd) => addDays(weekStart(day), wd);
 
 // ההגדרות (shfcfg/main) – תמיד מנורמלות. hrs: null = המנהל עוד לא הגדיר (אין התראת חורים)
 function cfgOf(raw) {
@@ -155,5 +200,5 @@ function normHrs(v) {
 module.exports = {
   HM_RE, DAY_RE, ID_RE, MAX_SKIP, DEF_LATE, DEF_AT, REM_MIN, HOLES_WIN,
   isHM, hmMin, isDay, addDays, weekdayOf, todayOf, weekStart, hmOf, times, appliesOn, occOn, expand, parseOcc, occById,
-  openRange, holes, holesTxt, remDue, cfgOf, holesDue, normDef, normHrs,
+  openRange, holes, holesTxt, remDue, remWin, quiet, quietWin, addSkip, sameWeek, SKIP_KEEP, cfgOf, holesDue, normDef, normHrs,
 };

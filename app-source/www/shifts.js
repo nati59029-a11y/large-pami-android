@@ -2,7 +2,8 @@
    V.shf – טבלה שבועית: עמודה לכל יום, משמרות לפי שעה, "חור" (זמן בלי עובדים בשעות הפעילות) באדום, גלילה לצד במסך צר.
      מנהל ועובד עם הרשאת "משמרות" (perms.shf): רואים הכול, מוסיפים/עורכים/מוחקים, ושולחים משימות לעובד שבמשמרת.
      עובד בלי ההרשאה: רואה רק את המשמרות שלו.
-   יצירה/עריכה: שואלים "משמרת קבועה?" (כל שבוע באותו יום ושעות). עריכה/מחיקה של מופע במשמרת קבועה: "רק הפעם" / "מכאן והלאה".
+   יצירה/עריכה: שואלים "משמרת קבועה?" (כל שבוע באותו יום ושעות). עריכה/מחיקה של מופע במשמרת קבועה: "רק הפעם" / "מכאן והלאה"
+   (רק מהיום והלאה; ב"מכאן והלאה" התאריך לא לפני המופע). משימה שלא נשלחה (המשמרת השתנתה / אין עובד) – באדום ביום שלה, עם מחיקה.
    שעת סיום מוקדמת משעת ההתחלה = משמרת שחוצה חצות (20:00–02:00).
    V.shfCfg – הגדרות מנהל: סף איחור, שעת ההתראה היומית, שעות פעילות לכל יום, וטבלת התאמה "עובד בכספית ← משתמש".
    כל קריאה וכתיבה – רק דרך shApi בשרת (functions/shifts.js), שגם אוכף את ההרשאות. כאן רק מה מוצג.
@@ -55,8 +56,8 @@ V.shf=()=>{const T='משמרות';if(!on())return{t:T,h:'<div class="empty">המ
  if(full)h+=`<div class="row" style="margin-bottom:8px"><button class="btn grow" ${big} data-a="shNew">+ משמרת</button>${w.mgr?`<button class="btn g grow" ${big} data-a="go" data-v="shfCfg">הגדרות</button>`:''}</div>`;
  if(full&&w.mgr&&!w.hrs)h+='<p class="note">כדי לקבל כל בוקר התראה על זמנים בלי עובדים – הגדירו שעות פעילות ב"הגדרות".</p>';
  h+='<div class="shw" role="region" aria-label="טבלת משמרות שבועית" tabindex="0"><div class="shg">';
- for(const d of w.days){const L=w.occ.filter(o=>o.day===d),H=(w.holes||{})[d]||[];
-  h+=`<div class="shd${d===w.today?' td':''}"><h4>${DN[dow(d)]}<br><small>${dm(d)}</small></h4>${L.map(o=>chip(o,w)).join('')}${H.map(x=>`<div class="shh">אין עובדים <span>${esc(x[0])}–${esc(x[1])}</span></div>`).join('')}${!L.length&&!H.length?'<p class="note" style="text-align:center;margin:4px 0">—</p>':''}</div>`}
+ for(const d of w.days){const L=w.occ.filter(o=>o.day===d),H=(w.holes||{})[d]||[],X=(w.orph||[]).filter(t=>t.day===d);
+  h+=`<div class="shd${d===w.today?' td':''}"><h4>${DN[dow(d)]}<br><small>${dm(d)}</small></h4>${L.map(o=>chip(o,w)).join('')}${H.map(x=>`<div class="shh">אין עובדים <span>${esc(x[0])}–${esc(x[1])}</span></div>`).join('')}${X.map(t=>`<div class="shh" role="alert">⚠ משימה שלא נשלחה (${t.why==='no-user'||t.why==='inactive'?'אין עובד פעיל במשמרת':'המשמרת השתנתה'}): ${esc(t.txt)}<button class="btn s g" style="min-height:44px;width:100%;margin-top:4px" data-a="shTDel" data-k="${esc(t.id)}">מחיקה</button></div>`).join('')}${!L.length&&!H.length&&!X.length?'<p class="note" style="text-align:center;margin:4px 0">—</p>':''}</div>`}
  h+='</div></div>';
  if(!w.occ.length)h+=`<p class="empty">${full?'אין משמרות בשבוע הזה. "+ משמרת" כדי להוסיף.':'אין לך משמרות בשבוע הזה.'}</p>`;
  h+='<p class="note">☾ = המשמרת נגמרת אחרי חצות. 🔁 = משמרת קבועה (כל שבוע).</p>';
@@ -73,11 +74,11 @@ ACT.shOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
  if(!o.u)h+='<p class="note">אין עובד במשמרת – קודם בחרו עובד (עריכה) ואז שלחו משימות.</p>';
  else if(ended)h+='<p class="note">המשמרת הסתיימה.</p>';
  else h+=`<form data-f="shTaskF" data-k="${esc(o.id)}" style="margin-top:8px"><label class="f"><span>משימה חדשה ל${esc(nm)}</span><textarea name="txt" rows="2" maxlength="500" required placeholder="למשל: לסדר את מדף החלב"></textarea></label><button class="btn w" ${big}>שליחה ${o.start<=Date.now()?'עכשיו':'– תוצג בתחילת המשמרת'}</button></form>`;
- h+=`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="shEdit" data-k="${esc(o.id)}">עריכה</button><button class="btn g grow" ${big} data-a="shDel" data-k="${esc(o.id)}">מחיקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`;
+ h+=o.day<w.today?`<p class="note">משמרת שעברה – אי אפשר לשנות.</p><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`:`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="shEdit" data-k="${esc(o.id)}">עריכה</button><button class="btn g grow" ${big} data-a="shDel" data-k="${esc(o.id)}">מחיקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`;
  dlg(h)};
 FRM.shTaskF=async f=>{const occ=f.dataset.k,txt=String(fd(f).txt||'').trim();if(!txt)return toast('כתבו משימה');if(txt.length>500)return toast('עד 500 תווים');
  const b=f.querySelector('button');b.disabled=true;
- try{const r=await fnCall('shApi',{op:'task',occ,txt});toast(r.st==='rel'?'המשימה נשלחה לעובד':'נשמר – העובד יראה את המשימה בתחילת המשמרת');closeDlg();reload()}catch(e){b.disabled=false;err(e)}};
+ try{const r=await fnCall('shApi',{op:'task',occ,txt});toast(r.st==='rel'?'המשימה נשלחה לעובד':r.st==='orph'?'המשימה לא נשלחה – אין עובד פעיל במשמרת':'נשמר – העובד יראה את המשימה בתחילת המשמרת');closeDlg();reload()}catch(e){b.disabled=false;err(e)}};
 ACT.shTDel=el=>{const id=el.dataset.k;ask('למחוק את המשימה?',async()=>{try{await fnCall('shApi',{op:'taskDel',id});toast('נמחקה');closeDlg();reload()}catch(e){err(e)}},'כן, מחק')};
 
 /* טופס משמרת: חדשה (o = null) או עריכה. "משמרת קבועה?" – חובה לבחור */
@@ -86,7 +87,7 @@ function formH(o){const w=S.w,st=(w&&w.staff)||[],d=o?o.day:(w&&w.days&&w.days.i
  const rad=(v,t)=>`<label class="chip" style="min-height:48px"><input type="radio" name="fx" value="${v}" required${fx===v?' checked':''}> ${t}</label>`;
  return `<h3>${o?'עריכת משמרת':'משמרת חדשה'}</h3><form data-f="shSaveF" data-k="${o?esc(o.id):''}">
  <label class="f"><span>עובד</span><select name="u" style="min-height:48px"><option value="">— בלי עובד (משמרת פתוחה) —</option>${st.map(s=>`<option value="${esc(s.uid)}"${o&&o.u===s.uid?' selected':''}>${esc(s.name)}${s.mgr?' (מנהל)':''}</option>`).join('')}</select></label>
- <label class="f"><span>תאריך</span><input type="date" name="d" required value="${esc(d)}" style="min-height:48px"></label>
+ <label class="f"><span>תאריך</span><input type="date" name="d" required value="${esc(d)}"${o?` min="${esc(w.today)}"`:''} style="min-height:48px"></label>
  <div class="row"><label class="f grow"><span>משעה</span><input type="time" name="s" required value="${esc(o?o.s:'08:00')}" style="min-height:48px"></label><label class="f grow"><span>עד שעה</span><input type="time" name="e" required value="${esc(o?o.e:'14:00')}" style="min-height:48px"></label></div>
  <p class="note" style="margin-top:0">שעת סיום מוקדמת משעת ההתחלה = המשמרת נגמרת למחרת (למשל 20:00–02:00).</p>
  <div class="f"><span>משמרת קבועה?</span><div class="chips" role="radiogroup" style="margin:4px 0;display:flex;flex-wrap:wrap;gap:6px">${rad('1','כן – כל שבוע באותו יום ושעות')}${rad('0','לא – רק בתאריך הזה')}</div></div>
@@ -105,9 +106,10 @@ FRM.shSaveF=f=>{const x=fd(f),o=f.dataset.k?occOf(f.dataset.k):null;
  const data={op:'save',u:x.u||'',d:x.d,s:x.s,e:x.e,fx:x.fx==='1',nt:String(x.nt||'').trim().slice(0,200)};
  const b=f.querySelector('button');
  if(!o){b.disabled=true;return saveRun(data,b)}
+ if(S.w&&x.d<S.w.today)return toast('אפשר לשנות משמרות רק מהיום והלאה');
  data.id=sidOf(o);
  if(!o.fx){b.disabled=true;return saveRun(data,b)}
- data.day=o.day;askMode('שמירת השינוי',m=>saveRun(Object.assign(data,{mode:m})))};
+ data.day=o.day;askMode('שמירת השינוי',m=>{if(m==='fwd'&&data.d<o.day)return toast('ב"מכאן והלאה" התאריך לא יכול להיות לפני '+dm(o.day));saveRun(Object.assign(data,{mode:m}))})};
 ACT.shDel=el=>{const o=occOf(el.dataset.k);if(!o)return;const id=sidOf(o);
  if(!o.fx)return ask('למחוק את המשמרת? משימות שממתינות לה יבוטלו.',()=>saveRun({op:'del',id}),'כן, מחק');
  askMode('מחיקת משמרת',m=>saveRun({op:'del',id,day:o.day,mode:m}))};

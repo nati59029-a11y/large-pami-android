@@ -1,19 +1,23 @@
 'use strict';
 // משמרות (שלב 3, 18.11.2026). כל הנתונים בתוך העסק (T.tdb(): בשורש בלארג' פעמי legacy, אחרת b/{bizId}/), והשרת בלבד קורא וכותב –
 // אין כללי Firestore לאוספים האלה, והחסימה הכללית בסוף firestore.rules חוסמת גישה ישירה מהאפליקציה.
-//   shf/{id}      – הגדרת משמרת (lib/shifts-core.js). shft/{id} – משימה למשמרת: { occ, sid, day, u, txt, st: wait|rel, tk, by, bn, at, relAt }.
+//   shf/{id}      – הגדרת משמרת (lib/shifts-core.js). shft/{id} – משימה למשמרת: { occ, sid, day, u, txt, st, tk, by, bn, at, relAt, why }.
+//                   st: wait (ממתינה) / rel (נשלחה – tasks/sh-<id>) / cx (בוטלה כשהמשמרת נמחקה) / orph (לא נשלחה: המופע לא קיים / אין עובד –
+//                   מוצגת למנהל בטבלה, לא נעלמת בשקט).
 //   shfcfg/main   – { late, at, hrs, ub, ua }. shfcfg/map – { m: { '<שם עובד בכספית>': uid } } (ישמש בשלב הנוכחות).
 //   shfsent/{day} – { rem: { occ: ts }, holes: ts } – מונע שליחה כפולה.
 // shApi({ op, ... }) – תוספת tasks. מנהל, או עובד עם perms.shf: הכול חוץ מ-cfg/setCfg (מנהל בלבד). עובד בלי shf: רק week, ורק המשמרות שלו.
 //   week{from}  – 7 ימים מ-from: מופעים, חורים (לפי שעות הפעילות), משימות (משימות שממתינות במשמרות של המשתמש עצמו – מוסתרות ממנו).
-//   save{id?, day?, mode?, u, d, s, e, fx, nt} – חדשה / עריכה. משמרת קבועה: mode 'one' (רק הפעם: skip + חד־פעמית עם of) / 'fwd' (מכאן והלאה:
-//     to = יום לפני, וקבועה חדשה; ההיסטוריה נשארת). משימות שממתינות עוברות למופע החדש.
-//   del{id, day?, mode?} – חד־פעמית: מחיקה (רק לפני שהתחילה). קבועה: 'one' = skip, 'fwd' = to. משימות שממתינות – מבוטלות (st 'cx').
+//   save{id?, day?, mode?, u, d, s, e, fx, nt} – חדשה / עריכה. עריכה רק מהיום והלאה (מופע שעבר – bad-day). משמרת קבועה: mode 'one'
+//     (רק הפעם: skip + חד־פעמית עם of) / 'fwd' (מכאן והלאה: to = יום לפני, וקבועה חדשה; ההיסטוריה נשארת; d לא לפני day).
+//     השינוי בהגדרה והעברת המשימות שממתינות – בטרנזקציה אחת. משימה שאין לה מופע מקביל – orph (לא מבוטלת בשקט).
+//   del{id, day?, mode?} – חד־פעמית: מחיקה (רק לפני שהתחילה). קבועה: 'one' = skip, 'fwd' = to (רק מהיום והלאה). משימות שממתינות – cx.
 //   task{occ, txt} / taskDel{id} – משימה למשמרת (עד 30 למופע). מוצגת לעובד רק בתחילת המשמרת: shTick יוצר אז משימה רגילה ב-tasks
 //     (tasks/sh-<id>, כמו recurring.js, בלי rc – tkPush שולח לעובד התראה). משמרת שכבר התחילה – המשימה נוצרת מיד.
 //   cfg / setCfg{late?, at?, hrs?, map?} – מנהל בלבד. staff – רשימת העובדים הפעילים והמנהלים לבחירה.
-// shTick – כל 10 דקות (us-central1 בלבד): פרסום משימות שהגיע זמנן; תזכורת לעובד שעה לפני המשמרת (פעם אחת);
-//   התראה למנהלים על זמנים בלי עובדים, פעם ביום אחרי שעת ההתראה (07:00). בחלון השקט (שבת וחג, TK.quietAt) – אין התראות.
+// shTick – כל 10 דקות (us-central1 בלבד): פרסום משימות שהגיע זמנן (בטרנזקציה: המשמרת נקראת מחדש, והמופע חייב להיות תקף);
+//   תזכורת לעובד שעה לפני המשמרת (פעם אחת); התראה למנהלים על זמנים בלי עובדים, פעם ביום אחרי שעת ההתראה (07:00).
+//   שבת וחג (SC.quiet – מערב 14:00 עד מוצאי 21:00): אין התראות. תזכורת שנופלת בחלון נשלחת לפניו (משמרת בשישי/שבת) או בסופו (מוצאי שבת).
 // שגיאות (details.reason): not-allowed, not-manager, bad-op, bad-field, bad-time, bad-day, bad-fx, bad-note, bad-user, bad-id, bad-mode,
 //   no-shift, no-occ, no-user, too-many, past, bad-text, released, bad-cfg, bad-late, bad-at, bad-hrs, bad-map, feature-off.
 
@@ -35,6 +39,7 @@ const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason })
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
 const str = (v, n) => (typeof v === 'string' ? v : '').slice(0, n);
 function onlyKeys(o, keys) { for (const k of Object.keys(o)) if (!keys.includes(k)) throw bad('bad-field', 'שדה לא מוכר: ' + String(k).slice(0, 30)); }
+const pastErr = () => bad('bad-day', 'אפשר לשנות משמרות רק מהיום והלאה');
 
 // ---------- עזר ----------
 async function loadDefs(db) {
@@ -53,12 +58,15 @@ async function staffList(db) {
   }
   return [...out.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
-// עובד פעיל או מנהל של העסק → השם (או null)
-async function userName(db, u) {
-  const [s, a] = await db.getAll(db.doc('staff/' + u), db.doc('admins/' + u));
+// עובד פעיל או מנהל של העסק → השם (או null). s/a = המסמכים staff/{u}, admins/{u}
+function nameFrom(s, a) {
   if (s.exists && s.get('active') === true) return str(s.get('name'), 60) || 'עובד';
   if (a.exists) return (s.exists && str(s.get('name'), 60)) || str(a.get('name'), 60) || str(a.get('email'), 200).split('@')[0].slice(0, 60) || 'מנהל';
   return null;
+}
+async function userName(db, u) {
+  const [s, a] = await db.getAll(db.doc('staff/' + u), db.doc('admins/' + u));
+  return nameFrom(s, a);
 }
 const meName = (request) => str(request.auth && request.auth.token && request.auth.token.email, 200).split('@')[0].slice(0, 100);
 
@@ -76,35 +84,55 @@ function taskDoc(s, occ, nm, now) {
     to: [occ.u], toN: [nm], ow: occ.u, owN: nm, clt: now, np: 0, wp: 0, mi: 0,
   };
 }
-// מחזיר 'rel' / 'cx'
-async function release(db, ref, s, occ, now) {
-  const nm = occ && occ.u ? await userName(db, occ.u) : null;
-  if (!occ || !occ.u || nm === null) { await ref.update({ st: 'cx', relAt: now }); return 'cx'; }
-  const tid = 'sh-' + ref.id;
-  const b = db.batch();
-  b.create(db.doc('tasks/' + tid), taskDoc(s, occ, nm, now));
-  b.update(ref, { st: 'rel', tk: tid, relAt: now, u: occ.u });
-  try { await b.commit(); } catch (e) {
-    if (!(e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message))))) throw e;
-    await ref.update({ st: 'rel', tk: tid, relAt: now });
-  }
-  return 'rel';
+// שחרור משימה אחת – בטרנזקציה: המשימה עדיין ממתינה, וההגדרה נקראת מחדש (מופע תקף, עם עובד פעיל, שכבר התחיל).
+// today (shTick): מופע שלא קיים ושיומו עבר – orph. מחזיר 'rel' / 'orph' / 'early' / 'gone' / 'skip'
+async function release(db, ref, now, today) {
+  return db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists || s.get('st') !== 'wait') return 'skip';
+    const x = s.data();
+    const p = SC.parseOcc(x.occ);
+    const ds = p ? await tx.get(db.doc('shf/' + p.sid)) : null;
+    const oc = ds && ds.exists ? SC.occById([Object.assign({ id: ds.id }, ds.data())], x.occ) : null;
+    if (!oc) {
+      if (today && (!p || p.day < SC.addDays(today, -1))) { tx.update(ref, { st: 'orph', why: 'gone', relAt: now }); return 'orph'; }
+      return 'gone';
+    }
+    if (oc.start > now) return 'early';
+    const [st, ad] = oc.u ? await tx.getAll(db.doc('staff/' + oc.u), db.doc('admins/' + oc.u)) : [null, null];
+    const nm = oc.u ? nameFrom(st, ad) : null;
+    if (nm === null) { tx.update(ref, { st: 'orph', why: oc.u ? 'inactive' : 'no-user', relAt: now }); return 'orph'; }
+    const tref = db.doc('tasks/sh-' + ref.id);
+    const t = await tx.get(tref);
+    if (!t.exists) tx.create(tref, taskDoc(x, oc, nm, now));
+    tx.update(ref, { st: 'rel', tk: tref.id, relAt: now, u: oc.u });
+    return 'rel';
+  });
 }
 
-// משימות שממתינות של הגדרה sid: map(day) → מזהה מופע חדש, או null = ביטול. pick(day) – אילו ימים
-async function moveTasks(db, sid, pick, map, now) {
-  const s = await db.collection('shft').where('sid', '==', sid).limit(500).get();
-  const b = db.batch();
+// בתוך טרנזקציה: המשימות שממתינות של הגדרה sid (קריאה – לפני כל כתיבה)
+async function waitOf(tx, db, sid) {
+  const s = await tx.get(db.collection('shft').where('sid', '==', sid).limit(500));
+  return s.docs.filter((d) => d.get('st') === 'wait');
+}
+// map(day) → מזהה מופע חדש, או null: cancel = מחיקה ע"י המשתמש (cx), אחרת orph (לא נעלמת בשקט)
+function moveIn(tx, docs, pick, map, now, cancel) {
   let n = 0;
-  for (const d of s.docs) {
+  for (const d of docs) {
     const x = d.data();
-    if (x.st !== 'wait' || !pick(x.day)) continue;
-    const to = map(x.day);
-    if (to) { const p = SC.parseOcc(to); b.update(d.ref, { occ: to, sid: p.sid, day: p.day }); } else b.update(d.ref, { st: 'cx', relAt: now });
+    if (!pick(x.day)) continue;
+    const to = map ? map(x.day) : null;
+    if (to) { const p = SC.parseOcc(to); if (to !== x.occ) tx.update(d.ref, { occ: to, sid: p.sid, day: p.day }); } else tx.update(d.ref, cancel ? { st: 'cx', relAt: now } : { st: 'orph', why: 'moved', relAt: now });
     n++;
   }
-  if (n) await b.commit();
   return n;
+}
+// "מכאן והלאה": המופע החדש שמקביל ליום x – היום הראשון (x === day) → המופע הראשון של ההגדרה החדשה; אחרת אותו שבוע, ביום החדש
+function fwdMap(nid, nd, day) {
+  return (x) => {
+    const t = x === day ? (nd.fx ? nd.from : nd.d) : nd.fx ? SC.sameWeek(x, nd.wd) : null;
+    return t && SC.appliesOn(nd, t) ? nid + '_' + t : null;
+  };
 }
 
 // ---------- shApi ----------
@@ -117,7 +145,7 @@ async function opWeek(g, input) {
   const [defs, cfgS] = await Promise.all([loadDefs(db), full ? db.doc('shfcfg/main').get() : null]);
   const all = SC.expand(defs, SC.addDays(from, -1), 8);
   const days = Array.from({ length: 7 }, (_, i) => SC.addDays(from, i));
-  let occ = all.filter((o) => o.day >= from && o.day <= days[6]);
+  const occ = all.filter((o) => o.day >= from && o.day <= days[6]);
   const out = { from, days, today, now, full, mgr: g.mgr };
   if (!full) {
     out.occ = occ.filter((o) => o.u === who.uid);
@@ -128,16 +156,19 @@ async function opWeek(g, input) {
   out.holes = {};
   if (cfg.hrs) for (const d of days) { const h = SC.holes(d, cfg.hrs, all); if (h.length) out.holes[d] = h.map(([a, b]) => [SC.hmOf(a), SC.hmOf(b)]); }
   const ts = await db.collection('shft').where('day', '>=', from).where('day', '<=', days[6]).limit(1000).get();
-  const tasks = {};
+  const tasks = {}, orph = [];
   const mine = new Set(occ.filter((o) => o.u === who.uid).map((o) => o.id));
   for (const d of ts.docs) {
     const x = d.data();
     if (x.st === 'cx') continue;
-    if (x.st === 'wait' && !g.mgr && mine.has(x.occ)) continue; // הנחה: משימות שממתינות במשמרת שלי – מוסתרות ממני
-    (tasks[x.occ] = tasks[x.occ] || []).push({ id: d.id, txt: str(x.txt, 500), st: x.st, bn: str(x.bn, 100), at: x.at || 0 });
+    if ((x.st === 'wait' || x.st === 'orph') && !g.mgr && mine.has(x.occ)) continue; // הנחה: משימות שממתינות במשמרת שלי – מוסתרות ממני
+    const t = { id: d.id, txt: str(x.txt, 500), st: x.st, bn: str(x.bn, 100), at: x.at || 0 };
+    if (x.st === 'orph') orph.push(Object.assign(t, { day: x.day, why: str(x.why, 20) }));
+    else (tasks[x.occ] = tasks[x.occ] || []).push(t);
   }
   out.occ = occ;
   out.tasks = tasks;
+  out.orph = orph;
   out.staff = await staffList(db);
   return out;
 }
@@ -145,7 +176,7 @@ async function opWeek(g, input) {
 async function opSave(g, input) {
   onlyKeys(input, ['op', 'id', 'day', 'mode', 'u', 'd', 's', 'e', 'fx', 'nt']);
   const { db, who } = g;
-  const now = Date.now();
+  const now = Date.now(), today = SC.todayOf(now);
   const n = SC.normDef(input);
   if (n.err) throw bad(n.err.reason, n.err.msg);
   const def = n.def;
@@ -159,83 +190,87 @@ async function opSave(g, input) {
     return { ok: true, id: ref.id };
   }
   if (typeof input.id !== 'string' || !SC.ID_RE.test(input.id)) throw bad('bad-id', 'מזהה לא תקין');
+  if (input.d < today) throw pastErr();
   const ref = db.doc('shf/' + input.id);
-  const snap = await ref.get();
-  if (!snap.exists) throw pre('no-shift', 'המשמרת לא נמצאה (אולי נמחקה). רעננו את המסך.');
-  const old = Object.assign({ id: snap.id }, snap.data());
-  const keep = { by: str(old.by, 128), at: old.at || now };
-  if (old.of) keep.of = old.of;
   const newOcc = (id, d) => (d.fx ? id + '_' + d.from : id + '_' + d.d);
-  if (old.fx !== true) {
-    // חד־פעמית: עריכה במקום (גם הפיכה לקבועה)
-    await ref.set(Object.assign({}, def, stamp, keep));
-    const to = newOcc(old.id, def);
-    await moveTasks(db, old.id, (day) => day === old.d, () => to, now);
-    return { ok: true, id: old.id };
-  }
-  const day = input.day;
-  if (!SC.isDay(day) || !SC.appliesOn(old, day)) throw bad('no-occ', 'המופע של המשמרת לא נמצא. רעננו את המסך.');
-  if (input.mode !== 'one' && input.mode !== 'fwd') throw bad('bad-mode', 'צריך לבחור: רק הפעם או מכאן והלאה');
-  if (input.mode === 'one') {
-    const one = SC.normDef(Object.assign({}, input, { fx: false })).def;
-    const skip = (Array.isArray(old.skip) ? old.skip : []).filter((x) => SC.isDay(x) && x >= SC.addDays(SC.todayOf(now), -7));
-    if (skip.length >= SC.MAX_SKIP) throw pre('too-many', 'יותר מדי שינויים חד־פעמיים במשמרת הזו. ערכו "מכאן והלאה".');
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw pre('no-shift', 'המשמרת לא נמצאה (אולי נמחקה). רעננו את המסך.');
+    const old = Object.assign({ id: snap.id }, snap.data());
+    const tasks = await waitOf(tx, db, old.id);
+    const keep = { by: str(old.by, 128), at: old.at || now };
+    if (old.of) keep.of = old.of;
+    if (old.fx !== true) {
+      // חד־פעמית: עריכה במקום (גם הפיכה לקבועה). המשימות עוברות לתאריך החדש
+      if (!SC.isDay(old.d) || old.d < today) throw pastErr();
+      tx.set(ref, Object.assign({}, def, stamp, keep));
+      const to = newOcc(old.id, def);
+      moveIn(tx, tasks, (x) => x === old.d, () => to, now);
+      return { ok: true, id: old.id };
+    }
+    const day = input.day;
+    if (!SC.isDay(day) || !SC.appliesOn(old, day)) throw bad('no-occ', 'המופע של המשמרת לא נמצא. רעננו את המסך.');
+    if (day < today) throw pastErr();
+    if (input.mode !== 'one' && input.mode !== 'fwd') throw bad('bad-mode', 'צריך לבחור: רק הפעם או מכאן והלאה');
+    if (input.mode === 'one') {
+      const one = SC.normDef(Object.assign({}, input, { fx: false })).def;
+      const sk = SC.addSkip(old, day, today);
+      if (sk.err) throw pre('too-many', 'יותר מדי שינויים חד־פעמיים במשמרת הזו. ערכו "מכאן והלאה".');
+      const nref = db.collection('shf').doc();
+      tx.update(ref, Object.assign({ skip: sk.skip, ub: who.uid, ua: now }, sk.from !== old.from ? { from: sk.from } : {}));
+      tx.set(nref, Object.assign({}, one, stamp, { of: old.id, by: who.uid, at: now }));
+      moveIn(tx, tasks, (x) => x === day, () => nref.id + '_' + one.d, now);
+      return { ok: true, id: nref.id };
+    }
+    // מכאן והלאה: התאריך החדש לא לפני המופע שנערך (אחרת שני מופעים באותו שבוע)
+    if (input.d < day) throw bad('bad-day', 'ב"מכאן והלאה" התאריך החדש לא יכול להיות לפני ' + day);
+    const nw = def.fx ? Object.assign({}, def, { to: SC.isDay(old.to) ? old.to : '', skip: (old.skip || []).filter((x) => x > def.from) }) : def;
+    if (day <= old.from) {
+      // המופע הראשון – אין היסטוריה לשמור: עריכה במקום
+      tx.set(ref, Object.assign({}, nw, stamp, keep));
+      moveIn(tx, tasks, (x) => x >= day, fwdMap(old.id, Object.assign({ id: old.id }, nw), day), now);
+      return { ok: true, id: old.id };
+    }
     const nref = db.collection('shf').doc();
-    const b = db.batch();
-    b.update(ref, { skip: skip.concat([day]), ub: who.uid, ua: now });
-    b.set(nref, Object.assign({}, one, stamp, { of: old.id, by: who.uid, at: now }));
-    await b.commit();
-    await moveTasks(db, old.id, (x) => x === day, () => nref.id + '_' + one.d, now);
+    tx.update(ref, { to: SC.addDays(day, -1), ub: who.uid, ua: now });
+    tx.set(nref, Object.assign({}, nw, stamp, { by: who.uid, at: now }));
+    moveIn(tx, tasks, (x) => x >= day, fwdMap(nref.id, Object.assign({ id: nref.id }, nw), day), now);
     return { ok: true, id: nref.id };
-  }
-  // מכאן והלאה
-  if (day <= old.from) {
-    // המופע הראשון – אין היסטוריה לשמור: עריכה במקום (טווח הסיום והדילוגים נשמרים כשהמשמרת נשארת קבועה)
-    const upd = def.fx ? Object.assign({}, def, { to: SC.isDay(old.to) ? old.to : '', skip: (old.skip || []).filter((x) => x > def.from) }) : def;
-    await ref.set(Object.assign({}, upd, stamp, keep));
-    const nd = Object.assign({ id: old.id }, upd);
-    await moveTasks(db, old.id, (x) => x >= day, (x) => (SC.appliesOn(nd, x) ? old.id + '_' + x : x === day ? newOcc(old.id, upd) : null), now);
-    return { ok: true, id: old.id };
-  }
-  const nref = db.collection('shf').doc();
-  const nw = def.fx ? Object.assign({}, def, { to: SC.isDay(old.to) ? old.to : '', skip: (old.skip || []).filter((x) => x > def.from) }) : def;
-  const b = db.batch();
-  b.update(ref, { to: SC.addDays(day, -1), ub: who.uid, ua: now });
-  b.set(nref, Object.assign({}, nw, stamp, { by: who.uid, at: now }));
-  await b.commit();
-  const nd = Object.assign({ id: nref.id }, nw);
-  await moveTasks(db, old.id, (x) => x >= day, (x) => (SC.appliesOn(nd, x) ? nref.id + '_' + x : x === day ? newOcc(nref.id, nw) : null), now);
-  return { ok: true, id: nref.id };
+  });
 }
 
 async function opDel(g, input) {
   onlyKeys(input, ['op', 'id', 'day', 'mode']);
   const { db, who } = g;
-  const now = Date.now();
+  const now = Date.now(), today = SC.todayOf(now);
   if (typeof input.id !== 'string' || !SC.ID_RE.test(input.id)) throw bad('bad-id', 'מזהה לא תקין');
   const ref = db.doc('shf/' + input.id);
-  const snap = await ref.get();
-  if (!snap.exists) throw pre('no-shift', 'המשמרת לא נמצאה (אולי כבר נמחקה)');
-  const old = Object.assign({ id: snap.id }, snap.data());
-  if (old.fx !== true) {
-    if (SC.isHM(old.s) && SC.isDay(old.d) && SC.times(old.d, old.s, old.e || old.s).start <= now) throw pre('past', 'אי אפשר למחוק משמרת שכבר התחילה');
-    await ref.delete();
-    await moveTasks(db, old.id, () => true, () => null, now);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw pre('no-shift', 'המשמרת לא נמצאה (אולי כבר נמחקה)');
+    const old = Object.assign({ id: snap.id }, snap.data());
+    const tasks = await waitOf(tx, db, old.id);
+    if (old.fx !== true) {
+      if (SC.isHM(old.s) && SC.isDay(old.d) && SC.times(old.d, old.s, old.e || old.s).start <= now) throw pre('past', 'אי אפשר למחוק משמרת שכבר התחילה');
+      tx.delete(ref);
+      moveIn(tx, tasks, () => true, null, now, true);
+      return { ok: true };
+    }
+    const day = input.day;
+    if (!SC.isDay(day) || !SC.appliesOn(old, day)) throw bad('no-occ', 'המופע של המשמרת לא נמצא. רעננו את המסך.');
+    if (day < today) throw pastErr();
+    if (input.mode === 'one') {
+      const sk = SC.addSkip(old, day, today);
+      if (sk.err) throw pre('too-many', 'יותר מדי שינויים חד־פעמיים במשמרת הזו. מחקו "מכאן והלאה".');
+      tx.update(ref, Object.assign({ skip: sk.skip, ub: who.uid, ua: now }, sk.from !== old.from ? { from: sk.from } : {}));
+      moveIn(tx, tasks, (x) => x === day, null, now, true);
+      return { ok: true };
+    }
+    if (input.mode !== 'fwd') throw bad('bad-mode', 'צריך לבחור: רק הפעם או מכאן והלאה');
+    tx.update(ref, { to: SC.addDays(day, -1), ub: who.uid, ua: now }); // ההיסטוריה נשארת
+    moveIn(tx, tasks, (x) => x >= day, null, now, true);
     return { ok: true };
-  }
-  const day = input.day;
-  if (!SC.isDay(day) || !SC.appliesOn(old, day)) throw bad('no-occ', 'המופע של המשמרת לא נמצא. רעננו את המסך.');
-  if (input.mode === 'one') {
-    const skip = (Array.isArray(old.skip) ? old.skip : []).filter((x) => SC.isDay(x) && x >= SC.addDays(SC.todayOf(now), -7));
-    if (skip.length >= SC.MAX_SKIP) throw pre('too-many', 'יותר מדי שינויים חד־פעמיים במשמרת הזו. מחקו "מכאן והלאה".');
-    await ref.update({ skip: skip.concat([day]), ub: who.uid, ua: now });
-    await moveTasks(db, old.id, (x) => x === day, () => null, now);
-    return { ok: true };
-  }
-  if (input.mode !== 'fwd') throw bad('bad-mode', 'צריך לבחור: רק הפעם או מכאן והלאה');
-  await ref.update({ to: SC.addDays(day, -1), ub: who.uid, ua: now }); // ההיסטוריה נשארת
-  await moveTasks(db, old.id, (x) => x >= day, () => null, now);
-  return { ok: true };
+  });
 }
 
 async function opTask(g, input, request) {
@@ -252,11 +287,11 @@ async function opTask(g, input, request) {
   if (!occ.u) throw pre('no-user', 'אין עובד במשמרת הזו – קודם בחרו עובד');
   if (occ.end <= now) throw pre('past', 'המשמרת כבר הסתיימה');
   const cnt = await db.collection('shft').where('occ', '==', input.occ).limit(MAX_TASKS + 20).get();
-  if (cnt.docs.filter((d) => d.get('st') !== 'cx').length >= MAX_TASKS) throw pre('too-many', 'אפשר עד ' + MAX_TASKS + ' משימות למשמרת');
+  if (cnt.docs.filter((d) => d.get('st') === 'wait' || d.get('st') === 'rel').length >= MAX_TASKS) throw pre('too-many', 'אפשר עד ' + MAX_TASKS + ' משימות למשמרת');
   const ref = db.collection('shft').doc();
-  const s = { occ: input.occ, sid: p.sid, day: p.day, u: occ.u, txt, st: 'wait', tk: '', by: who.uid, bn: meName(request), at: now, relAt: 0 };
-  await ref.set(s);
-  const st = occ.start <= now ? await release(db, ref, s, occ, now) : 'wait';
+  await ref.set({ occ: input.occ, sid: p.sid, day: p.day, u: occ.u, txt, st: 'wait', tk: '', by: who.uid, bn: meName(request), at: now, relAt: 0 });
+  let st = 'wait';
+  if (occ.start <= now) { const r = await release(db, ref, now); st = r === 'rel' ? 'rel' : r === 'orph' ? 'orph' : 'wait'; }
   return { ok: true, id: ref.id, st };
 }
 
@@ -268,7 +303,7 @@ async function opTaskDel(g, input) {
   const ok = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     if (!s.exists) return true;
-    if (s.get('st') !== 'wait') return false;
+    if (s.get('st') !== 'wait' && s.get('st') !== 'orph') return false;
     tx.delete(ref);
     return true;
   });
@@ -343,38 +378,43 @@ async function claim(db, day, key, occ, now) {
   });
 }
 
+const DN = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+// "היום" / "מחר" / "ביום שבת" – לפי שעון ישראל
+const whenTxt = (day, today) => (day === today ? 'היום' : day === SC.addDays(today, 1) ? 'מחר' : 'ביום ' + DN[SC.weekdayOf(day)]);
 async function tickBiz(o) {
   const db = T.tdb();
   const now = (o && o.now) || Date.now();
   const sc = T.scope();
   const DR = require('./daily-rep')._core;
   const [cfgS, defs, waitS] = await Promise.all([db.doc('shfcfg/main').get(), loadDefs(db), db.collection('shft').where('st', '==', 'wait').limit(500).get()]);
-  const res = { rel: 0, cx: 0, rem: 0, holes: 0 };
+  const res = { rel: 0, orph: 0, rem: 0, holes: 0 };
   if (!defs.length && waitS.empty) return res;
   const cfg = SC.cfgOf(cfgS.exists ? cfgS.data() : null);
   const today = SC.todayOf(now);
-  // 1. משימות שהגיע זמנן (גם בשבת – יצירת משימה אינה התראה; tkPush לא שולח בחלון השקט)
+  // 1. משימות שהגיע זמנן (גם בשבת – יצירת משימה אינה התראה; tkPush לא שולח בחלון השקט). הבדיקה הסופית – בטרנזקציה (release)
   for (const d of waitS.docs) {
     const x = d.data();
     const p = SC.parseOcc(x.occ);
     const oc = p ? SC.occById(defs, x.occ) : null;
-    if (!oc) { if (!p || p.day < SC.addDays(today, -1)) { await d.ref.update({ st: 'cx', relAt: now }); res.cx++; } continue; }
-    if (oc.start > now) continue;
-    res[await release(db, d.ref, x, oc, now)]++;
+    if (oc ? oc.start > now : p && p.day >= SC.addDays(today, -1)) continue;
+    const r = await release(db, d.ref, now, today);
+    if (r in res) res[r]++;
   }
-  if (TK.quietAt(now)) return Object.assign(res, { quiet: true });
-  const occs = SC.expand(defs, SC.addDays(today, -1), 3);
-  // 2. תזכורת לעובד, שעה לפני
+  const quiet = SC.quiet(now);
+  if (quiet) res.quiet = true;
+  const occs = SC.expand(defs, SC.addDays(today, -1), 6); // עד 4 ימים קדימה – תזכורת לפני שבת וחג רצופים
+  // 2. תזכורת לעובד, שעה לפני (בשבת וחג – לפני החלון או בסופו, SC.remDue)
   for (const oc of occs) {
     if (!SC.remDue(oc, now)) continue;
     if ((await userName(db, oc.u)) === null) continue;
     if (!(await claim(db, oc.day, 'rem', oc.id, now))) continue;
     res.rem++;
-    await DR.pushTo(db, [oc.u], { k: 'sh', id: oc.id, title: 'תזכורת משמרת', body: 'המשמרת שלך מתחילה ב-' + oc.s + ' ועד ' + oc.e + (oc.x ? ' (למחרת)' : '') + (oc.nt ? ' · ' + oc.nt.slice(0, 80) : '') }, o, sc && sc.bizId);
+    const sd = SC.todayOf(oc.start);
+    await DR.pushTo(db, [oc.u], { k: 'sh', id: oc.id, title: 'תזכורת משמרת', body: 'המשמרת שלך מתחילה ' + whenTxt(sd, today) + ' ב-' + oc.s + ' ועד ' + oc.e + (oc.x ? ' (למחרת)' : '') + (oc.nt ? ' · ' + oc.nt.slice(0, 80) : '') }, o, sc && sc.bizId);
   }
-  // 3. התראה למנהלים: זמנים בלי עובדים היום (פעם ביום)
+  // 3. התראה למנהלים: זמנים בלי עובדים היום (פעם ביום, לא בשבת וחג)
   const hd = SC.holesDue(cfg, now);
-  if (hd.go) {
+  if (hd.go && !quiet) {
     const hs = SC.holes(today, cfg.hrs, occs);
     if (await claim(db, today, 'holes', '', now)) {
       if (hs.length) {
@@ -410,7 +450,7 @@ exports.shApi = onCall(wrap(api));
 // מתוזמנת – אזור אחד בלבד (אסור להריץ כפול)
 exports.shTick = onSchedule({ region: LEGACY_REGION, schedule: 'every 10 minutes', timeZone: TK.TZ, timeoutSeconds: 120, memory: '256MiB' }, async () => {
   const r = await runTick({});
-  if (Object.values(r).some((x) => x.rel || x.rem || x.holes || x.error)) logger.info('shTick', r);
+  if (Object.values(r).some((x) => x.rel || x.orph || x.rem || x.holes || x.error)) logger.info('shTick', r);
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)

@@ -2,6 +2,7 @@
 // משמרות (shifts.js באפליקציה, 18.11.2026): טבלה שבועית (משמרת שחוצה חצות, חור באדום, גלילה לצד), לחיצה על משמרת (משימות + שליחה),
 // "משמרת קבועה?" חובה ביצירה, "רק הפעם / מכאן והלאה" בעריכה ובמחיקה של קבועה, הגדרות מנהל (סף איחור, שעת התראה, שעות פעילות, טבלת התאמה),
 // עובד בלי הרשאה – רק המשמרות שלו בלי עריכה, עובד עם shf – עורך בלי הגדרות, המתג shf ב-PMK, והתראה k:'sh'.
+// סבב בדיקה 1: משימה שלא נשלחה (orph) באדום, מופע שעבר בלי עריכה, "מכאן והלאה" לתאריך מוקדם / תאריך שעבר – לא נשלח.
 // רשת מדומה, נתונים מומצאים. שימוש: node ui-shifts.js <www-dir> [out.json] [shots-dir]. מסך טלפון קטן (360×740).
 const fs = require('fs');
 const path = require('path');
@@ -16,9 +17,11 @@ const STAFF = [{ uid: 'm', name: 'המנהל', mgr: true }, { uid: 'w', name: '�
 const OCC = [
   { id: 'A_2026-11-03', sid: 'A', day: '2026-11-03', s: '08:00', e: '14:00', u: 'w', nm: 'דנה', fx: true, nt: '', start: IL('2026-11-03', '08:00'), end: IL('2026-11-03', '14:00'), x: false },
   { id: 'B_2026-11-03', sid: 'B', day: '2026-11-03', s: '20:00', e: '02:00', u: 'w2', nm: 'יוסי', fx: false, nt: 'סגירה', start: IL('2026-11-03', '20:00'), end: IL('2026-11-04', '02:00'), x: true },
+  { id: 'D_2026-11-05', sid: 'D', day: '2026-11-05', s: '16:00', e: '20:00', u: 'w2', nm: 'יוסי', fx: true, nt: '', start: IL('2026-11-05', '16:00'), end: IL('2026-11-05', '20:00'), x: false },
+  { id: 'P_2026-11-02', sid: 'P', day: '2026-11-02', s: '08:00', e: '10:00', u: 'w2', nm: 'יוסי', fx: false, nt: '', start: IL('2026-11-02', '08:00'), end: IL('2026-11-02', '10:00'), x: false },
   { id: 'C_2026-11-04', sid: 'C', day: '2026-11-04', s: '10:00', e: '12:00', u: '', nm: '', fx: false, nt: '', start: IL('2026-11-04', '10:00'), end: IL('2026-11-04', '12:00'), x: false },
 ];
-const WEEK = (full, mgr, uid) => (full ? { from: DAYS[0], days: DAYS, today: '2026-11-03', now: 0, full: true, mgr, occ: OCC, hrs: [1, 1, 1, 1, 1, 1, null], holes: { '2026-11-03': [['14:00', '20:00']] }, tasks: { 'B_2026-11-03': [{ id: 't1', txt: 'לספור קופה', st: 'wait', bn: 'm', at: 1 }] }, staff: STAFF }
+const WEEK = (full, mgr, uid) => (full ? { from: DAYS[0], days: DAYS, today: '2026-11-03', now: 0, full: true, mgr, occ: OCC, hrs: [1, 1, 1, 1, 1, 1, null], holes: { '2026-11-03': [['14:00', '20:00']] }, tasks: { 'B_2026-11-03': [{ id: 't1', txt: 'לספור קופה', st: 'wait', bn: 'm', at: 1 }] }, orph: [{ id: 't9', txt: 'משימה שהלכה לאיבוד', st: 'orph', day: '2026-11-02', why: 'moved' }], staff: STAFF }
   : { from: DAYS[0], days: DAYS, today: '2026-11-03', now: 0, full: false, mgr: false, occ: OCC.filter((o) => o.u === uid) });
 
 async function open(browser, www, who, perms, calls) {
@@ -102,6 +105,25 @@ const fine = (r) => r.small.length === 0 && r.sw <= r.iw && r.dir === 'rtl';
   await page.click('form[data-f=shCfgF] > button'); await H.settle(page, 500);
   const sc = calls.filter((c) => c.n === 'shApi' && c.d.op === 'setCfg').pop();
   check('6א שמירה → setCfg: late 7, at 07:00, 7 ימים (שבת סגור), טבלת התאמה', sc && sc.d.late === 7 && sc.d.at === '07:00' && sc.d.hrs.length === 7 && sc.d.hrs[6] === null && sc.d.hrs[0].s === '08:00' && sc.d.map['דנה כ.'] === 'w' && sc.d.map['יוסי כספית'] === 'w2', sc && sc.d);
+  // סבב בדיקה 1: משימה שלא נשלחה מוצגת; מופע שעבר – בלי עריכה; "מכאן והלאה" לתאריך מוקדם – לא נשלח
+  await page.evaluate(() => { NAV = [{ v: 'home' }]; go('shf'); }); await H.settle(page, 600);
+  v = await q(page);
+  check('7א משימה שלא נשלחה – באדום, עם מחיקה', /משימה שלא נשלחה \(המשמרת השתנתה\): משימה שהלכה לאיבוד/.test(v.text) && !!(await page.$('[data-a=shTDel][data-k=t9]')) && fine(v), v.small);
+  await page.click('[data-a=shOpen][data-k="P_2026-11-02"]'); await H.settle(page, 300);
+  v = await q(page);
+  check('7ב מופע שעבר: "אי אפשר לשנות", בלי עריכה ומחיקה', /אי אפשר לשנות/.test(v.text) && !(await page.$('#dlg [data-a=shEdit]')) && !(await page.$('#dlg [data-a=shDel]')));
+  await page.evaluate(() => closeDlg());
+  await page.click('[data-a=shOpen][data-k="D_2026-11-05"]'); await H.settle(page, 300);
+  await page.click('#dlg [data-a=shEdit]'); await H.settle(page, 300);
+  const n1 = calls.length;
+  await page.evaluate(() => { const f = document.querySelector('#dlg form[data-f=shSaveF]'); f.querySelector('[name=d]').value = '2026-11-04'; FRM.shSaveF(f); });
+  await H.settle(page, 300);
+  await page.click('#dlg [data-a=shMode][data-v=fwd]'); await H.settle(page, 300);
+  check('7ג "מכאן והלאה" לתאריך שלפני המופע – לא נשלח; גם תאריך שעבר – לא נשלח', calls.filter((c) => c.n === 'shApi' && c.d.op === 'save').length === calls.slice(0, n1).filter((c) => c.n === 'shApi' && c.d.op === 'save').length);
+  await page.evaluate(() => { closeDlg(); ACT.shEdit({ dataset: { k: 'D_2026-11-05' } }); const f = document.querySelector('#dlg form[data-f=shSaveF]'); f.querySelector('[name=d]').value = '2026-11-01'; FRM.shSaveF(f); });
+  await H.settle(page, 300);
+  check('7ד תאריך שעבר בעריכה – לא נשלח, בלי שאלת "רק הפעם"', !/מכאן והלאה/.test((await q(page)).text) && calls.filter((c) => c.n === 'shApi' && c.d.op === 'save').length === calls.slice(0, n1).filter((c) => c.n === 'shApi' && c.d.op === 'save').length);
+  await page.evaluate(() => closeDlg());
   check('7 בלי שגיאות JavaScript (מנהל)', page.__errors.length === 0, page.__errors.slice(0, 3));
   await ctx.close();
   // ---- עובד בלי הרשאה ----
