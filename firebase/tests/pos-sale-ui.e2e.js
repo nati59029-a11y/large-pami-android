@@ -13,7 +13,7 @@ const txt = (page, sel) => page.locator(sel).first().innerText();
 const modal = '#pos .pos-modal';
 
 async function run(width, height, ds, role) {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME, args: ['--no-sandbox'] } : {});
   const ctx = await browser.newContext({ viewport: { width, height }, locale: 'he-IL' });
   const page = await ctx.newPage();
   const errs = [];
