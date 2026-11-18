@@ -4456,7 +4456,7 @@ async function abkEnc(txt){const k=await abkKey(),iv=crypto.getRandomValues(new 
 async function abkDec(buf){const b=new Uint8Array(buf);if(b.length<33||ABK_MAGIC.some((x,i)=>b[i]!==x))throw new Error('קובץ הגיבוי בענן לא מוכר');
  const k=await abkKey();return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b.slice(4,16),additionalData:abkAD()},k,b.slice(16)))}
 async function abkSt(path,opt){if(SY.mg){const x=new Error('מסך ניהול העסקים: אין גיבוי');x.mg=1;throw x}const t=await tok();opt=opt||{};opt.headers=Object.assign({Authorization:'Firebase '+t},opt.headers);let r;
- try{r=await fetch(STB()+path,opt)}catch(e){const x=new Error('אין חיבור לאינטרנט');x.offline=true;throw x}
+ try{r=await fetch(STB()+path,opt)}catch(e){const x=new Error('אין חיבור לאינטרנט');x.offline=true;x.raw=String(e&&(e.name+': '+e.message)||e).slice(0,120);throw x}
  if(!r.ok){const e=new Error(r.status===403?'אין הרשאה לגיבוי בענן':'שגיאה '+r.status);e.code=r.status;throw e}return r}
 async function abkList(){const r=await abkSt('?delimiter=%2F&prefix='+encodeURIComponent(abkDir()));const j=await r.json();
  return(j.items||[]).map(x=>x.name).filter(n=>/\/bk-\d{8}T\d{6}(\.\d{3})?Z-[a-z0-9]+\.lpb$/.test(n)).sort()}
