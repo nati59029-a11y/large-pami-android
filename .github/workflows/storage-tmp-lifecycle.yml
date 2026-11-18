@@ -5,6 +5,8 @@ name: Storage – auto-delete temp media (manual)
 # זה גיבוי שלישי – השרת מוחק מיד אחרי העיבוד, ו-secMediaClean מנקה כל 30 דקות.
 # כללי lifecycle תומכים רק בתחילית, לכן נבנית תחילית לכל עסק קיים (b/<biz>/sec_tmp/) + sec_tmp/ (legacy).
 # עסק חדש נכנס לכלל רק בהרצה הבאה (עד אז secMediaClean מכסה). כללי lifecycle אחרים ב-bucket נשמרים כמו שהם.
+# 17.11.2026 (קבוצות התכתבות, סבב 3 – החלטת בעל הפרויקט): סרטונים בקבוצות (grpv/ ו-b/<biz>/grpv/) נמחקים אחרי 90 יום.
+# ההודעה עצמה (Firestore) נשארת. גם כאן עסק חדש נכנס רק בהרצה הבאה – להריץ שוב אחרי פתיחת עסק חדש.
 
 on:
   workflow_dispatch:
@@ -52,7 +54,7 @@ jobs:
           [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
-      - name: Set lifecycle rule for sec_tmp (keeps all other rules)
+      - name: Set lifecycle rules for sec_tmp (1 day) and grpv (90 days) (keeps all other rules)
         env:
           P: ${{ inputs.project }}
         run: |
@@ -60,7 +62,7 @@ jobs:
           echo "::add-mask::$TOKEN"
           export TOKEN BUCKET="$P.firebasestorage.app"
           python3 - <<'PY'
-          import json, os, sys, urllib.request, urllib.parse, urllib.error
+          import json, os, re, sys, urllib.request, urllib.parse, urllib.error
           T, B = os.environ['TOKEN'], os.environ['BUCKET']
           API = 'https://storage.googleapis.com/storage/v1/b/' + urllib.parse.quote(B, safe='')
           def call(url, method='GET', body=None):
@@ -73,7 +75,10 @@ jobs:
                   print('::error::' + msg); sys.exit(1)
           meta = call(API + '?fields=lifecycle')
           rules = (meta.get('lifecycle') or {}).get('rule') or []
-          mine = lambda r: all('sec_tmp/' in p for p in ((r.get('condition') or {}).get('matchesPrefix') or ['x']))
+          KINDS = (('sec_tmp/', 1), ('grpv/', 90))  # (תחילית, ימים) – הכללים שהתהליך הזה מנהל
+          OURS = re.compile(r'^(b/[^/]+/)?(sec_tmp|grpv)/$')  # רק תחיליות שהתהליך הזה יוצר (הערה 3 של הבודק)
+          ours = lambda p: bool(OURS.match(p))
+          mine = lambda r: all(ours(p) for p in ((r.get('condition') or {}).get('matchesPrefix') or ['x']))
           keep = [r for r in rules if not mine(r)]
           bizs, tok = [], ''
           while True:
@@ -83,12 +88,15 @@ jobs:
               bizs += j.get('prefixes') or []
               tok = j.get('nextPageToken') or ''
               if not tok: break
-          prefixes = ['sec_tmp/'] + sorted(p + 'sec_tmp/' for p in bizs)
           CH = 50  # (לא מאומת) מגבלת אורך רשימת matchesPrefix – מחולק לכללים של 50
-          new = [{'action': {'type': 'Delete'}, 'condition': {'age': 1, 'matchesPrefix': prefixes[i:i + CH]}} for i in range(0, len(prefixes), CH)]
+          new, counts = [], []
+          for k, age in KINDS:
+              prefixes = [k] + sorted(p + k for p in bizs)
+              counts.append('%s: %d ימים, %d תחיליות' % (k, age, len(prefixes)))
+              new += [{'action': {'type': 'Delete'}, 'condition': {'age': age, 'matchesPrefix': prefixes[i:i + CH]}} for i in range(0, len(prefixes), CH)]
           if len(keep) + len(new) > 100: print('::error::יותר מדי כללים ב-bucket (המגבלה 100)'); sys.exit(1)
           call(API + '?fields=lifecycle', 'PATCH', {'lifecycle': {'rule': keep + new}})
-          out = 'כלל מחיקה אחרי יום הוגדר ב-%s: %d תחיליות (%d עסקים + legacy), %d כללים אחרים נשמרו.' % (B, len(prefixes), len(bizs), len(keep))
+          out = 'כללי מחיקה הוגדרו ב-%s (%s; %d עסקים + legacy), %d כללים אחרים נשמרו.' % (B, ' · '.join(counts), len(bizs), len(keep))
           print(out); open(os.environ['GITHUB_STEP_SUMMARY'], 'a').write(out + '\n')
           PY
 

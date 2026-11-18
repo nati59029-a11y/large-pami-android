@@ -25,6 +25,11 @@ if (mode === 'legacy') {
   /* סבב 2 (17.11.2026): סף פער מזומן משותף – המנהל קורא את cfg/zc (GET בלבד). חריג צר: רק GET של המסמך הזה, לכל היותר פעם אחת למשתמש, ורק אצל מנהל */
   const zcR = B2.filter(zcT); B2 = B2.filter((r) => !zcT(r));
   if (zcR.some((r) => r.who !== 'm@x.co') || new Set(zcR.map((r) => r.who + '|' + r.step)).size !== zcR.length) { console.log('נכשל: קריאת cfg/zc לא צפויה', zcR.map((r) => r.who + '|' + r.step)); fail++; }
+  /* סבב 3 (17.11.2026): קבוצות התכתבות – העובד מושך את רשימת הקבוצות שהוא חבר בהן (runQuery על grp, mem ARRAY_CONTAINS ה-uid שלו). חריג צר: רק השאילתה הזו, רק עם ה-uid של המשתמש עצמו, לכל היותר פעם אחת לשלב */
+  const grT = (r) => r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && /"collectionId":"grp"/.test(r.body || '');
+  const grR = B2.filter(grT); B2 = B2.filter((r) => !grT(r));
+  const grOk = (r) => { try { const q = JSON.parse(r.body).structuredQuery; const f = q.where.fieldFilter; return f.field.fieldPath === 'mem' && f.op === 'ARRAY_CONTAINS' && f.value.stringValue === r.who.split('@')[0]; } catch (e) { return false; } };
+  if (grR.some((r) => !grOk(r)) || new Set(grR.map((r) => r.who + '|' + r.step)).size !== grR.length) { console.log('נכשל: שאילתת grp לא צפויה', grR.map((r) => r.who + '|' + r.step + '|' + r.body)); fail++; }
   console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
   if (idn.some((r) => r.method !== 'GET')) { console.log('נכשל: קריאת זיהוי שאינה GET'); fail++; }
   /* הגעה מיידית (feature/inbox-live, 11.11.2026): אצל מנהל, inbox (status==new) ו-mq (st==new) נמשכים גם 3 שניות אחרי הפתיחה, כל 20 שניות ובחזרה לאפליקציה,
