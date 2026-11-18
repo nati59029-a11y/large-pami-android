@@ -1,0 +1,172 @@
+'use strict';
+// חוסרים (18.11.2026, שלב 1): hsr/{id}, hsr/{id}/p/1, hsph/{supId}, hsx/{supId} – בשורש ובתוך b/bt (עסק עם התוספת suppliers; bx = עסק אחר; bo = עסק בלי התוספת).
+// לכל תא: "מותר" ו"נחסם".
+
+const { describe, it, before, beforeEach } = require('node:test');
+const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
+const H = require('./helpers');
+
+const IMG = 'data:image/jpeg;base64,' + 'A'.repeat(500);
+let seq = 0;
+const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
+
+const ENVS = [
+  { name: 'שורש', P: '', mgr: 'u_mgr', e1: 'u_emp', e2: H.OTHER, off: 'u_off', out: 'u_out', prc: null, foreign: null, offBiz: null },
+  { name: 'עסק b/bt', P: 'b/bt/', mgr: 'bt_mgr', e1: 'bt_e1', e2: 'bt_e2', off: 'bt_off', out: 'u_out', prc: 'bt_prc', foreign: 'bx_mgr', offBiz: 'bo_mgr' },
+];
+
+function seedBiz(d, b) {
+  for (const [biz, mgr, emps, ft] of [['bt', 'bt_mgr', ['bt_e1', 'bt_e2', 'bt_prc'], { suppliers: true }], ['bx', 'bx_mgr', ['bx_e1'], { suppliers: true }], ['bo', 'bo_mgr', [], { suppliers: false }]]) {
+    b.set(d.doc('b/' + biz), { name: biz, status: 'active', features: ft });
+    b.set(d.doc(`b/${biz}/admins/${mgr}`), { email: mgr + '@example.invalid' });
+    for (const u of [mgr, ...emps]) b.set(d.doc(`b/${biz}/staff/${u}`), Object.assign({ name: u, role: u === mgr ? 'manager' : 'employee', active: true }, u === 'bt_prc' ? { perms: { prc: true } } : {}));
+  }
+  b.set(d.doc('b/bt/staff/bt_off'), { name: 'bt_off', role: 'employee', active: false });
+  b.set(d.doc('b/bo/hsr/h1'), { n: 'x' });
+}
+
+for (const E of ENVS) {
+  const R = (p) => E.P + p;
+  const item = (uid, o) => Object.assign({ n: 'חלב 3%', nk: 'חלב 3', gen: false, sups: ['s1'], supN: ['תנובה'], why: 'store', np: 0, st: 'open', by: uid, byN: uid, t: Date.now() }, o);
+  const upd = (uid, o) => Object.assign({ ub: uid, ut: Date.now() }, o);
+
+  describe(`חוסרים – Firestore – ${E.name}`, () => {
+    let env;
+    const fs = (uid) => env.authenticatedContext(uid, { email: uid + '@example.invalid' }).firestore();
+    const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
+
+    before(async () => { env = await H.getEnv(); });
+    beforeEach(async () => {
+      await H.seed(env);
+      await prep(async (d) => {
+        const b = d.batch();
+        if (E.P) seedBiz(d, b);
+        b.set(d.doc(R('hsr/h1')), item(E.e1, { t: 1 }));
+        b.set(d.doc(R('hsr/h1/p/1')), { img: IMG, t: 1, uid: E.e1 });
+        b.set(d.doc(R('hsph/s1')), { ph: '0501234567', n: 'תנובה', byN: E.mgr, t: 1 });
+        b.set(d.doc(R('hsx/s1')), { n: 'תנובה', it: ['חלב 3'], t: 1 });
+        await b.commit();
+      });
+    });
+
+    it('hsr: קריאה ורשימה – מנהל ועובד פעיל; מושבת, מחובר בלי תפקיד ומנהל של עסק אחר – נחסמים', async () => {
+      for (const u of [E.mgr, E.e1, E.e2]) {
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).get());
+        await assertSucceeds(fs(u).collection(R('hsr')).where('st', '==', 'open').get());
+      }
+      for (const u of [E.off, E.out]) await assertFails(fs(u).doc(R('hsr/h1')).get());
+      if (E.foreign) await assertFails(fs(E.foreign).collection(R('hsr')).get());
+      await assertFails(env.unauthenticatedContext().firestore().doc(R('hsr/h1')).get());
+    });
+
+    it('hsr: יצירה – מנהל ועובד, בשמם, st=open, זמן אמת; שדות וערכים נבדקים', async () => {
+      for (const u of [E.mgr, E.e1]) {
+        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u)));
+        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u, { gen: true, sups: [], supN: [], why: 'both', q: 2.5, cust: { nm: 'דני', ph: '0501234567', cid: 'c1' }, ord: { id: 'o1', no: 7 }, np: 1, h: [] })));
+      }
+      const e = fs(E.e1), N = () => R('hsr/' + fresh('n'));
+      await assertFails(e.doc(N()).set(item(E.e1, { x: 1 })), 'שדה לא מוכר');
+      await assertFails(e.doc(N()).set(item(E.e1, { byN: E.e2 })), 'byN של אחר');
+      await assertFails(e.doc(N()).set(item(E.e1, { by: E.e2 })), 'by של אחר');
+      await assertFails(e.doc(N()).set(item(E.e1, { t: Date.now() - 600000 })), 'זמן ישן');
+      await assertFails(e.doc(N()).set(item(E.e1, { st: 'arr' })), 'יצירה רק פתוח');
+      await assertFails(e.doc(N()).set(item(E.e1, { n: '' })));
+      await assertFails(e.doc(N()).set(item(E.e1, { n: 'א'.repeat(81) })));
+      await assertFails(e.doc(N()).set(item(E.e1, { q: -1 })), 'כמות שלילית');
+      await assertFails(e.doc(N()).set(item(E.e1, { q: 0 })));
+      await assertFails(e.doc(N()).set(item(E.e1, { why: 'x' })));
+      await assertFails(e.doc(N()).set(item(E.e1, { gen: true })), 'כללי עם ספקים');
+      await assertFails(e.doc(N()).set(item(E.e1, { sups: Array.from({ length: 11 }, (_, i) => 's' + i) })));
+      await assertFails(e.doc(N()).set(item(E.e1, { cust: { nm: 'דני', ph: '050-123' } })), 'טלפון עם מקף');
+      await assertFails(e.doc(N()).set(item(E.e1, { cust: { nm: 'דני', x: 1 } })));
+      await assertFails(e.doc(N()).set(item(E.e1, { ord: { id: '../x', no: 1 } })));
+      await assertFails(e.doc(N()).set(item(E.e1, { np: 2 })));
+      await assertFails(e.doc(N()).set(item(E.e1, { ub: E.e1, ut: Date.now() })), 'ub רק בעדכון');
+      await assertFails(e.doc(N()).set(item(E.e1, { h: Array.from({ length: 31 }, () => ({ k: 'man' })) })));
+      for (const u of [E.off, E.out]) await assertFails(fs(u).doc(N()).set(item(u)));
+      if (E.foreign) await assertFails(fs(E.foreign).doc(N()).set(item(E.foreign)));
+    });
+
+    it('hsr: עריכה, "הגיע", מחיקה רכה ושחזור – מנהל ועובד אחר; by/byN/t לא משתנים; ub בשם המעדכן', async () => {
+      for (const u of [E.mgr, E.e2]) {
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { n: 'חלב 1%', sups: ['s1', 's2'], supN: ['תנובה', 'טרה'], q: 3 })));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'arr', h: [{ k: 'man', t: Date.now(), byN: u }] })));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'open' })));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'del' })));
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'open' })));
+      }
+      const e = fs(E.e2);
+      await assertFails(e.doc(R('hsr/h1')).update({ st: 'arr' }), 'בלי ub/ut');
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e1, { st: 'arr' })), 'ub של אחר');
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { ut: Date.now() - 600000 })));
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { by: E.e2 })), 'by לא משתנה');
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { byN: E.e2 })), 'byN לא משתנה');
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { t: Date.now() })), 't לא משתנה');
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { st: 'gone' })));
+      await assertFails(e.doc(R('hsr/h1')).update(upd(E.e2, { z: 1 })));
+      for (const u of [E.off, E.out]) await assertFails(fs(u).doc(R('hsr/h1')).update(upd(u, { st: 'arr' })));
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsr/h1')).update(upd(E.foreign, { st: 'arr' })));
+    });
+
+    it('hsr: מחיקה אמיתית – מנהל בלבד', async () => {
+      await assertFails(fs(E.e1).doc(R('hsr/h1')).delete());
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsr/h1')).delete());
+      await assertSucceeds(fs(E.mgr).doc(R('hsr/h1')).delete());
+    });
+
+    it('hsr/p/1: תמונה – הצוות קורא ויוצר (רק 1, רק לפריט קיים, uid עצמו, עד 900,000), בלי עדכון; מחיקה – הצוות', async () => {
+      const e = fs(E.e2), ph = (o) => Object.assign({ img: IMG, t: Date.now(), uid: E.e2 }, o);
+      await assertSucceeds(e.doc(R('hsr/h1/p/1')).get());
+      await assertFails(fs(E.off).doc(R('hsr/h1/p/1')).get());
+      await assertFails(e.doc(R('hsr/h1/p/1')).set(ph()), 'עדכון (דריסה) אסור');
+      await assertSucceeds(e.doc(R('hsr/h1/p/1')).delete());
+      await assertSucceeds(e.doc(R('hsr/h1/p/1')).set(ph()));
+      await prep((d) => d.doc(R('hsr/h1/p/1')).delete());
+      await assertFails(e.doc(R('hsr/h1/p/2')).set(ph()), 'רק 1');
+      await assertFails(e.doc(R('hsr/nope/p/1')).set(ph()), 'פריט לא קיים');
+      await assertFails(e.doc(R('hsr/h1/p/1')).set(ph({ uid: E.e1 })));
+      await assertFails(e.doc(R('hsr/h1/p/1')).set(ph({ img: 'data:image/jpeg;base64,' + 'A'.repeat(900000) })), 'גדולה מדי');
+      await assertFails(e.doc(R('hsr/h1/p/1')).set(ph({ img: 'data:text/html;base64,' + 'A'.repeat(500) })));
+      await assertFails(e.doc(R('hsr/h1/p/1')).set(ph({ x: 1 })));
+      await assertFails(fs(E.off).doc(R('hsr/h1/p/1')).set(ph({ uid: E.off })));
+      await assertSucceeds(fs(E.mgr).doc(R('hsr/h1/p/1')).set(ph({ uid: E.mgr })));
+    });
+
+    it('hsph: טלפון ספק – הצוות קורא וכותב (ספרות, בשמו, זמן אמת); מחיקה – מנהל', async () => {
+      const ph = (u, o) => Object.assign({ ph: '972501234567', n: 'טרה', byN: u, t: Date.now() }, o);
+      for (const u of [E.mgr, E.e1]) { await assertSucceeds(fs(u).doc(R('hsph/s1')).get()); await assertSucceeds(fs(u).doc(R('hsph/' + fresh('s'))).set(ph(u))); await assertSucceeds(fs(u).doc(R('hsph/s1')).set(ph(u))); }
+      await assertFails(fs(E.e1).doc(R('hsph/s2')).set(ph(E.e1, { ph: '050-1234567' })));
+      await assertFails(fs(E.e1).doc(R('hsph/s2')).set(ph(E.e1, { ph: '12' })));
+      await assertFails(fs(E.e1).doc(R('hsph/s2')).set(ph(E.e2)), 'byN של אחר');
+      await assertFails(fs(E.e1).doc(R('hsph/s2')).set(ph(E.e1, { x: 1 })));
+      await assertFails(fs(E.off).doc(R('hsph/s1')).get());
+      await assertFails(fs(E.off).doc(R('hsph/s2')).set(ph(E.off)));
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsph/s1')).get());
+      await assertFails(fs(E.e1).doc(R('hsph/s1')).delete());
+      await assertSucceeds(fs(E.mgr).doc(R('hsph/s1')).delete());
+    });
+
+    it('hsx: שמות מוצרים מחשבוניות – הצוות קורא; כותב רק מנהל (ובעסק b גם עובד עם prc); עובד בלי prc – נחסם', async () => {
+      const x = (o) => Object.assign({ n: 'תנובה', it: ['חלב 3', 'קוטג 5'], t: Date.now() }, o);
+      for (const u of [E.mgr, E.e1]) { await assertSucceeds(fs(u).doc(R('hsx/s1')).get()); await assertSucceeds(fs(u).collection(R('hsx')).get()); }
+      await assertFails(fs(E.off).doc(R('hsx/s1')).get());
+      await assertSucceeds(fs(E.mgr).doc(R('hsx/s1')).set(x()));
+      await assertFails(fs(E.e1).doc(R('hsx/s1')).set(x()), 'עובד בלי prc');
+      if (E.prc) await assertSucceeds(fs(E.prc).doc(R('hsx/s1')).set(x()));
+      await assertFails(fs(E.mgr).doc(R('hsx/s1')).set(x({ it: Array.from({ length: 3001 }, (_, i) => 'a' + i) })));
+      await assertFails(fs(E.mgr).doc(R('hsx/s1')).set(x({ price: 5 })), 'בלי מחירים');
+      await assertFails(fs(E.mgr).doc(R('hsx/s1')).set(x({ t: 1 })));
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsx/s1')).set(x()));
+      await assertFails(fs(E.e1).doc(R('hsx/s1')).delete());
+      await assertSucceeds(fs(E.mgr).doc(R('hsx/s1')).delete());
+    });
+
+    if (E.offBiz) it('עסק בלי התוספת suppliers – הכול נחסם, גם למנהל העסק', async () => {
+      const m = fs(E.offBiz);
+      await assertFails(m.doc('b/bo/hsr/h1').get());
+      await assertFails(m.doc('b/bo/hsr/' + fresh('n')).set(item(E.offBiz)));
+      await assertFails(m.doc('b/bo/hsph/s1').set({ ph: '0501234567', n: 'x', byN: E.offBiz, t: Date.now() }));
+      await assertFails(m.doc('b/bo/hsx/s1').get());
+    });
+  });
+}
