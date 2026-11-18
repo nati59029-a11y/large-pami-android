@@ -1,7 +1,7 @@
 'use strict';
 // סריקת חנות בתלת מימד – שלב 12 (2026-11-15): התראות לטלפון.
-// 1. עובד: בפתיחה לא מתבקשת הרשאה (כמו קודם); בכניסה למסך התלת מימד (התוספת פעילה) – בקשת הרשאה פעם אחת, רישום, והמזהה נשלח לשרת.
-// 2. תוספת כבויה – כניסה למסך לא מבקשת הרשאה.  3. לחיצה על התראה של סריקת החנות (k:'s3') פותחת את מסך התלת מימד.
+// 1. עובד, תוסף המשימות פעיל (18.11.2026): בפתיחה – בקשת הרשאה פעם אחת, רישום, והמזהה נשלח לשרת; בכניסה למסך התלת מימד – לא מבקשים שוב.
+// 2. בלי תוסף המשימות ובלי התלת מימד – לא בפתיחה ולא בכניסה למסך מבקשים הרשאה.  3. לחיצה על התראה של סריקת החנות (k:'s3') פותחת את מסך התלת מימד.
 // 4. מנהל־על שעובד בעסק: הרישום נשלח עם העסק הנוכחי (bizId), כדי שהטלפון יירשם בעסק הנכון.
 // רשת מדומה (בלי שרת, בלי FCM). שימוש: node ui-push-s3.js <www-dir>
 const H = require('./harness');
@@ -9,7 +9,7 @@ let fail = 0;
 const check = (name, ok, info) => { if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
 const BIZ = 'biz-p';
 const ON = { scan: true, tasks: true, store3d: true };
-const OFF = { scan: true, tasks: true };
+const OFF = { scan: true };
 
 async function open(browser, www, who, feat, o) {
   const cfg = { mode: 'new', users: { [who]: BIZ }, sa: o && o.sa ? { [who]: 1 } : {}, biz: { [BIZ]: { dataRoot: 'b', features: feat, name: 'עסק בדיקה' } },
@@ -53,10 +53,11 @@ const reg = (bodies) => bodies.filter((b) => b[0] === 'registerPushToken').pop()
   // 1. עובד, התוספת פעילה
   let A = await open(browser, www, 'w', ON);
   let p = await pn(A.page);
-  check('עובד: בפתיחה – מאזינים נרשמו, בלי בקשת הרשאה ובלי רישום (כמו קודם)', p.includes('on:registration') && !p.includes('ask') && !p.includes('register'), p);
+  let r = reg(A.bodies);
+  check('עובד (משימות פעיל): בפתיחה – בקשת הרשאה פעם אחת, רישום, והמזהה נשלח לשרת', p.includes('on:registration') && p.filter((x) => x === 'ask').length === 1 && p.includes('register') && r && /^fcm_token_/.test(r[1].token), { p, r: r && r[1] });
   await A.page.evaluate(() => go('st3')); await H.settle(A.page, 700);
-  p = await pn(A.page); let r = reg(A.bodies);
-  check('עובד: כניסה למסך התלת מימד – בקשת הרשאה, רישום, והמזהה נשלח לשרת', p.filter((x) => x === 'ask').length === 1 && p.includes('register') && r && /^fcm_token_/.test(r[1].token), { p, r: r && r[1] });
+  p = await pn(A.page);
+  check('עובד: כניסה למסך התלת מימד – לא מבקשים הרשאה שוב', p.filter((x) => x === 'ask').length === 1, p);
   await A.page.evaluate(() => { NAV = [{ v: 'wk' }]; go('wk'); }); await H.settle(A.page, 300);
   await A.page.evaluate(() => go('st3')); await H.settle(A.page, 500);
   p = await pn(A.page);
@@ -70,6 +71,8 @@ const reg = (bodies) => bodies.filter((b) => b[0] === 'registerPushToken').pop()
 
   // 2. עובד, התוספת כבויה
   A = await open(browser, www, 'w', OFF);
+  p = await pn(A.page);
+  check('בלי תוסף המשימות: בפתיחה – בלי בקשת הרשאה (כמו קודם)', p.includes('on:registration') && !p.includes('ask') && !p.includes('register'), p);
   await A.page.evaluate(() => go('st3')); await H.settle(A.page, 500);
   p = await pn(A.page);
   check('תוספת כבויה: כניסה למסך לא מבקשת הרשאה', !p.includes('ask') && !reg(A.bodies), p);
@@ -78,7 +81,8 @@ const reg = (bodies) => bodies.filter((b) => b[0] === 'registerPushToken').pop()
 
   // 3. מנהל־על שהוא מנהל בעסק: הרישום עם bizId
   A = await open(browser, www, 'm', ON, { mgr: 1, sa: 1 });
-  r = reg(A.bodies);
+  r = reg(A.bodies); p = await pn(A.page);
+  check('מנהל: בפתיחה – בקשת הרשאה פעם אחת (כמו קודם)', p.filter((x) => x === 'ask').length === 1, p);
   check('מנהל־על: הרישום נשלח עם העסק הנוכחי', r && r[1].bizId === BIZ && /^fcm_token_/.test(r[1].token), r && r[1]);
   check('מנהל־על: בלי שגיאות JS', A.page.__errors.length === 0, A.page.__errors);
   await A.ctx.close();

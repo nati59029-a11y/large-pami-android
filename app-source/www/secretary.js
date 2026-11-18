@@ -658,16 +658,18 @@ ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disab
 /* ---------- התראות לטלפון (7.2; 12.11.2026: רכיב ההתראות נוסף לאפליקציה) ----------
    רק באפליקציה לטלפון שנבנתה עם הגדרות Firebase (PushGate.ready). בלי זה – לא קורה כלום, וההתראות רק במסך (כמו קודם).
    מנהל: בכניסה הראשונה – בקשת הרשאה להתראות (Android 13+), פעם אחת בלבד בטלפון. אחר כך בכל פתיחה – רישום מחדש (המזהה מתחדש לפעמים).
-   עובד: לא מתבקשת הרשאה. אם ההרשאה כבר קיימת בטלפון – נרשם על שמו, והשרת מוציא את הטלפון מהמשתמש הקודם (עובד לא מקבל התראות של מנהל).
+   עובד: (18.11.2026) כשתוסף המשימות פעיל – בקשת הרשאה פעם אחת בטלפון, כמו מנהל. אחרת לא מתבקשת. אם ההרשאה כבר קיימת בטלפון – נרשם על שמו, והשרת מוציא את הטלפון מהמשתמש הקודם (עובד לא מקבל התראות של מנהל).
    יציאה מהחשבון – מזהה הטלפון נמחק (unregister), כך שהתראות לא ממשיכות להגיע אליו. לחיצה על התראה – המזכירה, לשונית ההתראות. */
 const PN={done:0,ready:0};
+const pnTkOn=()=>{try{return typeof bzF!=='function'||bzF('tasks')===true}catch(e){return true}};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;PN.act=g.act===true;
  /* 16.11.2026: act:1 רק כשה-APK עצמו (Java) בונה התראות עם כפתורים – לא לפי קוד המסכים, שעדכון חי יכול להביא ל-APK ישן. act נשלח תמיד (0/1): רישום בלי act = מסכים ישנים */
  await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW())){PN.tk=t.value;pnSend()}});
  await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}/* מרכז עבודה סבב 3: "הזכר לעובד" (tkNudge) – פותח את המשימות בלשונית "היום שלי" *//* רובוט כספית (caspit-bot.js בשרת): התראה למנהל – פותח את "סנכרון כספית" */if(d.k==='cx'&&isA()&&typeof V.cxSync==='function'){try{go('cxSync')}catch(e){}return}if(d.k==='dr'&&(isA()||isW())&&typeof window.drOpen==='function'){try{window.drOpen(d.id)}catch(e){}return}if(d.k==='tk'&&(isA()||isW())&&typeof V.tk==='function'){try{TKT='my';if(window.TKW)TKW.d0=1;if(cur().v!=='tk')go('tk');else rerender()}catch(e){}return}if(d.k==='grp'&&window.GRP&&typeof GRP.open==='function'){GRP.open(d.id);return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
- if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
+ /* 18.11.2026 (החלטת בעל העסק): גם עובד מתבקש פעם אחת – כשתוסף המשימות פעיל בעסק (bzF('tasks')); אם הבדיקה לא זמינה – מבקשים. אותו סימון lp-push-asked כמו אצל מנהל */
+ if((isA()||(isW()&&pnTkOn()))&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
  if(p.receive==='granted')await P.register()}catch(e){}}
 /* 16.11.2026 מכשיר אחד: s = מזהה הכניסה (SY.ds), רק אחרי שהשרת אישר אותה (SY.dsc) – כך השרת רושם רק את הטלפון הנוכחי. secPushRe: רישום חוזר אחרי אישור מאוחר (dvCur) */
