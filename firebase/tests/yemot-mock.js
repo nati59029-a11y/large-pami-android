@@ -56,7 +56,8 @@ function start(port) {
       // tzphones (משימה 2026-11-17): מצב נפרד ל-RunTzintuk עם מערך מספרים (צינתוק ללקוחות משוב). לא הוגדר = כמו tzintuk
       // מערך מצבים (שליחה בקבוצות): מצב לכל קריאת מערך לפי הסדר; אחרי סוף המערך – 'ok'
       let mode = cmd === 'RunTzintuk' && Array.isArray(body.phones) && state.modes.tzphones ? state.modes.tzphones : state.modes[key];
-      if (Array.isArray(mode)) mode = mode[state.requests.filter((q) => q.cmd === 'RunTzintuk' && Array.isArray(q.body.phones)).length - 1] || 'ok';
+      // (2026-11-18) מערך מצבים גם לפקודות אחרות (למשל entries): לפי מספר הקריאות לאותה פקודה
+      if (Array.isArray(mode)) mode = mode[(cmd === 'RunTzintuk' && Array.isArray(body.phones) ? state.requests.filter((q) => q.cmd === 'RunTzintuk' && Array.isArray(q.body.phones)) : calls(cmd)).length - 1] || 'ok';
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
       if (mode === 'reset') return req.socket.destroy(); // מנתק בלי תשובה אחרי שהבקשה הגיעה (לא ודאי)
       // 'okclose': עונה OK ואז השרת נסגר – הקריאה הבאה נכשלת בלי חיבור (ECONNREFUSED, כשל ודאי). הבדיקה מפעילה מחדש (start)
