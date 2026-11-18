@@ -333,6 +333,49 @@ test('ייבוא: בתור "ממתין לטעינה" כבר יש קובץ של �
   await cp.evaluate(() => localStorage.removeItem('preq'));
 });
 
+test('ניסיון חוזר: הקובץ של הריצה כבר ב"טעינות קודמות" → לא מעלים שוב, התוצאה נקראת מהשורה הקיימת', async () => {
+  const cp = caspitPage();
+  srv.runId = 'retryrun1';
+  await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); const L = JSON.parse(localStorage.getItem('hist') || '[]'); const mx = Math.max(25520, ...L.map((x) => x.id)); L.push({ id: mx + 1, name: 'lp-new-retryrun1.csv', tn: 'טעינת פריטים חדשים', st: 'בוצע', c: 'שגויים: 0, נטענו: 1' }); localStorage.setItem('hist', JSON.stringify(L)); window.ev = []; });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1; srv.exportN.price = 0;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp, 'לא הועלה קובץ נוסף');
+  const ir = srv.ops('importResult').at(-1);
+  assert.equal(ir.kind, 'new'); assert.equal(ir.ok, true); assert.equal(ir.loaded, 1);
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+  assert.ok(!evs.includes('run'), 'לא נלחץ "העלה קבצים והרץ טעינה": ' + evs.join('|'));
+  delete srv.runId; srv.exportN.price = 2;
+});
+
+test('"טעינות קודמות" נטענת באיחור → מחכים לה ומעלים פעם אחת; לא מופיעה בכלל → selector-miss בלי העלאה ובלי קובץ בתור', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.setItem('histlate', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1; srv.exportN.price = 0;
+  let nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  let s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  await cp.evaluate(() => { localStorage.removeItem('histlate'); localStorage.setItem('histnone', '1'); });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ impHash: {} }); });
+  nImp = imports.length; t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'selector-miss', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp, 'לא הועלה כלום');
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const q = (await Promise.all(tabs.map((p) => p.evaluate(() => document.querySelectorAll('#queue tr').length).catch(() => 0)))).reduce((a, b) => a + b, 0);
+  assert.equal(q, 0, 'הקובץ שלנו לא נוסף לתור');
+  await cp.evaluate(() => localStorage.removeItem('histnone'));
+  srv.exportN.price = 2;
+});
+
 test('ייבוא עם שגויים בכספית → import-errors (עם המספרים), בלי ניסיון חוזר; זמן קצוב → import-timeout', async () => {
   const cp = caspitPage();
   await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.setItem('imperr', '1'); });

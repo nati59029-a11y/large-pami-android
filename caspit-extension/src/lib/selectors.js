@@ -5,7 +5,7 @@
 // לעולם לא ממלא סיסמה או שם משתמש: setDate/setFile מסרבים לשדות סיסמה, ואין צעד "הקלדה" כללי.
 (function (root) {
 'use strict';
-const OPS = new Set(['nav', 'waitFor', 'click', 'select', 'setDate', 'setFile', 'text', 'queue', 'queueGone', 'histMark']);
+const OPS = new Set(['nav', 'waitFor', 'click', 'select', 'setDate', 'setFile', 'text', 'queue', 'queueGone', 'queueEmpty', 'histMark']);
 const CLICKABLE = 'button,a,[role=button],[role=menuitem],[role=tab],[role=option],li,input[type=button],input[type=submit],label,span,div';
 const norm = (s) => String(s == null ? '' : s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\u00a0/g, ' ').replace(/[”“״"]/g, '"').replace(/\s+/g, ' ').trim();
 const own = (el) => norm(el.innerText != null && el.innerText !== '' ? el.innerText : el.textContent);
@@ -151,9 +151,25 @@ async function queueCheck(doc, s, C) {
     const R = queueRows(doc, s);
     if (R && R.length) {
       const mine = (r) => norm(r[0]) === name && (!type || norm(r[1]) === type);
-      if (R.some(mine)) return R.every(mine) ? { ok: true, n: R.length } : { ok: false, code: 'import-queue-not-empty', n: R.length };
+      // רק שורה אחת בדיוק, והיא שלנו (שתי שורות "שלנו" = שארית מניסיון קודם → לא מעלים)
+      if (R.some(mine)) return R.length === 1 ? { ok: true, n: 1 } : { ok: false, code: 'import-queue-not-empty', n: R.length };
     }
     if (C.now() >= end) return { ok: false, code: R ? (R.length ? 'import-queue-not-empty' : 'no-row') : 'no-queue' };
+    await C.sleep(300);
+  }
+}
+// לפני setFile: התור "ממתין לטעינה" חייב להיות ריק (אין טבלה / אין שורות). אחרת עוצרים לפני שמוסיפים את הקובץ שלנו
+function queueEmpty(doc, s) {
+  const R = queueRows(doc, s);
+  return !R || !R.length ? { ok: true } : { ok: false, code: 'import-queue-not-empty', n: R.length };
+}
+// "טעינות קודמות" חייבת להיות קריאה לפני העלאה (בלי זה אי אפשר לדעת אם הקובץ כבר הועלה): מחכים לה, ואם לא – null
+async function histWait(doc, s, C) {
+  const end = C.now() + (s.ms || 15000);
+  for (;;) {
+    const H = histRows(doc, s.head);
+    if (H && !H.bad) return H;
+    if (C.now() >= end) return null;
     await C.sleep(300);
   }
 }
@@ -256,17 +272,26 @@ async function runSteps(steps, ctx) {
     if (ctx.guard && !onPath(ctx.win, ctx.guard)) { rec.err = 'wrong-page'; res.ok = false; res.wrong = true; res.miss = i; break; }
     if (s.op === 'histMark') {
       // לפני ההעלאה: המזהה הגבוה בטבלת "טעינות קודמות"; ואם הקובץ שלנו (שם ייחודי לריצה) כבר שם – הועלה בניסיון קודם: לא מעלים שוב
-      const H = histRows(doc, s.head);
+      const H = ctx.probe ? histRows(doc, s.head) : await histWait(doc, s, C);
+      if (!H || H.bad) {
+        if (ctx.probe) continue;
+        // לא קוראים את הטבלה → לא יודעים אם כבר הועלה → לא מעלים (selector-miss)
+        rec.err = H ? 'hist-cols' : 'no-hist'; res.ok = false; res.miss = i; break;
+      }
       const name = norm(fill(s.name, C.vars));
-      res.hmax = H ? H.maxId : 0;
-      const prev = H && H.rows.find((r) => norm(r.name) === name);
+      res.hmax = H.maxId;
+      const prev = H.rows.find((r) => norm(r.name) === name);
       rec.found = rec.done = true;
       if (prev) { res.already = prev.id; break; }
       continue;
     }
-    if (s.op === 'queue' || s.op === 'queueGone') {
+    if (s.op === 'queue' || s.op === 'queueGone' || s.op === 'queueEmpty') {
       if (ctx.probe) continue; // היכרות: אין קובץ בתור
-      if (s.op === 'queue') {
+      if (s.op === 'queueEmpty') {
+        const q = queueEmpty(doc, s);
+        rec.found = q.ok; rec.n = q.n;
+        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; res.code = q.code; break; }
+      } else if (s.op === 'queue') {
         const q = await queueCheck(doc, s, C);
         rec.found = q.ok; rec.n = q.n;
         if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; if (q.code === 'import-queue-not-empty') res.code = q.code; break; }

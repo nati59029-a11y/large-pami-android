@@ -110,7 +110,8 @@ function render() {
       document.querySelectorAll('#hist .cx').forEach((b) => { b.onclick = () => ev.push('cancel'); });
       document.querySelectorAll('#hist .hl').forEach((b) => { b.onclick = (e) => { e.preventDefault(); ev.push('histlink'); }; });
     };
-    drawH();
+    // histlate: הטבלה מופיעה באיחור (3 שניות); histnone: הטבלה לא מופיעה בכלל
+    if (localStorage.getItem('histlate')) setTimeout(drawH, 3000); else if (!localStorage.getItem('histnone')) drawH();
     document.getElementById('run').onclick = async () => {
       ev.push('run');
       if (!Q.length) { document.querySelector('.result').textContent = 'שגיאה: אין קבצים'; return; }

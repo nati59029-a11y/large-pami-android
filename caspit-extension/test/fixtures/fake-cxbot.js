@@ -21,7 +21,7 @@ function start(o) {
       try { b = JSON.parse(raw); } catch (e) { return send(400, { ok: false, reason: 'bad-json' }); }
       S.calls.push(b);
       const op = b.op;
-      if (op === 'hello') return send(200, { ok: true, runId: 'srvrun' + S.calls.length, minVer: '0.0.1', biz: { name: 'עסק בדיקה' }, days: S.days, schedule: { at: '03:00', tz: 'Asia/Jerusalem' }, limits: { price: 500, newMax: 50 } });
+      if (op === 'hello') return send(200, { ok: true, runId: S.runId || 'srvrun' + S.calls.length, minVer: '0.0.1', biz: { name: 'עסק בדיקה' }, days: S.days, schedule: { at: '03:00', tz: 'Asia/Jerusalem' }, limits: { price: 500, newMax: 50 } });
       if (op === 'upload') return send(200, { ok: true });
       if (op === 'preview') return send(200, { ok: true, cnt: { nw: 1, in: 2 } });
       if (op === 'apply') return send(200, { ok: true, done: true, res: { nw: 1 } });

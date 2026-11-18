@@ -122,7 +122,8 @@
       {
         "op": "histMark",
         "head": "טעינות קודמות",
-        "name": "{fname}"
+        "name": "{fname}",
+        "ms": 20000
       },
       {
         "op": "select",
@@ -143,6 +144,10 @@
           }
         },
         "ms": 15000
+      },
+      {
+        "op": "queueEmpty",
+        "head": "ממתין לטעינה"
       },
       {
         "op": "setFile",
@@ -192,7 +197,8 @@
       {
         "op": "histMark",
         "head": "טעינות קודמות",
-        "name": "{fname}"
+        "name": "{fname}",
+        "ms": 20000
       },
       {
         "op": "select",
@@ -213,6 +219,10 @@
           }
         },
         "ms": 15000
+      },
+      {
+        "op": "queueEmpty",
+        "head": "ממתין לטעינה"
       },
       {
         "op": "setFile",
