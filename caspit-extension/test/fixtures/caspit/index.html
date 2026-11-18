@@ -99,7 +99,7 @@ function render() {
       // none – שום דבר לא נכנס לתור, ומוצגת הודעת שגיאה (לבדיקת האבחון)
       const um = localStorage.getItem('upmode') || '';
       const addF = (f) => { if (!f) return; if (um === 'xls' && f.type !== 'application/vnd.ms-excel') { ev.push('reject:' + f.type); return; } Q.push({ f, t, tn: jt.value.trim() }); drawQ(); ev.push('add:' + f.type); };
-      document.getElementById('positive-file-uploader').onchange = (e) => { if (um !== 'drop' && um !== 'none') addF(e.target.files[0]); else ev.push('change-ignored'); if (um === 'none') document.querySelector('.result').textContent = 'הקובץ לא נקלט 0521234567'; e.target.value = ''; };
+      document.getElementById('positive-file-uploader').onchange = (e) => { if (um !== 'drop' && um !== 'none') addF(e.target.files[0]); else ev.push('change-ignored'); if (um === 'none') { e.target.setAttribute('accept', '.csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); document.querySelector('.result').textContent = 'הקובץ לא נקלט 0521234567 – יש לבחור קובץ מסוג CSV או Excel בפורמט שמתאים לסוג הטעינה שנבחר ברשימה'; } e.target.value = ''; };
       document.getElementById('more').addEventListener('dragover', (e) => e.preventDefault());
       document.getElementById('more').addEventListener('drop', (e) => { e.preventDefault(); ev.push('drop'); if (um === 'drop') addF(e.dataTransfer.files[0]); });
     }; });

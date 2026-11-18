@@ -505,6 +505,7 @@ test('העלאה: הקובץ לא נקלט בשום דרך → selector-miss ע�
   assert.match(msg, /לא נכנס ל"ממתין לטעינה" אחרי 3 ניסיונות/, msg);
   assert.match(msg, /שדות קובץ: 1/, msg);
   assert.match(msg, /הקובץ לא נקלט/, 'ההודעה הגלויה בדף: ' + msg);
+  assert.match(msg, /יש לבחור קובץ מסוג CSV/, 'ההודעה לא נחתכה גם עם accept ארוך: ' + msg);
   assert.ok(!msg.includes('0521234567'), 'מספר טלפון סונן: ' + msg);
   assert.equal(srv.ops('report').at(-1).err.code, 'selector-miss');
   assert.equal(imports.length, nImp, 'לא הועלה כלום');

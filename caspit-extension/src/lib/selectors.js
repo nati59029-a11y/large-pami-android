@@ -341,7 +341,7 @@ async function runSteps(steps, ctx) {
 // היכרות: רשימת הפקדים בדף – בלי ערכים, בלי שדות סיסמה. o.noText (דף לקריאה בלבד): בלי טקסט, בלי aria, בלי אפשרויות בחירה
 // (רק מספרן), ו-href רק כסימן לקישור פנימי – כדי ששמות (למשל עובדים במסך הנוכחות) לא ייכנסו לדוח
 // מילות פעולה של כפתורים (היכרות מסך לקריאה בלבד, o.btn)
-const ACT = /הצג|חפש|חיפוש|יצוא|ייצוא|יצא|אקסל|excel|pdf|csv|הדפס|רענן|סנן|סינון|צור|הפק|בחר|נקה|אפס|קובץ|דוח|היום|אתמול|שבוע|חודש|תאריך|טווח|search|export|print|show|filter/i;
+const ACT = new Set(['הצג', 'חפש', 'חיפוש', 'יצוא', 'ייצוא', 'יצא', 'אקסל', 'לאקסל', 'excel', 'pdf', 'csv', 'הדפס', 'הדפסה', 'רענן', 'סנן', 'סינון', 'צור', 'הפק', 'נקה', 'אפס', 'קובץ', 'דוח', 'היום', 'אתמול', 'שבוע', 'חודש', 'תאריך', 'טווח', 'search', 'export', 'print', 'show', 'filter']);
 const DATA = 'table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]';
 function controls(doc, max, o) {
   const noText = !!(o && o.noText);
@@ -361,8 +361,9 @@ function controls(doc, max, o) {
       if (tag === 'select') c.optN = (el.options || []).length;
       // o.btn: גם טקסט של כפתורים שמחוץ לטבלאות ולרשימות (למשל "הצג", "יצוא לאקסל") – לא תוויות, לא אפשרויות, לא שדות
       if (o.btn && (tag === 'button' || g('role') === 'button' || (tag === 'input' && /^(button|submit)$/i.test(type || ''))) && !(el.closest && el.closest(DATA))) {
-        const t = (tag === 'input' ? norm(el.value) : own(el)).slice(0, 40);
-        if (t && ACT.test(t)) c.text = t; // רק מילות פעולה – כפתור עם שם עובד לא נכנס
+        // רק המילים שהן מילות פעולה (התאמה מלאה של מילה) – שם עובד, שעה או מספר על הכפתור לא נכנסים
+        const w = [...new Set((tag === 'input' ? norm(el.value) : own(el)).toLowerCase().split(/[^a-z\u05d0-\u05ea]+/).filter((x) => ACT.has(x)))];
+        if (w.length) c.text = w.join(' ').slice(0, 40);
       }
       out.push(c);
       continue;

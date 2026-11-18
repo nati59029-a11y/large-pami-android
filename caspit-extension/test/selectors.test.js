@@ -167,4 +167,15 @@ test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, ב
   const b = await page.evaluate(() => window.CxSel.controls(document, 400, { noText: true, btn: true }));
   assert.ok(b.every((x) => x.text === undefined || /יצוא|ייצוא|הצג|קובץ|דוח|סנן/.test(x.text)), JSON.stringify(b.filter((x) => x.text)));
   assert.ok(!JSON.stringify(b).includes('סגור חלון'));
+  // שמות ושעות על כפתורים: נשמרות רק מילות הפעולה עצמן (התאמה מלאה של מילה)
+  const t = await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'btnt';
+    box.innerHTML = ['אבי צור', 'משה בן צור', 'רונית נבחרה', 'דני כהן הצג פרטים', 'הצג 08:02-16:00', 'ייצוא לאקסל'].map((x, k) => '<button id="bt' + k + '">' + x + '</button>').join('');
+    document.body.appendChild(box);
+    const r = window.CxSel.controls(document, 400, { noText: true, btn: true }).filter((x) => /^button#bt\d$/.test(x.css)).map((x) => [x.css, x.text]);
+    box.remove(); return r;
+  });
+  const T = JSON.stringify(t);
+  for (const nm of ['אבי', 'משה', 'רונית', 'נבחרה', 'דני', 'כהן', 'פרטים', '08', '16']) assert.ok(!T.includes(nm), nm + ' ' + T);
+  assert.deepEqual(Object.fromEntries(t), { 'button#bt0': 'צור', 'button#bt1': 'צור', 'button#bt2': undefined, 'button#bt3': 'הצג', 'button#bt4': 'הצג', 'button#bt5': 'ייצוא לאקסל' });
 });

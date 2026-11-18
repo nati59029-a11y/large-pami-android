@@ -302,7 +302,13 @@ async function putFile(tabId, s, q, vars, f) {
   if (Q && Q.rows && Q.rows.length) return { ok: true, rec };
   const d = (await inIso(tabId, fileDiagIn, [s.t, GUARD]).catch(() => null)) || {};
   if (d.wrong) throw wrongPage();
-  const diag = S.scrub(`הקובץ לא נכנס ל"ממתין לטעינה" אחרי ${log.length} ניסיונות (${log.join(', ')}) · שדות קובץ: ${d.ins} (גלויים ${d.vis}) · נבחרו: ${d.files} · accept: ${d.accept || '—'}${d.multi ? ' · multiple' : ''}${Q && Q.rows === null ? ' · אין כותרת ממתין' : ''}${(d.msgs || []).length ? ' · הודעה: ' + d.msgs.join(' | ') : ''}`);
+  // כל חלק מסונן בנפרד (scrub חותך ל-200), וההודעות מהדף ראשונות – כדי שייכנסו גם אחרי הקיצור ל-290 בהודעה
+  const diag = [
+    (d.msgs || []).length ? 'הודעה בדף: ' + d.msgs.map((m) => S.scrub(m)).join(' | ') : '',
+    `הקובץ לא נכנס ל"ממתין לטעינה" אחרי ${log.length} ניסיונות (${log.join(', ')})`,
+    `שדות קובץ: ${d.ins} (גלויים ${d.vis}) · נבחרו: ${d.files}${d.val ? ' (יש ערך)' : ''}${Q && Q.rows === null ? ' · אין כותרת ממתין' : ''}${d.multi ? ' · multiple' : ''}`,
+    'accept: ' + (S.scrub(d.accept || '') || '—'),
+  ].filter(Boolean).join(' · ');
   return { ok: false, rec: Object.assign(rec, { err: 'no-queue' }), diag };
 }
 async function isLoginTab(tabId) {
@@ -492,7 +498,7 @@ async function exportImport(run, kind) {
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
   if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty');
-  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); if (res && res.diag) throw P.err('selector-miss', ('עדכון ' + (kind === 'new' ? 'פריטים חדשים' : 'מחירים') + ': ' + res.diag).slice(0, 290)); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
+  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); if (res && res.diag) throw P.err('selector-miss', ((kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים') + ': ' + res.diag).slice(0, 290)); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
   // אחרי "העלה קבצים והרץ טעינה": שורה חדשה (מזהה גדול מהקודם) עם השם שלנו, עד סטטוס סופי. קריאה בלבד, כל 3 שניות
   const r2 = await waitImport(tab, name, res.already ? res.already - 1 : res.hmax || 0, (await sel()).importWaitMs || 600e3);
   const text = `מזהה ${r2.id || '—'} · ${r2.st || ''} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`;
