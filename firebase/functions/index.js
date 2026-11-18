@@ -347,6 +347,10 @@ Object.assign(exports, require('./pos-sale'), require('./pos-doc'));
 // POS:M5 – קופה, משמרת (ש5): posAuth (PIN ואישור אחראי), posCash (משמרת ומזומן), posZ (דוח X/Z), posClock (שעון נוכחות). lib/pos-agg.js – החישובים
 Object.assign(exports, require('./pos-auth'), require('./pos-cash'), require('./pos-z'), require('./pos-clock'));
 // /POS:M5
+// POS:M7 – קופה ש7: תפעול מכשירים (posOps: אישור/ניתוק מרחוק/מצב ציוד/יומן תקלות/התנגשויות/הזנה ידנית, posOpsWatch) וגיבוי (posBackup, posBackupDaily)
+Object.assign(exports, require('./pos-ops'));
+Object.assign(exports, require('./pos-backup'));
+// /POS:M7
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
 // מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js

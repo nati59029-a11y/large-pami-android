@@ -2458,6 +2458,21 @@ service cloud.firestore {
         allow read: if feat('pos') && bMgr();
         allow create, update, delete: if false;
       }
+      // POS:M7 – קופה ש7 (17.11.2026): יומן תקלות (poserr), התנגשויות (posconf), אינדקס גיבויים (posbk). קריאה – מנהל בלבד, כתיבה – רק השרת
+      // (pos-ops.js, pos-backup.js). poserr טכני בלבד, בלי פרטי לקוחות (אפיון ד 4).
+      match /poserr/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posconf/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posbk/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // /POS:M7
       match /posgift/{code} {
         allow read: if posAny();
         allow create, update, delete: if false;
