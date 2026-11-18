@@ -49,7 +49,8 @@ test('find: טקסט מדויק, הרכיב הקטן ביותר, בלי רכיב
 });
 
 test('ייבוא: בחירת אפשרות לפי הטקסט, קובץ דרך DataTransfer, לחיצה, קריאת התוצאה', async () => {
-  const flow = SEL.flows.importPrice.filter((s) => s.op !== 'nav');
+  // הזרימה האמיתית (#job_type) נבדקת ב-e2e; כאן – אותם סוגי צעדים על <select> רגיל
+  const flow = [{ op: 'select', t: { css: '#kind' }, option: 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים' }].concat(SEL.flows.importPrice.filter((s) => ['setFile', 'click', 'waitFor', 'text'].includes(s.op) && !(s.op === 'waitFor' && s.t.css)));
   const r = await run(flow, { files: { csv: { name: 'p.csv', mime: 'text/csv', b64: Buffer.from('קוד,מחיר\n1,2\n').toString('base64') } } });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.match(r.text, /הסתיימה/);
@@ -120,6 +121,11 @@ test('guard: דף שאינו המשרד האחורי (/bo) – אף צעד לא 
   assert.equal(await page.evaluate(() => window.CxSel.onPath({ location: { origin: 'https://caspit.valu.co.il', pathname: '/bo' } }, { origin: 'https://caspit.valu.co.il', path: '/bo' })), true);
   assert.equal(await page.evaluate(() => window.CxSel.onPath({ location: { origin: 'https://caspit.valu.co.il', pathname: '/csv-imports' } }, { origin: 'https://caspit.valu.co.il', path: '/bo' })), false);
   assert.equal(await page.evaluate(() => window.CxSel.onPath({ location: { origin: 'https://caspit.valu.co.il', pathname: '/bogus' } }, { origin: 'https://caspit.valu.co.il', path: '/bo' })), false);
+});
+
+test('monthYear: עברית, אנגלית, מספרים', async () => {
+  const r = await page.evaluate(() => [window.CxSel.monthYear('נובמבר 2026'), window.CxSel.monthYear('January 2027'), window.CxSel.monthYear('3/2026'), window.CxSel.monthYear('xx')]);
+  assert.deepEqual(r, [{ y: 2026, m: 10 }, { y: 2027, m: 0 }, { y: 2026, m: 2 }, null]);
 });
 
 test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה שדה סיסמה', async () => {

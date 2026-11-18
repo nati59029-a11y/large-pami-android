@@ -142,6 +142,7 @@ async function inMain(tabId, func, args) {
   const [r] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args: args || [] });
   return r && r.result;
 }
+const peekIn = (p, guard) => (self.CxSel.onPath(window, guard) ? self.CxSel.peek(document, p, { win: window, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }) : { wrong: true });
 const runFlowIn = (steps, vars, files, probe, guard) => self.CxSel.runSteps(steps, { doc: document, win: window, vars, files, probe, guard });
 const wrongPage = () => P.err('wrong-page');
 async function onBo(tabId) { const t = await chrome.tabs.get(tabId).catch(() => null); return !!t && BO_RE.test(String(t.url || '')) && !t.pendingUrl; }
@@ -282,7 +283,7 @@ const STEP = {
   },
   async catalog(run) {
     const tab = await ownTab(false);
-    const f = await capture(tab, 'catalog', {}, 120e3);
+    const f = await capture(tab, 'catalog', {}, 600e3); // כספית מפיקה את הקובץ כ"משימה" (job) – בקטלוג גדול זה לוקח זמן
     const rows = rowsOf(f), det = C.detect(rows);
     if (det.kind !== 'cat') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "קטלוג פריטים"');
     const g = C.groupCat(rows, det), parts = C.parts(g.items);
@@ -450,12 +451,16 @@ async function runDisc() {
     for (const pg of S0.disc || []) {
       if (pg.hash) await navTo(tab, pg.hash, false, 3000);
       await guardBo(tab);
+      // היכרות v2: פותחים רשימות / לוח שנה רק כדי לראות אותם (בלי לבחור), לפני הצעדים
+      const pk = [];
+      for (const p of Array.isArray(pg.peek) ? pg.peek : []) { await guardBo(tab); const r = await inIso(tab, peekIn, [p, GUARD]); if (r && r.wrong) throw wrongPage(); pk.push(Object.assign({ name: String(p.name || '') }, r || {})); }
       const nonce = U.rid('n') + U.rid('');
-      const got = waitFile(nonce, tab, 25e3);
+      const got = waitFile(nonce, tab, 120e3);
       got.catch(() => {});
       await arm(tab, nonce);
       const probe = await runFlow(tab, pg.flow, { day }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
       const page = { name: pg.name, flow: pg.flow, probe: (probe.steps || []).map((x) => ({ i: x.i, op: x.op, found: x.found, done: x.done, el: x.el, err: x.err })), ok: !!probe.ok };
+      if (pk.length) page.peek = pk;
       const hasCap = (S0.flows[pg.flow] || []).some((x) => x.capture);
       if (hasCap) {
         const f = await got.catch(() => null);
