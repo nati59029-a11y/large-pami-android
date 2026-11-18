@@ -687,8 +687,9 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     const src = require('node:fs').readFileSync(require('node:path').join(H.ROOT, 'storage.rules'), 'utf8');
     const block = src.slice(src.indexOf('// ---------- ריבוי עסקים'), src.indexOf('// הכלל האחרון'));
     const paths = [...block.matchAll(/firestore\.(?:get|exists)\(\/databases\/\(default\)\/documents\/([a-z_]+)\//g)].map((m) => m[1]);
-    assert.deepEqual([...new Set(paths)].sort(), ['superadmins', 'users']);
-    assert.ok(!/documents\/b\//.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק');
+    /* סבב 3 (17.11.2026): סרטוני קבוצות (grpv) קוראים גם את מסמך הקבוצה – grp/{gid} ב-legacy ו-b/{bizId}/grp/{gid} בעסק – עדיין לכל היותר 2 קריאות (users + grp) */
+    assert.deepEqual([...new Set(paths)].sort(), ['b', 'grp', 'superadmins', 'users']);
+    assert.ok(!/documents\/b\/(?!\$\(bizId\)\/grp\/\$\(gid\)\))/.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק (רק b/{bizId}/grp/{gid} של סרטוני הקבוצות)');
   });
 });
 

@@ -325,6 +325,8 @@ Object.assign(exports, require('./secretary-media'));
 Object.assign(exports, require('./recurring'));
 // מרכז עבודה סבב 3 (15.11.2026): tkNudge – "הזכר לעובד" בהתראת טלפון (tasks-nudge.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./tasks-nudge'));
+// קבוצות התכתבות סבב 3 (17.11.2026): grpMsg / grpMsgB – התראה לטלפון על הודעה חדשה בקבוצה ועדכון grp/{gid}.last; grpDel / grpDelB – מחיקה מדורגת של קבוצה; grpMDel / grpMDelB – מחיקת הודעה: last מחדש וקובץ הסרטון (grp-notify.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./grp-notify'));
 // דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./daily-rep'));
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
