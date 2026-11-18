@@ -1,7 +1,7 @@
 /* POS:M3 – קופה, גל 2 (ש3): עבודה בלי רשת. תור מקומי, סל שנשמר, נורית רשת וסימן ✓. בלי Firestore – השליחה עצמה מוזרקת (send).
    אותו קובץ בדפדפן (window.PosOffline) ובבדיקות Node (module.exports) – firebase/tests/pos-offline.unit.test.js.
 
-   PosOffline.queue({ store, key, send, online?, now?, timer?, onConflict? }) → תור
+   PosOffline.queue({ store, key, send, online?, now?, timer?, onConflict?, skipErr? }) → תור   (skipErr – POS:W2: שגיאה קבועה מסומנת ולא עוצרת את התור; לתור בלי מספור)
      store: { get(k) → מחרוזת|null, set(k, מחרוזת), del(k) } – סינכרוני (localStorage). כל שינוי נכתב מיד, לפני שהפעולה חוזרת.
      send(item) → Promise<תשובת השרת>. שגיאה עם offline / קוד רשת / unavailable / internal / unauthenticated = "אין רשת, ננסה שוב".
      q.add({ reqId, fn, payload, kind? }, { seq: true }) → הפריט שנשמר. seq:true – מקבל את המספר הבא של הקופה (payload.seq),
@@ -83,7 +83,7 @@ function queue(o) {
   async function run() {
     let sent = 0;
     for (;;) {
-      const it = S.items.find((x) => x.st !== 'ok');
+      const it = S.items.find((x) => x.st !== 'ok' && !(o.skipErr && x.st === 'err')); // POS:W2: skipErr – תור בלי מספור (החזרות): שגיאה קבועה לא עוצרת את השאר
       if (!it) break;
       if (it.st === 'err') break; // שגיאה קבועה – עוצרים עד טיפול (retryErr)
       if (!online()) { lastNet = false; break; }
@@ -104,7 +104,8 @@ function queue(o) {
         it.st = 'err'; it.err = String(e && e.message || 'שגיאה').slice(0, 200); it.reason = rs; save(); emit();
         break;
       }
-      it.st = 'ok'; it.okAt = now(); it.res = r && typeof r === 'object' ? { id: r.id, seq: r.seq, gross: r.gross, dup: !!r.dup } : r;
+      // POS:W2: גם המסמכים (מספר המסמך הרשמי לקבלה) ופרטי ההחזרה – כדי להציג אותם גם כשהתשובה הגיעה ברקע
+      it.st = 'ok'; it.okAt = now(); it.res = r && typeof r === 'object' ? JSON.parse(JSON.stringify({ id: r.id, seq: r.seq, gross: r.gross, dup: !!r.dup, docs: Array.isArray(r.docs) ? r.docs.map((d) => ({ t: d.t, id: d.id, no: d.no })) : undefined, amt: r.amt, debtOff: r.debtOff, refunds: r.refunds, vouchers: r.vouchers })) : r;
       delete it.err; delete it.reason;
       S.lastOk = it.okAt; fails = 0; lastNet = true; sent += 1;
       save(); emit();
@@ -134,6 +135,8 @@ function queue(o) {
       for (const it of S.items) if (it.st !== 'ok' && it.payload && it.payload.seq != null) { n += 1; if (it.seq0 == null) it.seq0 = it.seq; it.seq = n; it.payload.seq = n; }
       S.seq = Math.max(n, from - 1); save(); emit(); return S.seq;
     },
+    // POS:W2: פריט שנדחה מיד, כשהקופאי עוד מול המסך (החזרה שהשרת דחה) – יוצא מהתור, כדי שאפשר יהיה לתקן ולשלוח מחדש. פריט שנשלח – לא נמחק
+    drop: (reqId) => { const n = S.items.length; S.items = S.items.filter((x) => x.reqId !== reqId || x.st === 'ok'); if (S.items.length !== n) { save(); emit(); } return n - S.items.length; },
     // שגיאה קבועה שטופלה (למשל הקופה הופעלה מחדש) – ניסיון נוסף
     retryErr: () => { for (const it of S.items) if (it.st === 'err') it.st = 'wait'; save(); emit(); return flush(); },
     netChanged: (up) => { lastNet = up ? null : false; emit(); if (up) { fails = 0; flush(); } },

@@ -320,5 +320,23 @@ describe('pos-data – מכירה בלי רשת וסנכרון (מול החוז�
     assert.equal(PD.toProd({ id: 'a', name: 'x', price: 10, bp: { b1: 9.5 } }, 'b1').price, 950);
     assert.equal(PD.toProd({ id: 'a', name: 'x', price: 10, on: false }, '_'), null);
     assert.equal(PD.toProd({ id: 'a', name: 'x', price: 'abc' }, '_'), null);
+    // POS:W2: הקטגוריה עוברת (אריחים, מבצע על קטגוריה)
+    assert.equal(PD.toProd({ id: 'a', name: 'x', price: 10, cat: 'c7' }, '_').cat, 'c7');
+    assert.equal(PD.toProd({ id: 'a', name: 'x', price: 10 }, '_').cat, '');
+  });
+
+  it('POS:W2: תור עם skipErr – שגיאה קבועה לא עוצרת את הבאים; drop מוציא פריט שנדחה; התשובה שומרת את המסמכים', async () => {
+    const st = OFF.memStore();
+    const sent = [];
+    const q = OFF.queue({ store: st, key: 't', timer: fastTimer, skipErr: true, send: async (it) => { sent.push(it.reqId); if (it.payload.bad) { const e = new Error('נדחה'); e.code = 'failed-precondition'; e.details = { reason: 'ret-qty' }; throw e; } return { id: 'K1-R00000' + sent.length, amt: 100, docs: [{ t: 'cr', id: 'crD-K1-1', no: 7, extra: 'x' }] }; } });
+    q.add({ reqId: 'a1', fn: 'posReturn', payload: { bad: true } });
+    q.add({ reqId: 'a2', fn: 'posReturn', payload: {} });
+    await q.flush(); await tick(); await q.flush();
+    assert.equal(q.mark('a1'), '!'); assert.equal(q.mark('a2'), '✓');
+    assert.deepEqual(q.item('a2').res.docs, [{ t: 'cr', id: 'crD-K1-1', no: 7 }]);
+    assert.equal(q.item('a2').res.amt, 100);
+    assert.equal(q.drop('a1'), 1); assert.equal(q.item('a1'), null);
+    assert.equal(q.drop('a2'), 0, 'פריט שנשלח לא נמחק');
+    assert.equal(q.status().net, 'on');
   });
 });

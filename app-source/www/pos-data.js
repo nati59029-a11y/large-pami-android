@@ -19,7 +19,7 @@
    seq – המספר הבא של הקופה, מהמונה המקומי (כמו בלי רשת), כך שמספר הקבלה ידוע מיד ושווה למספר בשרת (K1-000124).
    אם השרת דוחה את המספר (seq-used / seq-gap – למשל אחרי ניקוי המכשיר) – כל מה שממתין ממוספר מחדש מהמונה בשרת, והמספר הישן נשמר (no0).
    מכשיר שלא רשום כקופה (pos-base: "רישום המכשיר הזה") – מצב תרגול: מספרים T000001, לא נשלח לשרת לעולם.
-   החזרות: אין עדיין פונקציית שרת – נשמרות במכשיר בלבד (srv:false) עד שלב 1.
+   החזרות: saveReturn – במכשיר בלבד (srv:false; מצב תרגול). POS:W2: returnSrv – ל-posReturn של ש2 דרך תור נפרד עם reqId (ראו rq).
    PosDataCore.create(deps) – הליבה בלי דפדפן (לבדיקות). בדפדפן deps מחוברים ל-fnCall / fsx / SY / localStorage. */
 (function (root) {
 'use strict';
@@ -35,7 +35,8 @@ function toProd(d, br) {
   if (!d || !d.id || !d.name || d.on === false) return null;
   const sh = d.bp && typeof d.bp === 'object' && typeof d.bp[br] === 'number' ? d.bp[br] : +d.price;
   if (!Number.isFinite(sh) || sh < 0) return null;
-  return { id: String(d.id), name: String(d.name), barcode: d.barcode ? String(d.barcode) : '', sku: d.sku ? String(d.sku) : '', price: Math.round(Math.round(sh * 10000) / 100), al: Array.isArray(d.al) ? d.al.filter((x) => typeof x === 'string') : [] };
+  // POS:W2: cat – הקטגוריה של המוצר (prod.cat, כמו בשרת): אריחים לפי קטגוריה, ומבצע על קטגוריה מחושב במכשיר כמו ב-posSale
+  return { id: String(d.id), name: String(d.name), barcode: d.barcode ? String(d.barcode) : '', sku: d.sku ? String(d.sku) : '', price: Math.round(Math.round(sh * 10000) / 100), al: Array.isArray(d.al) ? d.al.filter((x) => typeof x === 'string') : [], cat: typeof d.cat === 'string' ? d.cat : '' };
 }
 
 /* deps: { store, key, dev()→'K1'|'', inst()→string, br()→'_', cashier()→{id,name}, call(fn,data)→Promise, devSeq()→Promise<lastSeq>,
@@ -67,6 +68,32 @@ function create(deps) {
     Q.on((s) => { for (const f of netSubs) { try { f(s); } catch (e) { /* */ } } });
     return Q;
   }
+  // POS:W2 – החזרות לשרת (posReturn): תור נפרד בלי מספור (השרת ממספר R לכל קופה). אותו reqId נשלח שוב עד תשובה – השרת מחזיר את
+  // ההחזרה הקיימת (dup), ולכן אין החזרה כפולה. החזרה שנדחתה (למשל אין יתרה להחזרה) לא עוצרת את שאר התור (skipErr).
+  // החזרה על מכירה שעוד בתור המכירות – מחכה לה (שגיאה זמנית), ומספר המכירה נקבע ברגע השליחה (_sr = reqId של המכירה, אחרי מספור מחדש).
+  let RQ = null, RQK = '';
+  function rq() {
+    const k = base() + ':ret';
+    if (RQ && RQK === k) return RQ;
+    RQK = k;
+    RQ = OFF.queue({
+      store, key: k, now, timer: deps.timer, online: deps.online, skipErr: true,
+      send: (it) => {
+        const p = Object.assign({}, it.payload), sr = p._sr;
+        delete p._sr;
+        if (sr) {
+          const w = q().item(sr);
+          if (w && w.st !== 'ok') { const e = new Error('המכירה המקורית עוד לא נשלחה לשרת'); e.code = 'unavailable'; return Promise.reject(e); }
+          const s = ledger().sales.find((x) => x.reqId === sr);
+          if (s && s.id) p.sale = s.id;
+        }
+        return deps.call(it.fn, p);
+      },
+    });
+    RQ.on(() => { const s = q().status(); for (const f of netSubs) { try { f(s); } catch (e) { /* */ } } });
+    return RQ;
+  }
+  const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); });
   function ledger() {
     const k = base() + ':led';
     if (L && LK === k) return L;
@@ -110,7 +137,7 @@ function create(deps) {
     if (seqSynced || !dev() || !deps.online()) return;
     try { const n = await deps.devSeq(); if (Number.isInteger(n)) { q().syncSeq(n); seqSynced = true; } } catch (e) { /* בלי רשת – המונה המקומי */ }
   }
-  function decorate(s) { const o = clone(s); o.sync = s.practice ? 'T' : q().mark(s.reqId) || '✓'; const it = q().item(s.reqId); if (it && it.res && it.res.id) o.srvId = it.res.id; return o; }
+  function decorate(s) { const o = clone(s); o.sync = s.practice ? 'T' : q().mark(s.reqId) || '✓'; const it = q().item(s.reqId); if (it && it.res && it.res.id) o.srvId = it.res.id; if (it && it.res && Array.isArray(it.res.docs)) o.docs = it.res.docs; return o; }
   const shiftOf = () => { const t = now(); return { id: (dev() || 'T') + '-' + dayOf(t).replace(/-/g, ''), no: 1, openedAt: new Date(dayOf(t) + 'T00:00:00').getTime() }; };
   const API = {
     isMock: false,
@@ -140,6 +167,9 @@ function create(deps) {
           if (sale.cust) payload.cust = String(sale.cust);
           if (sale.note) payload.note = String(sale.note).slice(0, 300);
           if (sale.manDisc) payload.manDisc = { amt: sale.manDisc.amt, why: String(sale.manDisc.why || '').slice(0, 80) }; // הסכום שהקופאי ראה (לא האחוז – בלי הפרשי עיגול)
+          // POS:W2: אישורי ההנחה (ש5, posAuth) – השרת מאמת מי אישר, תפקיד ותקרה, ומסמן את האישור כמנוצל
+          const aps = [...new Set(sale.lines.map((l) => l.mdisc && l.mdisc.ap).concat(sale.manDisc && sale.manDisc.ap).filter((x) => typeof x === 'string' && x))];
+          if (aps.length) payload.aps = aps.slice(0, 5);
           payload.lines = sale.lines.map((l, i) => {
             const o = payload.lines[i];
             if (l.gen || !o.pid || o.pid === 'gen') { delete o.pid; o.free = true; }
@@ -163,6 +193,36 @@ function create(deps) {
       ledSave();
       return { id, no, at };
     },
+    // POS:W2 – החזרה בשרת. o = { reqId?, sale (מזהה K1-000001), saleReq?, saleNo?, items:[{i,qty}], why, cond?, tag, dmg?, refunds?, debtTo?, aps?, lines?, total? }
+    //   → { reqId, res } (השרת אישר: res = { id, amt, debtOff, refunds, vouchers, docs }) | { reqId, pend:true } (בתור – יישלח כשהרשת חוזרת, עם אותו reqId).
+    //   השרת דחה – שגיאה עם reason (ret-qty, ret-over-method, ap-bad …), וההחזרה לא נשמרת.
+    returnSrv: async (o) => {
+      const d = dev();
+      if (!d) { const e = new Error('מצב תרגול – החזרה לא נשלחת לשרת'); e.reason = 'practice'; throw e; }
+      const reqId = o.reqId || rid(rand), at = now(), led = ledger();
+      const payload = { op: 'do', reqId, dev: d, inst: deps.inst(), sale: o.sale, items: o.items, why: String(o.why || '').slice(0, 80), tag: o.tag === true };
+      if (o.cond) payload.cond = String(o.cond).slice(0, 120);
+      if (o.dmg === true) payload.dmg = true;
+      if (Array.isArray(o.refunds) && o.refunds.length) payload.refunds = o.refunds;
+      if (o.debtTo) payload.debtTo = o.debtTo;
+      if (Array.isArray(o.aps) && o.aps.length) payload.aps = o.aps.slice(0, 5);
+      if (o.saleReq) payload._sr = o.saleReq;
+      const ex = rq().item(reqId);
+      rq().add({ reqId, fn: 'posReturn', kind: 'ret', payload });
+      if (!ex) { led.rets.push({ id: '', reqId, saleId: o.sale, saleNo: o.saleNo, lines: (o.lines || []).map((l) => ({ pid: l.pid, qty: l.qty })), total: o.total || 0, at, day: dayOf(at), dev: d, cashier: deps.cashier().id, shift: shiftOf().id, srv: true }); ledSave(); }
+      if (deps.online()) await Promise.race([rq().flush(), sleep(o.wait || 8000)]);
+      const it = rq().item(reqId);
+      const lr = ledger().rets.find((r) => r.reqId === reqId);
+      if (it && it.st === 'ok') { if (lr && it.res) { lr.id = it.res.id; ledSave(); } return { reqId, res: it.res }; }
+      if (it && it.st === 'err') {
+        rq().drop(reqId);
+        const L = ledger(); L.rets = L.rets.filter((r) => r.reqId !== reqId); ledSave();
+        const e = new Error(it.err || 'ההחזרה נדחתה'); e.reason = it.reason; throw e;
+      }
+      return { reqId, pend: true };
+    },
+    retPending: () => rq().pending(),
+    retItem: (reqId) => rq().item(reqId),
     dayStats: async () => {
       const d = dayOf(now()), l = ledger(), S = l.sales.filter((s) => s.day === d), R = l.rets.filter((r) => r.day === d);
       return { sales: S.length, total: S.reduce((a, s) => a + s.total, 0), returns: R.length, returnsTotal: R.reduce((a, r) => a + r.total, 0), pending: q().pending() };
@@ -172,13 +232,13 @@ function create(deps) {
     stats: () => { const w = q().items().filter((x) => x.st !== 'ok'); return { n: w.length, oldest: w.length ? Math.min(...w.map((x) => x.at || 0)) : 0 }; },
     onNet: (f) => { netSubs.add(f); return () => netSubs.delete(f); },
     mark: (reqId) => q().mark(reqId),
-    flush: () => q().flush(),
+    flush: () => { if (dev()) rq().flush(); return q().flush(); },
     retry: () => q().retryErr(),
-    netChanged: (up) => { if (up) seqSynced = false; q().netChanged(up); },
+    netChanged: (up) => { if (up) seqSynced = false; q().netChanged(up); if (dev()) rq().netChanged(up); },
     cart: () => OFF.cart({ store, key: base() }),
     practice: () => !dev(),
     _q: () => q(),
-    _reset: () => { store.del(base() + ':q'); store.del(base() + ':led'); store.del(base() + ':cart'); Q = null; L = null; },
+    _reset: () => { store.del(base() + ':q'); store.del(base() + ':led'); store.del(base() + ':cart'); store.del(base() + ':ret:q'); Q = null; L = null; RQ = null; },
   };
   return API;
 }
@@ -224,7 +284,7 @@ function data() {
 }
 // ממשק קבוע (window.PosData) שמפנה לעסק / לקופה הנוכחיים
 const PD = {};
-['getSession', 'getProducts', 'refreshProducts', 'search', 'searchSync', 'explain', 'byBarcode', 'saveSale', 'getSales', 'getSale', 'returnedQty', 'saveReturn', 'dayStats',
+['getSession', 'getProducts', 'refreshProducts', 'search', 'searchSync', 'explain', 'byBarcode', 'saveSale', 'getSales', 'getSale', 'returnedQty', 'saveReturn', 'returnSrv', 'retPending', 'retItem', 'dayStats',
   'net', 'stats', 'onNet', 'mark', 'flush', 'retry', 'netChanged', 'cart', 'practice', '_reset'].forEach((k) => { PD[k] = function () { return data()[k].apply(null, arguments); }; });
 PD.isMock = false;
 PD.normalize = root.PosCatalog.norm;

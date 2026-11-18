@@ -409,3 +409,177 @@ describe('posPark, posDoc, posPromo, כללים', () => {
     for (const f of ['pos-sale.js', 'pos-doc.js']) assert.ok(!/(tx|b|batch|ref|\))\.delete\(/.test(fs.readFileSync(path.join(__dirname, '../functions', f), 'utf8')), f);
   });
 });
+
+// ---------------------------------------------------------------------------------
+// POS:W2 – איחוד גל 2, סבב 2 (18.11): אישור אחראי (ש5) במכירה ובהחזרה, החזרה מהקופה דרך התור (pos-data → posReturn), קטגוריה במבצע
+describe('POS:W2 – אישור אחראי (ש5) ב-posSale וב-posReturn', () => {
+  const AG = require('../functions/lib/pos-agg');
+  const AU = () => require('../functions/pos-auth.js')._core;
+  const PIN = { [LEAD]: '4826', [MGR]: '7391' };
+  const auth = async (uid, data) => { try { return { ok: true, r: await AU().call()(req(uid, data)) }; } catch (e) { return { ok: false, reason: e.details && e.details.reason, msg: e.message }; } };
+  const appr = async (uid, by, act, pct, need) => {
+    const r = await auth(uid, Object.assign({ op: 'approve', act, by, pin: PIN[by] }, pct != null ? { pct } : {}, need ? { need } : {}));
+    assert.equal(R(r), 'ok', r.msg); assert.ok(r.r.ap); return r.r.ap;
+  };
+  beforeEach(async () => { await seed(); for (const [u, p] of Object.entries(PIN)) { const h = AG.pinHash(p); await set('pospin/' + u, { h: h.h, s: h.s, fails: 0, lockUntil: 0, upd: 1 }); } });
+  const ten = (o) => Object.assign({ lines: [L({ pid: 'pm', n: 'מגש', unit: 10000 })], manDisc: { pct: 10, why: 'לקוח קבוע' }, pays: [{ m: 'cash', amt: 9000 }] }, o);
+
+  it('leads: הקופאי רואה רק מי שיכול לאשר (אחראי / מנהל עם קוד), בלי פרטי הקוד', async () => {
+    const r = await auth(CASH, { op: 'leads' });
+    assert.equal(R(r), 'ok');
+    assert.deepEqual(r.r.staff.map((x) => [x.uid, x.role]).sort(), [[LEAD, 'lead'], [MGR, 'manager']].sort());
+    assert.ok(r.r.staff.every((x) => !('h' in x) && !('s' in x) && !('hasPin' in x)));
+  });
+
+  it('קופאי + אישור אחראי תקין (10%) – עובר; נרשם מי אישר; האישור מנוצל: שליחה חוזרת (אותו reqId) – אותה מכירה, מכירה אחרת – נדחית', async () => {
+    const ap = await appr(CASH, LEAD, 'disc', 10);
+    const o = sale(ten({ aps: [ap] }));
+    const r = await call('posSale', CASH, o);
+    assert.equal(R(r), 'ok', r.msg);
+    const s = await get('possale/' + r.r.id);
+    assert.equal(s.gross, 9000); assert.deepEqual(s.aps, [{ id: ap, by: LEAD, role: 'lead' }]);
+    const lg = await get('poslog/' + ap);
+    assert.equal(lg.used, true); assert.equal(lg.sale, r.r.id);
+    const again = await call('posSale', CASH, o);
+    assert.equal(R(again), 'ok'); assert.equal(again.r.dup, true); assert.equal(again.r.id, r.r.id);
+    assert.equal(R(await call('posSale', CASH, sale(ten({ aps: [ap] })))), 'ap-used');
+  });
+
+  it('בלי אישור / אישור מזויף / של קופאי אחר / מסוג אחר / מבנה לא תקין – נדחה, ושום מכירה לא נשמרת', async () => {
+    assert.equal(R(await call('posSale', CASH, sale(ten()))), 'disc-role');
+    assert.equal(R(await call('posSale', CASH, sale(ten({ aps: ['FakeApproval12345678'] })))), 'ap-bad');
+    const forLead = await appr(LEAD, MGR, 'disc', 10); // ניתן לאחראי – הקופאית לא יכולה להשתמש בו
+    assert.equal(R(await call('posSale', CASH, sale(ten({ aps: [forLead] })))), 'ap-bad');
+    const voidAp = await appr(CASH, LEAD, 'void');
+    assert.equal(R(await call('posSale', CASH, sale(ten({ aps: [voidAp] })))), 'ap-bad');
+    assert.equal(R(await call('posSale', CASH, sale(ten({ aps: ['x'] })))), 'bad-ap');
+    assert.equal(R(await call('posSale', CASH, sale(ten({ aps: 'abc' })))), 'bad-ap');
+    assert.equal((await all('possale')).length, 0);
+    assert.equal((await get('poslog/' + voidAp)).used, false);
+  });
+
+  it('תקרה: אחראי עד 10% – 15% עם אישור אחראי נדחה (גם בשרת); עם אישור מנהל – עובר; מתחת למחיר מינימום – רק מנהל', async () => {
+    const ap = await appr(CASH, LEAD, 'disc', 10);
+    const p15 = ten({ manDisc: { pct: 15, why: 'x' }, pays: [{ m: 'cash', amt: 8500 }] });
+    assert.equal(R(await call('posSale', CASH, sale(Object.assign({}, p15, { aps: [ap] })))), 'disc-over');
+    assert.equal((await get('poslog/' + ap)).used, false, 'מכירה שנדחתה לא מנצלת את האישור');
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'disc', pct: 15, by: LEAD, pin: PIN[LEAD] })), 'need-manager');
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'disc', pct: 5, by: LEAD, pin: PIN[LEAD], need: 'manager' })), 'need-manager');
+    const m = await appr(CASH, MGR, 'disc', 15);
+    const r = await call('posSale', CASH, sale(Object.assign({}, p15, { aps: [m] })));
+    assert.equal(R(r), 'ok'); assert.equal((await get('possale/' + r.r.id)).discOvr, true); // 85 ₪ < מינימום 90 ₪ – מנהל, נרשם
+    const ap2 = await appr(CASH, LEAD, 'disc', 10);
+    // 5.5% מכל העגלה (בתוך התקרה של אחראי), אבל המגש יורד ל-89 ₪ – מתחת למינימום 90 ₪
+    const below = { lines: [L({ pid: 'pm', n: 'מגש', unit: 10000, mdisc: { amt: 1100, why: 'x' } }), L({ pid: 'pa', n: 'צלחת', unit: 1250, qty: 8 })], pays: [{ m: 'cash', amt: 18900 }] };
+    assert.equal(R(await call('posSale', CASH, sale(Object.assign({}, below, { aps: [ap2] })))), 'below-min');
+  });
+
+  it('החזרה: קופאי בלי אישור – נדחה; עם אישור אחראי – עובר; 250 ₪ עם אישור אחראי – דורש מנהל, עם אישור מנהל – עובר; אישור מזויף – נדחה', async () => {
+    const s = await sell(CASH, { lines: [L({ qty: 6 })], pays: [{ m: 'cash', amt: 29940 }] });
+    const ret = (o) => Object.assign({ reqId: reqId(), dev: 'K1', inst: INST1, why: 'לא מתאים', tag: true, sale: s.id, items: [{ i: 0, qty: 1 }] }, o);
+    assert.equal(R(await call('posReturn', CASH, ret())), 'ret-lead');
+    assert.equal(R(await call('posReturn', CASH, ret({ aps: ['FakeApproval12345678'] }))), 'ap-bad');
+    const discAp = await appr(CASH, LEAD, 'disc', 5);
+    assert.equal(R(await call('posReturn', CASH, ret({ aps: [discAp] }))), 'ap-bad');
+    const a1 = await appr(CASH, LEAD, 'ret');
+    const o1 = ret({ aps: [a1] });
+    const r1 = await call('posReturn', CASH, o1);
+    assert.equal(R(r1), 'ok', r1.msg); assert.equal(r1.r.docs[0].t, 'cr');
+    assert.deepEqual((await get('posret/' + r1.r.id)).aps, [{ id: a1, by: LEAD, role: 'lead' }]);
+    const d1 = await call('posReturn', CASH, o1); // אותו reqId (האישור כבר מנוצל) – אותה החזרה, לא נדחה ולא כפול
+    assert.equal(R(d1), 'ok'); assert.equal(d1.r.dup, true); assert.equal(d1.r.id, r1.r.id);
+    assert.equal(R(await call('posReturn', CASH, ret({ aps: [a1] }))), 'ap-used');
+    const a2 = await appr(CASH, LEAD, 'ret');
+    assert.equal(R(await call('posReturn', CASH, ret({ items: [{ i: 0, qty: 5 }], aps: [a2] }))), 'ret-mgr');
+    const a3 = await appr(CASH, MGR, 'ret', null, 'manager');
+    const r3 = await call('posReturn', CASH, ret({ items: [{ i: 0, qty: 5 }], aps: [a3] }));
+    assert.equal(R(r3), 'ok'); assert.equal(r3.r.amt, 5 * 4990);
+    assert.equal((await all('posret', ['sale', s.id])).length, 2);
+  });
+});
+
+describe('POS:W2 – החזרה מהקופה (pos-data.returnSrv → posReturn) ומבצע לפי קטגוריה', () => {
+  const path = require('node:path');
+  const W = path.join(__dirname, '..', '..', 'app-source', 'www');
+  const OFF = require(path.join(W, 'pos-offline.js'));
+  const PDC = require(path.join(W, 'pos-data.js'));
+  const PPW = require(path.join(W, 'pos-promo.js'));
+  beforeEach(seed);
+  function device(uid) {
+    const net = { up: true, lose: 0, n: 0 };
+    const D = PDC.create({
+      store: OFF.memStore(), key: 'lp-pos:' + A, timer: { set: (f) => setTimeout(f, 1), clear: clearTimeout },
+      dev: () => 'K1', inst: () => INST1, br: () => 'b1', cashier: () => ({ id: uid, name: 'x' }), online: () => net.up,
+      call: async (fn, data) => {
+        if (!net.up) { const e = new Error('אין חיבור לאינטרנט'); e.offline = true; throw e; }
+        const r = await call(fn, uid, JSON.parse(JSON.stringify(data)));
+        if (!r.ok) { const e = new Error(r.msg); e.code = r.code; e.details = { reason: r.reason }; throw e; }
+        if (net.lose && ++net.n % 2 === 1) { const e = new Error('אין חיבור לאינטרנט'); e.offline = true; throw e; } // השרת רשם, התשובה אבדה
+        return r.r;
+      },
+      devSeq: async () => (await get('posdev/K1')).lastSeq || 0,
+      loadProducts: async () => (await all('prod')).map((p) => Object.assign({}, p, { id: p._id })),
+    });
+    return { D, net };
+  }
+  const drain = async (D) => { for (let i = 0; i < 300 && (D.net().pending || D.retPending()); i++) { await D.flush(); await new Promise((r) => setTimeout(r, 3)); } };
+  const devSale = (unit, qty, m) => ({ lines: [{ pid: 'p1', name: 'מטען', price: unit, qty, total: unit * qty }], total: unit * qty, pays: [{ m: m || 'cash', amt: unit * qty }] });
+
+  it('עם רשת: הקבלה מקבלת מספר מסמך; החזרה – חשבונית זיכוי; אותה בקשה פעמיים – החזרה אחת; יותר ממה שנשאר / יותר ממה ששולם באמצעי – נדחה', async () => {
+    const { D } = device(LEAD);
+    const r = await D.saveSale(devSale(4990, 2));
+    await drain(D);
+    const sl = await D.getSale(r.no);
+    assert.equal(sl.srvId, 'K1-000001'); assert.equal(sl.docs[0].t, 'ir'); assert.ok(sl.docs[0].no != null, 'מספר המסמך הרשמי');
+    const o = { reqId: 'rqret00000001x', sale: sl.srvId, saleReq: sl.reqId, saleNo: sl.no, items: [{ i: 0, qty: 1 }], why: 'לא מתאים', tag: true, refunds: [{ m: 'cash', amt: 4990 }], lines: [{ pid: 'p1', qty: 1 }], total: 4990 };
+    const a = await D.returnSrv(o);
+    assert.equal(a.res.id, 'K1-R000001'); assert.equal(a.res.amt, 4990); assert.equal(a.res.docs[0].t, 'cr');
+    const b = await D.returnSrv(o); // לחיצה כפולה / שליחה חוזרת
+    assert.equal(b.res.id, 'K1-R000001');
+    assert.equal((await all('posret')).length, 1);
+    await assert.rejects(D.returnSrv(Object.assign({}, o, { reqId: 'rqret00000002x', items: [{ i: 0, qty: 2 }], refunds: [{ m: 'cash', amt: 9980 }] })), (e) => e.reason === 'ret-qty');
+    await assert.rejects(D.returnSrv(Object.assign({}, o, { reqId: 'rqret00000003x', refunds: [{ m: 'cash', amt: 5990 }] })), (e) => e.reason === 'ret-sum');
+    assert.equal(D.retPending(), 0, 'החזרה שנדחתה לא נשארת בתור');
+    const ok2 = await D.returnSrv(Object.assign({}, o, { reqId: 'rqret00000004x' }));
+    assert.equal(ok2.res.id, 'K1-R000002');
+    await assert.rejects(D.returnSrv(Object.assign({}, o, { reqId: 'rqret00000005x' })), (e) => e.reason === 'ret-qty'); // כבר הוחזר הכול
+    const s = await get('possale/K1-000001');
+    assert.deepEqual(s.retQty, [2]); assert.equal(s.retAmt[0], 9980); assert.deepEqual(s.retByM, { cash: 9980 });
+  });
+
+  it('בלי רשת: מכירה והחזרה נכנסות לתור; כשהרשת חוזרת – המכירה קודם, ההחזרה אחריה עם אותו reqId, גם כשהתשובות הולכות לאיבוד – בלי כפילות', async () => {
+    const { D, net } = device(LEAD);
+    net.up = false;
+    const r = await D.saveSale(devSale(4990, 1));
+    const sl = await D.getSale(r.no);
+    assert.equal(sl.docs, undefined, 'בלי רשת אין עדיין מסמך – הקבלה "ממתין למסמך"');
+    const p = await D.returnSrv({ sale: sl.id, saleReq: sl.reqId, saleNo: sl.no, items: [{ i: 0, qty: 1 }], why: 'לא מתאים', tag: true, lines: [{ pid: 'p1', qty: 1 }], total: 4990 });
+    assert.equal(p.pend, true); assert.equal(D.retPending(), 1);
+    net.up = true; net.lose = 1; D.netChanged(true);
+    await drain(D);
+    assert.equal(D.retPending(), 0);
+    const it = D.retItem(p.reqId);
+    assert.equal(it.st, 'ok'); assert.equal(it.res.id, 'K1-R000001'); assert.equal(it.res.docs[0].t, 'cr');
+    assert.equal((await all('possale')).length, 1); assert.equal((await all('posret')).length, 1);
+    assert.equal((await get('posret/K1-R000001')).reqId, p.reqId);
+    assert.ok((await D.getSale(r.no)).docs.length, 'המסמך הגיע כשהרשת חזרה');
+  });
+
+  it('מבצע על קטגוריה: הקטגוריה מ-pos-data (prod.cat) – הסכום במכשיר זהה לשרת; בלי קטגוריה – המכשיר טועה והשרת דוחה', async () => {
+    await set('promo/cat1', { type: 'pct', pct: 20, cats: ['c1'], on: true, n: 'קטגוריה' });
+    const promos = (await all('promo')).map((x) => Object.assign({}, x, { id: x._id }));
+    const prod = PDC.toProd(Object.assign({ id: 'p1' }, await get('prod/p1')), 'b1');
+    assert.equal(prod.cat, 'c1');
+    const devGross = (withCat) => {
+      const r = PPW.apply([{ pid: prod.id, cat: withCat ? prod.cat : undefined, qty: 2, unit: prod.price }], promos, { at: Date.now() });
+      return prod.price * 2 - r.lines[0].pdisc;
+    };
+    const g = devGross(true);
+    assert.equal(g, 9980 - 1996);
+    const r = await call('posSale', CASH, sale({ lines: [L({ qty: 2 })], gross: g, pays: [{ m: 'cash', amt: g }] }));
+    assert.equal(R(r), 'ok', r.msg); assert.equal(r.r.gross, g);
+    const bad = devGross(false);
+    assert.equal(bad, 9980);
+    assert.equal(R(await call('posSale', CASH, sale({ lines: [L({ qty: 2 })], gross: bad, pays: [{ m: 'cash', amt: bad }] }))), 'bad-total');
+  });
+});

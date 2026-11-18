@@ -95,7 +95,7 @@ function undo(){const u=S.undo;if(!u||Date.now()>u.until)return;const i=S.cart.f
  S.undo=null;clearTimeout(undoT);D().log('undoAdd',{pid:u.key});cart();cust();UI().say('ההוספה בוטלה')}
 
 /* ---------- עגלה ---------- */
-function cart(){const el=R&&R.querySelector('#posCart');if(!el)return;const{E,fmt}=UI();const t=calc(),st=view('stock'),disc=can(UI().cfg('discRoles')||'lead');
+function cart(){const el=R&&R.querySelector('#posCart');if(!el)return;const{E,fmt}=UI();const t=calc(),st=view('stock'),disc=canDisc();
  el.innerHTML=`<div class="pos-cbar"><button class="pos-b g" data-pa="cust" aria-label="${S.cust?'לקוח: '+E(S.cust.name):'בחירת לקוח'}">${S.cust?'👤 '+E(S.cust.name):'לקוח'}</button><button class="pos-b g" data-pa="note" aria-label="הערה למכירה">${S.note?'הערה ✓':'הערה'}</button>${disc?`<button class="pos-b g" data-pa="disc" ${S.cart.length?'':'disabled'} aria-label="הנחה">הנחה</button>`:''}<button class="pos-b g" data-pa="park" ${S.cart.length?'':'disabled'} aria-label="השהיית העגלה">השהיה</button></div>
  <div class="pos-lines" id="posLines">${t.lines.length?t.lines.map(l=>`<div class="pos-line${l.key===S.sel?' sel':''}" data-k="${l.key}">
   <div class="n"><b>${E(l.name)}</b><small>${fmt(l.unit)}${l.gen?` <button class="pos-lnk" data-pa="price" data-k="${l.key}" aria-label="שינוי מחיר ${E(l.name)}">שינוי מחיר</button>`:''}${st&&l.stock!=null?` · מלאי ${l.stock-inCart(l.pid)}`:''}${l.pdisc?` · <span class="pos-promo">מבצע −${fmt(l.pdisc)}</span>`:''}${l.mdisc?` · <span class="pos-promo">הנחה −${fmt(l.mdisc.amt)}</span>`:''}</small></div>
@@ -114,7 +114,9 @@ async function clearCart(){if(!S.cart.length)return;if(UI().cfg('confirmClearCar
 function setQty(key,q){q=Math.floor(+q);const i=S.cart.findIndex(l=>l.key===key);if(i<0)return;if(!(q>0)){delLine(key);return}S.cart[i]=Object.assign({},S.cart[i],{qty:Math.min(q,99999)});S.sel=key;cart();cust()}
 
 /* ---------- הנחה ידנית (ס7, נ7–נ8): רק אחראי ומעלה. אחראי עד discMax.lead; מעבר – מנהל. מתחת למחיר מינימום – מנהל בלבד ---------- */
-async function discount(){const{E,fmt,cfg,modal,parseAmt}=UI();if(!can(cfg('discRoles')||'lead')||!S.cart.length)return;const sel=S.cart.find(l=>l.key===S.sel)||S.cart[S.cart.length-1];
+/* POS:W2 (איחוד): עם חלון האישור האמיתי של ש5 (PosApprove) – גם קופאי מבקש הנחה, והאחראי / המנהל מאשר בקוד שלו */
+const canDisc=()=>can(UI().cfg('discRoles')||'lead')||!!root.PosApprove;
+async function discount(){const{E,fmt,cfg,modal,parseAmt}=UI();if(!canDisc()||!S.cart.length)return;const sel=S.cart.find(l=>l.key===S.sel)||S.cart[S.cart.length-1];
  const v=await modal(`<div class="pos-sh"><h2>הנחה</h2></div>
   <div class="pos-seg" role="radiogroup" aria-label="על מה ההנחה"><button type="button" role="radio" aria-checked="true" data-sc="line">שורה: ${E(sel.name)}</button><button type="button" role="radio" aria-checked="false" data-sc="all">כל העגלה</button></div>
   <div class="pos-grid2"><label class="pos-f"><span>אחוז</span><input id="dPct" inputmode="decimal" dir="ltr" data-autof aria-label="הנחה באחוזים"></label><label class="pos-f"><span>או סכום (₪)</span><input id="dAmt" inputmode="decimal" dir="ltr" aria-label="הנחה בשקלים"></label></div>
@@ -127,8 +129,8 @@ async function discount(){const{E,fmt,cfg,modal,parseAmt}=UI();if(!can(cfg('disc
  if(amt>base){UI().toast('ההנחה גדולה מהסכום','bad');return}
  const eff=base?amt*100/base:0,max=(cfg('discMax')||{}).lead||0;let need=eff>max+1e-9?'mgr':'lead';
  const minOk=v.sc==='line'?(line.unit*line.qty-(line.pdisc||0)-amt)>=(sel.min||0)*line.qty:true;if(!minOk)need='mgr';
- const ap=await UI().approve({role:role(),need,text:'הנחה של '+fmt(amt)+(eff?' ('+Math.round(eff*10)/10+'%)':'')});if(!ap.ok)return;
- const rec={amt,why:v.why,by:ap.by};if(pct!=null)rec.pct=pct;
+ const ap=await UI().approve({role:role(),need,act:'disc',pct:eff,text:'הנחה של '+fmt(amt)+(eff?' ('+Math.round(eff*10)/10+'%)':'')});if(!ap.ok)return;
+ const rec={amt,why:v.why,by:ap.by};if(pct!=null)rec.pct=pct;if(ap.ap)rec.ap=ap.ap;/* POS:W2: מזהה האישור – השרת בודק אותו */
  if(v.sc==='line'){const i=S.cart.findIndex(l=>l.key===sel.key);S.cart[i]=Object.assign({},S.cart[i],{mdisc:rec})}else S.manDisc=rec;
  D().log(minOk?'disc':'discOvr',Object.assign({sc:v.sc},rec));cart();cust()}
 async function linePrice(key){const{modal,parseAmt}=UI();const l=S.cart.find(x=>x.key===key);if(!l||!l.gen)return;/* א 5.8: שינוי מחיר רק בשורת מוצר כללי */
@@ -162,7 +164,10 @@ async function finish(t,r){const{cfg,toast,fmt}=UI();S.busy=1;const s=S.sess||{}
  S.cart=[];S.cust=null;S.note='';S.manDisc=null;S.undo=null;S.chg=r.chg||0;S.busy=0;cart();cust();refresh();focusQ();
  UI().say('המכירה נשמרה. '+(r.chg?'עודף '+fmt(r.chg):''))}
 /* מכירה אחרונה (ס17): עותק, קבלת מתנה, שליחה */
-function rcptHtml(d,gift){const{E,fmt,hm,dmy,M_NAME}=UI();return`<div class="pos-rcpt${gift?' gift':''}" aria-label="${gift?'קבלת מתנה':'קבלה'}"><p class="pos-note">${d.doc==='inv+rc'?'חשבונית מס + קבלה':'חשבונית מס קבלה'} מס' ${E(d.no)} · ${dmy(d.at)} ${hm(d.at)} · קופאי ${E(d.cashierNo||'')}</p>
+/* POS:W2: מספר המסמך הרשמי מהשרת (docs), לא מספר המכירה הפנימי (ב מ8). עוד אין – "ממתין למסמך" */
+const DOCN={ir:'חשבונית מס קבלה',inv:'חשבונית מס',rc:'קבלה',cr:'חשבונית זיכוי'};
+const docTxt=d=>Array.isArray(d.docs)&&d.docs.length?d.docs.map(x=>(DOCN[x.t]||x.t)+' '+x.no).join(' · '):(root.PosData&&root.PosData.isMock?(d.doc==='inv+rc'?'חשבונית מס + קבלה':'חשבונית מס קבלה')+' מס\' '+d.no:'ממתין למסמך');
+function rcptHtml(d,gift){const{E,fmt,hm,dmy,M_NAME}=UI();return`<div class="pos-rcpt${gift?' gift':''}" aria-label="${gift?'קבלת מתנה':'קבלה'}"><p class="pos-note">${E(docTxt(d))} · ${dmy(d.at)} ${hm(d.at)} · קופאי ${E(d.cashierNo||'')}</p>
  ${d.lines.map(l=>`<div class="pos-kv"><span>${E(l.name)}${l.qty!==1?` <small>${l.qty}${gift?'':' × '+fmt(l.unit)}</small>`:''}</span>${gift?'':`<b>${fmt(l.tot)}</b>`}</div>${!gift&&l.disc?`<div class="pos-kv sm"><span>הנחה</span><b>−${fmt(l.disc)}</b></div>`:''}`).join('')}
  ${gift?'<p class="pos-note">קבלת מתנה – בלי מחירים</p>':`${d.sdisc?`<div class="pos-kv"><span>הנחת חשבון</span><b>−${fmt(d.sdisc)}</b></div>`:''}<div class="pos-kv big"><span>סה"כ</span><b id="rcptTotal">${fmt(d.gross)}</b></div><div class="pos-kv"><span>מתוכו מע"מ 18%</span><b>${fmt(d.vat)}</b></div>
  ${d.pays.map(p=>`<div class="pos-kv"><span>${E(M_NAME[p.m])}</span><b>${fmt(p.amt)}</b></div>`).join('')}${d.debt?`<div class="pos-kv"><span>הקפה</span><b>${fmt(d.debt)}</b></div>`:''}${d.chg?`<div class="pos-kv"><span>עודף</span><b>${fmt(d.chg)}</b></div>`:''}`}
@@ -173,7 +178,9 @@ async function last(){const{modal}=UI();const d=S.last;if(!d)return;
  if(v==='gift'){UI().Dev.print({kind:'gift',doc:d});D().log('giftRcpt',{no:d.no});await modal(`<div class="pos-sh"><h2>קבלת מתנה</h2></div>${rcptHtml(d,true)}<button class="pos-b w" data-v="no" data-def>סגירה</button>`,{label:'קבלת מתנה'})}
  if(v==='send'){D().log('send',{no:d.no});UI().toast('השליחה הדיגיטלית תגיע עם מודול הקבלות')}}
 async function ret(prefill){const r=await root.PosRet.open({role:role(),prefill});if(!r)return;UI().Dev.print({kind:'ret',doc:Object.assign({},r.ret,r.r)});
- if(r.ret.byM.cash)UI().Dev.openDrawer('refund');UI().toast('ההחזרה נשמרה: '+UI().fmt(r.ret.total));refresh()}
+ /* POS:W2: החזרה שעוד לא אושרה בשרת (בלי רשת) – בתור; המגירה לא נפתחת והכסף לא מוחזר עד שהשרת מאשר (ב ה15) */
+ if(r.r&&r.r.pend){UI().toast('אין רשת – ההחזרה ממתינה לשרת. אין להחזיר כסף עד שתאושר','warn');refresh();return}
+ if(r.ret.byM.cash)UI().Dev.openDrawer('refund');UI().toast('ההחזרה נשמרה: '+UI().fmt(r.r&&r.r.amt!=null?r.r.amt:r.ret.total));refresh()}
 
 /* ברקוד לא מוכר (א 5.7): הוספה מהירה – המוצר נוצר, נמכר באותה מכירה, מסומן fromPos והמנהל מקבל התראה */
 async function unknown(code){const{cfg,modal,E,parseAmt,toast}=UI();if(cfg('bc.unknown')!=='quickAdd'||cfg('bc.cashierCreate')==='never'){toast('ברקוד לא מוכר: '+code,'bad');return}

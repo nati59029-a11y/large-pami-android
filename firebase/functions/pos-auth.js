@@ -2,10 +2,11 @@
 // קופה (POS), ש5 – עובדים ו-PIN, ואישור אחראי. posAuth({ op, … }). אוסף pospin/{uid} = { h, s, fails, lockUntil, upd, setAt, setBy } – אף אחד לא קורא מהאפליקציה.
 //
 //   op 'list'                       → { staff: [{ uid, name, role, hasPin, locked, wait }] } – מנהל: עובדי הקופה ומצב הקוד.
+//   op 'leads'                      → { staff: [{ uid, name, role, locked }] } – POS:W2, כל מי שבקופה: מי יכול לאשר (אחראי / מנהל עם קוד).
 //   op 'set',    { pin, old? }      → { ok } – העובד קובע את הקוד שלו. כבר יש קוד – חייב old (ניסיון שגוי נספר לנעילה).
 //   op 'reset',  { uid }            → { ok } – איפוס קוד (ושחרור נעילה) – רק לבעלים (מנהל העסק / מנהל־על). נרשם ב-poslog.
 //   op 'verify', { uid?, pin, dev? } → { ok, uid, name, role } – כניסה / החלפת קופאי במסך הקופה. ברירת מחדל: הקוד של המתחבר.
-//   op 'approve',{ by, pin, act, pct?, ref?, dev? }
+//   op 'approve',{ by, pin, act, pct?, ref?, dev?, need? }   (need:'manager' – POS:W2: הקופה דורשת מנהל; רק מעלה)
 //                                   → { ok, ap, by, name, role, need } – אישור אחראי. by = מי שמאשר (ה-PIN שלו).
 //     act 'disc' – הנחה באחוזים (pct): עד discMax.cashier – בלי אישור; אחראי משמרת – עד 10% (ולא יותר מ-discMax.lead); מעל זה – מנהל.
 //     act 'void' | 'ret' | 'price' | 'drawer' – אחראי משמרת או מנהל.
@@ -25,8 +26,9 @@ const ACTS = ['disc', 'void', 'ret', 'price', 'drawer'];
 async function auth(request) {
   const input = inputObject(request);
   const op = input.op;
-  if (!['list', 'set', 'reset', 'verify', 'approve'].includes(op)) throw G.bad('bad-op', 'פעולה לא מוכרת');
+  if (!['list', 'leads', 'set', 'reset', 'verify', 'approve'].includes(op)) throw G.bad('bad-op', 'פעולה לא מוכרת');
   if (op === 'list') return list(request);
+  if (op === 'leads') return leads(request);
   if (op === 'reset') return reset(request, input);
   if (op === 'set') return setPin(request, input);
   if (op === 'verify') return verify(request, input);
@@ -35,6 +37,15 @@ async function auth(request) {
 
 async function list(request) {
   const { db } = await G.gate(request, { mgr: true });
+  return { ok: true, staff: await staffOf(db) };
+}
+// POS:W2 – חלון האישור בקופה: מי יכול לאשר (אחראי משמרת / מנהל עם קוד). כל מי שבקופה – בלי פרטי הקוד, רק שם ותפקיד
+async function leads(request) {
+  const { db } = await G.gate(request, { sell: true });
+  const all = await staffOf(db);
+  return { ok: true, staff: all.filter((x) => (x.role === 'manager' || x.role === 'lead') && x.hasPin).map((x) => ({ uid: x.uid, name: x.name, role: x.role, locked: x.locked })) };
+}
+async function staffOf(db) {
   const [st, ad, pins] = await Promise.all([db.collection('staff').limit(500).get(), db.collection('admins').limit(100).get(), db.collection('pospin').limit(600).get()]);
   const pm = new Map(pins.docs.map((d) => [d.id, d.data()]));
   const now = Date.now();
@@ -49,7 +60,7 @@ async function list(request) {
   }
   for (const u of adm) if (!out.some((x) => x.uid === u)) { const p = pm.get(u), ls = AG.lockState(p, now); out.push({ uid: u, name: '', role: 'manager', hasPin: !!(p && p.h), locked: ls.locked, wait: ls.wait }); }
   out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'he'));
-  return { ok: true, staff: out };
+  return out;
 }
 
 async function setPin(request, input) {
@@ -111,8 +122,10 @@ async function approve(request, input) {
   if (input.act === 'disc') {
     const cfg = await require('./lib/pos-cfg-read').cfgOf(db); // POS:W2: לפי הסכמה של ש4
     try { need = AG.discNeed(input.pct, cfg); } catch (e) { throw G.aggErr(e); }
-    if (need === null) return { ok: true, ap: null, need: null };
+    if (need === null && input.need !== 'manager') return { ok: true, ap: null, need: null };
   }
+  // POS:W2: הקופה מבקשת אישור מנהל במפורש (מתחת למחיר מינימום, החזרה מעל retMgrAbove) – רק מעלה את הדרישה, אף פעם לא מורידה
+  if (input.need === 'manager') need = 'manager';
   const x = await G.roleOfUid(db, input.by);
   if (!x.role) throw G.nf('no-user', 'העובד המאשר לא נמצא');
   if (!AG.canApprove(x.role, need)) throw G.deny(need === 'manager' ? 'need-manager' : 'need-lead', need === 'manager' ? 'נדרש אישור מנהל' : 'נדרש אישור אחראי משמרת');

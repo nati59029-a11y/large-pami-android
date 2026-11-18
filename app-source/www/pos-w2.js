@@ -6,6 +6,9 @@
    2. PosOffline.stats() → {n, oldest} – לש7 (דיווח התור לשרת).
    3. הדפסה: Devices.print (ש7) מקבל מ-ש1 {kind, doc}; כאן הקבלה נבנית ב-PosReceipt (ש2) ומומרת לשורות של LpPosRender.
    0. טעינת ההגדרות של העסק (PosCfg.ready של ש4) – בלעדיה כל המודולים רואים רק ברירות מחדל.
+   סבב 2 (18.11): 4. קטגוריות ואריחים (prod.cat מ-pos-data, אוסף cat), ומבצע לפי קטגוריה – אותה קטגוריה כמו בשרת.
+     5. אישור אחראי / מנהל – חלון PIN אמיתי (PosApprove.ask → posAuth של ש5); מזהה האישור נשלח ל-posSale / posReturn והשרת בודק אותו.
+     6. החזרה – ל-posReturn של ש2 (PosData.returnSrv: תור עם reqId). 7. מספר המסמך הרשמי בקבלה; בלי רשת – "ממתין למסמך".
    בלי pos-data.js (למשל בדיקות של ש1 לבד) – לא עושה כלום, והמדומה נשאר. סכומים באגורות. */
 (function(root){
 'use strict';
@@ -18,14 +21,18 @@ root.addEventListener('lp-biz-change',()=>setTimeout(cfgKick,300));
 if(typeof root.posOpen==='function'){const o0=root.posOpen;root.posOpen=async function(){await cfgKick();return o0.apply(this,arguments)};try{if(typeof ACT!=='undefined')ACT.posOpen=()=>root.posOpen()}catch(e){}}
 /* 0א. מבצעים: ש1 קורא PosPromo.apply(lines, ctx) ומצפה למערך שורות; ש2 מספק apply(lines, promos, ctx) → {lines:[{pdisc,promo}]}.
        כאן המתאם: המבצעים מהאוסף promo (נקרא כשיש קופה, ומתרענן כל 5 דקות), ואותו חישוב בדיוק כמו בשרת (posSale) */
+/* fvj (פענוח מסמך Firestore) מוגדר באפליקציה כ-const – לא קיים על window. סבב 2: עד עכשיו root.fvj נכשל בשקט, ולכן המבצעים והלקוחות לא נטענו במכשיר */
+const fvj0=m=>{try{if(typeof fvj==='function')return fvj(m)}catch(e){}return root.fvj(m)};
 let PROMOS=[],prAt=0,prBusy=null;
+/* קטגוריה של מוצר בעגלה (מ-prod.cat, דרך pos-data) – למבצע על קטגוריה. המפה מתעדכנת בכל טעינת מוצרים (למטה) */
+let PMAP=new Map();const catOf=pid=>(pid&&PMAP.get(pid))||'';
 const prLive=()=>{try{return!!(root.PosCfg&&root.PosCfg.open&&root.PosCfg.open())}catch(e){return false}};
 function promosLoad(){if(prBusy||!prLive()||typeof root.fsx!=='function')return prBusy;prBusy=(async()=>{try{const j=await root.fsx('/promo?pageSize=500');
- PROMOS=((j&&j.documents)||[]).map(d=>Object.assign({},root.fvj({mapValue:d}),{id:String(d.name||'').split('/').pop()}));prAt=Date.now()}catch(e){/* בלי רשת – הרשימה האחרונה */}})().finally(()=>{prBusy=null});return prBusy}
+ PROMOS=((j&&j.documents)||[]).map(d=>Object.assign({},fvj0({mapValue:d}),{id:String(d.name||'').split('/').pop()}));prAt=Date.now()}catch(e){/* בלי רשת – הרשימה האחרונה */}})().finally(()=>{prBusy=null});return prBusy}
 if(root.PosUI&&root.PosUI.Promo&&root.PosPromo&&typeof root.PosPromo.apply==='function'){
  root.PosUI.Promo.apply=function(lines,ctx){const plain=()=>lines.map(l=>Object.assign({},l,{pdisc:0,promo:null}));
   try{if(Date.now()-prAt>5*60000)promosLoad();if(!PROMOS.length)return plain();const cfg=k=>root.PosUI.cfg(k);
-   const r=root.PosPromo.apply(lines.map(l=>({pid:l.gen?undefined:l.pid,qty:l.qty,unit:l.unit,noPromo:!!l.gen})),PROMOS,{at:Date.now(),stack:cfg('promoStack'),cpnStack:cfg('cpnStack')!==false,cpnOnPromo:cfg('cpnOnPromo')===true});
+   const r=root.PosPromo.apply(lines.map(l=>({pid:l.gen?undefined:l.pid,cat:l.gen?undefined:(l.cat||catOf(l.pid)||undefined),qty:l.qty,unit:l.unit,noPromo:!!l.gen})),PROMOS,{at:Date.now(),stack:cfg('promoStack'),cpnStack:cfg('cpnStack')!==false,cpnOnPromo:cfg('cpnOnPromo')===true});
    return lines.map((l,i)=>{const x=(r&&r.lines&&r.lines[i])||{};return Object.assign({},l,{pdisc:x.pdisc||0,promo:x.promo||null})})}catch(e){return plain()}};
  [1500,6000].forEach(ms=>setTimeout(promosLoad,ms));root.addEventListener('lp-biz-change',()=>{PROMOS=[];prAt=0})}
 const PD=root.PosData;
@@ -50,8 +57,21 @@ PD.getSession=async function(){const r=await getSession0.apply(null,arguments);r
 
 /* ---------- מוצרים ---------- */
 const GEN={id:'gen',name:'פריט כללי',barcode:'',sku:'0',price:0,gen:true};
-PD.getCategories=async()=>[];/* קטגוריות במוצרים – פתוח (pos-data.js לא מעביר cat) */
-PD.byCat=async()=>[];
+let PL=null;const gp0=PD.getProducts;
+PD.getProducts=async function(){const L=await gp0.apply(null,arguments);if(Array.isArray(L)&&L!==PL){PL=L;PMAP=new Map(L.map(p=>[p.id,p.cat||'']))}return L};
+/* קטגוריות (אוסף cat של ש6: name, parent, ord). לשונית לכל קטגוריה ראשית שיש בה מוצרים; תת־קטגוריה – בתוך הראשית שלה.
+   עותק במכשיר – לעבודה בלי רשת */
+let CATS=null,catAt=0;
+async function catsLoad(){if(CATS&&Date.now()-catAt<10*60000)return CATS;
+ try{const out=[];let tok='';for(let i=0;i<3;i++){const j=await root.fsx('/cat?pageSize=1000'+(tok?'&pageToken='+encodeURIComponent(tok):''));
+   for(const d of(j&&j.documents)||[]){const o=fvj0({mapValue:d})||{};out.push({id:String(d.name||'').split('/').pop(),name:String(o.name||'').slice(0,40),parent:typeof o.parent==='string'?o.parent:'',ord:typeof o.ord==='number'?o.ord:0})}
+   tok=j&&j.nextPageToken;if(!tok)break}
+  CATS=out;catAt=Date.now();ls(K('cat'),JSON.stringify(out))}catch(e){if(!CATS)CATS=jget(K('cat'))||[]}
+ return CATS}
+function topOf(id,C){const m=new Map((C||[]).map(c=>[c.id,c]));let c=m.get(id),n=0;while(c&&c.parent&&m.has(c.parent)&&n++<5)c=m.get(c.parent);return c?c.id:id}
+PD.getCategories=async()=>{let L=[];try{L=await PD.getProducts()}catch(e){}const C=await catsLoad();const used=new Set((L||[]).filter(p=>p.cat).map(p=>topOf(p.cat,C)));
+ return C.filter(c=>used.has(c.id)).sort((a,b)=>(a.ord-b.ord)||a.name.localeCompare(b.name,'he')).map(c=>({id:c.id,name:c.name||c.id}))};
+PD.byCat=async cat=>{let L=[];try{L=await PD.getProducts()}catch(e){return[]}const C=CATS||[];return(L||[]).filter(p=>p.cat&&(p.cat===cat||topOf(p.cat,C)===cat))};
 PD.favorites=async n=>{let L=[];try{L=await PD.getProducts()}catch(e){/* בלי רשת ובלי עותק במכשיר – אין אריחים, החיפוש עדיין עובד כשיגיעו */}return(L||[]).slice(0,n||24)};
 PD.getProduct=async pid=>{if(pid==='gen')return Object.assign({},GEN);try{return((await PD.getProducts())||[]).find(p=>p.id===pid)||null}catch(e){return null}};
 /* ברקוד לא מוכר → posProdQuick (ש6). המחיר בשרת בשקלים */
@@ -75,7 +95,7 @@ PD.getLog=async()=>jget(K('log'))||[];
 let CU=null,cuAt=0;
 async function custList(){if(CU&&Date.now()-cuAt<5*60000)return CU;const out=[];let tok='';
  for(let i=0;i<5;i++){const j=await root.fsx('/cust?pageSize=1000'+(tok?'&pageToken='+encodeURIComponent(tok):''));
-  for(const d of(j&&j.documents)||[]){const o=root.fvj({mapValue:d});const id=String(d.name||'').split('/').pop();if(o&&!o.mv)out.push({id,name:String(o.bn||o.name||''),phone:String(o.phone||''),phx:Array.isArray(o.phx)?o.phx.map(String):[],biz:o.wholesale===true,taxId:o.vat||'',addr:'',limit:typeof o.lim==='number'?Math.round(o.lim*100):0,bal:0})}
+  for(const d of(j&&j.documents)||[]){const o=fvj0({mapValue:d});const id=String(d.name||'').split('/').pop();if(o&&!o.mv)out.push({id,name:String(o.bn||o.name||''),phone:String(o.phone||''),phx:Array.isArray(o.phx)?o.phx.map(String):[],biz:o.wholesale===true,taxId:o.vat||'',addr:'',limit:typeof o.lim==='number'?Math.round(o.lim*100):0,bal:0})}
   tok=j&&j.nextPageToken;if(!tok)break}
  CU=out;cuAt=Date.now();return CU}
 const nrm=s=>(PD.normalize?PD.normalize(s):String(s||'').toLowerCase());
@@ -98,12 +118,14 @@ PD.saveSale=async sale=>{
  s.lines=s.lines.map(l=>Object.assign(l,{price:l.unit,total:l.fin!=null?l.fin:l.tot,barcode:l.barcode||''}));
  const r=await saveSale0(s);
  const c=sale.cust&&CU&&CU.find(x=>x.id===sale.cust);
- return{id:r.id,no:r.no,at:r.at,reqId:r.reqId,sync:r.sync,doc:c&&c.biz?'inv+rc':'ir'}};
+ /* מספר המסמך הרשמי (posSale → docs) לקבלה: עם רשת – מחכים לתשובה עד 6 שניות; אחרת הקבלה יוצאת "ממתין למסמך" והמסמך מגיע ברקע */
+ let docs=[];if(r.sync!=='T'&&root.navigator.onLine!==false){try{await Promise.race([PD.flush(),new Promise(z=>setTimeout(z,6000))]);const x=await getSale0(r.no);if(x&&Array.isArray(x.docs))docs=x.docs}catch(e){}}
+ return{id:r.id,no:r.no,at:r.at,reqId:r.reqId,sync:r.sync,doc:c&&c.biz?'inv+rc':'ir',docs,docPend:!docs.length}};
 /* מכירה שמורה → צורת ש1 (כמות וסכום שהוחזרו לכל שורה) */
 const retMap=()=>jget(K('ret'))||{};
+const getSale0=PD.getSale;
 function asUi(s){if(!s)return null;const m=retMap()[s.no]||{};s.gross=s.gross!=null?s.gross:s.total;s.pays=s.pays||(s.payments||[]).map(p=>({m:p.m,amt:p.a}));
  s.lines=(s.lines||[]).map(l=>Object.assign({unit:l.price,fin:l.total,tot:l.total},l));s.retQty=m.q||{};s.retAmt=m.a||{};s.retByM=m.m||{};return s}
-const getSale0=PD.getSale;
 PD.getSale=async no=>asUi(await getSale0(no));
 PD.findSales=async o=>{o=o||{};if(o.no){const s=await PD.getSale(o.no);return s?[s]:[]}
  const days=o.day?[o.day]:Array.from({length:14},(_,i)=>dayOf(Date.now()-i*86400000));let L=[];
@@ -111,13 +133,22 @@ PD.findSales=async o=>{o=o||{};if(o.no){const s=await PD.getSale(o.no);return s?
  if(o.phone){const dg=String(o.phone).replace(/\D/g,'');let C=[];try{C=(await custList()).filter(c=>c.phone.includes(dg)||c.phx.some(p=>p.includes(dg))).map(c=>c.id)}catch(e){}L=L.filter(s=>s.cust&&C.includes(s.cust))}
  if(o.gross)L=L.filter(s=>s.gross===o.gross);return L.slice(0,100)};
 PD.myStats=async cid=>{const S=((await PD.getSales({day:dayOf(Date.now())}))||[]).filter(s=>!cid||s.cashier===cid);return{sales:S.length,total:S.reduce((a,s)=>a+(s.gross!=null?s.gross:s.total||0),0)}};
-/* החזרה – במכשיר (pos-data.js: srv:false). posReturn של ש2 – פתוח */
+/* החזרה → posReturn של ש2 (PosData.returnSrv): השרת בודק בטרנזקציה אחת את כל התקרות (ה15) – כמות וסכום לשורה, לכל אמצעי, קיזוז חוב,
+   reqId נגד כפילות – ומפיק חשבונית זיכוי. הבדיקה כאן במכשיר רק מונעת שליחה שברור שתידחה. בלי רשת – ההחזרה בתור (pend) ונשלחת עם אותו reqId.
+   מצב תרגול (מכשיר לא רשום) – במכשיר בלבד, כמו קודם */
 const saveReturn0=PD.saveReturn;
 PD.saveReturn=async ret=>{const s=await PD.getSale(ret.saleNo);if(ret.src==='sale'&&!s)throw fail('no-sale','המכירה לא נמצאה');
  if(s)for(const l of ret.lines){const sl=s.lines[l.i];if(!sl)throw fail('bad-line','שורה לא קיימת');if((s.retQty[l.i]||0)+l.qty>sl.qty)throw fail('over-qty','כמות גבוהה ממה שנמכר');if((s.retAmt[l.i]||0)+l.amt>sl.fin)throw fail('over-amt','סכום גבוה ממה ששולם')}
- const r=await saveReturn0(Object.assign(clone(ret),{lines:ret.lines.map(l=>Object.assign({},l,{price:l.unit,total:l.amt}))}));
+ let r,srv=null;
+ if(s&&!s.practice&&typeof PD.returnSrv==='function'&&!(PD.practice&&PD.practice())){
+  const money=ret.total-(ret.debtOff||0);
+  srv=await PD.returnSrv({reqId:ret.reqId,sale:s.srvId||s.id,saleReq:s.reqId,saleNo:s.no,items:ret.lines.map(l=>({i:l.i,qty:l.qty})),why:ret.why,cond:ret.cond,tag:ret.tag,dmg:ret.dmg,
+   refunds:money>0&&ret.method?[{m:ret.method,amt:money}]:undefined,aps:ret.ap?[ret.ap]:undefined,lines:ret.lines.map(l=>({pid:l.pid,qty:l.qty})),total:ret.total});
+  const x=srv.res||{};r={id:x.id||'',no:x.id||'',at:Date.now()}}
+ else r=await saveReturn0(Object.assign(clone(ret),{lines:ret.lines.map(l=>Object.assign({},l,{price:l.unit,total:l.amt}))}));
  if(s){const M=retMap(),m=M[s.no]||{q:{},a:{},m:{}};ret.lines.forEach(l=>{m.q[l.i]=(m.q[l.i]||0)+l.qty;m.a[l.i]=(m.a[l.i]||0)+l.amt});Object.entries(ret.byM||{}).forEach(([k,a])=>{m.m[k]=(m.m[k]||0)+a});M[s.no]=m;ls(K('ret'),JSON.stringify(M))}
- return{id:r.id,no:r.no,at:r.at,doc:'cr'}};
+ const x=(srv&&srv.res)||{};
+ return Object.assign({id:r.id,no:r.no,at:r.at,doc:'cr',docs:Array.isArray(x.docs)?x.docs:[]},srv?{reqId:srv.reqId,pend:!!srv.pend}:{},x.amt!=null?{amt:x.amt,refunds:x.refunds||[],vouchers:x.vouchers||[],debtOffSrv:x.debtOff||0}:{})};
 
 /* ---------- ש7: מצב התור ---------- */
 if(root.PosOffline&&typeof root.PosOffline.stats!=='function')root.PosOffline.stats=()=>{try{return PD.stats()}catch(e){return{n:0,oldest:0}}};
@@ -126,9 +157,10 @@ if(root.PosOffline&&typeof root.PosOffline.stats!=='function')root.PosOffline.st
 function cfgv(k){try{return root.PosUI?root.PosUI.cfg(k):undefined}catch(e){return undefined}}
 function receiptOfDoc(job){const R=root.PosReceipt,d=job.doc;if(!R||!d||!Array.isArray(d.lines))return null;const s=gSY()||{},b=s.biz||{};
  const fmt=String(d.fmt||'r80').replace(/^r/,'');
- const data={hdr:{name:b.name||b.n||''},docs:[],pays:job.kind==='ret'?[]:(d.pays||[]),
-  sale:{id:d.id,at:d.at,soldAt:d.at,lines:d.lines.map(l=>({n:l.name,unit:l.unit,qty:l.qty,disc:l.disc||0,promo:l.promo||null})),manDisc:d.manDisc||null,net:d.net!=null?d.net:(d.gross||d.total||0)-(d.vat||0),vat:d.vat||0,rate:cfgv('vatRate')||18,gross:d.gross!=null?d.gross:(d.total||0),chg:d.chg||0,debt:d.debt||0,note:d.note||''}};
- if(job.kind==='ret')data.docs=[{t:'cr',no:d.no||'',id:d.id||''}];
+ const docs=(Array.isArray(d.docs)?d.docs:[]).filter(x=>x&&x.no!=null).map(x=>({t:x.t,no:x.no,id:x.id}));
+ const data={hdr:{name:b.name||b.n||''},docs,pays:job.kind==='ret'?[]:(d.pays||[]),
+  sale:{id:d.id,at:d.at,soldAt:d.at,lines:d.lines.map(l=>({n:l.name,unit:l.unit,qty:l.qty,disc:l.disc||0,promo:l.promo||null})),manDisc:d.manDisc||null,net:d.net!=null?d.net:(d.gross||d.total||0)-(d.vat||0),vat:d.vat||0,rate:cfgv('vatRate')||18,gross:d.gross!=null?d.gross:(d.amt!=null?d.amt:(d.total||0)),chg:d.chg||0,debt:d.debt||0,note:d.note||''}};
+ /* החזרה: חשבונית הזיכוי מהשרת (posReturn → docs). בלי תשובה עדיין – PosReceipt מדפיס "ממתין למסמך" */
  const out=R.build(data,{fmt:fmt==='a4'?'a4':fmt==='58'?'58':'80',gift:job.kind==='gift',copy:!!job.copy,cashNo:d.cashierNo,cfg:{rcptFooter:cfgv('rcptFooter'),rcptQr:false,rcptBarcode:false}});
  const lines=out.rows.map(r=>r.t==='hr'?{t:'line'}:r.t==='sp'?{t:'feed',n:12}:r.t==='lr'?{t:'cols',cols:[{text:String(r.a||''),w:0.68,align:'right'},{text:String(r.b||''),w:0.32,align:'left'}]}:r.t==='qr'?{t:'qr',data:String(r.a||''),size:0.5}:r.t==='bc'?{t:'barcode',data:String(r.a||''),format:'CODE128',h:60,text:true}:{t:'text',text:String(r.a||''),align:'center',bold:r.t==='b'});
  return{width:fmt==='58'?384:576,lines}}
@@ -137,5 +169,45 @@ function hookPrint(){const D=root.Devices;if(!D||typeof D.print!=='function'||D.
  D._w2=true;return true}
 /* Devices (ש7) נטען אחרי הקובץ הזה */
 if(!hookPrint())root.addEventListener('DOMContentLoaded',hookPrint,{once:true});
+
+/* ---------- מסמך שהגיע ברקע: מכירה שנשמרה בלי רשת קיבלה מספר מסמך כשהרשת חזרה ---------- */
+let docBusy=false,docAgain=false;
+function docCheck(){if(docBusy){docAgain=true;return}const S=root.POS_DEBUG&&root.POS_DEBUG.S,l=S&&S.last;if(!l||!l.no||(Array.isArray(l.docs)&&l.docs.length))return;docBusy=true;docAgain=false;
+ getSale0(l.no).then(x=>{if(!x||!Array.isArray(x.docs)||!x.docs.length||S.last!==l)return;l.docs=x.docs;l.docPend=false;
+  try{const U=root.PosUI,R=root.PosReceipt,d=x.docs[0];if(S.open&&U)U.toast('התקבל מסמך: '+((R&&R.DOC_N&&R.DOC_N[d.t])||d.t)+' '+d.no+'. הדפסה – ב"מכירה אחרונה"')}catch(e){}}).catch(()=>{}).finally(()=>{docBusy=false;if(docAgain)docCheck()})}
+/* האירוע lp-pos-net (pos-data, בכל שינוי בתור) – ולא PD.onNet: המופע של pos-data נוצר מחדש במעבר עסק, והמנוי היה הולך לאיבוד */
+root.addEventListener('lp-pos-net',docCheck);
+
+/* ---------- אישור אחראי / מנהל (ש5): חלון PIN במקום החלון המדומה של ש1 ----------
+   PosUI.approve קורא ל-PosApprove.ask({role, need, text, act?, pct?, ref?}) כשהתפקיד של הקופאי לא מספיק. → {ok, by, ap, name, role}
+   מי יכול לאשר – posAuth op:'leads'; האישור – PosShift.approve → posAuth op:'approve' (PIN של המאשר, נעילה אחרי 5 טעויות).
+   ap – מזהה האישור שהשרת שמר (poslog); נשלח עם המכירה (aps) או ההחזרה, והשרת בודק אותו שוב ומסמן כמנוצל.
+   אישור בטלפון של המאשר – פתוח (אין עדיין פונקציה בשרת). בלי רשת אין אישור. */
+let LEADS=null,leadsAt=0;
+async function leadsLoad(){if(LEADS&&Date.now()-leadsAt<5*60000)return LEADS;const r=await fn('posAuth',{op:'leads'});LEADS=(r&&r.staff)||[];leadsAt=Date.now();return LEADS}
+root.addEventListener('lp-biz-change',()=>{LEADS=null});
+const ACTS=['disc','void','ret','price','drawer'];
+function approveAsk(o){o=o||{};const U=root.PosUI,E=U.E,mgr=o.need==='mgr'||o.need==='own',act=ACTS.includes(o.act)?o.act:'void',who=mgr?'מנהל':'אחראי';
+ return new Promise(res=>{const R=U.UI.root||document.body,w=document.createElement('div');w.className='pos-modal';w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');w.setAttribute('aria-label','אישור '+who);R.append(w);U.UI.stack.push(w);
+  const st={L:null,err:'',busy:0};
+  const done=v=>{if(!w.isConnected)return;w.remove();U.UI.stack=U.UI.stack.filter(x=>x!==w);res(v)};w._close=()=>done({ok:false,by:null});w._scan=()=>{};
+  function draw(){const L=(st.L||[]).filter(x=>!mgr||x.role==='manager');
+   w.innerHTML=`<div class="pos-card"><div class="pos-sh"><h2>נדרש אישור ${who}</h2></div><p class="pos-ask">${E(o.text||'')}</p>
+   ${st.L==null?'<p class="pos-note">טוען…</p>':L.length?`<form id="apF"><label class="pos-f"><span>מי מאשר</span><select id="apBy" aria-label="מי מאשר">${L.map(x=>`<option value="${E(x.uid)}"${x.locked?' disabled':''}>${E(x.name||x.uid)} – ${x.role==='manager'?'מנהל':'אחראי'}${x.locked?' (נעול)':''}</option>`).join('')}</select></label>
+    <label class="pos-f"><span>הקוד של המאשר</span><input id="apPin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" dir="ltr" data-autof aria-label="קוד PIN של המאשר"></label></form>`:st.err?'':`<p class="pos-err" role="alert">אין ${who} עם קוד PIN. את הקוד קובעים במסך "עובדים וקוד".</p>`}
+   ${st.err?`<p class="pos-err" role="alert">${E(st.err)}</p>`:''}
+   <p class="pos-note">המאשר מקליד את הקוד שלו כאן. אישור בטלפון של המאשר – בהמשך.</p>
+   <div class="pos-row2"><button class="pos-b g" data-v="no">ביטול</button><button class="pos-b" data-v="ok" data-def ${L.length&&!st.busy?'':'disabled'}>${st.busy?'בודק…':'אישור'}</button></div></div>`;
+   const f=w.querySelector('[data-autof]');if(f)try{f.focus({preventScroll:true})}catch(e){}}
+  async function go(){if(st.busy)return;const by=(w.querySelector('#apBy')||{}).value,pin=String((w.querySelector('#apPin')||{}).value||'').trim();
+   if(!by||!pin){st.err='בחרו מי מאשר והקלידו את הקוד';draw();return}
+   st.busy=1;st.err='';draw();
+   try{const body={act,by,pin};if(act==='disc')body.pct=Math.min(100,Math.max(0,Math.ceil((+o.pct||0)*100)/100));if(mgr)body.need='manager';if(o.ref)body.ref=String(o.ref).slice(0,80);
+    const r=await root.PosShift.approve(body);done({ok:true,by:r.by||by,ap:r.ap||null,name:r.name||'',role:r.role||''})}
+   catch(e){st.busy=0;st.err=(e&&e.message)||'האישור נכשל';draw()}}
+  w.addEventListener('click',ev=>{const b=ev.target.closest('[data-v]');if(!b||!w.contains(b)||b.disabled)return;if(b.dataset.v==='no')return done({ok:false,by:null});go()});
+  w.addEventListener('submit',ev=>{ev.preventDefault();go()});
+  draw();leadsLoad().then(L=>{st.L=L;draw()}).catch(e=>{st.L=[];st.err=root.navigator.onLine===false?'אישור דורש חיבור לרשת':((e&&e.message)||'רשימת המאשרים לא נטענה');draw()})})}
+if(root.PosShift&&typeof root.PosShift.approve==='function'&&!root.PosApprove)root.PosApprove={ask:approveAsk};
 })(typeof window!=='undefined'?window:globalThis);
 /* /POS:W2 */

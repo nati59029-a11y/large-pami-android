@@ -11,11 +11,12 @@
 //   • אין נתוני כרטיס: רק last4 (4 ספרות), appr, brand, inst, tx, src, term, termNo, ref, reqId. כל רצף של 13–19 ספרות שעובר Luhn – נדחה.
 //
 // פונקציות (onCall):
-//   posSale({ reqId, dev, inst, soldAt, lines, pays, chg?, debt?, cust?, manDisc?, cpns?, promoOff?, note?, docAs?, alloc?, cashOk?, seq?, gross?, off? })
+//   posSale({ reqId, dev, inst, soldAt, lines, pays, chg?, debt?, cust?, manDisc?, cpns?, promoOff?, note?, docAs?, alloc?, cashOk?, seq?, gross?, off?, aps? })
 //     lines: [{ pid?, n, bc?, cat?, qty, unit, mdisc?{amt|pct, why?}, noPromo?, stk?, free? }] – unit באגורות (מחיר מחירון; הנחת מבצע מחושבת בשרת).
 //     pays: [{ m, amt, ref?, reqId?, + card: last4, appr, brand?, inst?, tx?, src?, term?, termNo? · check: chk{no,bank}, due?, post? · gift/voucher: code }]
 //     → { id, seq, gross, paid, chg, debt, docs:[{t,id,no}], warn[], dup? }
-//   posReturn({ op:'quote'|'do', reqId, dev, inst, sale?, items?[{i,qty}], noRcpt?[{pid,qty}], why, cond?, tag, dmg?, refunds?[{m,amt}], debtTo? })
+//   posReturn({ op:'quote'|'do', reqId, dev, inst, sale?, items?[{i,qty}], noRcpt?[{pid,qty}], why, cond?, tag, dmg?, refunds?[{m,amt}], debtTo?, aps? })
+//   aps (POS:W2) – מזהי אישור של ש5 (posAuth op:'approve'): 'disc' במכירה, 'ret' בהחזרה. נבדקים בשרת ומסומנים used (ראו apsCheck).
 //     → quote: { amt, debtOff, debtCash, money, alloc, max } · do: { id, amt, debtOff, refunds, vouchers, docs, dup? }
 //   posPark({ op:'save'|'done'|'list'|'flag', ... })      – עגלות מושהות (pospark). flag = בסגירת יום: פתוחות ← 'flag'.
 //   posDebtPay({ reqId, dev, inst, cust, amt, pays, chg? }) – תשלום חוב הקפה: קבלה (rc) שנסגרת מול החשבוניות הפתוחות.
@@ -319,21 +320,54 @@ function compute(lines, input, cfg, promos, prods, cp, ctx) {
   });
   return { calc, lines: out, manual, pct, below, applied: pr.applied };
 }
-function discAuth(who, cfg, c) {
+// r – התפקיד שקובע (של הקופאי, או של מי שאישר – POS:W2). viaAp – ההנחה עוברת בזכות אישור: אחראי – עד 10% (כמו posAuth, ש5)
+function discAuth(r, cfg, c, viaAp) {
   if (!(c.manual > 0)) return null;
-  const r = roleOf(who);
   if (r === 'mgr') return c.below.length ? 'ovr' : null;
   const dm = isObj(cfg.discMax) ? cfg.discMax : {};
   const roles = cfg.discRoles;
-  const cap = r === 'lead' ? (roles === 'none' ? 0 : dm.lead) : (roles === 'all' ? 100 : roles === 'cashierCap' ? dm.cashier : 0);
+  let cap = r === 'lead' ? (roles === 'none' ? 0 : dm.lead) : (roles === 'all' ? 100 : roles === 'cashierCap' ? dm.cashier : 0);
+  if (viaAp && r === 'lead' && typeof cap === 'number') cap = Math.min(cap, 10);
   if (!(typeof cap === 'number' && cap > 0)) throw deny('disc-role', 'אין לך הרשאה לתת הנחה ידנית');
   if (c.pct > cap + 1e-9) throw deny('disc-over', `הנחה מעל ${cap}% – דורש מנהל`, { cap });
   if (c.below.length) throw deny('below-min', 'מתחת למחיר המינימום – מנהל בלבד');
   return null;
 }
 
+// ---------- POS:W2 – אישור אחראי / מנהל (ש5: posAuth op:'approve' → poslog/{ap}, k:'appr') ----------
+// הקופה מצרפת aps:[מזהה] למכירה (act 'disc') או להחזרה (act 'ret'). השרת מאמת כל אישור: הרשומה קיימת (poslog – רק השרת כותב, ולכן
+// אי אפשר לזייף), סוג הפעולה נכון, ניתנה לקופאי הזה (for), לא נוצלה (used), ובחלון של 12 שעות מרגע הפעולה. התפקיד שקובע – של מי שאישר
+// (role ברשומה, נבדק ע"י posAuth מול ה-PIN שלו). אישור משמש פעם אחת: מסומן used בטרנזקציה של הפעולה.
+const AP_RE = /^[A-Za-z0-9]{10,40}$/;
+const AP_WIN = 12 * 3600000; // משמרת: עגלה מושהית או החזרה שחיכתה לרשת – עדיין באותו יום עבודה
+const AP_ROLE = { manager: 'mgr', lead: 'lead' };
+function apsIn(v) {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.length > 5 || v.some((x) => typeof x !== 'string' || !AP_RE.test(x)) || new Set(v).size !== v.length) throw bad('bad-ap', 'אישור לא תקין');
+  return v;
+}
+// snaps – poslog/{ap}. → { role: 'lead'|'mgr'|null, list:[{ id, by, role }] }
+// soft – בדיקה מקדימה מחוץ לטרנזקציה: אישור שנוצל לא נדחה כאן (שליחה חוזרת של אותו reqId מחזירה את התוצאה הראשונה – בטרנזקציה)
+function apsCheck(snaps, who, act, at, now, soft) {
+  let role = null;
+  const list = [];
+  for (const x of snaps) {
+    const v = x.exists ? x.data() : null;
+    if (!v || v.k !== 'appr' || v.act !== act || v.for !== who.uid || !AP_ROLE[v.role] || typeof v.at !== 'number' || v.at > now + 60000) throw deny('ap-bad', 'האישור לא תקף');
+    if (v.used === true && !soft) throw deny('ap-used', 'האישור כבר נוצל');
+    if (Math.abs(at - v.at) > AP_WIN) throw deny('ap-old', 'פג תוקף האישור – בקשו אישור חדש');
+    const r = AP_ROLE[v.role];
+    if (!role || RANK[r] > RANK[role]) role = r;
+    list.push({ id: x.id, by: String(v.by || '').slice(0, 128), role: r });
+  }
+  return { role, list };
+}
+// התפקיד שקובע: של הקופאי, או של מי שאישר אם הוא גבוה יותר
+const effRole = (who, ap) => { const r = roleOf(who); return ap && ap.role && RANK[ap.role] > RANK[r] ? ap.role : r; };
+const apUse = (tx, db, ap, o) => { for (const a of ap.list) tx.update(db.doc('poslog/' + a.id), Object.assign({ used: true, usedAt: Date.now() }, o)); };
+
 // ---------- posSale ----------
-const SALE_KEYS = ['reqId', 'dev', 'inst', 'lines', 'pays', 'chg', 'debt', 'cust', 'manDisc', 'cpns', 'promoOff', 'note', 'docAs', 'alloc', 'cashOk', 'vm', 'soldAt', 'seq', 'gross', 'off'];
+const SALE_KEYS = ['reqId', 'dev', 'inst', 'lines', 'pays', 'chg', 'debt', 'cust', 'manDisc', 'cpns', 'promoOff', 'note', 'docAs', 'alloc', 'cashOk', 'vm', 'soldAt', 'seq', 'gross', 'off', 'aps'];
 async function saleIn(request) {
   const input = inputObject(request);
   if (K.isPractice(input.reqId) || K.isPractice(input.dev)) throw bad('practice', 'מכירת תרגול לא נשלחת לשרת');
@@ -358,6 +392,7 @@ async function saleIn(request) {
   const promoOff = input.promoOff == null ? [] : input.promoOff;
   if (!Array.isArray(promoOff) || promoOff.length > 50 || promoOff.some((x) => typeof x !== 'string' || !x || x.length > 80)) throw bad('bad-input', 'קלט לא תקין');
   const note = input.note == null ? '' : str(input.note, 300);
+  const apIds = apsIn(input.aps);
   const chg = input.chg == null ? 0 : input.chg, debt = input.debt == null ? 0 : input.debt;
   const cfg = await cfgOf(db);
   if (promoOff.length && cfg.promoCancelRole === 'lead' && !atLeast(who, 'lead')) throw deny('promo-off-lead', 'ביטול מבצע – באישור אחראי');
@@ -373,9 +408,11 @@ async function saleIn(request) {
     const refs = [mark, dref].concat(pids.map((p) => db.doc('prod/' + p)), cpnCodes.map((c) => db.doc('poscpn/' + c)));
     const gcodes = [...new Set((input.pays || []).filter((p) => p && (p.m === 'gift' || p.m === 'voucher') && typeof p.code === 'string').map((p) => p.code))];
     const gr = gcodes.map((c) => db.doc('posgift/' + c));
-    const snaps = await tx.getAll(...refs.concat(gr));
+    const snaps = await tx.getAll(...refs.concat(gr, apIds.map((a) => db.doc('poslog/' + a))));
     const [m, s] = snaps;
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res') || { id: m.get('sale'), seq: m.get('seq'), gross: m.get('gross') }); return; }
+    // POS:W2: אישור הנחה (ש5) – אחרי בדיקת הכפילות (שליחה חוזרת של מכירה שכבר נרשמה מחזירה אותה, גם כשהאישור כבר נוצל)
+    const ap = apsCheck(snaps.slice(snaps.length - apIds.length), who, 'disc', input.soldAt, now);
     const d = devOk(s, input.inst, cfg);
     const prods = {};
     pids.forEach((p, i) => { const x = snaps[2 + i]; if (x.exists) prods[p] = x.data(); });
@@ -397,7 +434,7 @@ async function saleIn(request) {
       return { code, promo: { type: pm.type, pct: pm.pct, amt: pm.amt, pids: pm.pids, cats: pm.cats } };
     });
     const co = compute(lines, input, cfg, promos, prods, cp, { at: input.soldAt, club: !!(cd && cd.club), grp: cd && cd.grp, promoOff });
-    const ovr = discAuth(who, cfg, co);
+    const ovr = discAuth(effRole(who, ap), cfg, co, !!ap.role && RANK[ap.role] > RANK[roleOf(who)]);
     const calc = co.calc;
     // סכום מהמכשיר שונה: מכירה מקוונת – נדחית (המכשיר מחשב מחדש). מכירה בלי רשת (off) – כבר נמסרה ללקוח: נשמרת לבדיקת מנהל (chk), בלי מסמך
     let gross = calc.gross, chk = null;
@@ -475,7 +512,7 @@ async function saleIn(request) {
       retQty: co.lines.map(() => 0), retAmt: co.lines.map(() => 0), retByM: {}, soldAt: input.soldAt, at: now, off: input.off === true,
     }, cust ? { cust, custName: String((cd && (cd.bn || cd.name)) || '').slice(0, 80) } : {}, note ? { note } : {}, md ? { manDisc: md } : {},
     chk ? Object.assign({ chk: true }, chk) : {}, priceChk.length ? { chkPrice: priceChk.slice(0, 50) } : {}, warn.length ? { warn } : {}, ovr ? { discOvr: true } : {},
-    promoOff.length ? { promoOff } : {});
+    promoOff.length ? { promoOff } : {}, ap.list.length ? { aps: ap.list } : {});
     // ---- כתיבות ----
     B.flush();
     tx.create(db.doc('possale/' + id), doc);
@@ -486,6 +523,7 @@ async function saleIn(request) {
       tx.set(db.collection('posgiftlog').doc(), { code, amt: -amt, sale: id, by: who.uid, at: now });
     }
     for (const { s: x, code } of cps) tx.update(x.ref, { st: 'used', sale: id, usedAt: now, usedBy: who.uid });
+    apUse(tx, db, ap, { sale: id });
     // מלאי (מינימלי עד ש6 – lib/pos-stock.js): q.{סניף} יורד בכמות, גם מתחת ל-0 (ב ס8)
     const byPid = {};
     for (const l of co.lines) if (l.pid && prods[l.pid]) byPid[l.pid] = (byPid[l.pid] || 0) + l.qty;
@@ -615,7 +653,7 @@ function retAlloc(sale, R, cfg, o) {
   }
   return out;
 }
-const RET_KEYS = ['op', 'reqId', 'dev', 'inst', 'sale', 'items', 'noRcpt', 'why', 'cond', 'tag', 'dmg', 'refunds', 'debtTo', 'img'];
+const RET_KEYS = ['op', 'reqId', 'dev', 'inst', 'sale', 'items', 'noRcpt', 'why', 'cond', 'tag', 'dmg', 'refunds', 'debtTo', 'img', 'aps'];
 async function retIn(request) {
   const input = inputObject(request);
   if (K.isPractice(input.reqId) || K.isPractice(input.dev)) throw bad('practice', 'פעולת תרגול לא נשלחת לשרת');
@@ -636,21 +674,28 @@ async function retIn(request) {
   if (op === 'do' && cfg.retNeedTag === true && input.tag !== true) throw pre('need-tag', 'מוצר בלי תג ואריזה לא מתקבל');
   if (input.debtTo != null && !['cash', 'voucher'].includes(input.debtTo)) throw bad('bad-refund', 'אמצעי החזר לא תקין');
   const dmg = input.dmg === true;
-  // מי מאשר (ב ה2): אחראי ומעלה; מעל retMgrAbove – מנהל. (אישור מרחוק / PIN – ש5, pos-approve)
-  if (op === 'do' && !atLeast(who, 'lead')) throw deny('ret-lead', 'החזרה – באישור אחראי');
+  // מי מאשר (ב ה2): אחראי ומעלה; מעל retMgrAbove – מנהל. POS:W2: קופאי – עם אישור (aps, act 'ret') של אחראי / מנהל (ש5, PIN).
+  // כאן בדיקה מקדימה (קריאה רגילה); האימות הקובע והסימון used – בתוך הטרנזקציה
+  const apIds = op === 'do' ? apsIn(input.aps) : [];
+  const apRefs = apIds.map((a) => db.doc('poslog/' + a));
+  const ap0 = apIds.length ? apsCheck(await db.getAll(...apRefs), who, 'ret', now, now, true) : { role: null, list: [] };
+  const r0 = effRole(who, ap0);
+  if (op === 'do' && RANK[r0] < RANK.lead) throw deny('ret-lead', 'החזרה – באישור אחראי');
   if (!withSale) {
     if (cfg.retNoRcpt === 'no') throw pre('ret-no-rcpt', 'אין החזרה בלי קבלה בעסק');
-    if (cfg.retNoRcpt === 'lead' && !atLeast(who, 'lead')) throw deny('ret-lead', 'החזרה בלי קבלה – באישור אחראי');
+    if (cfg.retNoRcpt === 'lead' && RANK[r0] < RANK.lead) throw deny('ret-lead', 'החזרה בלי קבלה – באישור אחראי');
   }
   const mark = op === 'do' ? db.doc('posreq/' + input.dev + '_' + input.reqId) : null;
   const dref = db.doc('posdev/' + input.dev);
   const sref = withSale ? db.doc('possale/' + input.sale) : null;
   let res;
   await serial(who.bizId + '/' + input.dev, () => runTx(db, async (tx) => {
-    const reads = [dref].concat(mark ? [mark] : [], sref ? [sref] : []);
+    const reads = [dref].concat(mark ? [mark] : [], sref ? [sref] : [], apRefs);
     const sn = await tx.getAll(...reads);
     const ds = sn[0], ms = mark ? sn[1] : null, ss = sref ? sn[mark ? 2 : 1] : null;
     if (ms && ms.exists) { res = Object.assign({ ok: true, dup: true }, ms.get('res')); return; }
+    const ap = apsCheck(sn.slice(sn.length - apRefs.length), who, 'ret', now, now);
+    const rr = effRole(who, ap);
     const d = op === 'do' ? devOk(ds, input.inst, cfg) : (ds.exists ? ds.data() : (() => { throw nf('no-dev', 'הקופה לא נמצאה'); })());
     const br = d.br || '_';
     let sale = null, rl, R, plan, rate;
@@ -678,7 +723,7 @@ async function retIn(request) {
       rate = cfg.vatRate;
     }
     if (!(R > 0)) throw pre('ret-zero', 'אין סכום להחזרה בשורות שנבחרו');
-    if (op === 'do' && Number.isInteger(cfg.retMgrAbove) && R > cfg.retMgrAbove && !atLeast(who, 'mgr')) throw deny('ret-mgr', 'החזרה בסכום הזה – באישור מנהל', { amt: R });
+    if (op === 'do' && Number.isInteger(cfg.retMgrAbove) && R > cfg.retMgrAbove && RANK[rr] < RANK.mgr) throw deny('ret-mgr', 'החזרה בסכום הזה – באישור מנהל', { amt: R });
     // הלקוח של המכירה (קיזוז חוב): יתרה וחשבוניות פתוחות – ספר המסמכים, קריאות לפני כתיבות
     const custId = sale && sale.cust ? sale.cust : '';
     const { B, c } = await D.prep(tx, db, { uid: who.uid }, now, cfg, input.dev, custId);
@@ -750,9 +795,10 @@ async function retIn(request) {
     // מלאי: תקין חוזר למלאי; פגום – רק רישום (ב ה5)
     if (!dmg) { const byPid = {}; for (const x of rl) if (x.pid) byPid[x.pid] = (byPid[x.pid] || 0) + x.qty; for (const [pid, q] of Object.entries(byPid)) { const pr = db.doc('prod/' + pid); tx.set(pr, { q: { [br]: FieldValue.increment(q) } }, { merge: true }); } }
     const doc = Object.assign({ id: rid, reqId: input.reqId, dev: input.dev, br, src: withSale ? 'sale' : 'noRcpt', lines: rl, amt: R, debtOff: plan.debtOff, refunds,
-      why, cond, tag: input.tag === true, dmg, by: who.uid, at: now, doc: cr.id, docs: [cr] }, sale ? { sale: input.sale, cust: custId || '' } : {},
+      why, cond, tag: input.tag === true, dmg, by: who.uid, at: now, doc: cr.id, docs: [cr] }, sale ? { sale: input.sale, cust: custId || '' } : {}, ap.list.length ? { aps: ap.list } : {},
     vouchers.length ? { vouchers: vouchers.map((v) => v.code) } : {}, typeof input.img === 'string' && /^[A-Za-z0-9_/.-]{1,200}$/.test(input.img) ? { img: input.img } : {});
     tx.create(db.doc('posret/' + rid), doc);
+    apUse(tx, db, ap, { ret: rid });
     tx.update(dref, { lastRet: lastRet + 1, lastSync: now });
     const out = { id: rid, amt: R, debtOff: plan.debtOff, refunds, vouchers, docs: [cr] };
     tx.set(mark, { kind: 'ret', ret: rid, at: now, res: out });
