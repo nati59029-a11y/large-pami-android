@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'ptkPush', 'ptkPushB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff', 'tkPush', 'tkPushB']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -95,6 +95,17 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
       assert.ok(e.eventTrigger && /document\.v1\.deleted$/.test(e.eventTrigger.eventType), n + ' – טריגר מחיקת מסמך');
       assert.equal(e.eventTrigger.eventFilterPathPatterns.document, doc);
       assert.equal(e.eventTrigger.retry, false);
+    }
+  });
+  it('התראות משימות (18.11.2026): tkPush / tkPushB – טריגר כתיבה (עם auth), ptkPush / ptkPushB – טריגר יצירה; europe-west1 בלבד, בלי ניסיון חוזר', () => {
+    for (const [n, doc, re] of [['tkPush', 'tasks/{id}', /document\.v1\.written\.withAuthContext$/], ['tkPushB', 'b/{bizId}/tasks/{id}', /document\.v1\.written\.withAuthContext$/],
+      ['ptkPush', 'ptk/{id}', /document\.v1\.created$/], ['ptkPushB', 'b/{bizId}/ptk/{id}', /document\.v1\.created$/]]) {
+      const e = ep(ex[n]);
+      assert.deepEqual(regions(ex[n]), ['europe-west1'], n);
+      assert.ok(e.eventTrigger && re.test(e.eventTrigger.eventType), n + ' – ' + (e.eventTrigger && e.eventTrigger.eventType));
+      assert.equal(e.eventTrigger.eventFilterPathPatterns.document, doc);
+      assert.equal(e.eventTrigger.retry, false);
+      assert.ok(e.maxInstances >= 1 && e.maxInstances <= 5, 'maxInstances נמוך');
     }
   });
   it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
