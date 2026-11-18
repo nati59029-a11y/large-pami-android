@@ -57,8 +57,9 @@ function inputObject(request) {
 // אותה הגדרה בדיוק כמו perm()/dflt() בכללי Firestore של b/{bizId}.
 // prc (12.11.2026, תמחור חשבונית ספק): "עדכון מחירים ומלאי" – כבוי כברירת מחדל, גם לעובד ישן בלי perms (גם בלארג' פעמי).
 // s3m (14.11.2026, store3d): "שרטוט מפה" – עובד ששומר מפה (s3SaveMap) וקורא גרסאות קודמות; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
-const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m']);
-const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false });
+// shf (18.11.2026, shifts.js): "משמרות" – עובד שרואה את כל המשמרות, עורך ושולח משימות למשמרת; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
+const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'shf']);
+const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, shf: false });
 function hasPerm(who, k) {
   if (!who || who.role === 'manager') return true;
   const p = who.staff && typeof who.staff.get === 'function' ? who.staff.get('perms') : null;

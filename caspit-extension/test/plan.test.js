@@ -102,3 +102,20 @@ test('הודעות בעברית לכל קוד', () => {
   for (const c of ['needs-login', 'selector-miss', 'limit', 'auth', 'network']) assert.match(P.msgOf(c), /[א-ת]/);
   assert.equal(P.msgOf('???'), P.MSG.fail);
 });
+
+test('"סנכרן עכשיו" (wantRemote): רק בקשה חדשה ותקינה, לא בזמן ריצה, לא כשריצה ממתינה לניסיון חוזר', () => {
+  const R = { want: true, id: 'qabc12345' };
+  assert.equal(P.wantRemote(R, { now: T0 }), 'qabc12345');
+  assert.equal(P.wantRemote({ want: false }, { now: T0 }), null);
+  assert.equal(P.wantRemote(null, { now: T0 }), null);
+  assert.equal(P.wantRemote({ want: true, id: '../x' }, { now: T0 }), null, 'מזהה לא תקין');
+  assert.equal(P.wantRemote(R, { now: T0, lastReq: 'qabc12345' }), null, 'אותה בקשה – פעם אחת');
+  assert.equal(P.wantRemote(R, { now: T0, busy: true }), null);
+  const waiting = P.fail(run0(), T0, P.err('network'));
+  assert.equal(P.wantRemote(R, { now: T0 + 1000, run: waiting }), null, 'ריצה ממתינה לניסיון חוזר');
+  assert.equal(P.wantRemote(R, { now: T0 + P.STALE_MS + 1, run: waiting }), 'qabc12345', 'ריצה ישנה לא חוסמת');
+  assert.equal(P.wantRemote(R, { now: T0, run: P.fail(run0(), T0, P.err('selector-miss')) }), 'qabc12345', 'ריצה שהסתיימה לא חוסמת');
+  assert.equal(run0({ req: 'qabc12345' }).req, 'qabc12345');
+  assert.equal(run0().req, null);
+  assert.match(P.msgOf('remote'), /[א-ת]/); assert.match(P.msgOf('req-gone'), /[א-ת]/);
+});
