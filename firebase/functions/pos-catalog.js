@@ -92,7 +92,9 @@ async function prodSave(request) {
   if (input.price == null || input.price === '') throw bad('bad-price', 'מחיר – חובה');
   d.price = shek(input.price, 'מחיר');
   let barcode = input.barcode === undefined ? undefined : bcOf(input.barcode);
-  const bcs = input.bcs === undefined ? undefined : strList(input.bcs, 20, 30, 'bcs').map((b) => bcOf(b, 'ברקוד נוסף'));
+  // ברקוד – לא דרך txt (שם ספרות ארוכות נחסמות כמספר כרטיס); בדיקת ברקוד בלבד
+  if (input.bcs !== undefined && (!Array.isArray(input.bcs) || input.bcs.length > 20)) throw bad('bad-bcs', 'ברקודים נוספים: עד 20');
+  const bcs = input.bcs === undefined ? undefined : [...new Set(input.bcs.map((b) => bcOf(b, 'ברקוד נוסף')).filter(Boolean))];
   let packs;
   if (input.packs !== undefined) {
     if (!Array.isArray(input.packs) || input.packs.length > 10) throw bad('bad-packs', 'ברקודי ארגז: עד 10');

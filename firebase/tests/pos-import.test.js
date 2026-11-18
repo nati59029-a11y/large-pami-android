@@ -104,7 +104,7 @@ describe('קופה – ייבוא מכספיט (pos-import.js)', () => {
     const cs = await adm().doc(P('cat/' + tray.cat)).get();
     assert.equal(cs.get('name'), 'חד פעמי', 'קטגוריה חדשה נוצרה בשם מהקובץ');
     const log = await snap('posimp/' + job);
-    assert.deepEqual([log.kind, log.src, log.rows, log.added, log.dup, log.bad, log.ids.length], ['prod', 'csv', 7, 2, 3, 2]);
+    assert.deepEqual([log.kind, log.src, log.rows, log.added, log.dup, log.bad, log.ids.length], ['prod', 'csv', 7, 2, 3, 2, 2]);
     assert.ok(!/\d{8}/.test(log.file), 'רצף ספרות ארוך לא נשמר בשם הקובץ');
     // שליחה חוזרת (ניתוק באמצע) – אותה תוצאה, בלי יצירה נוספת ובלי ספירה כפולה
     const again = await call('posImport', MGR, { job, kind: 'prod', file: 'SAMPLE-export-20261117.csv', src: 'csv', total: rows.length, at: 0, rows });
