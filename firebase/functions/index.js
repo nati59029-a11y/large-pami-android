@@ -367,3 +367,5 @@ Object.assign(exports, require('./biz-apk'));
 Object.assign(exports, require('./caspit'));
 // רובוט כספית – שלב B (18.11.2026): cxBotTok, cxBotDisc (מנהל / מנהל־על), cxBot (HTTP לתוסף Chrome, europe-west1), cxBotWatch (מתוזמנת, us-central1) – caspit-bot.js
 Object.assign(exports, require('./caspit-bot'));
+// משמרות – שלב 3 (18.11.2026): shApi (טבלה שבועית, עריכה, משימות למשמרת, הגדרות), shTick (מתוזמנת כל 10 דקות, us-central1) – shifts.js
+Object.assign(exports, require('./shifts'));

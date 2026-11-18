@@ -398,7 +398,7 @@ exports.drRemind = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 minut
 });
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  submit, mgr, setCfg, setCap, remindBiz, runRemind, reserve, settle, aiParts, audPath, pushMgrs,
+  submit, mgr, setCfg, setCap, remindBiz, runRemind, reserve, settle, aiParts, audPath, pushMgrs, pushTo, // pushTo – גם ל-shifts.js (shTick)
   call: {
     drSubmit: (o) => wrap('drSubmit', (r) => submit(r, o)),
     drMgr: (o) => wrap('drMgr', (r) => mgr(r, o)),
