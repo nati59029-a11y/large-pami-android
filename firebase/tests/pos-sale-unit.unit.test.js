@@ -228,3 +228,33 @@ describe('קבלה (ב 5.10, ה 5.16) – pos-receipt.js', () => {
     assert.ok(!r.rows.some((x) => /סה"כ|מע"מ|מזומן|ביט/.test(String(x.a))));
   });
 });
+
+// POS:W2 סבב 2 (ליקוי 6): החלון (posAuth → discNeed, וגם הקופה – PosCalc.discNeed) והשרת (posSale → discCheck) מחליטים אותו דבר בכל הצירופים
+describe('POS:W2 – הנחה ידנית: החלון והשרת מחליטים אותו דבר (discRoles × discMax × אחוז × מאשר)', () => {
+  const AG = require('../functions/lib/pos-agg');
+  const PCW = require(path.join(ROOT, 'app-source', 'www', 'pos-calc.js'));
+  // שורה אחת של 100 ₪ עם הנחה ידנית של pct%
+  const co = (pct) => { const md = Math.round(pct * 100); return { cl: [{ md, base: 10000, pd: 0, disc: md }], below: [], calc: { sdisc: 0, lines: [{ sd: 0 }] }, manual: md, pct: md / 100 }; };
+  const lines = (ap) => [{ pid: 'p1', mdisc: ap ? { amt: 1, ap } : { amt: 1 } }];
+  const ok = (fn) => { try { fn(); return 'ok'; } catch (e) { return (e.details && e.details.reason) || e.message; } };
+  it('בלי אישור – עובר בדיוק כשהחלון אומר "לא צריך"; עם אישור אחראי – בדיוק כשהחלון אומר "אחראי"; מנהל – תמיד', () => {
+    const W = require('../functions/pos-sale')._core;
+    assert.equal(typeof W.discCheck, 'function');
+    let n = 0;
+    for (const discRoles of ['lead', 'cashier', 'all', 'none', 'mgr', 'posMgr', 'cashierCap']) for (const cashier of [0, 3, 5]) for (const lead of [6, 10, 15]) for (const pct of [0.5, 3, 5, 6, 10, 12]) {
+      const cfg = { discMax: { cashier, lead }, discRoles };
+      const need = AG.discNeed(pct, cfg);
+      assert.equal(PCW.discNeed(pct, cfg), need, 'הקופה והשרת – אותו קובץ');
+      const tag = JSON.stringify({ discRoles, cashier, lead, pct, need });
+      const cash = { uid: 'c', role: 'employee', perms: { pos: true } };
+      const noAp = ok(() => W.discCheck(cash, cfg, co(pct), lines(), {}, []));
+      assert.equal(noAp === 'ok', need === null, tag + ' בלי אישור: ' + noAp);
+      const leadAp = ok(() => W.discCheck(cash, cfg, co(pct), lines('L'), {}, [{ id: 'L', role: 'lead', need: 'lead', pct, ref: 'l:p1' }]));
+      assert.equal(leadAp === 'ok', need !== 'manager', tag + ' אישור אחראי: ' + leadAp);
+      const mgrAp = ok(() => W.discCheck(cash, cfg, co(pct), lines('M'), {}, [{ id: 'M', role: 'mgr', need: 'manager', pct, ref: 'l:p1' }]));
+      assert.equal(mgrAp, 'ok', tag + ' אישור מנהל');
+      n++;
+    }
+    assert.ok(n > 300);
+  });
+});

@@ -28,6 +28,11 @@ const CAT = root && root.PosCatalog || (typeof require === 'function' ? require(
 const pad = (n) => String(n).padStart(6, '0');
 const dayOf = (t) => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const clone = (o) => JSON.parse(JSON.stringify(o));
+// POS:W2 (סבב 2): מכירה שהשרת דחה בגלל אישור (פג תוקף, של משתמש אחר, חורג ממה שאושר) – יוצאת מהתור ל"מכירות שנדחו" (lp-pos-err),
+// הנורית אדומה, הקופאי והמנהל מקבלים הודעה, והתור ממשיך (המכירות הבאות ממוספרות מחדש מהמונה בשרת – seq-gap → onConflict)
+const SALE_REJ = new Set(['ap-bad', 'ap-used', 'ap-old', 'ap-scope', 'bad-ap', 'disc-role', 'disc-over', 'below-min']);
+const reasonOf = (e) => (e && ((e.details && e.details.reason) || e.reason)) || '';
+const perm = (reason, msg) => { const e = new Error(msg); e.code = 'failed-precondition'; e.details = { reason }; return e; };
 function rid(rand) { const a = rand(9); return 'r' + Date.now().toString(36) + Array.from(a, (b) => b.toString(16).padStart(2, '0')).join(''); }
 const defRand = (n) => { const a = new Uint8Array(n); if (root && root.crypto && root.crypto.getRandomValues) root.crypto.getRandomValues(a); else for (let i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256); return a; };
 // מוצר מ-Firestore (prod) → מוצר קופה. price בשקלים → אגורות; מחיר סניף (bp) קודם. מוצר כבוי (on:false) – לא נכנס
@@ -54,6 +59,15 @@ function create(deps) {
     Q = OFF.queue({
       store, key: k, now, timer: deps.timer, online: deps.online,
       send: (it) => deps.call(it.fn, it.payload),
+      asideKey: (deps.key || 'lp-pos').replace(/^lp-pos/, 'lp-pos-err') + ':' + (dev() || 'T'),
+      aside: (it, e) => {
+        const rs = reasonOf(e);
+        if (it.kind !== 'sale' || !SALE_REJ.has(rs)) return false;
+        const led = ledger(), sl = led.sales.find((x) => x.reqId === it.reqId);
+        if (sl) { sl.rej = { reason: rs, msg: String(e && e.message || '').slice(0, 200), at: now() }; if (sl.no0 == null) sl.no0 = sl.no; sl.no = null; sl.id0 = sl.id; sl.id = ''; ledSave(); }
+        try { if (deps.onReject) deps.onReject({ reqId: it.reqId, seq: it.seq, reason: rs, msg: String(e && e.message || ''), gross: it.payload && it.payload.gross }); } catch (x) { /* */ }
+        return true;
+      },
       onConflict: async (qq, it) => {
         const last = await deps.devSeq();
         if (!Number.isInteger(last)) throw new Error('אין מונה מהשרת');
@@ -65,7 +79,11 @@ function create(deps) {
         ledSave();
       },
     });
-    Q.on((s) => { for (const f of netSubs) { try { f(s); } catch (e) { /* */ } } });
+    Q.on((s) => {
+      for (const f of netSubs) { try { f(s); } catch (e) { /* */ } }
+      // POS:W2: מכירה נשלחה – החזרות שחיכו לה יוצאות עכשיו
+      if (RQ && RQK === base() + ':ret' && RQ.pending()) Promise.resolve().then(() => RQ.flush());
+    });
     return Q;
   }
   // POS:W2 – החזרות לשרת (posReturn): תור נפרד בלי מספור (השרת ממספר R לכל קופה). אותו reqId נשלח שוב עד תשובה – השרת מחזיר את
@@ -80,18 +98,43 @@ function create(deps) {
       store, key: k, now, timer: deps.timer, online: deps.online, skipErr: true,
       send: (it) => {
         const p = Object.assign({}, it.payload), sr = p._sr;
-        delete p._sr;
+        delete p._sr; delete p._m;
         if (sr) {
-          const w = q().item(sr);
-          if (w && w.st !== 'ok') { const e = new Error('המכירה המקורית עוד לא נשלחה לשרת'); e.code = 'unavailable'; return Promise.reject(e); }
-          const s = ledger().sales.find((x) => x.reqId === sr);
+          const s = ledger().sales.find((x) => x.reqId === sr), w = q().item(sr);
+          if (s && s.rej) return Promise.reject(perm('sale-rej', 'המכירה המקורית נדחתה בשרת – אי אפשר להחזיר עליה'));
+          if (w && w.st === 'err') return Promise.reject(perm('sale-err', 'המכירה המקורית תקועה בשליחה – פנו למנהל'));
+          // המכירה עוד בתור – מדלגים על ההחזרה הזו (החזרות אחרות ממשיכות) ומנסים שוב אחרי שהמכירה נשלחת
+          if (w && w.st !== 'ok') { const e = new Error('המכירה המקורית עוד לא נשלחה לשרת'); e.skip = true; return Promise.reject(e); }
           if (s && s.id) p.sale = s.id;
         }
         return deps.call(it.fn, p);
       },
     });
-    RQ.on(() => { const s = q().status(); for (const f of netSubs) { try { f(s); } catch (e) { /* */ } } });
+    RQ.on(() => { const s = q().status(); for (const f of netSubs) { try { f(s); } catch (e) { /* */ } } retWatch(); });
     return RQ;
+  }
+  // POS:W2 (סבב 2): החזרה נרשמת במכשיר (דוח היום, מונים) רק אחרי שהשרת אישר. תשובה שהגיעה ברקע (לא מול המסך) – deps.onRet:
+  //   { st:'ok', res } – אפשר להחזיר כסף לפי מה שהשרת אישר; { st:'err', reason, msg } – ההחזרה בוטלה במכשיר.
+  const fg = new Set();
+  let rwBusy = false;
+  function retRecord(it) {
+    const led = ledger();
+    if (led.rets.some((r) => r.reqId === it.reqId)) return false;
+    const m = (it.payload && it.payload._m) || {}, at = now(), res = it.res || {};
+    led.rets.push({ id: res.id || '', reqId: it.reqId, saleId: it.payload.sale, saleNo: m.saleNo, lines: m.lines || [], total: res.amt != null ? res.amt : (m.total || 0), at, day: dayOf(at), dev: dev(), cashier: deps.cashier().id, shift: shiftOf().id, srv: true });
+    ledSave();
+    return true;
+  }
+  function retWatch() {
+    if (rwBusy || !RQ) return;
+    rwBusy = true;
+    try {
+      for (const it of RQ.items()) {
+        if (fg.has(it.reqId)) continue;
+        if (it.st === 'ok' && retRecord(it)) { try { if (deps.onRet) deps.onRet({ st: 'ok', reqId: it.reqId, res: it.res, m: it.payload._m || {} }); } catch (e) { /* */ } }
+        if (it.st === 'err') { RQ.drop(it.reqId); try { if (deps.onRet) deps.onRet({ st: 'err', reqId: it.reqId, reason: it.reason, msg: it.err, m: it.payload._m || {} }); } catch (e) { /* */ } }
+      }
+    } finally { rwBusy = false; }
   }
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); });
   function ledger() {
@@ -137,7 +180,7 @@ function create(deps) {
     if (seqSynced || !dev() || !deps.online()) return;
     try { const n = await deps.devSeq(); if (Number.isInteger(n)) { q().syncSeq(n); seqSynced = true; } } catch (e) { /* בלי רשת – המונה המקומי */ }
   }
-  function decorate(s) { const o = clone(s); o.sync = s.practice ? 'T' : q().mark(s.reqId) || '✓'; const it = q().item(s.reqId); if (it && it.res && it.res.id) o.srvId = it.res.id; if (it && it.res && Array.isArray(it.res.docs)) o.docs = it.res.docs; return o; }
+  function decorate(s) { const o = clone(s); o.sync = s.practice ? 'T' : s.rej ? '!' : q().mark(s.reqId) || '✓'; const it = q().item(s.reqId); if (it && it.res && it.res.id) o.srvId = it.res.id; if (it && it.res && Array.isArray(it.res.docs)) o.docs = it.res.docs; return o; }
   const shiftOf = () => { const t = now(); return { id: (dev() || 'T') + '-' + dayOf(t).replace(/-/g, ''), no: 1, openedAt: new Date(dayOf(t) + 'T00:00:00').getTime() }; };
   const API = {
     isMock: false,
@@ -167,13 +210,12 @@ function create(deps) {
           if (sale.cust) payload.cust = String(sale.cust);
           if (sale.note) payload.note = String(sale.note).slice(0, 300);
           if (sale.manDisc) payload.manDisc = { amt: sale.manDisc.amt, why: String(sale.manDisc.why || '').slice(0, 80) }; // הסכום שהקופאי ראה (לא האחוז – בלי הפרשי עיגול)
-          // POS:W2: אישורי ההנחה (ש5, posAuth) – השרת מאמת מי אישר, תפקיד ותקרה, ומסמן את האישור כמנוצל
-          const aps = [...new Set(sale.lines.map((l) => l.mdisc && l.mdisc.ap).concat(sale.manDisc && sale.manDisc.ap).filter((x) => typeof x === 'string' && x))];
-          if (aps.length) payload.aps = aps.slice(0, 5);
+          // POS:W2: אישור ההנחה (ש5, posAuth) לכל הנחה – השרת מאמת מי אישר, תפקיד, האחוז שאושר והשורה, ומסמן את האישור כמנוצל
+          if (sale.manDisc && typeof sale.manDisc.ap === 'string' && sale.manDisc.ap) payload.manDisc.ap = sale.manDisc.ap;
           payload.lines = sale.lines.map((l, i) => {
             const o = payload.lines[i];
             if (l.gen || !o.pid || o.pid === 'gen') { delete o.pid; o.free = true; }
-            if (l.mdisc) o.mdisc = { amt: l.mdisc.amt, why: String(l.mdisc.why || '').slice(0, 80) };
+            if (l.mdisc) o.mdisc = Object.assign({ amt: l.mdisc.amt, why: String(l.mdisc.why || '').slice(0, 80) }, typeof l.mdisc.ap === 'string' && l.mdisc.ap ? { ap: l.mdisc.ap } : {});
             return o;
           });
         }
@@ -185,7 +227,7 @@ function create(deps) {
       return { id, no, at, reqId, sync: practice ? 'T' : q().mark(reqId) };
     },
     getSales: async (o) => { const d = o && o.day || dayOf(now()); return ledger().sales.filter((s) => s.day === d).reverse().map(decorate); },
-    getSale: async (no) => { const s = ledger().sales.find((x) => x.no === +no || x.id === no || x.no0 === +no); return s ? decorate(s) : null; },
+    getSale: async (no) => { const L = ledger().sales; const s = L.find((x) => x.no === +no || (x.id && x.id === no)) || L.find((x) => !x.rej && x.no0 === +no); return s ? decorate(s) : null; },
     returnedQty: async (saleNo) => { const m = {}; ledger().rets.filter((r) => r.saleNo === +saleNo).forEach((r) => r.lines.forEach((l) => { m[l.pid] = (m[l.pid] || 0) + l.qty; })); return m; },
     saveReturn: async (ret) => {
       const at = now(), led = ledger(); led.rseq += 1; const no = led.rseq, id = 'R' + (dev() || 'T') + '-' + pad(no);
@@ -199,7 +241,7 @@ function create(deps) {
     returnSrv: async (o) => {
       const d = dev();
       if (!d) { const e = new Error('מצב תרגול – החזרה לא נשלחת לשרת'); e.reason = 'practice'; throw e; }
-      const reqId = o.reqId || rid(rand), at = now(), led = ledger();
+      const reqId = o.reqId || rid(rand);
       const payload = { op: 'do', reqId, dev: d, inst: deps.inst(), sale: o.sale, items: o.items, why: String(o.why || '').slice(0, 80), tag: o.tag === true };
       if (o.cond) payload.cond = String(o.cond).slice(0, 120);
       if (o.dmg === true) payload.dmg = true;
@@ -207,24 +249,24 @@ function create(deps) {
       if (o.debtTo) payload.debtTo = o.debtTo;
       if (Array.isArray(o.aps) && o.aps.length) payload.aps = o.aps.slice(0, 5);
       if (o.saleReq) payload._sr = o.saleReq;
-      const ex = rq().item(reqId);
-      rq().add({ reqId, fn: 'posReturn', kind: 'ret', payload });
-      if (!ex) { led.rets.push({ id: '', reqId, saleId: o.sale, saleNo: o.saleNo, lines: (o.lines || []).map((l) => ({ pid: l.pid, qty: l.qty })), total: o.total || 0, at, day: dayOf(at), dev: d, cashier: deps.cashier().id, shift: shiftOf().id, srv: true }); ledSave(); }
-      if (deps.online()) await Promise.race([rq().flush(), sleep(o.wait || 8000)]);
-      const it = rq().item(reqId);
-      const lr = ledger().rets.find((r) => r.reqId === reqId);
-      if (it && it.st === 'ok') { if (lr && it.res) { lr.id = it.res.id; ledSave(); } return { reqId, res: it.res }; }
-      if (it && it.st === 'err') {
-        rq().drop(reqId);
-        const L = ledger(); L.rets = L.rets.filter((r) => r.reqId !== reqId); ledSave();
-        const e = new Error(it.err || 'ההחזרה נדחתה'); e.reason = it.reason; throw e;
-      }
+      payload._m = Object.assign({ saleNo: o.saleNo, lines: (o.lines || []).map((l) => ({ pid: l.pid, qty: l.qty })), total: o.total || 0 }, o.meta ? { meta: o.meta } : {}); // נשאר במכשיר (לא נשלח)
+      fg.add(reqId);
+      let it;
+      try {
+        rq().add({ reqId, fn: 'posReturn', kind: 'ret', payload });
+        if (deps.online()) await Promise.race([rq().flush(), sleep(o.wait || 8000)]);
+        it = rq().item(reqId);
+      } finally { fg.delete(reqId); }
+      if (it && it.st === 'ok') { retRecord(it); return { reqId, res: it.res }; }
+      if (it && it.st === 'err') { rq().drop(reqId); const e = new Error(it.err || 'ההחזרה נדחתה'); e.reason = it.reason; throw e; }
       return { reqId, pend: true };
     },
     retPending: () => rq().pending(),
+    rejected: () => q().rejected(),
+    ackRejected: () => q().ackRejected(),
     retItem: (reqId) => rq().item(reqId),
     dayStats: async () => {
-      const d = dayOf(now()), l = ledger(), S = l.sales.filter((s) => s.day === d), R = l.rets.filter((r) => r.day === d);
+      const d = dayOf(now()), l = ledger(), S = l.sales.filter((s) => s.day === d && !s.rej), R = l.rets.filter((r) => r.day === d);
       return { sales: S.length, total: S.reduce((a, s) => a + s.total, 0), returns: R.length, returnsTotal: R.reduce((a, r) => a + r.total, 0), pending: q().pending() };
     },
     net: () => q().status(),
@@ -278,13 +320,16 @@ function data() {
     devSeq: async () => { const d = myDev(); if (!d) return null; const j = await fsx('/posdev/' + d); const o = decDoc(j); return Number.isInteger(o.lastSeq) ? o.lastSeq : 0; },
     loadProducts,
     online: () => root.navigator.onLine !== false,
+    // POS:W2 (סבב 2): אירועים לממשק – מכירה שנדחתה, החזרה שהשרת ענה עליה ברקע
+    onReject: (x) => { try { root.dispatchEvent(new CustomEvent('lp-pos-rej', { detail: x })); } catch (e) { /* */ } },
+    onRet: (x) => { try { root.dispatchEvent(new CustomEvent('lp-pos-ret', { detail: x })); } catch (e) { /* */ } },
   });
   DATA.onNet((s) => { root.PosOffline.paint(s); try { root.dispatchEvent(new CustomEvent('lp-pos-net', { detail: s })); } catch (e) { /* */ } });
   return DATA;
 }
 // ממשק קבוע (window.PosData) שמפנה לעסק / לקופה הנוכחיים
 const PD = {};
-['getSession', 'getProducts', 'refreshProducts', 'search', 'searchSync', 'explain', 'byBarcode', 'saveSale', 'getSales', 'getSale', 'returnedQty', 'saveReturn', 'returnSrv', 'retPending', 'retItem', 'dayStats',
+['getSession', 'getProducts', 'refreshProducts', 'search', 'searchSync', 'explain', 'byBarcode', 'saveSale', 'getSales', 'getSale', 'returnedQty', 'saveReturn', 'returnSrv', 'retPending', 'retItem', 'rejected', 'ackRejected', 'dayStats',
   'net', 'stats', 'onNet', 'mark', 'flush', 'retry', 'netChanged', 'cart', 'practice', '_reset'].forEach((k) => { PD[k] = function () { return data()[k].apply(null, arguments); }; });
 PD.isMock = false;
 PD.normalize = root.PosCatalog.norm;

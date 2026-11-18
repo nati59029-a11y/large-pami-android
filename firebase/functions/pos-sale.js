@@ -260,9 +260,10 @@ function linesIn(lines) {
     if (l.stk != null && typeof l.stk === 'number' && Number.isFinite(l.stk)) o.stk = l.stk;
     if (l.mdisc != null) {
       if (!isObj(l.mdisc)) throw bad('bad-disc', 'הנחה לא תקינה');
-      keysOk(l.mdisc, ['amt', 'pct', 'why']);
+      keysOk(l.mdisc, ['amt', 'pct', 'why', 'ap']);
       if ((l.mdisc.amt == null) === (l.mdisc.pct == null)) throw bad('bad-disc', 'הנחה בסכום או באחוז');
       o.mdisc = { why: str(l.mdisc.why, 80) };
+      if (l.mdisc.ap != null) o.mdisc.ap = apsIn([l.mdisc.ap])[0]; // POS:W2
       if (l.mdisc.amt != null) { if (!isAg(l.mdisc.amt) || l.mdisc.amt < 0) throw bad('bad-disc', 'הנחה לא תקינה'); o.mdisc.amt = l.mdisc.amt; }
       else { if (typeof l.mdisc.pct !== 'number' || !(l.mdisc.pct >= 0 && l.mdisc.pct <= 100)) throw bad('bad-disc', 'הנחה לא תקינה'); o.mdisc.pct = l.mdisc.pct; }
     }
@@ -318,56 +319,89 @@ function compute(lines, input, cfg, promos, prods, cp, ctx) {
     else delete o.mdisc;
     return o;
   });
-  return { calc, lines: out, manual, pct, below, applied: pr.applied };
+  return { calc, cl, lines: out, manual, pct, below, applied: pr.applied };
 }
-// r – התפקיד שקובע (של הקופאי, או של מי שאישר – POS:W2). viaAp – ההנחה עוברת בזכות אישור: אחראי – עד 10% (כמו posAuth, ש5)
-function discAuth(r, cfg, c, viaAp) {
-  if (!(c.manual > 0)) return null;
-  if (r === 'mgr') return c.below.length ? 'ovr' : null;
-  const dm = isObj(cfg.discMax) ? cfg.discMax : {};
-  const roles = cfg.discRoles;
-  let cap = r === 'lead' ? (roles === 'none' ? 0 : dm.lead) : (roles === 'all' ? 100 : roles === 'cashierCap' ? dm.cashier : 0);
-  if (viaAp && r === 'lead' && typeof cap === 'number') cap = Math.min(cap, 10);
-  if (!(typeof cap === 'number' && cap > 0)) throw deny('disc-role', 'אין לך הרשאה לתת הנחה ידנית');
-  if (c.pct > cap + 1e-9) throw deny('disc-over', `הנחה מעל ${cap}% – דורש מנהל`, { cap });
-  if (c.below.length) throw deny('below-min', 'מתחת למחיר המינימום – מנהל בלבד');
-  return null;
-}
-
 // ---------- POS:W2 – אישור אחראי / מנהל (ש5: posAuth op:'approve' → poslog/{ap}, k:'appr') ----------
-// הקופה מצרפת aps:[מזהה] למכירה (act 'disc') או להחזרה (act 'ret'). השרת מאמת כל אישור: הרשומה קיימת (poslog – רק השרת כותב, ולכן
-// אי אפשר לזייף), סוג הפעולה נכון, ניתנה לקופאי הזה (for), לא נוצלה (used), ובחלון של 12 שעות מרגע הפעולה. התפקיד שקובע – של מי שאישר
-// (role ברשומה, נבדק ע"י posAuth מול ה-PIN שלו). אישור משמש פעם אחת: מסומן used בטרנזקציה של הפעולה.
+// כל הנחה ידנית שהקופאי לא רשאי לתת בעצמו נושאת מזהה אישור: mdisc.ap (שורה) או manDisc.ap (כל העגלה). בהחזרה – aps:[מזהה].
+// השרת מאמת כל אישור: הרשומה קיימת (poslog – רק השרת כותב, ובמסד של העסק – אישור של עסק אחר לא נמצא), סוג הפעולה, ניתן לקופאי
+// המחובר (for), לא נוצל (used), ובתוקף: 30 דקות מיצירתו לפי שעון השרת (הכרעת בעל העסק, 18.11), ובמכירה – נוצר לפני רגע המכירה (soldAt).
+// האישור קשור למה שאושר (סבב 2): הנחה – pct ≥ ההנחה בפועל, ref = 'l:<מוצר>' / 'cart'; החזרה – ref = מספר המכירה ('noRcpt' בלי קבלה),
+// amt ≥ סכום ההחזרה. התפקיד – של מי שאישר; תקרות לפי PC.discCap (אותו כלל כמו posAuth). מתחת למחיר מינימום – רק אישור מנהל שנוצר
+// עם need:'manager' ומכסה את ההנחה (אז נרשם discOvr). אישור משמש פעם אחת: מסומן used בטרנזקציה של הפעולה.
+// מכירה שהגיעה מהתור אחרי יותר מ-30 דקות – נדחית (ap-old) והקופה מעבירה אותה ל"מכירות שנדחו" (הכרעה בצד הבטוח, ראו pos-data.js).
 const AP_RE = /^[A-Za-z0-9]{10,40}$/;
-const AP_WIN = 12 * 3600000; // משמרת: עגלה מושהית או החזרה שחיכתה לרשת – עדיין באותו יום עבודה
+const AP_WIN = 30 * 60000;
+const AP_SKEW = 2 * 60000; // הפרש שעונים מותר בין המכשיר לשרת (soldAt מול זמן יצירת האישור)
 const AP_ROLE = { manager: 'mgr', lead: 'lead' };
 function apsIn(v) {
   if (v == null) return [];
   if (!Array.isArray(v) || v.length > 5 || v.some((x) => typeof x !== 'string' || !AP_RE.test(x)) || new Set(v).size !== v.length) throw bad('bad-ap', 'אישור לא תקין');
   return v;
 }
-// snaps – poslog/{ap}. → { role: 'lead'|'mgr'|null, list:[{ id, by, role }] }
+// snaps – poslog/{ap}. → { role, list:[{ id, by, role, need, pct, amt, ref }] }. soldAt – רק במכירה.
 // soft – בדיקה מקדימה מחוץ לטרנזקציה: אישור שנוצל לא נדחה כאן (שליחה חוזרת של אותו reqId מחזירה את התוצאה הראשונה – בטרנזקציה)
-function apsCheck(snaps, who, act, at, now, soft) {
+function apsCheck(snaps, who, act, now, o) {
+  o = o || {};
   let role = null;
   const list = [];
   for (const x of snaps) {
     const v = x.exists ? x.data() : null;
     if (!v || v.k !== 'appr' || v.act !== act || v.for !== who.uid || !AP_ROLE[v.role] || typeof v.at !== 'number' || v.at > now + 60000) throw deny('ap-bad', 'האישור לא תקף');
-    if (v.used === true && !soft) throw deny('ap-used', 'האישור כבר נוצל');
-    if (Math.abs(at - v.at) > AP_WIN) throw deny('ap-old', 'פג תוקף האישור – בקשו אישור חדש');
+    if (v.used === true && !o.soft) throw deny('ap-used', 'האישור כבר נוצל');
+    if (now - v.at > AP_WIN) throw deny('ap-old', 'פג תוקף האישור (30 דקות) – בקשו אישור חדש');
+    if (o.soldAt != null && v.at > o.soldAt + AP_SKEW) throw deny('ap-bad', 'האישור ניתן אחרי המכירה');
     const r = AP_ROLE[v.role];
     if (!role || RANK[r] > RANK[role]) role = r;
-    list.push({ id: x.id, by: String(v.by || '').slice(0, 128), role: r });
+    list.push({ id: x.id, by: String(v.by || '').slice(0, 128), role: r, need: v.need || null, pct: typeof v.pct === 'number' ? v.pct : null, amt: Number.isInteger(v.amt) ? v.amt : null, ref: typeof v.ref === 'string' ? v.ref : null });
   }
   return { role, list };
 }
-// התפקיד שקובע: של הקופאי, או של מי שאישר אם הוא גבוה יותר
-const effRole = (who, ap) => { const r = roleOf(who); return ap && ap.role && RANK[ap.role] > RANK[r] ? ap.role : r; };
-const apUse = (tx, db, ap, o) => { for (const a of ap.list) tx.update(db.doc('poslog/' + a.id), Object.assign({ used: true, usedAt: Date.now() }, o)); };
+const apUse = (tx, db, list, o) => { for (const a of list) tx.update(db.doc('poslog/' + a.id), Object.assign({ used: true, usedAt: Date.now() }, o)); };
+const apPub = (a) => ({ id: a.id, by: a.by, role: a.role });
+// סמכות הנחה ידנית (ב נ7), לכל הנחה בנפרד ולכל המכירה. → { ovr, used:[אישור] }
+// לכל הנחה: מה שהקופאי רשאי בעצמו (PC.discCap) – עובר; אחרת חייב אישור שמכסה אותה (ref, pct, תפקיד, מינימום).
+function discCheck(who, cfg, co, lines, input, apl) {
+  const own = roleOf(who);
+  const am = new Map(apl.map((a) => [a.id, a]));
+  const items = [];
+  lines.forEach((l, i) => {
+    const c = co.cl[i];
+    if (!(c.md > 0)) return;
+    const b = c.base - c.pd;
+    items.push({ pct: b > 0 ? c.md * 100 / b : 100, below: co.below.includes(i), ap: l.mdisc && l.mdisc.ap, ref: 'l:' + (l.pid || 'gen') });
+  });
+  if (co.calc.sdisc > 0) {
+    const b = co.cl.reduce((x, c) => x + c.base - c.disc, 0);
+    items.push({ pct: b > 0 ? co.calc.sdisc * 100 / b : 100, below: co.below.some((i) => co.calc.lines[i].sd > 0), ap: input.manDisc && input.manDisc.ap, ref: 'cart' });
+  }
+  let ovr = false, top = own;
+  const used = [];
+  for (const it of items) {
+    if (own === 'mgr') { if (it.below) ovr = true; continue; }
+    const capOwn = PC.discCap(own, cfg);
+    if (it.pct <= capOwn + 1e-9 && !it.below) continue;
+    const a = it.ap ? am.get(it.ap) : null;
+    if (!a) {
+      if (it.below && it.pct <= capOwn + 1e-9) throw deny('below-min', 'מתחת למחיר המינימום – מנהל בלבד');
+      if (!(capOwn > 0)) throw deny('disc-role', 'אין לך הרשאה לתת הנחה ידנית');
+      throw deny('disc-over', `הנחה מעל ${capOwn}% – דורש אישור`, { cap: capOwn });
+    }
+    if (used.includes(a)) throw deny('ap-used', 'אותו אישור לשתי הנחות');
+    if (a.ref !== it.ref) throw deny('ap-scope', 'האישור ניתן להנחה אחרת');
+    if (a.pct == null || it.pct > a.pct + 1e-6) throw deny('ap-scope', `ההנחה גדולה ממה שאושר (${a.pct == null ? 0 : a.pct}%)`, { pct: a.pct });
+    const capAp = PC.discCap(a.role, cfg);
+    if (it.pct > capAp + 1e-9) throw deny('disc-over', `הנחה מעל ${capAp}% – דורש מנהל`, { cap: capAp });
+    if (it.below) { if (!(a.role === 'mgr' && a.need === 'manager')) throw deny('below-min', 'מתחת למחיר המינימום – אישור מנהל מפורש'); ovr = true; }
+    used.push(a);
+    if (RANK[a.role] > RANK[top]) top = a.role;
+  }
+  // כל ההנחות יחד – לא מעל התקרה של התפקיד הגבוה ביותר שאישר (מנהל – בלי תקרה)
+  if (top !== 'mgr' && co.manual > 0) { const cap = PC.discCap(top, cfg); if (co.pct > cap + 1e-9) throw deny(cap > 0 ? 'disc-over' : 'disc-role', cap > 0 ? `הנחה מעל ${cap}% – דורש מנהל` : 'אין לך הרשאה לתת הנחה ידנית', { cap }); }
+  return { ovr, used };
+}
 
 // ---------- posSale ----------
-const SALE_KEYS = ['reqId', 'dev', 'inst', 'lines', 'pays', 'chg', 'debt', 'cust', 'manDisc', 'cpns', 'promoOff', 'note', 'docAs', 'alloc', 'cashOk', 'vm', 'soldAt', 'seq', 'gross', 'off', 'aps'];
+const SALE_KEYS = ['reqId', 'dev', 'inst', 'lines', 'pays', 'chg', 'debt', 'cust', 'manDisc', 'cpns', 'promoOff', 'note', 'docAs', 'alloc', 'cashOk', 'vm', 'soldAt', 'seq', 'gross', 'off'];
 async function saleIn(request) {
   const input = inputObject(request);
   if (K.isPractice(input.reqId) || K.isPractice(input.dev)) throw bad('practice', 'מכירת תרגול לא נשלחת לשרת');
@@ -382,8 +416,9 @@ async function saleIn(request) {
   const lines = linesIn(input.lines);
   if (input.manDisc != null) {
     if (!isObj(input.manDisc)) throw bad('bad-disc', 'הנחה לא תקינה');
-    keysOk(input.manDisc, ['amt', 'pct', 'why']);
+    keysOk(input.manDisc, ['amt', 'pct', 'why', 'ap']);
     if ((input.manDisc.amt == null) === (input.manDisc.pct == null)) throw bad('bad-disc', 'הנחה בסכום או באחוז');
+    if (input.manDisc.ap != null) apsIn([input.manDisc.ap]);
   }
   const cust = input.cust == null || input.cust === '' ? '' : str(input.cust, 80);
   if (cust && !/^[A-Za-z0-9_-]{1,80}$/.test(cust)) throw bad('bad-cust', 'לקוח לא תקין');
@@ -392,7 +427,7 @@ async function saleIn(request) {
   const promoOff = input.promoOff == null ? [] : input.promoOff;
   if (!Array.isArray(promoOff) || promoOff.length > 50 || promoOff.some((x) => typeof x !== 'string' || !x || x.length > 80)) throw bad('bad-input', 'קלט לא תקין');
   const note = input.note == null ? '' : str(input.note, 300);
-  const apIds = apsIn(input.aps);
+  const apIds = apsIn([...new Set(lines.map((l) => l.mdisc && l.mdisc.ap).concat(input.manDisc && input.manDisc.ap).filter(Boolean))]);
   const chg = input.chg == null ? 0 : input.chg, debt = input.debt == null ? 0 : input.debt;
   const cfg = await cfgOf(db);
   if (promoOff.length && cfg.promoCancelRole === 'lead' && !atLeast(who, 'lead')) throw deny('promo-off-lead', 'ביטול מבצע – באישור אחראי');
@@ -412,7 +447,7 @@ async function saleIn(request) {
     const [m, s] = snaps;
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res') || { id: m.get('sale'), seq: m.get('seq'), gross: m.get('gross') }); return; }
     // POS:W2: אישור הנחה (ש5) – אחרי בדיקת הכפילות (שליחה חוזרת של מכירה שכבר נרשמה מחזירה אותה, גם כשהאישור כבר נוצל)
-    const ap = apsCheck(snaps.slice(snaps.length - apIds.length), who, 'disc', input.soldAt, now);
+    const ap = apsCheck(snaps.slice(snaps.length - apIds.length), who, 'disc', now, { soldAt: input.soldAt });
     const d = devOk(s, input.inst, cfg);
     const prods = {};
     pids.forEach((p, i) => { const x = snaps[2 + i]; if (x.exists) prods[p] = x.data(); });
@@ -434,7 +469,8 @@ async function saleIn(request) {
       return { code, promo: { type: pm.type, pct: pm.pct, amt: pm.amt, pids: pm.pids, cats: pm.cats } };
     });
     const co = compute(lines, input, cfg, promos, prods, cp, { at: input.soldAt, club: !!(cd && cd.club), grp: cd && cd.grp, promoOff });
-    const ovr = discAuth(effRole(who, ap), cfg, co, !!ap.role && RANK[ap.role] > RANK[roleOf(who)]);
+    const dc = discCheck(who, cfg, co, lines, input, ap.list);
+    const ovr = dc.ovr ? 'ovr' : null;
     const calc = co.calc;
     // סכום מהמכשיר שונה: מכירה מקוונת – נדחית (המכשיר מחשב מחדש). מכירה בלי רשת (off) – כבר נמסרה ללקוח: נשמרת לבדיקת מנהל (chk), בלי מסמך
     let gross = calc.gross, chk = null;
@@ -512,7 +548,7 @@ async function saleIn(request) {
       retQty: co.lines.map(() => 0), retAmt: co.lines.map(() => 0), retByM: {}, soldAt: input.soldAt, at: now, off: input.off === true,
     }, cust ? { cust, custName: String((cd && (cd.bn || cd.name)) || '').slice(0, 80) } : {}, note ? { note } : {}, md ? { manDisc: md } : {},
     chk ? Object.assign({ chk: true }, chk) : {}, priceChk.length ? { chkPrice: priceChk.slice(0, 50) } : {}, warn.length ? { warn } : {}, ovr ? { discOvr: true } : {},
-    promoOff.length ? { promoOff } : {}, ap.list.length ? { aps: ap.list } : {});
+    promoOff.length ? { promoOff } : {}, dc.used.length ? { aps: dc.used.map(apPub) } : {});
     // ---- כתיבות ----
     B.flush();
     tx.create(db.doc('possale/' + id), doc);
@@ -523,7 +559,7 @@ async function saleIn(request) {
       tx.set(db.collection('posgiftlog').doc(), { code, amt: -amt, sale: id, by: who.uid, at: now });
     }
     for (const { s: x, code } of cps) tx.update(x.ref, { st: 'used', sale: id, usedAt: now, usedBy: who.uid });
-    apUse(tx, db, ap, { sale: id });
+    apUse(tx, db, dc.used, { sale: id });
     // מלאי (מינימלי עד ש6 – lib/pos-stock.js): q.{סניף} יורד בכמות, גם מתחת ל-0 (ב ס8)
     const byPid = {};
     for (const l of co.lines) if (l.pid && prods[l.pid]) byPid[l.pid] = (byPid[l.pid] || 0) + l.qty;
@@ -678,8 +714,8 @@ async function retIn(request) {
   // כאן בדיקה מקדימה (קריאה רגילה); האימות הקובע והסימון used – בתוך הטרנזקציה
   const apIds = op === 'do' ? apsIn(input.aps) : [];
   const apRefs = apIds.map((a) => db.doc('poslog/' + a));
-  const ap0 = apIds.length ? apsCheck(await db.getAll(...apRefs), who, 'ret', now, now, true) : { role: null, list: [] };
-  const r0 = effRole(who, ap0);
+  const ap0 = apIds.length ? apsCheck(await db.getAll(...apRefs), who, 'ret', now, { soft: true }) : { role: null, list: [] };
+  const r0 = ap0.role && RANK[ap0.role] > RANK[roleOf(who)] ? ap0.role : roleOf(who);
   if (op === 'do' && RANK[r0] < RANK.lead) throw deny('ret-lead', 'החזרה – באישור אחראי');
   if (!withSale) {
     if (cfg.retNoRcpt === 'no') throw pre('ret-no-rcpt', 'אין החזרה בלי קבלה בעסק');
@@ -694,8 +730,7 @@ async function retIn(request) {
     const sn = await tx.getAll(...reads);
     const ds = sn[0], ms = mark ? sn[1] : null, ss = sref ? sn[mark ? 2 : 1] : null;
     if (ms && ms.exists) { res = Object.assign({ ok: true, dup: true }, ms.get('res')); return; }
-    const ap = apsCheck(sn.slice(sn.length - apRefs.length), who, 'ret', now, now);
-    const rr = effRole(who, ap);
+    const ap = apsCheck(sn.slice(sn.length - apRefs.length), who, 'ret', now);
     const d = op === 'do' ? devOk(ds, input.inst, cfg) : (ds.exists ? ds.data() : (() => { throw nf('no-dev', 'הקופה לא נמצאה'); })());
     const br = d.br || '_';
     let sale = null, rl, R, plan, rate;
@@ -723,7 +758,18 @@ async function retIn(request) {
       rate = cfg.vatRate;
     }
     if (!(R > 0)) throw pre('ret-zero', 'אין סכום להחזרה בשורות שנבחרו');
-    if (op === 'do' && Number.isInteger(cfg.retMgrAbove) && R > cfg.retMgrAbove && RANK[rr] < RANK.mgr) throw deny('ret-mgr', 'החזרה בסכום הזה – באישור מנהל', { amt: R });
+    // מי מאשר (ב ה2): אחראי ומעלה; מעל retMgrAbove – מנהל. קופאי / אחראי בלי הסמכות – אישור שמכסה בדיוק את ההחזרה הזו (המכירה, הסכום)
+    let apUsed = [];
+    if (op === 'do') {
+      const need = Number.isInteger(cfg.retMgrAbove) && R > cfg.retMgrAbove ? 'mgr' : 'lead';
+      if (RANK[roleOf(who)] < RANK[need]) {
+        const a = ap.list.filter((x) => RANK[x.role] >= RANK[need]).sort((x, y) => RANK[y.role] - RANK[x.role])[0];
+        if (!a) throw deny(need === 'mgr' ? 'ret-mgr' : 'ret-lead', need === 'mgr' ? 'החזרה בסכום הזה – באישור מנהל' : 'החזרה – באישור אחראי', { amt: R });
+        if (a.ref !== (withSale ? input.sale : 'noRcpt')) throw deny('ap-scope', 'האישור ניתן להחזרה של מכירה אחרת');
+        if (a.amt == null || R > a.amt) throw deny('ap-scope', 'סכום ההחזרה גדול ממה שאושר', { amt: a.amt });
+        apUsed = [a];
+      }
+    }
     // הלקוח של המכירה (קיזוז חוב): יתרה וחשבוניות פתוחות – ספר המסמכים, קריאות לפני כתיבות
     const custId = sale && sale.cust ? sale.cust : '';
     const { B, c } = await D.prep(tx, db, { uid: who.uid }, now, cfg, input.dev, custId);
@@ -795,10 +841,10 @@ async function retIn(request) {
     // מלאי: תקין חוזר למלאי; פגום – רק רישום (ב ה5)
     if (!dmg) { const byPid = {}; for (const x of rl) if (x.pid) byPid[x.pid] = (byPid[x.pid] || 0) + x.qty; for (const [pid, q] of Object.entries(byPid)) { const pr = db.doc('prod/' + pid); tx.set(pr, { q: { [br]: FieldValue.increment(q) } }, { merge: true }); } }
     const doc = Object.assign({ id: rid, reqId: input.reqId, dev: input.dev, br, src: withSale ? 'sale' : 'noRcpt', lines: rl, amt: R, debtOff: plan.debtOff, refunds,
-      why, cond, tag: input.tag === true, dmg, by: who.uid, at: now, doc: cr.id, docs: [cr] }, sale ? { sale: input.sale, cust: custId || '' } : {}, ap.list.length ? { aps: ap.list } : {},
+      why, cond, tag: input.tag === true, dmg, by: who.uid, at: now, doc: cr.id, docs: [cr] }, sale ? { sale: input.sale, cust: custId || '' } : {}, apUsed.length ? { aps: apUsed.map(apPub) } : {},
     vouchers.length ? { vouchers: vouchers.map((v) => v.code) } : {}, typeof input.img === 'string' && /^[A-Za-z0-9_/.-]{1,200}$/.test(input.img) ? { img: input.img } : {});
     tx.create(db.doc('posret/' + rid), doc);
-    apUse(tx, db, ap, { ret: rid });
+    apUse(tx, db, apUsed, { ret: rid });
     tx.update(dref, { lastRet: lastRet + 1, lastSync: now });
     const out = { id: rid, amt: R, debtOff: plan.debtOff, refunds, vouchers, docs: [cr] };
     tx.set(mark, { kind: 'ret', ret: rid, at: now, res: out });
@@ -1117,6 +1163,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { posSale: saleIn, posReturn: retIn, posPark: parkIn, posDebtPay: debtIn, posCouponUse: cpnIn, posGift: giftIn, posPromo: promoIn };
 for (const [n, f] of Object.entries(FNS)) exports[n] = onCall(wrap(n, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  CFG0, PAYM, cfgOf, luhn, cardIn, hasCard, paysIn, closeOk, byMethod, linesIn, compute, discAuth, retLines, retAlloc, targets, QON,
+  CFG0, PAYM, cfgOf, luhn, cardIn, hasCard, paysIn, closeOk, byMethod, linesIn, compute, discCheck, apsCheck, retLines, retAlloc, targets, QON,
   call: Object.fromEntries(Object.entries(FNS).map(([n, f]) => [n, () => wrap(n, f)])),
 } });

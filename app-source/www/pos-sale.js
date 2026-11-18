@@ -129,8 +129,9 @@ async function discount(){const{E,fmt,cfg,modal,parseAmt}=UI();if(!canDisc()||!S
  if(amt>base){UI().toast('ההנחה גדולה מהסכום','bad');return}
  const eff=base?amt*100/base:0,max=(cfg('discMax')||{}).lead||0;let need=eff>max+1e-9?'mgr':'lead';
  const minOk=v.sc==='line'?(line.unit*line.qty-(line.pdisc||0)-amt)>=(sel.min||0)*line.qty:true;if(!minOk)need='mgr';
- const ap=await UI().approve({role:role(),need,act:'disc',pct:eff,text:'הנחה של '+fmt(amt)+(eff?' ('+Math.round(eff*10)/10+'%)':'')});if(!ap.ok)return;
- const rec={amt,why:v.why,by:ap.by};if(pct!=null)rec.pct=pct;if(ap.ap)rec.ap=ap.ap;/* POS:W2: מזהה האישור – השרת בודק אותו */
+ const apRef=v.sc==='line'?'l:'+(sel.gen?'gen':sel.pid):'cart';/* POS:W2: האישור קשור לשורה / לעגלה ולאחוז */
+ const ap=await UI().approve({role:role(),need,act:'disc',pct:eff,ref:apRef,text:'הנחה של '+fmt(amt)+(eff?' ('+Math.round(eff*10)/10+'%)':'')});if(!ap.ok)return;
+ const rec={amt,why:v.why,by:ap.by};if(pct!=null)rec.pct=pct;if(ap.ap)Object.assign(rec,apMeta(ap,eff,apRef,need));/* POS:W2: מזהה האישור – השרת בודק אותו */
  if(v.sc==='line'){const i=S.cart.findIndex(l=>l.key===sel.key);S.cart[i]=Object.assign({},S.cart[i],{mdisc:rec})}else S.manDisc=rec;
  D().log(minOk?'disc':'discOvr',Object.assign({sc:v.sc},rec));cart();cust()}
 async function linePrice(key){const{modal,parseAmt}=UI();const l=S.cart.find(x=>x.key===key);if(!l||!l.gen)return;/* א 5.8: שינוי מחיר רק בשורת מוצר כללי */
@@ -150,7 +151,20 @@ async function parks(){const{modal,E,fmt,hm}=UI();const L=await D().parked();
  S.cart=k.lines.map(l=>Object.assign({},l,{key:'l'+(++seq)}));S.cust=k.cust||null;S.note=k.note||'';S.manDisc=k.manDisc||null;S.chg=null;cart();cust();refresh()}
 
 /* ---------- תשלום וסיום ---------- */
-async function pay(){const t=calc();if(!(t.gross>0)||S.busy)return;/* ס18: אין תשלום בעגלה ריקה */
+/* POS:W2 (סבב 2): אישור הנחה תקף 30 דקות (לפי שעון השרת) ורק לקופאי שקיבל אותו. לפני התשלום – אישור שפג או של משתמש אחר
+   (למשל עגלה מושהית) מתבקש מחדש; בלי אישור – ההנחה יורדת והקופאי רואה את הסכום החדש לפני שגובים */
+const apMeta=(ap,pct,ref,need)=>({ap:ap.ap,apAt:ap.at||Date.now(),apFor:ap.for||'',apPct:pct,apRef:ref,apNeed:need});
+async function apFresh(){const A=root.PosApprove;if(!A||typeof A.fresh!=='function')return true;const{fmt}=UI();let cut=false;
+ const L=S.cart.map((l,i)=>l.mdisc&&l.mdisc.ap?{rec:l.mdisc,i}:null).filter(Boolean);if(S.manDisc&&S.manDisc.ap)L.push({rec:S.manDisc,i:-1});
+ for(const x of L){if(A.fresh(x.rec))continue;
+  const ap=await UI().approve({role:role(),need:x.rec.apNeed||'lead',act:'disc',pct:x.rec.apPct,ref:x.rec.apRef,text:'האישור להנחה של '+fmt(x.rec.amt)+' פג או ניתן למשתמש אחר – נדרש אישור מחדש'});
+  if(ap.ok&&ap.ap){Object.assign(x.rec,apMeta(ap,x.rec.apPct,x.rec.apRef,x.rec.apNeed));continue}
+  if(ap.ok){['ap','apAt','apFor','apPct','apRef','apNeed'].forEach(k=>delete x.rec[k]);continue}
+  cut=true;if(x.i<0)S.manDisc=null;else{const l=Object.assign({},S.cart[x.i]);delete l.mdisc;S.cart[x.i]=l}}
+ if(cut){D().log('discOff',{why:'apExpired'});cart();cust();UI().toast('הנחה בלי אישור תקף הוסרה – בדקו את הסכום ולחצו שוב על תשלום','warn');return false}
+ return true}
+async function pay(){const t0=calc();if(!(t0.gross>0)||S.busy)return;/* ס18: אין תשלום בעגלה ריקה */
+ if(!(await apFresh()))return;const t=calc();
  /* POS:W2 (איחוד): קופה שנותקה מרחוק / מושבתת / מחכה לאישור מכשיר (ש7) – לא מתחילים תשלום */
  try{const DV=root.Devices;if(DV&&typeof DV.blocked==='function'&&DV.blocked()){UI().toast((DV.msg&&DV.msg('BLOCKED'))||'הקופה חסומה למכירה. פנו למנהל','bad');return}}catch(e){}
  const r=await root.PosPay.open({gross:t.gross,cust:S.cust,role:role()});if(!r)return;await finish(t,r)}
@@ -177,10 +191,13 @@ async function last(){const{modal}=UI();const d=S.last;if(!d)return;
  if(v==='copy'){UI().Dev.print({kind:'sale',doc:d,copy:true});D().log('reprint',{no:d.no});UI().toast('נשלח להדפסה')}
  if(v==='gift'){UI().Dev.print({kind:'gift',doc:d});D().log('giftRcpt',{no:d.no});await modal(`<div class="pos-sh"><h2>קבלת מתנה</h2></div>${rcptHtml(d,true)}<button class="pos-b w" data-v="no" data-def>סגירה</button>`,{label:'קבלת מתנה'})}
  if(v==='send'){D().log('send',{no:d.no});UI().toast('השליחה הדיגיטלית תגיע עם מודול הקבלות')}}
-async function ret(prefill){const r=await root.PosRet.open({role:role(),prefill});if(!r)return;UI().Dev.print({kind:'ret',doc:Object.assign({},r.ret,r.r)});
- /* POS:W2: החזרה שעוד לא אושרה בשרת (בלי רשת) – בתור; המגירה לא נפתחת והכסף לא מוחזר עד שהשרת מאשר (ב ה15) */
- if(r.r&&r.r.pend){UI().toast('אין רשת – ההחזרה ממתינה לשרת. אין להחזיר כסף עד שתאושר','warn');refresh();return}
- if(r.ret.byM.cash)UI().Dev.openDrawer('refund');UI().toast('ההחזרה נשמרה: '+UI().fmt(r.r&&r.r.amt!=null?r.r.amt:r.ret.total));refresh()}
+async function ret(prefill){const r=await root.PosRet.open({role:role(),prefill});if(!r)return;
+ /* POS:W2: החזרה שעוד לא אושרה בשרת (בלי רשת) – בתור: בלי קבלה, בלי מגירה ובלי כסף עד שהשרת מאשר (ב ה15). האישור מגיע בהודעה (pos-w2.js) */
+ if(r.r&&r.r.pend){UI().toast('אין רשת – ההחזרה ממתינה לאישור השרת. אין להחזיר כסף עד שתופיע הודעה שאושרה','warn');refresh();return}
+ UI().Dev.print({kind:'ret',doc:Object.assign({},r.ret,r.r)});
+ /* המגירה – לפי מה שהשרת אישר במזומן (במצב תרגול – לפי החישוב במכשיר) */
+ const cash=r.r&&Array.isArray(r.r.refunds)?r.r.refunds.filter(x=>x.m==='cash').reduce((a,x)=>a+x.amt,0):(r.ret.byM.cash||0);
+ if(cash>0)UI().Dev.openDrawer('refund');UI().toast('ההחזרה נשמרה: '+UI().fmt(r.r&&r.r.amt!=null?r.r.amt:r.ret.total));refresh()}
 
 /* ברקוד לא מוכר (א 5.7): הוספה מהירה – המוצר נוצר, נמכר באותה מכירה, מסומן fromPos והמנהל מקבל התראה */
 async function unknown(code){const{cfg,modal,E,parseAmt,toast}=UI();if(cfg('bc.unknown')!=='quickAdd'||cfg('bc.cashierCreate')==='never'){toast('ברקוד לא מוכר: '+code,'bad');return}

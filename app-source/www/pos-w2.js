@@ -127,28 +127,46 @@ const getSale0=PD.getSale;
 function asUi(s){if(!s)return null;const m=retMap()[s.no]||{};s.gross=s.gross!=null?s.gross:s.total;s.pays=s.pays||(s.payments||[]).map(p=>({m:p.m,amt:p.a}));
  s.lines=(s.lines||[]).map(l=>Object.assign({unit:l.price,fin:l.total,tot:l.total},l));s.retQty=m.q||{};s.retAmt=m.a||{};s.retByM=m.m||{};return s}
 PD.getSale=async no=>asUi(await getSale0(no));
-PD.findSales=async o=>{o=o||{};if(o.no){const s=await PD.getSale(o.no);return s?[s]:[]}
+/* מכירה שהשרת דחה (rej, "מכירות שנדחו") – לא מופיעה בחיפוש להחזרה ולא בסיכום של הקופאי */
+PD.findSales=async o=>{o=o||{};if(o.no){const s=await PD.getSale(o.no);return s&&!s.rej?[s]:[]}
  const days=o.day?[o.day]:Array.from({length:14},(_,i)=>dayOf(Date.now()-i*86400000));let L=[];
- for(const d of days)L=L.concat(((await PD.getSales({day:d}))||[]).map(asUi));
+ for(const d of days)L=L.concat(((await PD.getSales({day:d}))||[]).filter(s=>!s.rej).map(asUi));
  if(o.phone){const dg=String(o.phone).replace(/\D/g,'');let C=[];try{C=(await custList()).filter(c=>c.phone.includes(dg)||c.phx.some(p=>p.includes(dg))).map(c=>c.id)}catch(e){}L=L.filter(s=>s.cust&&C.includes(s.cust))}
  if(o.gross)L=L.filter(s=>s.gross===o.gross);return L.slice(0,100)};
-PD.myStats=async cid=>{const S=((await PD.getSales({day:dayOf(Date.now())}))||[]).filter(s=>!cid||s.cashier===cid);return{sales:S.length,total:S.reduce((a,s)=>a+(s.gross!=null?s.gross:s.total||0),0)}};
+PD.myStats=async cid=>{const S=((await PD.getSales({day:dayOf(Date.now())}))||[]).filter(s=>!s.rej&&(!cid||s.cashier===cid));return{sales:S.length,total:S.reduce((a,s)=>a+(s.gross!=null?s.gross:s.total||0),0)}};
 /* החזרה → posReturn של ש2 (PosData.returnSrv): השרת בודק בטרנזקציה אחת את כל התקרות (ה15) – כמות וסכום לשורה, לכל אמצעי, קיזוז חוב,
    reqId נגד כפילות – ומפיק חשבונית זיכוי. הבדיקה כאן במכשיר רק מונעת שליחה שברור שתידחה. בלי רשת – ההחזרה בתור (pend) ונשלחת עם אותו reqId.
    מצב תרגול (מכשיר לא רשום) – במכשיר בלבד, כמו קודם */
 const saveReturn0=PD.saveReturn;
+/* סבב 2: המונה המקומי (כמה הוחזר) מתעדכן רק אחרי שהשרת אישר, ולפי מה שהשרת אישר לכל אמצעי (byM). החזרה שממתינה – ב-K('retp') */
+function byMOf(res){const m={};for(const r of(res&&res.refunds)||[]){const k=r.src==='debt'?'debt':r.src||r.m;m[k]=(m[k]||0)+r.amt}if(res&&res.debtOff)m.debt=(m.debt||0)+res.debtOff;return m}
+function retApply(saleNo,lines,byM){const M=retMap(),m=M[saleNo]||{q:{},a:{},m:{}};lines.forEach(l=>{m.q[l.i]=(m.q[l.i]||0)+l.qty;m.a[l.i]=(m.a[l.i]||0)+l.amt});Object.entries(byM||{}).forEach(([k,a])=>{m.m[k]=(m.m[k]||0)+a});M[saleNo]=m;ls(K('ret'),JSON.stringify(M))}
+const retpR=()=>jget(K('retp'))||{},retpW=o=>ls(K('retp'),JSON.stringify(o));
 PD.saveReturn=async ret=>{const s=await PD.getSale(ret.saleNo);if(ret.src==='sale'&&!s)throw fail('no-sale','המכירה לא נמצאה');
  if(s)for(const l of ret.lines){const sl=s.lines[l.i];if(!sl)throw fail('bad-line','שורה לא קיימת');if((s.retQty[l.i]||0)+l.qty>sl.qty)throw fail('over-qty','כמות גבוהה ממה שנמכר');if((s.retAmt[l.i]||0)+l.amt>sl.fin)throw fail('over-amt','סכום גבוה ממה ששולם')}
- let r,srv=null;
  if(s&&!s.practice&&typeof PD.returnSrv==='function'&&!(PD.practice&&PD.practice())){
-  const money=ret.total-(ret.debtOff||0);
-  srv=await PD.returnSrv({reqId:ret.reqId,sale:s.srvId||s.id,saleReq:s.reqId,saleNo:s.no,items:ret.lines.map(l=>({i:l.i,qty:l.qty})),why:ret.why,cond:ret.cond,tag:ret.tag,dmg:ret.dmg,
+  const money=ret.total-(ret.debtOff||0),lines=ret.lines.map(l=>({i:l.i,qty:l.qty,amt:l.amt}));
+  const srv=await PD.returnSrv({reqId:ret.reqId,sale:s.srvId||s.id,saleReq:s.reqId,saleNo:s.no,items:ret.lines.map(l=>({i:l.i,qty:l.qty})),why:ret.why,cond:ret.cond,tag:ret.tag,dmg:ret.dmg,
    refunds:money>0&&ret.method?[{m:ret.method,amt:money}]:undefined,aps:ret.ap?[ret.ap]:undefined,lines:ret.lines.map(l=>({pid:l.pid,qty:l.qty})),total:ret.total});
-  const x=srv.res||{};r={id:x.id||'',no:x.id||'',at:Date.now()}}
- else r=await saveReturn0(Object.assign(clone(ret),{lines:ret.lines.map(l=>Object.assign({},l,{price:l.unit,total:l.amt}))}));
- if(s){const M=retMap(),m=M[s.no]||{q:{},a:{},m:{}};ret.lines.forEach(l=>{m.q[l.i]=(m.q[l.i]||0)+l.qty;m.a[l.i]=(m.a[l.i]||0)+l.amt});Object.entries(ret.byM||{}).forEach(([k,a])=>{m.m[k]=(m.m[k]||0)+a});M[s.no]=m;ls(K('ret'),JSON.stringify(M))}
- const x=(srv&&srv.res)||{};
- return Object.assign({id:r.id,no:r.no,at:r.at,doc:'cr',docs:Array.isArray(x.docs)?x.docs:[]},srv?{reqId:srv.reqId,pend:!!srv.pend}:{},x.amt!=null?{amt:x.amt,refunds:x.refunds||[],vouchers:x.vouchers||[],debtOffSrv:x.debtOff||0}:{})};
+  if(srv.pend){const P=retpR();P[srv.reqId]={saleNo:s.no,lines,ret:clone(ret),at:Date.now()};retpW(P);return{id:'',no:'',at:Date.now(),doc:'cr',docs:[],reqId:srv.reqId,pend:true}}
+  const x=srv.res||{};retApply(s.no,lines,byMOf(x));
+  return{id:x.id||'',no:x.id||'',at:Date.now(),doc:'cr',docs:Array.isArray(x.docs)?x.docs:[],reqId:srv.reqId,pend:false,amt:x.amt,refunds:x.refunds||[],vouchers:x.vouchers||[],debtOffSrv:x.debtOff||0}}
+ /* מצב תרגול – במכשיר בלבד, כמו קודם */
+ const r=await saveReturn0(Object.assign(clone(ret),{lines:ret.lines.map(l=>Object.assign({},l,{price:l.unit,total:l.amt}))}));
+ if(s)retApply(s.no,ret.lines,ret.byM);
+ return{id:r.id,no:r.no,at:r.at,doc:'cr',docs:[]}};
+/* תשובה מהשרת ברקע על החזרה שחיכתה לרשת: אושרה – הודעה "אפשר להחזיר כסף", המגירה נפתחת לפי מה שהשרת אישר, וקבלת ההחזרה מודפסת;
+   נדחתה – ההחזרה מבוטלת במכשיר (המונה לא עודכן מלכתחילה) והודעה */
+const U2=()=>root.PosUI;
+root.addEventListener('lp-pos-ret',ev=>{const x=ev.detail||{},P=retpR(),p=P[x.reqId];delete P[x.reqId];retpW(P);const U=U2();
+ if(x.st==='ok'){const res=x.res||{};if(p)retApply(p.saleNo,p.lines,byMOf(res));
+  const cash=(res.refunds||[]).filter(r=>r.m==='cash').reduce((a,r)=>a+r.amt,0);
+  try{if(U){U.toast('ההחזרה אושרה בשרת – אפשר להחזיר כסף ללקוח: '+U.fmt(res.amt||0)+(cash?' (מזומן '+U.fmt(cash)+')':''),'ok');if(p)U.Dev.print({kind:'ret',doc:Object.assign({},p.ret,{id:res.id,no:res.id,docs:res.docs||[],amt:res.amt,refunds:res.refunds||[]})});if(cash>0)U.Dev.openDrawer('refund')}}catch(e){}}
+ else{try{if(U)U.toast('החזרה נדחתה בשרת: '+(x.msg||'')+' – לא להחזיר כסף. ההחזרה בוטלה','bad')}catch(e){}}});
+/* מכירה שהשרת דחה (אישור לא תקף) – עברה ל"מכירות שנדחו", התור ממשיך. הודעה לקופאי, ודיווח למנהל (posOps err → poserr + התראה) */
+root.addEventListener('lp-pos-rej',ev=>{const x=ev.detail||{},U=U2();
+ try{if(U)U.toast('מכירה נדחתה בשרת: '+(x.msg||x.reason||'')+'. היא הועברה ל"מכירות שנדחו" – פנו למנהל','bad')}catch(e){}
+ try{const D=root.Devices;if(D&&typeof D.reportErr==='function')D.reportErr('crit','SALE_REJ','מכירה שנגבתה נדחתה בשרת בגלל אישור: '+(x.reason||''),{reason:x.reason||'',seq:x.seq||0,gross:x.gross||0})}catch(e){}});
 
 /* ---------- ש7: מצב התור ---------- */
 if(root.PosOffline&&typeof root.PosOffline.stats!=='function')root.PosOffline.stats=()=>{try{return PD.stats()}catch(e){return{n:0,oldest:0}}};
@@ -187,7 +205,12 @@ let LEADS=null,leadsAt=0;
 async function leadsLoad(){if(LEADS&&Date.now()-leadsAt<5*60000)return LEADS;const r=await fn('posAuth',{op:'leads'});LEADS=(r&&r.staff)||[];leadsAt=Date.now();return LEADS}
 root.addEventListener('lp-biz-change',()=>{LEADS=null});
 const ACTS=['disc','void','ret','price','drawer'];
-function approveAsk(o){o=o||{};const U=root.PosUI,E=U.E,mgr=o.need==='mgr'||o.need==='own',act=ACTS.includes(o.act)?o.act:'void',who=mgr?'מנהל':'אחראי';
+const me=()=>{const s=gSY();return(s&&s.uid)||''};
+function approveAsk(o){o=o||{};const U=root.PosUI,E=U.E,act=ACTS.includes(o.act)?o.act:'void';
+ /* סבב 2 (ליקוי 6): הנחה – אותו כלל כמו השרת (PosCalc.discNeed, כולל discRoles): לא צריך אישור – בלי חלון; צריך מנהל – רק מנהלים ברשימה */
+ let dn;if(act==='disc'){try{dn=root.PosCalc.discNeed(Math.min(100,Math.max(0,+o.pct||0)),{discMax:U.cfg('discMax'),discRoles:U.cfg('discRoles')})}catch(e){dn='lead'}
+  if(dn===null&&o.need!=='mgr'&&o.need!=='own')return Promise.resolve({ok:true,by:'self',ap:null})}
+ const mgr=o.need==='mgr'||o.need==='own'||dn==='manager',who=mgr?'מנהל':'אחראי';
  return new Promise(res=>{const R=U.UI.root||document.body,w=document.createElement('div');w.className='pos-modal';w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');w.setAttribute('aria-label','אישור '+who);R.append(w);U.UI.stack.push(w);
   const st={L:null,err:'',busy:0};
   const done=v=>{if(!w.isConnected)return;w.remove();U.UI.stack=U.UI.stack.filter(x=>x!==w);res(v)};w._close=()=>done({ok:false,by:null});w._scan=()=>{};
@@ -202,12 +225,15 @@ function approveAsk(o){o=o||{};const U=root.PosUI,E=U.E,mgr=o.need==='mgr'||o.ne
   async function go(){if(st.busy)return;const by=(w.querySelector('#apBy')||{}).value,pin=String((w.querySelector('#apPin')||{}).value||'').trim();
    if(!by||!pin){st.err='בחרו מי מאשר והקלידו את הקוד';draw();return}
    st.busy=1;st.err='';draw();
-   try{const body={act,by,pin};if(act==='disc')body.pct=Math.min(100,Math.max(0,Math.ceil((+o.pct||0)*100)/100));if(mgr)body.need='manager';if(o.ref)body.ref=String(o.ref).slice(0,80);
-    const r=await root.PosShift.approve(body);done({ok:true,by:r.by||by,ap:r.ap||null,name:r.name||'',role:r.role||''})}
+   try{const body={act,by,pin};if(act==='disc')body.pct=Math.min(100,Math.max(0,Math.ceil((+o.pct||0)*100)/100));if(act==='ret'&&Number.isInteger(o.amt))body.amt=o.amt;if(mgr)body.need='manager';if(o.ref)body.ref=String(o.ref).slice(0,80);
+    const r=await root.PosShift.approve(body);done({ok:true,by:r.by||by,ap:r.ap||null,name:r.name||'',role:r.role||'',for:me(),at:Date.now(),pct:body.pct,ref:body.ref||null,need:mgr?'mgr':'lead'})}
    catch(e){st.busy=0;st.err=(e&&e.message)||'האישור נכשל';draw()}}
   w.addEventListener('click',ev=>{const b=ev.target.closest('[data-v]');if(!b||!w.contains(b)||b.disabled)return;if(b.dataset.v==='no')return done({ok:false,by:null});go()});
   w.addEventListener('submit',ev=>{ev.preventDefault();go()});
   draw();leadsLoad().then(L=>{st.L=L;draw()}).catch(e=>{st.L=[];st.err=root.navigator.onLine===false?'אישור דורש חיבור לרשת':((e&&e.message)||'רשימת המאשרים לא נטענה');draw()})})}
-if(root.PosShift&&typeof root.PosShift.approve==='function'&&!root.PosApprove)root.PosApprove={ask:approveAsk};
+/* fresh(rec) – אישור שנשמר בהנחה בעגלה עדיין טוב לשליחה: ניתן למשתמש המחובר עכשיו, ולפני פחות מ-25 דקות (השרת: 30, לפי שעון השרת).
+   אחרת מסך המכירה מבקש אישור מחדש לפני התשלום – כדי שהשרת לא ידחה מכירה שכבר נגבתה */
+const AP_FRESH=25*60000;
+if(root.PosShift&&typeof root.PosShift.approve==='function'&&!root.PosApprove)root.PosApprove={ask:approveAsk,me,fresh:rec=>!!(rec&&rec.ap&&rec.apFor&&rec.apFor===me()&&typeof rec.apAt==='number'&&Date.now()-rec.apAt<AP_FRESH&&Date.now()>=rec.apAt-60000)};
 })(typeof window!=='undefined'?window:globalThis);
 /* /POS:W2 */

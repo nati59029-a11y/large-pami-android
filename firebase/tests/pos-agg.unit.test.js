@@ -32,14 +32,16 @@ describe('pos-agg – PIN', () => {
 });
 
 describe('pos-agg – אישור אחראי', () => {
-  const cfg = { discMax: { cashier: 5, lead: 15 } };
+  // POS:W2 סבב 2 (ליקוי 6): discMax.cashier חל רק כש-discRoles מתיר לקופאי ('cashier'), בדיוק כמו בשרת המכירה
+  const cfg = { discMax: { cashier: 5, lead: 15 }, discRoles: 'cashier' };
   it('הנחה: עד 5% בלי אישור; אחראי עד 10% (גם כשההגדרה 15); מעל 10% – מנהל', () => {
+    assert.equal(AG.discNeed(3, { discMax: { cashier: 5, lead: 15 } }), 'lead', 'discRoles ברירת מחדל (lead) – קופאי לא נותן הנחה לבד');
     assert.equal(AG.discNeed(0, cfg), null);
     assert.equal(AG.discNeed(5, cfg), null);
     assert.equal(AG.discNeed(5.01, cfg), 'lead');
     assert.equal(AG.discNeed(10, cfg), 'lead');
     assert.equal(AG.discNeed(10.01, cfg), 'manager');
-    assert.equal(AG.discNeed(8, { discMax: { cashier: 5, lead: 7 } }), 'manager'); // הגדרה נמוכה מ-10 – גוברת
+    assert.equal(AG.discNeed(8, { discMax: { cashier: 5, lead: 7 }, discRoles: 'cashier' }), 'manager'); // הגדרה נמוכה מ-10 – גוברת
     assert.throws(() => AG.discNeed(101, cfg), (e) => e.reason === 'bad-disc');
     assert.throws(() => AG.discNeed('5', cfg), (e) => e.reason === 'bad-disc');
   });

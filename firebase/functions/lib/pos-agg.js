@@ -53,17 +53,9 @@ function pinAfter(rec, ok, now) {
 }
 
 // ---------- אישור אחראי ----------
-// role: 'manager' | 'lead' | 'cashier'. cfg.discMax = { cashier, lead } (PosCfg). → { ok, need: null | 'lead' | 'manager' }
-// קופאי: עד discMax.cashier בלי אישור. אחראי משמרת: עד min(discMax.lead, 10). מעל זה – מנהל.
-function discNeed(pct, cfg) {
-  if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw fail('bad-disc', 'אחוז הנחה לא תקין');
-  const dm = (cfg && cfg.discMax) || {};
-  const cash = Number.isFinite(dm.cashier) ? dm.cashier : 5;
-  const lead = Math.min(Number.isFinite(dm.lead) ? dm.lead : LEAD_DISC_MAX, LEAD_DISC_MAX);
-  if (pct <= cash) return null;
-  if (pct <= lead) return 'lead';
-  return 'manager';
-}
+// POS:W2 (סבב 2 – ליקוי 6): אותו כלל בדיוק כמו posSale (discCap ב-pos-calc.js, משותף גם לקופה) – כולל discRoles.
+// קודם: קופאי קיבל "לא צריך אישור" עד discMax.cashier גם כש-discRoles לא מתיר לו הנחה, והשרת דחה את המכירה שכבר נמסרה.
+function discNeed(pct, cfg) { return require('./pos-calc').discNeed(pct, cfg); }
 const canApprove = (role, need) => need === null || role === 'manager' || (need === 'lead' && role === 'lead');
 
 // ---------- מזומן ----------

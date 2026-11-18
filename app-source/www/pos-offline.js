@@ -1,7 +1,9 @@
 /* POS:M3 – קופה, גל 2 (ש3): עבודה בלי רשת. תור מקומי, סל שנשמר, נורית רשת וסימן ✓. בלי Firestore – השליחה עצמה מוזרקת (send).
    אותו קובץ בדפדפן (window.PosOffline) ובבדיקות Node (module.exports) – firebase/tests/pos-offline.unit.test.js.
 
-   PosOffline.queue({ store, key, send, online?, now?, timer?, onConflict?, skipErr? }) → תור   (skipErr – POS:W2: שגיאה קבועה מסומנת ולא עוצרת את התור; לתור בלי מספור)
+   PosOffline.queue({ store, key, send, online?, now?, timer?, onConflict?, skipErr?, aside?, asideKey? }) → תור
+     POS:W2: skipErr – שגיאה קבועה מסומנת ולא עוצרת את התור (לתור בלי מספור). aside(it, e) → true – הפריט יוצא לרשימת "נדחו"
+     (asideKey; q.rejected(), q.ackRejected()) והתור ממשיך; נורית אדומה עד אישור. send שזורק e.skip – מדלגים על הפריט בסבב הזה.
      store: { get(k) → מחרוזת|null, set(k, מחרוזת), del(k) } – סינכרוני (localStorage). כל שינוי נכתב מיד, לפני שהפעולה חוזרת.
      send(item) → Promise<תשובת השרת>. שגיאה עם offline / קוד רשת / unavailable / internal / unauthenticated = "אין רשת, ננסה שוב".
      q.add({ reqId, fn, payload, kind? }, { seq: true }) → הפריט שנשמר. seq:true – מקבל את המספר הבא של הקופה (payload.seq),
@@ -55,10 +57,11 @@ function queue(o) {
     store.set(K, JSON.stringify(S));
   }
   const waiting = () => S.items.filter((it) => it.st !== 'ok');
+  function asideList() { if (!o.asideKey) return []; try { const a = JSON.parse(store.get(o.asideKey) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
   function status() {
-    const w = waiting(), err = w.find((it) => it.st === 'err');
-    const net = err ? 'err' : (lastNet === false || !online()) ? 'off' : w.length ? 'sync' : 'on';
-    return { net, pending: w.length, err: err ? { reqId: err.reqId, msg: err.err, reason: err.reason } : null, lastOk: S.lastOk, seq: S.seq };
+    const w = waiting(), err = w.find((it) => it.st === 'err'), rej = asideList().filter((x) => !x.ack);
+    const net = err || rej.length ? 'err' : (lastNet === false || !online()) ? 'off' : w.length ? 'sync' : 'on';
+    return { net, pending: w.length, err: err ? { reqId: err.reqId, msg: err.err, reason: err.reason } : rej.length ? { reqId: rej[0].reqId, msg: rej[0].err, reason: rej[0].reason, rej: true } : null, rej: rej.length, lastOk: S.lastOk, seq: S.seq };
   }
   function emit() { const s = status(); for (const f of subs) { try { f(s); } catch (e) { /* */ } } }
   function later() {
@@ -82,8 +85,9 @@ function queue(o) {
 
   async function run() {
     let sent = 0;
+    const skip = new Set(); // POS:W2 (סבב 2): פריטים שמחכים למשהו אחר (e.skip – למשל החזרה שהמכירה שלה עוד בתור) – מדלגים עליהם בסבב הזה וממשיכים
     for (;;) {
-      const it = S.items.find((x) => x.st !== 'ok' && !(o.skipErr && x.st === 'err')); // POS:W2: skipErr – תור בלי מספור (החזרות): שגיאה קבועה לא עוצרת את השאר
+      const it = S.items.find((x) => x.st !== 'ok' && !(o.skipErr && x.st === 'err') && !skip.has(x.reqId)); // POS:W2: skipErr – תור בלי מספור (החזרות): שגיאה קבועה לא עוצרת את השאר
       if (!it) break;
       if (it.st === 'err') break; // שגיאה קבועה – עוצרים עד טיפול (retryErr)
       if (!online()) { lastNet = false; break; }
@@ -91,6 +95,7 @@ function queue(o) {
       let r;
       try { r = await o.send(it); } catch (e) {
         const rs = reasonOf(e);
+        if (e && e.skip) { skip.add(it.reqId); it.wait = String(e.message || '').slice(0, 120); save(); continue; }
         if ((rs === 'seq-used' || rs === 'seq-gap') && typeof o.onConflict === 'function' && (it.fix || 0) < 3) {
           it.fix = (it.fix || 0) + 1; save();
           try { await o.onConflict(api, it, e); continue; } catch (e2) { /* נופל לשגיאה */ }
@@ -101,6 +106,14 @@ function queue(o) {
           fails += 1; save(); emit(); later();
           return { sent, left: waiting().length };
         }
+        // POS:W2 (סבב 2): aside(it, e) → true – הפריט עובר לרשימת "נדחו" (asideKey, נורית אדומה עד שמנהל מאשר שראה), והתור ממשיך
+        if (typeof o.aside === 'function' && o.aside(it, e)) {
+          const list = asideList();
+          list.push({ reqId: it.reqId, fn: it.fn, kind: it.kind, seq: it.seq, payload: it.payload, reason: rs, err: String(e && e.message || 'שגיאה').slice(0, 200), at: now(), ack: false });
+          store.set(o.asideKey, JSON.stringify(list.slice(-200)));
+          S.items = S.items.filter((x) => x !== it); save(); emit();
+          continue;
+        }
         it.st = 'err'; it.err = String(e && e.message || 'שגיאה').slice(0, 200); it.reason = rs; save(); emit();
         break;
       }
@@ -110,6 +123,7 @@ function queue(o) {
       S.lastOk = it.okAt; fails = 0; lastNet = true; sent += 1;
       save(); emit();
     }
+    if (skip.size) later();
     emit();
     return { sent, left: waiting().length };
   }
@@ -126,6 +140,8 @@ function queue(o) {
     mark: (reqId) => { const it = S.items.find((x) => x.reqId === reqId); return !it ? '' : it.st === 'ok' ? '✓' : it.st === 'err' ? '!' : '⏳'; },
     item: (reqId) => { const it = S.items.find((x) => x.reqId === reqId); return it ? JSON.parse(JSON.stringify(it)) : null; },
     items: () => JSON.parse(JSON.stringify(S.items)),
+    rejected: () => asideList(),
+    ackRejected: () => { const a = asideList(); a.forEach((x) => { x.ack = true; }); if (o.asideKey) store.set(o.asideKey, JSON.stringify(a)); emit(); return a.length; },
     pending: () => waiting().length,
     seq: () => S.seq,
     syncSeq: (n) => { if (Number.isInteger(n) && n > S.seq) { S.seq = n; save(); emit(); } return S.seq; },

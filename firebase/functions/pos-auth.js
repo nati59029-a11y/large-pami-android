@@ -6,7 +6,7 @@
 //   op 'set',    { pin, old? }      → { ok } – העובד קובע את הקוד שלו. כבר יש קוד – חייב old (ניסיון שגוי נספר לנעילה).
 //   op 'reset',  { uid }            → { ok } – איפוס קוד (ושחרור נעילה) – רק לבעלים (מנהל העסק / מנהל־על). נרשם ב-poslog.
 //   op 'verify', { uid?, pin, dev? } → { ok, uid, name, role } – כניסה / החלפת קופאי במסך הקופה. ברירת מחדל: הקוד של המתחבר.
-//   op 'approve',{ by, pin, act, pct?, ref?, dev?, need? }   (need:'manager' – POS:W2: הקופה דורשת מנהל; רק מעלה)
+//   op 'approve',{ by, pin, act, pct?, amt?, ref?, dev?, need? }   (need:'manager' – POS:W2: הקופה דורשת מנהל; רק מעלה)
 //                                   → { ok, ap, by, name, role, need } – אישור אחראי. by = מי שמאשר (ה-PIN שלו).
 //     act 'disc' – הנחה באחוזים (pct): עד discMax.cashier – בלי אישור; אחראי משמרת – עד 10% (ולא יותר מ-discMax.lead); מעל זה – מנהל.
 //     act 'void' | 'ret' | 'price' | 'drawer' – אחראי משמרת או מנהל.
@@ -138,7 +138,9 @@ async function approve(request, input) {
     if (!r.ok) return;
     const ref = db.collection('poslog').doc();
     ap = ref.id;
-    tx.set(ref, { k: 'appr', act: input.act, pct: input.act === 'disc' ? input.pct : null, ref: G.str(input.ref, 80) || null, by: input.by, role: x.role, need, for: who.uid, dev, at: now, used: false });
+    // POS:W2 (סבב 2): האישור קשור למה שאושר – pct (הנחה), amt (סכום החזרה באגורות) ו-ref (השורה / העגלה / המכירה). posSale / posReturn דוחים חריגה
+    const amt = input.act === 'ret' && Number.isInteger(input.amt) && input.amt >= 0 && input.amt <= 1e9 ? input.amt : null;
+    tx.set(ref, { k: 'appr', act: input.act, pct: input.act === 'disc' ? input.pct : null, amt, ref: G.str(input.ref, 80) || null, by: input.by, role: x.role, need, for: who.uid, dev, at: now, used: false });
   });
   await G.pinAlert(db, who, input.by, r);
   G.pinThrow(r);

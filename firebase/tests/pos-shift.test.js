@@ -172,7 +172,10 @@ describe('ש5 – אישור אחראי', () => {
 
   it('הנחה: עד 5% – בלי אישור; אחראי משמרת מאשר עד 10%; מעל 10% – רק מנהל; קופאי לא מאשר', async () => {
     await pins(LEAD, MGR, CASH2);
-    await put(`b/${A}/poscfg/main`, { discMax: { cashier: 5, lead: 10 } }); // POS:W2: בסכמה של ש4 ברירת המחדל לקופאי היא 0 – כאן העסק קבע 5
+    // POS:W2 סבב 2 (ליקוי 6): discMax.cashier חל רק כש-discRoles מתיר לקופאי ('cashier') – אותו כלל כמו posSale. ברירת המחדל 'lead' – כל הנחה של קופאי דורשת אישור
+    await put(`b/${A}/poscfg/main`, { v: { discMax: { cashier: 5, lead: 10 } } });
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'disc', pct: 3, by: LEAD, pin: 'x' })), 'bad-pin', 'discRoles=lead: גם 3% דורש אישור');
+    await put(`b/${A}/poscfg/main`, { v: { discMax: { cashier: 5, lead: 10 }, discRoles: 'cashier' } }); // בסכמה של ש4 ברירת המחדל לקופאי היא 0 – כאן העסק קבע 5
     let r = await auth(CASH, { op: 'approve', act: 'disc', pct: 5, by: LEAD, pin: 'x' });
     assert.equal(R(r), 'ok'); assert.equal(r.r.ap, null);
     r = await auth(CASH, { op: 'approve', act: 'disc', pct: 10, by: LEAD, pin: PIN[LEAD], ref: 'K1-000001', dev: 'K1' });

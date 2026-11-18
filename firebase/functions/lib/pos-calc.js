@@ -114,7 +114,28 @@ function change(given, due) {
   if (!isAg(given) || !isAg(due)) throw fail('bad-amt', 'סכום לא תקין');
   return given >= due ? given - due : null;
 }
-const api = { VAT0, isAg, rnd, toAg, pctOf, vatIn, vatEx, spread, line, sale, cashRound, change };
+// POS:W2 – הנחה ידנית (אפיון ב נ7): התקרה באחוזים לפי תפקיד. כלל אחד לחלון האישור (posAuth), לשרת (posSale) ולקופה.
+//   role: 'cashier' | 'lead' | 'mgr' ('manager'). מנהל – בלי תקרה. אחראי – עד discMax.lead ולא יותר מ-10 (discRoles 'none' – 0).
+//   discRoles (סכמת ש4: התפקיד הנמוך ביותר שנותן הנחה): 'cashier' / 'staff' / 'cashierCap' – קופאי עד discMax.cashier; 'all' – קופאי עד 100;
+//   'lead' / 'posMgr' (ברירת המחדל) – קופאי 0; 'mgr' / 'brMgr' / 'admin' / 'owner' / 'none' – גם אחראי 0 (רק מנהל).
+const LEAD_DISC_MAX = 10;
+const DR_CASH = ['cashier', 'staff', 'cashierCap'], DR_NOLEAD = ['none', 'mgr', 'brMgr', 'admin', 'owner'];
+function discCap(role, cfg) {
+  if (role === 'mgr' || role === 'manager') return Infinity;
+  const dm = cfg && cfg.discMax && typeof cfg.discMax === 'object' ? cfg.discMax : {};
+  const roles = cfg ? cfg.discRoles : undefined;
+  const n = (v, d) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : d);
+  if (role === 'lead') return DR_NOLEAD.includes(roles) ? 0 : Math.min(n(dm.lead, LEAD_DISC_MAX), LEAD_DISC_MAX);
+  return roles === 'all' ? 100 : DR_CASH.includes(roles) ? Math.min(100, n(dm.cashier, 0)) : 0;
+}
+// מי צריך לאשר הנחה של pct% שקופאי נותן: null (מותר לקופאי בלי אישור) | 'lead' | 'manager'
+function discNeed(pct, cfg) {
+  if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw fail('bad-disc', 'אחוז הנחה לא תקין');
+  if (pct <= discCap('cashier', cfg) + 1e-9) return null;
+  if (pct <= discCap('lead', cfg) + 1e-9) return 'lead';
+  return 'manager';
+}
+const api = { VAT0, isAg, rnd, toAg, pctOf, vatIn, vatEx, spread, line, sale, cashRound, change, discCap, discNeed, LEAD_DISC_MAX };
 // שרת (Node) – module.exports; קופה (דפדפן) – window.PosCalc
 if (typeof module === 'object' && module.exports) module.exports = api; else root.PosCalc = api;
 })(typeof self !== 'undefined' ? self : this);

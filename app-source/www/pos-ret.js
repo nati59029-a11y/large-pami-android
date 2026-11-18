@@ -63,7 +63,7 @@ function open(ctx){const{E,fmt,cfg,M_NAME,hm,dmy}=U();return new Promise(res=>{
   if(!S.why){S.err='בחרו סיבת החזרה';draw();return}if(cfg('retNeedTag')&&!S.tag&&!S.dmg){S.err='מוצר בלי תג ואריזה לא מתקבל';draw();return}
   if(S.dmg&&cfg('retDefective')==='exchange'){S.err='מוצר פגום – החלפה בלבד. החלפה בתוך מכירה חדשה תגיע בשלב הבא.';draw();return}
   const sp=RetCalc.split(S.sale,t,S.m);if(!sp.ok){S.err=sp.err.replace(S.m,M_NAME[S.m]||S.m);draw();return}
-  const need=t>cfg('retMgrAbove')?'mgr':'lead';const ap=await U().approve({role:ctx.role,need,act:'ret',ref:S.sale.srvId||S.sale.id,text:'החזרה של '+fmt(t)});if(!ap.ok)return;
+  const need=t>cfg('retMgrAbove')?'mgr':'lead';const ap=await U().approve({role:ctx.role,need,act:'ret',ref:S.sale.srvId||S.sale.id,amt:t,text:'החזרה של '+fmt(t)});if(!ap.ok)return;
   S.busy=1;draw();const ret={reqId:U().reqId(),src:'sale',saleNo:S.sale.no,lines:L.map(x=>({i:x.i,pid:x.l.pid,name:x.l.name,unit:x.l.unit,qty:x.q,amt:x.amt,back:!S.dmg})),total:t,vat:Math.round(t*18/118),
    byM:sp.byM,debtOff:sp.debtOff,method:S.m,why:S.why,cond:S.cond,tag:S.tag,dmg:S.dmg,by:ap.by};if(ap.ap)ret.ap=ap.ap;/* POS:W2: מזהה האישור (ש5) – posReturn בודק אותו */
   try{const r=await D().saveReturn(ret);done({ret,r})}catch(e){S.busy=0;S.err='ההחזרה נכשלה: '+(e&&e.message||'נסו שוב');draw()}}

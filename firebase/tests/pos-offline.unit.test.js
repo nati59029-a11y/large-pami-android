@@ -340,3 +340,107 @@ describe('pos-data – מכירה בלי רשת וסנכרון (מול החוז�
     assert.equal(q.status().net, 'on');
   });
 });
+
+// POS:W2 סבב 2 – ליקויים 3–5: מכירה שנדחתה (אישור) לא עוצרת את התור; החזרה על מכירה שלא נשלחה לא חוסמת החזרות אחרות;
+// החזרה שממתינה לא נרשמת במכשיר עד שהשרת מאשר, ותשובה ברקע מגיעה לממשק (onRet)
+describe('POS:W2 – תור מכירות והחזרות: דחייה לא עוצרת, החזרה ממתינה לא נספרת', () => {
+  function rig() {
+    const S = server();
+    const R = { rets: new Map(), n: 0, saleDown: false };
+    const errOf = (reason, code) => { const e = new Error(reason); e.code = code || 'failed-precondition'; e.details = { reason }; return e; };
+    S.posReturn = (d) => {
+      if (R.rets.has(d.reqId)) return Object.assign({ dup: true }, R.rets.get(d.reqId));
+      if (!S.sale.has(d.sale)) throw errOf('no-sale', 'not-found');
+      if (d.why === 'BAD') throw errOf('ret-over-method');
+      R.n += 1; const amt = (d.refunds || []).reduce((a, x) => a + x.amt, 0) || 100;
+      const r = { ok: true, id: d.dev + '-R' + String(R.n).padStart(6, '0'), amt, refunds: [{ m: 'cash', src: 'cash', amt }], docs: [{ t: 'cr', id: 'cr' + R.n, no: R.n }] };
+      R.rets.set(d.reqId, r); return r;
+    };
+    const net = { up: true };
+    const ev = { rej: [], ret: [] };
+    const inst = 'inst_k1_aaaaaaaaaaaaaaaa'; S.addDev('K1', inst);
+    const D = PD.create({
+      store: OFF.memStore(), key: 'lp-pos:biz1', timer: fastTimer, dev: () => 'K1', inst: () => inst, br: () => '_', cashier: () => ({ id: 'u1', name: 'x' }), online: () => net.up,
+      call: async (fn, data) => {
+        await tick();
+        if (!net.up) throw offErr();
+        const d = JSON.parse(JSON.stringify(data));
+        if (fn === 'posSale') {
+          if (R.saleDown) throw errOf('internal', 'unavailable');
+          if (d.note === 'OLD') throw errOf('ap-old', 'permission-denied');
+          return S.posSale(d);
+        }
+        assert.equal(fn, 'posReturn'); assert.equal(d._sr, undefined); assert.equal(d._m, undefined, 'שדות המכשיר לא נשלחים');
+        return S.posReturn(d);
+      },
+      devSeq: async () => S.dev.get('K1').lastSeq,
+      loadProducts: async () => [],
+      onReject: (x) => ev.rej.push(x), onRet: (x) => ev.ret.push(x),
+    });
+    return { S, R, D, net, ev };
+  }
+  const sl = (note) => ({ lines: [{ pid: 'p1', name: 'חלב', price: 690, qty: 1, total: 690 }], total: 690, pays: [{ m: 'cash', amt: 690 }], note: note || '' });
+  const retOf = (s, o) => Object.assign({ sale: s.id, saleReq: s.reqId, saleNo: s.no, items: [{ i: 0, qty: 1 }], why: 'לא מתאים', tag: true, refunds: [{ m: 'cash', amt: 690 }], lines: [{ pid: 'p1', qty: 1 }], total: 690, wait: 300 }, o || {});
+  const drainAll = async (D) => { for (let i = 0; i < 300 && (D.net().pending || D.retPending()); i++) { await D.flush(); await new Promise((r) => setTimeout(r, 3)); } };
+
+  it('ליקוי 3: מכירה שהשרת דחה בגלל אישור – יוצאת ל"מכירות שנדחו" (lp-pos-err), נורית אדומה, הודעה, והמכירות שאחריה נשלחות ברצף בלי חור', async () => {
+    const { S, D, net, ev } = rig();
+    net.up = false;
+    await D.saveSale(sl()); await D.saveSale(sl('OLD')); await D.saveSale(sl());
+    net.up = true; D.netChanged(true); await drainAll(D);
+    assert.equal(D.net().pending, 0, 'התור לא נעצר');
+    assert.deepEqual([...S.sale.values()].map((x) => x.seq).sort(), [1, 2], 'בשרת – 1, 2 בלי חור');
+    const rj = D.rejected();
+    assert.equal(rj.length, 1); assert.equal(rj[0].reason, 'ap-old');
+    assert.equal(D.net().net, 'err', 'נורית אדומה'); assert.equal(D.net().rej, 1);
+    assert.equal(ev.rej.length, 1); assert.equal(ev.rej[0].reason, 'ap-old');
+    const all = await D.getSales();
+    assert.equal(all.filter((x) => x.sync === '!').length, 1); assert.equal(all.filter((x) => x.sync === '✓').length, 2);
+    assert.equal((await D.dayStats()).sales, 2, 'המכירה שנדחתה לא בסיכום');
+    assert.equal((await D.getSale(2)).sync, '✓', 'מספר 2 – המכירה שנשלחה, לא זו שנדחתה');
+    D.ackRejected(); assert.equal(D.net().net, 'on');
+  });
+
+  it('ליקוי 4: החזרה על מכירה שעוד בתור לא חוסמת החזרה אחרת; נשלחת לבד כשהמכירה יוצאת; החזרה על מכירה שנדחתה – נדחית מיד', async () => {
+    const { S, R, D } = rig();
+    const s0 = await D.saveSale(sl()); await drainAll(D);
+    const S0 = await D.getSale(s0.no);
+    R.saleDown = true;
+    const a = await D.saveSale(sl()); const A = await D.getSale(a.no);
+    const pa = await D.returnSrv(retOf(A));
+    assert.equal(pa.pend, true);
+    const p0 = await D.returnSrv(retOf(S0));
+    assert.ok(p0.res && p0.res.id, 'ההחזרה על המכירה שכבר נשלחה – יצאה, למרות שהחזרה קודמת מחכה');
+    R.saleDown = false; await drainAll(D);
+    assert.equal(D.retItem(pa.reqId).st, 'ok', 'ההחזרה שחיכתה נשלחה אחרי המכירה');
+    assert.equal(R.rets.size, 2); assert.ok(S.sale.has(A.id));
+    const b = await D.saveSale(sl('OLD')); await drainAll(D);
+    const B = (await D.getSales()).find((x) => x.reqId === b.reqId);
+    await assert.rejects(D.returnSrv(Object.assign(retOf(B), { saleNo: undefined })), (e) => e.reason === 'sale-rej');
+    assert.equal(D.retPending(), 0);
+  });
+
+  it('ליקוי 5: החזרה ממתינה לא נספרת עד אישור; אישור ברקע – onRet ok ונספרת; דחייה ברקע – onRet err, לא נספרת ולא נשארת בתור', async () => {
+    const { D, net, ev } = rig();
+    const s = await D.saveSale(sl()); await drainAll(D);
+    const S1 = await D.getSale(s.no);
+    net.up = false;
+    const p = await D.returnSrv(retOf(S1));
+    assert.equal(p.pend, true);
+    assert.equal((await D.dayStats()).returns, 0, 'לא בדוח היום לפני אישור');
+    assert.deepEqual(await D.returnedQty(S1.no), {});
+    const bad = await D.returnSrv(retOf(S1, { why: 'BAD' }));
+    assert.equal(bad.pend, true);
+    net.up = true; D.netChanged(true); await drainAll(D);
+    const ok = ev.ret.find((x) => x.reqId === p.reqId), no = ev.ret.find((x) => x.reqId === bad.reqId);
+    assert.equal(ok.st, 'ok'); assert.equal(ok.res.amt, 690); assert.equal(ok.res.refunds[0].m, 'cash');
+    assert.equal(no.st, 'err'); assert.equal(no.reason, 'ret-over-method');
+    const st = await D.dayStats();
+    assert.equal(st.returns, 1); assert.equal(st.returnsTotal, 690);
+    assert.deepEqual(await D.returnedQty(S1.no), { p1: 1 });
+    assert.equal(D.retPending(), 0); assert.equal(D.retItem(bad.reqId), null);
+    // החזרה שהשרת אישר מול המסך – לא מגיעה שוב כאירוע רקע
+    const fgr = await D.returnSrv(retOf(S1, { refunds: [{ m: 'cash', amt: 1 }] }));
+    assert.ok(fgr.res); assert.equal(ev.ret.filter((x) => x.reqId === fgr.reqId).length, 0);
+  });
+});
