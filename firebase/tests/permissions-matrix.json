@@ -395,6 +395,17 @@
         "delete": "DDDDD"
       }
     },
+    "yemot_tzsend": {
+      "source": "משימה 2026-11-18 – שליחות צינתוק מ\"שלוחות הקו\" (רק השרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "get":    "DDDDD",
+        "list":   "DDDDD",
+        "create": "DDDDD",
+        "update": "DDDDD",
+        "delete": "DDDDD"
+      }
+    },
     "cprice": {
       "source": "משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1 – מחיר קבוע ללקוח (כתיבה רק בשרת)",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה (הרשאת הזמנות)", "manager": "קריאה" },

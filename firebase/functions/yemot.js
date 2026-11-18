@@ -172,7 +172,10 @@ async function lineNumbers(ctx, ext) {
 const israelMonth = () => israelDay().slice(0, 7);
 const FB_TZ_PART = 500;
 const NO_CONNECT = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
-async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText) {
+// opts (רשות, משימה 2026-11-18 – sendLineTzintuk ב-yemot-tz.js): { keepFree: true } = לא מורידים את מי שברשימה החינמית (צינתוק "רק ללקוחות המשוב").
+// sendPromo לא מעביר opts – ההתנהגות שלו לא משתנה. out.free = כמה ברשימה החינמית (רק כשנקראה).
+async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText, opts) {
+  const keepFree = !!(opts && opts.keepFree);
   const { normPhone } = require('./yemot-fblist')._core;
   const sent = [...new Set((Array.isArray(already) ? already : []).map(normPhone).filter(Boolean))]; // רשומה ישנה בלי השדה – ריק
   const done = new Set(sent);
@@ -184,7 +187,8 @@ async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText) {
     if (!Number.isInteger(tplId) || tplId <= 0) return out; // הרשימה עוד לא נוצרה
     const all = [...new Set((await getTemplateEntries(ctx, tplId)).filter((e) => !e.blocked).map((e) => normPhone(e.phone)).filter(Boolean))];
     if (!all.length) return out;
-    const subs = new Set((await tzlEntries(ctx, cfg.list)).map(normPhone).filter(Boolean));
+    const subs = keepFree ? new Set() : new Set((await tzlEntries(ctx, cfg.list)).map(normPhone).filter(Boolean));
+    if (!keepFree) out.free = subs.size;
     const phones = all.filter((p) => !subs.has(p));
     out.total = phones.length;
     if (!phones.length) return out;
@@ -755,5 +759,5 @@ exports.expirePromosOnLine = onSchedule({ region: LEGACY_REGION, schedule: 'ever
 Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpiry });
 Object.defineProperty(exports, '_test', { enumerable: false, value: { israelDay, addDays, cleanText, validDay } });
 // משותף ל-yemot-line.js, ולבדיקות שקוראות לליבה בתוך התהליך (לא נספרים כפונקציות)
-Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, staleRe, holdsPath, effectiveUntil, isLocked, readCfg, heDate, _resetSeed() { seedDone = false; } } });
+Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, staleRe, holdsPath, effectiveUntil, isLocked, readCfg, heDate, fbTzintuk, FBLIST, NO_CONNECT, israelMonth, _resetSeed() { seedDone = false; } } });
 Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly, nightlyAll, staleRe } });
