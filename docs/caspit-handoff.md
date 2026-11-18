@@ -58,6 +58,15 @@
 - **בשרת:** שדות importResult, והתראות על `import-errors` ו-`import-timeout`.
 - **אם השינויים בענף לא נשמרו:** צריך לבנות את 0.1.4 מחדש לפי הסעיף הזה.
 
+## היכרות 4 (0.1.5, 18.11 בערב) – ממצאים
+- קטלוג (11,213 פריטים, 16 עמודות) ומכירות (CSV, 9 עמודות) – נקראו תקין. מסך הייבוא: "טעינות קודמות" נקראה (histMark עבר), כך שההגנה מהעלאה כפולה עובדת מול כספית האמיתית.
+- **מסך הנוכחות: לא נמצא** (אין בתפריט קישור עם המילה "נוכחות"). קישורים רלוונטיים מהתפריט (110 קישורים נאספו):
+  `#/hours-reports` "דוח שעות מרוכז" (המועמד העיקרי), `#/report-active-employee-on-stores` "דוח עובדים במשמרת" (מי מחובר עכשיו – טוב לבדיקת איחור בזמן אמת),
+  `#/employees` "עובדים", `#/michpal-exports` "יצוא שעות עובדים למערכת מכפל". בהגדרות החברה: `employee_hours_calculator_shifts_and_ext`, `employee_long_shift_hours_marking_time`.
+  → בשלב הנוכחות: לעדכן ב-selectors.json את דף ההיכרות attendance ל-`hash` ישיר (`#/hours-reports` ו-`#/report-active-employee-on-stores`) במקום find, ולהריץ היכרות שוב.
+- **לקוחות עסקיים:** `#/hakafa-customers` "לקוחות הקפה", `#/hakafa-reports` "דוח לקוחות - הקפה", `#/hakafa-customer-reports` "ריכוז לקוחות הקפה",
+  `#/customer-sales-report` "דוח קניות לקוחות - פירוט שורות בחשבונית", `#/total-sales-per-customer`, `#/hakafa_monthly_charge_customers` "הפקת חשבוניות מרכזות", `#/merakez_invoices` "רצף חשבוניות מרכזות", `#/customer-shipments` "תעודות משלוח".
+
 ## החלטות בעל העסק (גוברות)
 1. **קטלוג:**
    - כל הקטלוג מכספית נכנס לאפליקציה, אחרי ניקוי.
