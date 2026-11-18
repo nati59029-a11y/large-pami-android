@@ -42,7 +42,7 @@ const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
 const SRUN_RE = /^[A-Za-z0-9_-]{6,40}$/; // מזהה ריצה (runId מ-hello, או מזהה של התוסף אם hello נכשל)
 const TOK_RE = /^([a-z0-9-]{3,30})\.([A-Za-z0-9_-]{43})$/;
-const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page'];
+const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty'];
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
 const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason });
@@ -110,7 +110,7 @@ async function cxBotTok(w, input) {
     const cfg = CX.cfgOf(c);
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120) } : null,
-      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
+      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
@@ -226,10 +226,16 @@ const OPF = {
     return { n: r.n, csv: r.csv, rows: r.rows, added: r.added || 0 };
   },
   async importResult(w, b, x) {
-    O.onlyKeys(b, ['run', 'kind', 'n', 'ok', 'text', 'hash']);
+    O.onlyKeys(b, ['run', 'kind', 'n', 'ok', 'text', 'hash', 'id', 'status', 'errors', 'loaded']);
+    // תוסף 0.1.4: השורה בטבלת "טעינות קודמות" של כספית – מזהה, סטטוס, שגויים, נטענו (-1 = לא ידוע)
+    const int = (v) => (v === undefined ? undefined : Number.isInteger(v) && v >= -1 && v <= 1e9 ? v : NaN);
+    const ex = { id: int(b.id), errors: int(b.errors), loaded: int(b.loaded) };
+    if (Object.values(ex).some((v) => Number.isNaN(v)) || (b.status !== undefined && typeof b.status !== 'string')) throw bad('bad-import', 'דיווח טעינה לא תקין');
     if (typeof b.run !== 'string' || !SRUN_RE.test(b.run) || !['new', 'price'].includes(b.kind) || !Number.isInteger(b.n) || b.n < 0 || b.n > 100000) throw bad('bad-import', 'דיווח טעינה לא תקין');
     if (b.hash !== undefined && (typeof b.hash !== 'string' || !/^[0-9a-f]{64}$/.test(b.hash))) throw bad('bad-import', 'דיווח טעינה לא תקין');
-    await runRef(b.run).set({ imp: { [b.kind]: { n: b.n, ok: b.ok === true, text: str(b.text, 500), hash: b.hash || '', at: x.now } }, upd: x.now }, { merge: true });
+    const rec = Object.assign({ n: b.n, ok: b.ok === true, text: str(b.text, 500), hash: b.hash || '', at: x.now }, ex.id !== undefined ? { id: ex.id, status: str(b.status, 40), errors: ex.errors === undefined ? -1 : ex.errors, loaded: ex.loaded === undefined ? -1 : ex.loaded } : {});
+    await runRef(b.run).set({ imp: { [b.kind]: rec }, upd: x.now }, { merge: true });
+    await priv(w.bizId, 'cxbot').set({ li: Object.assign({ kind: b.kind, run: b.run }, rec) }, { merge: true }); // הטעינה האחרונה לכספית (לכרטיס הרובוט)
     return {};
   },
   async report(w, b, x, o) {
@@ -344,6 +350,9 @@ async function handle(req, res, opts) {
 const MSG = {
   'needs-login': 'צריך להתחבר מחדש לכספית בדפדפן Chrome במחשב החנות. אחרי ההתחברות הסנכרון ימשיך לבד.',
   'selector-miss': 'מסך בכספית השתנה והרובוט לא מצא כפתור או קובץ. הסנכרון נעצר – פרטים באפליקציה, בסנכרון כספית.',
+  'import-errors': 'הטעינה לכספית הסתיימה עם שורות שגויות (או נכשלה). המספרים באפליקציה, בסנכרון כספית; הקובץ השגוי – ב"טעינות קודמות" בכספית.',
+  'import-timeout': 'כספית לא סיימה את הטעינה בזמן. כדאי לבדוק ב"טעינות קודמות" בכספית אם היא הסתיימה.',
+  'import-queue-not-empty': 'במסך הייבוא של כספית ממתינים קבצים שמישהו הוסיף ולא העלה – הרובוט לא העלה כלום. כדאי לנקות את "ממתין לטעינה" בכספית.',
   'wrong-page': 'התוסף הגיע לדף שאינו המשרד האחורי של כספית ועצר (בלי לגעת בקופה). פרטים באפליקציה, בסנכרון כספית.',
   limit: 'יותר מדי שינויים לכספית בריצה אחת – הרובוט עצר לבדיקה. פרטים באפליקציה, בסנכרון כספית.',
   nosync: 'המחשב בחנות לא סנכרן מול כספית הלילה. בדקו שהמחשב דלוק ו-Chrome פתוח.',

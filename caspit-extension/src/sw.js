@@ -181,6 +181,9 @@ async function runFlow(tabId, name, vars, files, probe) {
     for (const x of r.steps || []) out.steps.push(Object.assign(x, { i: x.i + i }));
     if (r.text) out.text = r.text;
     if (r.wrong) throw wrongPage();
+    if (r.code) out.code = r.code;
+    if (r.hmax !== undefined) out.hmax = r.hmax;
+    if (r.already) { out.already = r.already; return out; }
     if (!r.ok) { out.ok = false; if (out.miss == null && r.miss != null) out.miss = r.miss + i; if (!probe) return out; }
     i = j;
   }
@@ -251,6 +254,8 @@ function rowsOf(f) {
 // ---------- שלבי הריצה ----------
 const STEP = {
   async hello(run) {
+    // העלאה לכספית (פריטים חדשים / מחירים) כבויה עד שנדע בוודאות איך מסך הייבוא מעלה קובץ – בלי export לשרת (לא מסמנים pd) ובלי ייבוא
+    if ((await sel()).importEnabled !== true) run.flags.noImp = true;
     const r = await (await api()).call('hello', { mode: run.mode, manual: run.manual });
     if (r.minVer && cmpVer(VER, r.minVer) < 0) throw P.err('min-ver');
     if (r.enabled === false && !run.manual) throw P.err('disabled');
@@ -361,19 +366,43 @@ async function exportImport(run, kind) {
   const done = (await get('impHash')) || {};
   if (done[hash] === today) return { n, skip: 'same' };
   const tab = await ownTab(false);
-  const name = (kind === 'new' ? 'caspit-new-items-' : 'caspit-price-update-') + today.replace(/-/g, '') + '.csv';
-  const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', {}, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
-  if (!res || !res.ok) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
-  const text = String(res.text || '').slice(0, 500);
-  await cl.call('importResult', { run: run.srv, kind, n, ok: !/שגיא/.test(text), text, hash });
+  // שם ייחודי לריצה – כך מוצאים את השורה שלנו בטבלת "טעינות קודמות" (וניסיון חוזר של אותה ריצה לא מעלה פעמיים)
+  const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
+  const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
+  if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty');
+  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
+  // אחרי "העלה קבצים והרץ טעינה": שורה חדשה (מזהה גדול מהקודם) עם השם שלנו, עד סטטוס סופי. קריאה בלבד, כל 3 שניות
+  const r2 = await waitImport(tab, name, res.already ? res.already - 1 : res.hmax || 0, (await sel()).importWaitMs || 600e3);
+  const text = `מזהה ${r2.id || '—'} · ${r2.st || ''} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`;
+  const out = { run: run.srv, kind, n, ok: r2.fin === 'ok' && !r2.err, text, hash, id: r2.id || 0, status: String(r2.st || '').slice(0, 40), errors: r2.err == null ? -1 : r2.err, loaded: r2.ok == null ? -1 : r2.ok };
+  await cl.call('importResult', out);
   done[hash] = today;
   const keep = Object.entries(done).sort((a, b) => (a[1] < b[1] ? 1 : -1)).slice(0, 20);
   await set({ impHash: Object.fromEntries(keep) });
-  return { n, text: text.slice(0, 120) };
+  if (r2.fin === 'timeout') throw P.err('import-timeout', `כספית לא סיימה את הטעינה (מזהה ${r2.id || '—'}, ${r2.st || 'לא נמצאה שורה'}) תוך ${Math.round(((await sel()).importWaitMs || 600e3) / 60e3)} דקות`);
+  if (r2.fin === 'fail' || r2.err) throw P.err('import-errors', `טעינה ${r2.id} בכספית: ${r2.st} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`);
+  return { n, id: r2.id, loaded: r2.ok, errors: r2.err };
+}
+const histIn = (head) => { const H = self.CxSel.histRows(document, head); return H ? { rows: H.rows.slice(0, 200), maxId: H.maxId } : null; };
+async function waitImport(tab, name, after, ms) {
+  const end = Date.now() + ms;
+  let last = null;
+  for (;;) {
+    await guardBo(tab);
+    const H = await inIso(tab, histIn, ['טעינות קודמות']).catch(() => null);
+    const row = H && H.rows.filter((r) => r.id > after && r.name === name).sort((a, b) => b.id - a.id)[0];
+    if (row) {
+      last = row;
+      if (/בוצע/.test(row.st)) return Object.assign({ fin: 'ok' }, row);
+      if (/שגיא|נכשל|בוטל/.test(row.st)) return Object.assign({ fin: 'fail' }, row);
+    }
+    if (Date.now() > end) return Object.assign({ fin: 'timeout' }, last || {});
+    await sleep(3000);
+  }
 }
 function summary(run) {
   const i = run.info || {};
-  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, flags: run.flags };
+  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags };
 }
 
 // ---------- ריצה ----------
@@ -511,7 +540,7 @@ async function handle(m) {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
       run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null };
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }
@@ -538,4 +567,4 @@ async function handle(m) {
   return { ok: false, code: 'bad-msg' };
 }
 // לבדיקות (Playwright): הפעלת טריגר ידנית
-self.__cxTest = { trigger, tick, startAuto, resume, setupAlarms, startRun };
+self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun };

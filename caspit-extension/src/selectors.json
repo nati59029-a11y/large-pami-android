@@ -1,8 +1,10 @@
 {
-  "v": 1,
-  "note": "גרסה 1 (18.11.2026) – לפי דוח היכרות אמיתי מכספית (המשרד האחורי /bo). כפתור הקטלוג, מסך הדוח והייבוא – אומתו; כפתור הטעינה אחרי בחירת סוג הקובץ – עוד ניחוש (ההיכרות הבאה מגלה).",
+  "v": 2,
+  "note": "גרסה 2 (18.11.2026) – לפי 3 דוחות היכרות וצילומי מסך מכספית (/bo). קטלוג ודוח מכירות – אומתו. העלאה לכספית: בחירת סוג → בחירת קובץ (שורה ב\"ממתין לטעינה\"; רק השורה שלנו) → \"העלה קבצים והרץ טעינה\" → שורה חדשה ב\"טעינות קודמות\" עם השם הייחודי שלנו, עד \"בוצע\" (שגויים/נטענו). בטבלה הזו לא לוחצים כלום.",
   "base": "https://caspit.valu.co.il/bo",
   "start": "#/catalogs",
+  "importEnabled": true,
+  "importWaitMs": 600000,
   "login": {
     "hash": [
       "#/login",
@@ -118,12 +120,14 @@
         "ms": 30000
       },
       {
+        "op": "histMark",
+        "head": "טעינות קודמות",
+        "name": "{fname}"
+      },
+      {
         "op": "select",
         "t": {
-          "css": "#job_type",
-          "alt": {
-            "tag": "select,[role=combobox],[role=listbox]"
-          }
+          "css": "#job_type"
         },
         "option": "טעינת פריטים חדשים",
         "safe": true
@@ -131,67 +135,44 @@
       {
         "op": "waitFor",
         "t": {
-          "css": "input[type=file]",
-          "hidden": true
+          "css": "#positive-file-uploader",
+          "hidden": true,
+          "alt": {
+            "css": "input[type=file]",
+            "hidden": true
+          }
         },
         "ms": 15000
       },
       {
         "op": "setFile",
         "t": {
-          "css": "input[type=file]",
-          "hidden": true
+          "css": "#positive-file-uploader",
+          "hidden": true,
+          "alt": {
+            "css": "input[type=file]",
+            "hidden": true
+          }
         },
         "file": "csv"
+      },
+      {
+        "op": "queue",
+        "head": "ממתין לטעינה",
+        "name": "{fname}",
+        "type": "טעינת פריטים חדשים",
+        "ms": 20000
       },
       {
         "op": "click",
         "t": {
           "textAny": [
-            "טען קובץ",
-            "טעינת קובץ",
-            "טען",
-            "טעינה",
-            "העלה קובץ",
-            "העלאה",
-            "העלה",
-            "ייבוא",
-            "יבוא",
-            "שלח"
+            "העלה קבצים והרץ טעינה"
           ],
           "tag": "button,[role=button],input[type=submit],input[type=button]"
         },
         "submit": true,
-        "wait": 3000
-      },
-      {
-        "op": "waitFor",
-        "t": {
-          "textAny": [
-            "הסתיים",
-            "נטענו",
-            "בהצלחה",
-            "שגיאה",
-            "שגיאות",
-            "הושלם"
-          ]
-        },
-        "ms": 300000
-      },
-      {
-        "op": "text",
-        "t": {
-          "css": "[role=alert],.alert,.modal-body,.toast,.result,.notification",
-          "textAny": [
-            "הסתיים",
-            "נטענו",
-            "בהצלחה",
-            "שגיאה",
-            "שגיאות",
-            "הושלם"
-          ]
-        },
-        "optional": true
+        "wait": 2000
       }
     ],
     "importPrice": [
@@ -209,12 +190,14 @@
         "ms": 30000
       },
       {
+        "op": "histMark",
+        "head": "טעינות קודמות",
+        "name": "{fname}"
+      },
+      {
         "op": "select",
         "t": {
-          "css": "#job_type",
-          "alt": {
-            "tag": "select,[role=combobox],[role=listbox]"
-          }
+          "css": "#job_type"
         },
         "option": "עדכון מחיר לצרכן ו/או מחיר עלות לפריטים",
         "safe": true
@@ -222,67 +205,44 @@
       {
         "op": "waitFor",
         "t": {
-          "css": "input[type=file]",
-          "hidden": true
+          "css": "#positive-file-uploader",
+          "hidden": true,
+          "alt": {
+            "css": "input[type=file]",
+            "hidden": true
+          }
         },
         "ms": 15000
       },
       {
         "op": "setFile",
         "t": {
-          "css": "input[type=file]",
-          "hidden": true
+          "css": "#positive-file-uploader",
+          "hidden": true,
+          "alt": {
+            "css": "input[type=file]",
+            "hidden": true
+          }
         },
         "file": "csv"
+      },
+      {
+        "op": "queue",
+        "head": "ממתין לטעינה",
+        "name": "{fname}",
+        "type": "עדכון מחיר לצרכן ו/או מחיר עלות לפריטים",
+        "ms": 20000
       },
       {
         "op": "click",
         "t": {
           "textAny": [
-            "טען קובץ",
-            "טעינת קובץ",
-            "טען",
-            "טעינה",
-            "העלה קובץ",
-            "העלאה",
-            "העלה",
-            "ייבוא",
-            "יבוא",
-            "שלח"
+            "העלה קבצים והרץ טעינה"
           ],
           "tag": "button,[role=button],input[type=submit],input[type=button]"
         },
         "submit": true,
-        "wait": 3000
-      },
-      {
-        "op": "waitFor",
-        "t": {
-          "textAny": [
-            "הסתיים",
-            "נטענו",
-            "בהצלחה",
-            "שגיאה",
-            "שגיאות",
-            "הושלם"
-          ]
-        },
-        "ms": 300000
-      },
-      {
-        "op": "text",
-        "t": {
-          "css": "[role=alert],.alert,.modal-body,.toast,.result,.notification",
-          "textAny": [
-            "הסתיים",
-            "נטענו",
-            "בהצלחה",
-            "שגיאה",
-            "שגיאות",
-            "הושלם"
-          ]
-        },
-        "optional": true
+        "wait": 2000
       }
     ]
   },

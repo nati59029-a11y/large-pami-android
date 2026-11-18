@@ -50,7 +50,8 @@ test('find: טקסט מדויק, הרכיב הקטן ביותר, בלי רכיב
 
 test('ייבוא: בחירת אפשרות לפי הטקסט, קובץ דרך DataTransfer, לחיצה, קריאת התוצאה', async () => {
   // הזרימה האמיתית (#job_type) נבדקת ב-e2e; כאן – אותם סוגי צעדים על <select> רגיל
-  const flow = [{ op: 'select', t: { css: '#kind' }, option: 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים' }].concat(SEL.flows.importPrice.filter((s) => ['setFile', 'click', 'waitFor', 'text'].includes(s.op) && !(s.op === 'waitFor' && s.t.css)));
+  const flow = [{ op: 'select', t: { css: '#kind' }, option: 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים' }, { op: 'setFile', t: { css: 'input[type=file]' }, file: 'csv' },
+    { op: 'click', t: { text: 'טען קובץ' }, submit: true, wait: 300 }, { op: 'waitFor', t: { textAny: ['הסתיימה'] }, ms: 5000 }, { op: 'text', t: { css: '[role=alert]' }, optional: true }];
   const r = await run(flow, { files: { csv: { name: 'p.csv', mime: 'text/csv', b64: Buffer.from('קוד,מחיר\n1,2\n').toString('base64') } } });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.match(r.text, /הסתיימה/);
