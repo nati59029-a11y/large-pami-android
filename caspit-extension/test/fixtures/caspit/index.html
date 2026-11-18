@@ -22,7 +22,7 @@ window.ev = [];
 function dl(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); ev.push('dl:' + name); }
 document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
 // תפריט "עובדים": תת-התפריט נוצר רק במעבר עכבר (כמו תפריט נפתח); לחיצה נרשמת (אסור שהתוסף ילחץ)
-document.getElementById('empm').addEventListener('mouseover', () => { document.getElementById('empsub').innerHTML = '<a href="#/employees">רשימת עובדים</a> <a href="#/attendance-report">דוח נוכחות</a>'; });
+document.getElementById('empm').addEventListener('mouseover', () => { document.getElementById('empsub').innerHTML = '<a href="#/employees">רשימת עובדים</a> <a href="#/attendance-report">דוח נוכחות</a> <a href="#/hours-reports">דוח שעות מרוכז</a>'; });
 const hit = (k) => { ev.push(k); localStorage.setItem('attHits', (localStorage.getItem('attHits') || '') + k + ';'); };
 document.getElementById('empm').addEventListener('click', () => hit('emp-click'));
 const HE_M = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ']; // כמו בכספית: "נוב 2026"
@@ -95,7 +95,13 @@ function render() {
       // מוסיפה שורה לטבלה "ממתין לטעינה" (שם | סוג קובץ | פעולות: הסר). "העלה קבצים והרץ טעינה" מעלה את כל השורות.
       document.getElementById('more').innerHTML = '<label for="positive-file-uploader">בחר קובץ</label> <input type="file" id="positive-file-uploader"> <button type="button" class="btn btn-default" id="sample">הורד קובץ דוגמה</button>';
       document.getElementById('sample').onclick = () => ev.push('sample');
-      document.getElementById('positive-file-uploader').onchange = (e) => { const f = e.target.files[0]; if (f) { Q.push({ f, t, tn: jt.value.trim() }); drawQ(); } e.target.value = ''; };
+      // upmode (בדיקות 0.1.6 – התקלה של 19.11): '' רגיל; drop – בחירה רגילה לא עובדת, רק גרירה לאזור; xls – רק קובץ שסומן application/vnd.ms-excel;
+      // none – שום דבר לא נכנס לתור, ומוצגת הודעת שגיאה (לבדיקת האבחון)
+      const um = localStorage.getItem('upmode') || '';
+      const addF = (f) => { if (!f) return; if (um === 'xls' && f.type !== 'application/vnd.ms-excel') { ev.push('reject:' + f.type); return; } Q.push({ f, t, tn: jt.value.trim() }); drawQ(); ev.push('add:' + f.type); };
+      document.getElementById('positive-file-uploader').onchange = (e) => { if (um !== 'drop' && um !== 'none') addF(e.target.files[0]); else ev.push('change-ignored'); if (um === 'none') { e.target.setAttribute('accept', '.csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); document.querySelector('.result').textContent = 'הקובץ לא נקלט 0521234567 – יש לבחור קובץ מסוג CSV או Excel בפורמט שמתאים לסוג הטעינה שנבחר ברשימה'; } e.target.value = ''; };
+      document.getElementById('more').addEventListener('dragover', (e) => e.preventDefault());
+      document.getElementById('more').addEventListener('drop', (e) => { e.preventDefault(); ev.push('drop'); if (um === 'drop') addF(e.dataTransfer.files[0]); });
     }; });
     const Q = [];
     // קובץ שמישהו כבר הוסיף ולא העלה (בדיקת "התור לא ריק")
@@ -131,7 +137,7 @@ function render() {
       drawQ(); drawH();
     };
     document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
-  } else if (h.startsWith('#/attendance-report')) {
+  } else if (h.startsWith('#/attendance-report') || h.startsWith('#/hours-reports') || h.startsWith('#/report-active-employee-on-stores')) {
     // מסך נוכחות מדומה: טבלה עם שמות ושעות (אסור שיגיעו לדוח), וכפתורי פעולה (אסור ללחוץ)
     // גם מחוץ לטבלה: מסנן "עובד" עם שמות, וכרטיסי עובדים (קישור, תווית, כפתור עם שם) – אסור שהשמות יגיעו לדוח
     app.innerHTML = '<div class="attendance"><h2>דוח נוכחות</h2><button class="btn btn-primary" id="attIn">החתמת כניסה</button><button class="btn" id="attX">ייצוא לאקסל</button>'
