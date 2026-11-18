@@ -3823,6 +3823,7 @@ V.tk=()=>{TKGM={};(TK.L||[]).forEach(x=>{const k=tkGrpKey(x);if(!k)return;const 
   ${window.TKW&&TKW.formX()||'<p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p>'}<button class="btn w">הוסף משימה</button></form>
   ${adm||(window.TKW&&TKW.wk())?'':rqBtn()}
   <div class="chips" style="margin:12px 0">${(window.TKW&&TKW.wk()?tabs.filter(x=>x[0]==='my'||x[0]==='done'):tabs).map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>${window.TKW?TKW.fbar(TKT):''}
+  ${TKT==='wait'&&adm&&window.TKW&&TKW.apBtn?TKW.apBtn():''}
   ${TKT==='my'||TKT==='team'?(window.TKW?TKW.view(TKT,card):''):TKT==='sum'?tkSumView():TKT==='rc'?rcView():S0.length?S0.map(t=>t.pv?ptCard(t):card(t)).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':TKT==='wait'?'אין משימות שממתינות לטיפול.':'עוד אין משימות שבוצעו.'}</p>`}
   <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
 function tkSelInit(){if(TKN.sel===null&&TKST.L)TKN.sel=new Set(TKST.L.map(x=>x.uid));return TKN.sel||new Set()}
@@ -3937,9 +3938,10 @@ ACT.tkDone=el=>{const t=tkGet(el.dataset.id);if(!t)return;const adm=fbAdmin(),nc
   try{await tkPatch(t.id,{st:'done',open:'',sub:now,ok:now,doneBy:fbBy(),late:now>tkDl(t)?'1':''})}catch(e){if(adm||e.code!==403)throw e;return wait()}
   toast('✓ סומן כבוצע')},''),'כן, בוצע')};
 ACT.tkReq=el=>{const t=tkGet(el.dataset.id);if(t)tkDo(()=>tkPatch(t.id,{pr:'1'}),'העובד יתבקש לצרף תמונה')};
-ACT.tkOk=el=>{const t=tkGet(el.dataset.id);if(!t)return;tkDo(()=>tkPatch(t.id,{st:'done',open:'',ok:Date.now(),late:t.sub>tkDl(t)?'1':'',note:''}),'✓ אושר')};
+const tkOkP=t=>()=>tkPatch(t.id,{st:'done',open:'',ok:Date.now(),late:t.sub>tkDl(t)?'1':'',note:''});/* סבב 4: משותף גם ל"עבור ואשר" */
+ACT.tkOk=el=>{const t=tkGet(el.dataset.id);if(!t)return;tkDo(tkOkP(t),'✓ אושר')};
 ACT.tkRej=el=>{const t=tkGet(el.dataset.id);if(!t)return;dlg(`<h3>${t.pr==='1'?'למה התמונה לא מאושרת?':'למה מחזירים את המשימה?'}</h3><form data-f="tkRej" data-id="${esc(t.id)}"><label class="f"><span>הערה לעובד</span><textarea name="note" maxlength="300" required></textarea></label><div class="row"><button class="btn r grow">החזר לעובד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.tkRej=f=>{const id=f.dataset.id,t=tkGet(id),note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();tkDo(()=>tkPatch(id,Object.assign({st:'open',img:'',sub:0,doneBy:'',note,rt:t&&t.pr!=='1'?'1':''},t&&t.np>0?{wp:0}:{})),'המשימה הוחזרה לעובד')};
+FRM.tkRej=f=>{const id=f.dataset.id,t=tkGet(id),note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();return tkDo(()=>tkPatch(id,Object.assign({st:'open',img:'',sub:0,doneBy:'',note,rt:t&&t.pr!=='1'?'1':''},t&&t.np>0?{wp:0}:{})),'המשימה הוחזרה לעובד')};
 ACT.tkDel=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('למחוק את המשימה לצמיתות?',()=>tkDo(()=>fsx('/tasks/'+t.id,{method:'DELETE'}),'המשימה נמחקה'),'מחק')};
 ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');if(!imgOk(u))return toast('התמונה לא תקינה ולא תוצג');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
 /* תגובות: השרשור נטען רק כשפותחים אותו. בחלון (dlg) – ולכן tkRe לא בונה את המסך מחדש בזמן שמקלידים */

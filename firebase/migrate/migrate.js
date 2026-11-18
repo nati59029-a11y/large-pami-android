@@ -49,6 +49,7 @@ const COPY = [
   // תתי-האוספים (cust/p, pinv/p, rq/c, mq/p, sec_chat/m, sec_inv/p, sec_note/n, custBak/items, stockBak/items) מועתקים עם ההורה.
   'ptk', 'rtk', 'rq', 'mq', // משימות פרטיות, משימות חוזרות, בקשות, בקשות מנהל
   'grp', // קבוצות התכתבות (סבב 3, 17.11.2026): כלל ב-b/{bizId} וב-legacy בשורש; תתי-האוספים (m, m/p, r) כמו rq/c. סרטוני Storage (grpv/) לא מועתקים
+  'tkt', // תבניות משימה בענן (סבב 4, 18.11.2026): כלל ב-b/{bizId} וב-legacy בשורש; תת-האוסף p (תמונת דוגמה) מועתק עם ההורה
   'rv', // גלאי גרסת הכללים של מרכז העבודה במשימות (#74): מסמך rv/tk2 שלא קיים, אין כתיבה – נוסף כדי שהרשימה תכסה כל כלל ב-b/{bizId}
   'cust', 'custcfg', 'custBak', 'cardLog', 'cardQ', // לקוחות; custBak = גיבוי לפני "מחיקת כל הלקוחות" (customers.js)
   'cat', 'xfer', 'pinv', 'stockBak', // קטגוריות, העברות מלאי, חשבוניות מחיר; stockBak = גיבוי לפני "מחיקת כל המלאי" (orders.js)
