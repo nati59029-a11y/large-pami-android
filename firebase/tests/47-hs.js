@@ -150,6 +150,57 @@ for (const E of ENVS) {
       if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsr/h1')).update(upd(E.foreign, { st: 'arr' })));
     });
 
+    // שלב 2 (19.11.2026): הורדה אוטומטית מחשבונית ספק – 'inv' (הגיע כולו), 'part' (חלקי, הכמות יורדת), 'unp' (ביטול חלקי)
+    it('hsr: שלב 2 – הורדה מחשבונית: inv / part / unp לפי החוזה; זיוף, כמות לא נכונה ושדות זרים – נחסמים', async () => {
+      const doc = (u) => fs(u).doc(R('hsr/h1'));
+      const nu = () => { const ut = Math.max(Date.now(), lastUt + 1); lastUt = ut; return ut; };
+      const ie = (u, ut, o) => Object.assign({ k: 'inv', t: ut, byN: u, u, pinv: 'iRQ1', inv: '5001', sup: 'תנובה' }, o);
+      await prep((d) => d.doc(R('hsr/h1')).update({ q: 10 }));
+      // עדכון של שדות מצב בלבד (בלי itOk המלא) – עדיין נבדקים הערכים שהשתנו
+      await assertFails(doc(E.e2).update(upd(E.e2, { q: -1 })), 'כמות שלילית בעדכון מצב');
+      await assertFails(doc(E.e2).update(upd(E.e2, { q: 'x' })), 'כמות לא מספר');
+      await assertFails(doc(E.e2).update(upd(E.e2, { q: 100001 })), 'כמות גדולה מדי');
+      await assertFails(doc(E.e2).update(upd(E.e2, { ub: 'x'.repeat(101) })), 'ub ארוך');
+      for (const u of [E.mgr, E.e2]) {
+        // חלקי: 10 → 6
+        let o = await cur(), ut = nu();
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 9, q: 6 })]) }), 'q0 לא הכמות הקודמת');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 5 })]) }), 'q ברשומה לא הכמות החדשה');
+        await assertFails(doc(u).update({ q: 12, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 12 })]) }), 'הכמות עולה');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10 })]) }), 'part בלי q');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 6, x: 1 })]) }), 'שדה זר ברשומה');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 6, pinv: '../x' })]) }), 'pinv עם נתיב');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 6, inv: 'x'.repeat(31) })]) }), 'מספר חשבונית ארוך');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(E.e1, ut, { k: 'part', q0: 10, q: 6 })]) }), 'רשומה בשם אחר');
+        await assertFails(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([{ k: 'man', t: ut, byN: u, u }]) }), 'man בלי שינוי מצב');
+        await assertFails(doc(u).update({ st: 'arr', q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 6 })]) }), 'part עם שינוי מצב');
+        await assertSucceeds(doc(u).update({ q: 6, ub: u, ut, h: (o.h || []).concat([ie(u, ut, { k: 'part', q0: 10, q: 6 })]) }));
+        // ביטול החלקי: חוזר בדיוק ל-10
+        o = await cur(); ut = nu();
+        await assertFails(doc(u).update({ q: 11, ub: u, ut, h: o.h.concat([{ k: 'unp', t: ut, byN: u, u }]) }), 'unp לכמות אחרת');
+        await assertFails(doc(u).update({ q: 10, ub: u, ut, h: o.h.concat([{ k: 'unp', t: ut, byN: u, u, pinv: 'iRQ1' }]) }), 'unp עם שדות');
+        await assertSucceeds(doc(u).update({ q: 10, ub: u, ut, h: o.h.concat([{ k: 'unp', t: ut, byN: u, u }]) }));
+        o = await cur(); ut = nu();
+        await assertFails(doc(u).update({ q: 10, ub: u, ut, h: o.h.concat([{ k: 'unp', t: ut, byN: u, u }]) }), 'unp פעמיים (הקודמת לא part)');
+        // הגיע כולו: open → arr, הכמות לא משתנה, בלי q0 / q
+        await assertFails(doc(u).update({ st: 'arr', ub: u, ut, h: o.h.concat([ie(u, ut, { q0: 10, q: 0 })]) }), 'inv עם q0/q');
+        await assertFails(doc(u).update({ st: 'arr', q: 4, ub: u, ut, h: o.h.concat([ie(u, ut)]) }), 'inv שמשנה כמות');
+        await assertFails(doc(u).update({ st: 'del', ub: u, ut, h: o.h.concat([ie(u, ut)]) }), 'inv למצב אחר');
+        await assertFails(doc(u).update({ ub: u, ut, h: o.h.concat([ie(u, ut)]) }), 'inv בלי שינוי מצב');
+        await assertFails(doc(u).update({ st: 'arr', ub: u, ut, h: o.h.concat([ie(u, ut, { sup: 5 })]) }), 'sup לא מחרוזת');
+        await assertSucceeds(doc(u).update({ st: 'arr', ub: u, ut, h: o.h.concat([ie(u, ut)]) }));
+        // החזר (undo) אחרי inv – כמו בשלב 1
+        await assertSucceeds(doc(u).update(await stUpd(u, 'open', 'undo')));
+        o = await cur(); ut = nu();
+        await assertFails(doc(u).update({ st: 'del', ub: u, ut, h: o.h.concat([ie(u, ut)]) }), 'inv למחוק');
+      }
+      // inv רק מ-open: פריט שכבר הגיע / נמחק – לא
+      await assertSucceeds(doc(E.e2).update(await stUpd(E.e2, 'del', 'del')));
+      let o = await cur(), ut = nu();
+      await assertFails(doc(E.e2).update({ st: 'arr', ub: E.e2, ut, h: o.h.concat([ie(E.e2, ut)]) }), 'inv מנמחק');
+      for (const u of [E.off, E.out]) { o = await cur(); ut = nu(); await assertFails(fs(u).doc(R('hsr/h1')).update({ st: 'arr', ub: u, ut, h: o.h.concat([ie(u, ut)]) })); }
+    });
+
     it('hsr: מחיקה אמיתית – מנהל בלבד', async () => {
       await assertFails(fs(E.e1).doc(R('hsr/h1')).delete());
       if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsr/h1')).delete());

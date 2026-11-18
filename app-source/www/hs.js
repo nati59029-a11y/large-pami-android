@@ -22,6 +22,8 @@ const mask=a=>a.map(k=>'updateMask.fieldPaths='+k).join('&');
 const qrun=async sq=>{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>DEC(x.document))};
 const stQ=(st,lim)=>({from:[{collectionId:'hsr'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:st}}},limit:lim});
 const err=e=>toast(e&&e.code===403?'החוסרים יופעלו בקרוב':tkErr(e));
+/* שינוי מצב שנדחה (403) כשהרשימה כבר נטענה = כנראה הפריט השתנה במכשיר אחר (h כבר לא ההמשך): מרעננים ומודיעים במקום שגיאה */
+const stErr=e=>{if(e&&e.code===403&&HS.L&&!HS.off){toast('הפריט עודכן במכשיר אחר. הרשימה רועננה – נסו שוב.');HS.at=0;HS.arr=null;HS.del=null;hsLoad()}else err(e)};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const dOpen=()=>!!document.querySelector('#dlg[open]');
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
@@ -40,6 +42,7 @@ const st=document.createElement('style');st.textContent=`
 .hs-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .hs-th{width:84px;height:84px;object-fit:cover;border-radius:var(--r-m,10px);border:1px solid var(--line);display:block}
 .hs-sr{padding:6px 0;border-bottom:1px solid var(--line)}.hs-sr:last-child{border:0}
+.hs-bn{position:fixed;inset:auto 10px calc(100px + env(safe-area-inset-bottom)) 10px;z-index:98;max-width:520px;margin:auto;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 `;document.head.appendChild(st);
 
 /* ---------- ספקים ---------- */
@@ -77,8 +80,8 @@ const cIdx=()=>{try{const P=ordOn()&&window.__ox&&Array.isArray(window.__ox.P)?w
 /* המנהל: בניית hsx מחשבוניות התמחור (pinv) – רק חדשות מאז הפעם הקודמת, רק שמות מוצרים (בלי מחירים). כשל (403 וכו') – בשקט */
 async function xBuild(){if(HS.xb||!mgr()||!PM())return;HS.xb=1;const K='hs-xat|'+who();
  try{const last=+localStorage.getItem(K)||0;
-  const L=await qrun({from:[{collectionId:'pinv'}],select:{fields:['supId','sup','at','lines'].map(f=>({fieldPath:f}))},where:{fieldFilter:{field:{fieldPath:'at'},op:'GREATER_THAN',value:iv(last)}},orderBy:[{field:{fieldPath:'at'},direction:'ASCENDING'}],limit:200});
-  if(!L.length)return;await xLoad(true);let mx=last;const add={};
+  const L=await qrun({from:[{collectionId:'pinv'}],select:{fields:['supId','sup','at','lines','inv','st'].map(f=>({fieldPath:f}))},where:{fieldFilter:{field:{fieldPath:'at'},op:'GREATER_THAN',value:iv(last)}},orderBy:[{field:{fieldPath:'at'},direction:'ASCENDING'}],limit:200});
+  if(!L.length)return;invFill(L);await xLoad(true);let mx=last;const add={};
   L.forEach(p=>{mx=Math.max(mx,+p.at||0);const id=String(p.supId||'');if(!idOk(id))return;const a=add[id]||(add[id]={n:String(p.sup||'').slice(0,60),k:[]});
    (Array.isArray(p.lines)?p.lines:[]).forEach(l=>{const k=PM().key(l&&l.n||'');if(k&&k.length<=200)a.k.push(k)})});
   for(const id of Object.keys(add)){const d0=(HS.x||[]).find(d=>d.id===id),old=d0&&Array.isArray(d0.it)?d0.it:[];
@@ -106,17 +109,17 @@ function itemH(x,mode){
  const c=x.cust&&(x.cust.nm||x.cust.ph)?x.cust:null;
  const det=[x.q?'כמות '+C.fmtQ(x.q):'',c?'לקוח: '+[c.nm,c.ph].filter(Boolean).join(' '):''].filter(Boolean).join(' · ');
  const meta='נוסף ע"י '+(x.byN||'')+' · '+tm(x.t)+(x.ub&&mode==='open'?' · עודכן ע"י '+x.ub+' · '+tm(x.ut):'');
- const hA=mode==='arr'?lastH(x,['man','arr']):null,hD=mode==='del'?lastH(x,['del']):null;
+ const hA=mode==='arr'?lastH(x,['man','inv']):null,hD=mode==='del'?lastH(x,['del']):null,hP=mode==='open'&&C.unpartQ(x)!=null?x.h[x.h.length-1]:null;
  const b=(a,t,cl)=>`<button type="button" class="btn ${cl||'g'} s" data-a="${a}" data-id="${esc(x.id)}">${t}</button>`;
  let acts='';
- if(mode==='open')acts=b('hsArr','✓ הגיע','')+b('hsEdit','עריכה')+b('hsDel','מחיקה');
+ if(mode==='open')acts=b('hsArr','✓ הגיע','')+b('hsEdit','עריכה')+b('hsDel','מחיקה')+(hP?b('hsUnp','בטל הגעה חלקית'):'');
  else if(mode==='arr')acts=b('hsUndo','החזר לחוסרים')+(c&&c.ph?b('hsCustWa','הודעה ללקוח בוואטסאפ',''):'');
  else acts=b('hsRes','שחזור');
  if(x.np)acts+=b('hsImg','📷 תמונה');
  if(x.ord&&x.ord.id&&ordOn())acts+=`<button type="button" class="btn g s" data-a="go" data-v="oxOrd" data-arg="${esc(x.ord.id)}">להזמנה #${esc(x.ord.no||'')}</button>`;
  return `<div class="card hs-it" data-hs="${esc(x.id)}" style="padding:10px 12px"><div class="m"><b>${esc(x.n)}</b>
  <div class="hs-tg">${supTags(x)}<span class="tag">${esc(WHYT(x.why))}</span>${x.ord&&x.ord.id?`<span class="tag">הזמנה #${esc(x.ord.no||'')}</span>`:''}</div>
- ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${hA?`<small>הגיע · ${esc(tm(hA.t))} · ${esc(hA.byN||'')}</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(hD.byN||'')}</small>`:''}</div>
+ ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t)):`הגיע · ${esc(tm(hA.t))} · ${esc(hA.byN||'')}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))}</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(hD.byN||'')}</small>`:''}</div>
  <div class="hs-acts">${acts}</div></div>`}
 function listH(L,mode,empty){return L===null?'<div class="empty">טוען…</div>':L.length?L.map(x=>itemH(x,mode)).join(''):`<div class="empty">${empty}</div>`}
 
@@ -152,7 +155,7 @@ CHG.hsSel=el=>{HS.sel=idOk(el.value)?el.value:'';rerender()};
 
 /* ---------- מצב: הגיע / החזר / מחיקה רכה / שחזור ---------- */
 async function setSt(id,stN,k){const x=find(id);if(!x)return false;const ut=nextUt(x),ub=fbBy().slice(0,100),h=C.hAdd(x.h,{k,t:ut,byN:ub,u:SY.uid});/* הכללים: רשומה אחת בסוף, בשם המבצע, t = ut */
- try{await fsx('/hsr/'+id+'?'+mask(['st','h','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds({st:stN,h,ub,ut})})})}catch(e){err(e);return false}
+ try{await fsx('/hsr/'+id+'?'+mask(['st','h','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds({st:stN,h,ub,ut})})})}catch(e){stErr(e);return false}
  const from=x.st;Object.assign(x,{st:stN,h,ub,ut});HS.mv[id]=x;/* נשאר זמין לפעולות (למשל הודעה ללקוח) גם כשרשימת היעד עוד לא נטענה */
  const lk=s=>s==='open'?'L':s;if(HS[lk(from)])HS[lk(from)]=HS[lk(from)].filter(y=>y.id!==id);if(HS[lk(stN)])HS[lk(stN)]=[x].concat(HS[lk(stN)].filter(y=>y.id!==id));
  tilePaint();return true}
@@ -300,4 +303,45 @@ ACT.hsPdf=async el=>{const g=HS.G[el.dataset.id],k=el.dataset.k;if(!g||!idOk(g.i
   else await outSave({name,data:pdf,mime:'application/pdf'},'share')}
  catch(e){toast('הקובץ לא נוצר: '+(e&&e.message||e))}};
 
+/* ---------- שלב 2 (19.11.2026): הורדה אוטומטית בקליטת חשבונית ספק ----------
+   pricing.js קורא ל-window.hsOnInv אחרי piCreate מוצלח (פעם אחת לחשבונית), בלי לחכות – כשל כאן לא נוגע בקליטת החשבונית.
+   ההתאמה (HsCore.matchInv) מחמירה: עדיף לפספס. כל פריט מתעדכן עם תנאי גרסה (currentDocument.updateTime) – שני מכשירים לא דורסים זה את זה;
+   אותה חשבונית לא מטופלת פעמיים (pinv בהיסטוריה). המנהל משלים בפתיחת המסך חשבוניות שנקלטו ולא טופלו (invFill, מתוך xBuild).
+   ביטול: "בטל" בהודעה, "החזר לחוסרים" (הגיע כולו) או "בטל הגעה חלקית" (רשומת 'unp' שמחזירה את הכמות). */
+let IQ=Promise.resolve();
+const invQ=L=>{IQ=IQ.then(()=>invRun(L)).catch(()=>{});return IQ};
+const qrunU=async sq=>{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>({x:DEC(x.document),u:x.document.updateTime||''}))};
+function upLocal(x){HS.mv[x.id]=x;const t=x.st==='open'?'L':x.st;['L','arr','del'].forEach(k=>{const a=HS[k];if(!a)return;const i=a.findIndex(y=>y.id===x.id);if(k===t){if(i>=0)a[i]=x;else HS[k]=[x].concat(a)}else if(i>=0)a.splice(i,1)})}
+async function invApply(r,m,d,again){const x=r.x,ut=nextUt(x),ub=fbBy().slice(0,100);
+ const h=C.hAdd(x.h,C.invEntry(m,d,ut,ub,SY.uid)),f=m.k==='part'?{q:m.q,h,ub,ut}:{st:'arr',h,ub,ut};
+ try{const j=await fsx('/hsr/'+x.id+'?'+mask(Object.keys(f))+(r.u?'&currentDocument.updateTime='+encodeURIComponent(r.u):''),{method:'PATCH',body:JSON.stringify({fields:flds(f)})});
+  return{x:Object.assign({},x,f),u:j&&j.updateTime||''}}
+ catch(e){/* הפריט השתנה בינתיים (תנאי הגרסה – 400, או הכללים דחו כי h כבר לא ההמשך – 403): קוראים מחדש, בודקים שעדיין פתוח ומתאים, ומנסים פעם אחת */
+  if(again||!e||![400,403,409,412].includes(e.code))return null;
+  try{const doc=await fsx('/hsr/'+x.id),y=DEC(doc);if(!valid(y))return null;const m2=C.matchInv([y],d,PM())[0];return m2?invApply({x:y,u:doc.updateTime||''},m2,d,1):null}catch(e2){return null}}}
+async function invRun(L){if(!on()||!PM()||!Array.isArray(L)||!L.length)return;
+ let R;try{R=await qrunU(stQ('open',500))}catch(e){return}
+ const M=new Map(R.filter(r=>valid(r.x)).map(r=>[r.x.id,r])),done=[];let A=null;/* פריטים שהגיעו – רק אם יש התאמה, כדי שפריט שכבר ירד באותה חשבונית "יתפוס" את השורות שלו */
+ for(const d of L){let ms=[];try{ms=C.matchInv([...M.values()].map(r=>r.x),d,PM());
+   if(ms.length){if(!A){try{A=(await qrun(stQ('arr',300))).filter(valid)}catch(e){A=[]}}ms=C.matchInv([...M.values()].map(r=>r.x).concat(A.filter(a=>!M.has(a.id))),d,PM())}}catch(e){continue}
+  for(const m of ms){const r=M.get(m.id);if(!r)continue;const w=await invApply(r,m,d);if(!w)continue;
+   if(w.x.st==='open')M.set(w.x.id,w);else{M.delete(w.x.id);if(A)A=[w.x].concat(A.filter(a=>a.id!==w.x.id))}upLocal(w.x);done.push({id:w.x.id,n:w.x.n,k:m.k,q:m.q,inv:String(d.inv||'').slice(0,30)})}}
+ if(!done.length)return;tilePaint();paint();invMsg(done)}
+/* הודעה שלא חוסמת את המסך (גם כשחלון פתוח), עם "בטל" */
+function invMsg(D){HS.bn=D;let e=document.getElementById('hsBn');if(!e){e=document.createElement('div');e.id='hsBn';e.className='card hs-bn';e.setAttribute('role','status');document.body.appendChild(e)}
+ const invs=[...new Set(D.map(x=>x.inv).filter(Boolean))];
+ e.innerHTML=`<b>ירדו מהחוסרים${invs.length?' (חשבונית '+esc(invs.join(', '))+')':''}:</b><div style="margin:6px 0">${D.map(x=>'• '+esc(x.n)+(x.k==='part'?` – הגיע חלקית, נשארו ${esc(C.fmtQ(x.q))}`:'')).join('<br>')}</div>
+ <div class="row"><button type="button" class="btn g grow" data-a="hsInvUndo">בטל</button><button type="button" class="btn grow" data-a="hsBnX">סגור</button></div>`;
+ clearTimeout(HS.bt);HS.bt=setTimeout(ACT.hsBnX,15000)}
+ACT.hsBnX=()=>{const b=document.getElementById('hsBn');if(b)b.remove()};
+async function unp(id){const x=find(id),q0=C.unpartQ(x);if(q0==null)return false;const ut=nextUt(x),ub=fbBy().slice(0,100),h=C.hAdd(x.h,{k:'unp',t:ut,byN:ub,u:SY.uid});
+ try{await fsx('/hsr/'+id+'?'+mask(['q','h','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds({q:q0,h,ub,ut})})})}catch(e){stErr(e);return false}
+ Object.assign(x,{q:q0,h,ub,ut});upLocal(x);tilePaint();return true}
+ACT.hsUnp=async el=>{if(el.disabled)return;el.disabled=true;if(await unp(el.dataset.id)){toast('הכמות הוחזרה');rerender()}else el.disabled=false};
+ACT.hsInvUndo=async el=>{const D=HS.bn||[];if(el.disabled||!D.length)return;el.disabled=true;let n=0;
+ for(const d of D){const x=find(d.id);if(!x)continue;if(d.k==='inv'?x.st==='arr'&&await setSt(d.id,'open','undo'):await unp(d.id))n++}
+ HS.bn=null;ACT.hsBnX();toast(n===D.length?'בוטל – הפריטים חזרו לחוסרים':'בוטלו '+n+' מתוך '+D.length);paint()};
+/* המנהל: חשבוניות חדשות מ-pinv (שכבר נקראו ב-xBuild) – רק מ-30 הימים האחרונים ולא מבוטלות */
+function invFill(L){try{const cut=Date.now()-30*864e5,P=L.filter(p=>p&&idOk(String(p.id||''))&&p.st!=='void'&&+p.at>cut).map(p=>({id:p.id,sup:p.sup,supId:p.supId,inv:p.inv,at:+p.at,lines:p.lines}));if(P.length)invQ(P)}catch(e){}}
+window.hsOnInv=d=>{try{if(!d||!idOk(String(d.id||''))||!on())return;const v={id:d.id,sup:d.sup,supId:d.supId,inv:d.inv,at:Date.now(),lines:d.lines};setTimeout(()=>invQ([v]),0)}catch(e){}};
 })();

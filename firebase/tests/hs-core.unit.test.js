@@ -118,3 +118,95 @@ describe('חוסרים – hs-core', () => {
     assert.equal(h.length, 30); assert.equal(h[0].t, 5); assert.equal(h[29].t, 34);
   });
 });
+
+// ---------- שלב 2: הורדה אוטומטית בקליטת חשבונית (matchInv / invEntry / unpartQ) ----------
+describe('חוסרים – שלב 2: matchInv', () => {
+  const T = 1000;
+  const I = (id, n, o) => Object.assign({ id, n, nk: n, gen: false, sups: ['s1'], supN: ['תנובה'], why: 'store', st: 'open', t: T }, o);
+  const INV = (lines, o) => Object.assign({ id: 'iRQ1', sup: 'תנובה', supId: 's1', inv: '5001', at: T + 1, lines }, o);
+  const M = (items, inv) => J(C.matchInv(items, inv, PM)).map((r) => ({ id: r.id, k: r.k, got: r.got, q0: r.q0, q: r.q }));
+  const L1 = [{ n: 'חלב תנובה 3% 1 ליטר', qty: 4 }];
+
+  it('פריט בלי כמות של ספק החשבונית – יורד כולו (inv)', () => {
+    assert.deepEqual(M([I('a', 'חלב 3%')], INV(L1)), [{ id: 'a', k: 'inv', got: 4, q0: undefined, q: undefined }]);
+  });
+  it('כמות חלקית: נדרשו 10, הגיעו 4 – נשאר 6 (part)', () => {
+    assert.deepEqual(M([I('a', 'חלב 3%', { q: 10 })], INV(L1)), [{ id: 'a', k: 'part', got: 4, q0: 10, q: 6 }]);
+  });
+  it('כמות מלאה או יותר – יורד כולו; כמה שורות של אותו מוצר מצטברות', () => {
+    assert.equal(M([I('a', 'חלב 3%', { q: 4 })], INV(L1))[0].k, 'inv');
+    assert.equal(M([I('a', 'חלב 3%', { q: 3 })], INV(L1))[0].k, 'inv');
+    const r = M([I('a', 'חלב 3%', { q: 10 })], INV([{ n: 'חלב 3% ליטר', qty: 4 }, { n: 'חלב 3% קרטון', qty: 5 }]));
+    assert.deepEqual(r, [{ id: 'a', k: 'part', got: 9, q0: 10, q: 1 }]);
+  });
+  it('יש כמות נדרשת ואין כמות ידועה בשורה – לא יורד (עדיף לפספס)', () => {
+    assert.deepEqual(M([I('a', 'חלב 3%', { q: 10 })], INV([{ n: 'חלב 3% ליטר', qty: 0 }])), []);
+    assert.equal(M([I('a', 'חלב 3%')], INV([{ n: 'חלב 3% ליטר' }]))[0].k, 'inv'); // בלי כמות נדרשת – יורד
+  });
+  it('ספק אחר לא מוריד (supId)', () => {
+    assert.deepEqual(M([I('a', 'חלב 3%')], INV(L1, { supId: 's2', sup: 'שטראוס' })), []);
+  });
+  it('חשבונית בלי supId – לפי שם הספק המנורמל; שם אחר לא מוריד', () => {
+    assert.equal(M([I('a', 'חלב 3%')], INV(L1, { supId: undefined, sup: ' תנובה ' })).length, 1);
+    assert.deepEqual(M([I('a', 'חלב 3%')], INV(L1, { supId: undefined, sup: 'שטראוס' })), []);
+    assert.deepEqual(M([I('a', 'חלב 3%')], INV(L1, { supId: undefined, sup: '' })), []);
+  });
+  it('פריט כללי יורד מכל ספק (גם מספק לא מוכר)', () => {
+    const g = I('g', 'שקיות גדולות', { gen: true, sups: [], supN: [] });
+    const L = [{ n: 'שקיות גדולות 50 יח', qty: 3 }];
+    assert.equal(M([g], INV(L, { supId: 's2', sup: 'שטראוס' }))[0].k, 'inv');
+    assert.equal(M([g], INV(L, { supId: undefined, sup: 'ספק חדש' }))[0].k, 'inv');
+  });
+  it('פריט עם כמה ספקים – יורד מכל אחד מהם', () => {
+    const x = I('a', 'חלב 3%', { sups: ['s1', 's2'], supN: ['תנובה', 'שטראוס'] });
+    assert.equal(M([x], INV(L1, { supId: 's2' })).length, 1);
+    assert.deepEqual(M([x], INV(L1, { supId: 's3' })), []);
+  });
+  it('שמות דומים אבל שונים – לא יורד', () => {
+    const cases = [['חלב', 'חלבה'], ['חלב 3%', 'חלב 1% ליטר'], ['שמן זית', 'שמן קנולה'], ['קולה זירו', 'קולה 1.5 ליטר'], ['שוקו', 'שוקולד מריר'], ['במבה', 'ביסלי גריל']];
+    for (const [n, l] of cases) assert.deepEqual(M([I('a', n)], INV([{ n: l, qty: 1 }])), [], n + ' / ' + l);
+  });
+  it('צורות כתיבה של אותו מוצר – יורד (גרש, ספרות צמודות, כתיב מלא)', () => {
+    assert.equal(M([I('a', 'קוטג 5%')], INV([{ n: "קוטג' 5% 250 גרם", qty: 2 }])).length, 1);
+    assert.equal(M([I('a', 'שקיות גדולות')], INV([{ n: 'שקיות גדולות 50יח', qty: 2 }])).length, 1);
+  });
+  it('שורה שמתאימה לשני פריטים – נזקפת רק לספציפי יותר', () => {
+    const r = M([I('a', 'חלב'), I('b', 'חלב 3%')], INV(L1));
+    assert.deepEqual(r.map((x) => x.id), ['b']);
+  });
+  it('אותה חשבונית פעמיים – פעם אחת (pinv בהיסטוריה), גם אחרי ביטול', () => {
+    const x = I('a', 'חלב 3%', { q: 10, h: [{ k: 'part', t: 5, byN: 'm', u: 'm', pinv: 'iRQ1', inv: '5001', sup: 'תנובה', q0: 10, q: 6 }, { k: 'unp', t: 6, byN: 'm', u: 'm' }] });
+    assert.deepEqual(M([x], INV(L1)), []);
+    assert.equal(M([x], INV(L1, { id: 'iRQ2' })).length, 1); // חשבונית אחרת – כן
+  });
+  it('עיבוד חוזר: פריט שכבר ירד באותה חשבונית תופס את השורה – פריט כללי יותר לא יורד במקומו', () => {
+    const hb = [{ k: 'inv', t: 5, byN: 'm', u: 'm', pinv: 'iRQ1', inv: '5001', sup: 'תנובה' }];
+    assert.deepEqual(M([I('a', 'חלב'), I('b', 'חלב 3%', { st: 'arr', h: hb })], INV(L1)), []);
+    assert.deepEqual(M([I('a', 'חלב'), I('b', 'חלב 3%', { st: 'open', h: hb.concat([{ k: 'undo' }]) })], INV(L1)), []); // אחרי "החזר"
+    assert.deepEqual(M([I('a', 'חלב'), I('b', 'חלב 3%', { st: 'arr', h: hb })], INV(L1, { id: 'iRQ2' })).map((r) => r.id), ['a']); // חשבונית אחרת
+  });
+  it('רק פריטים פתוחים, שנוספו לפני החשבונית, עם מזהה תקין', () => {
+    assert.deepEqual(M([I('a', 'חלב 3%', { st: 'arr' }), I('b', 'חלב 3%', { st: 'del' })], INV(L1)), []);
+    assert.deepEqual(M([I('a', 'חלב 3%', { t: T + 5 })], INV(L1)), []);
+    assert.deepEqual(M([I('a/../x', 'חלב 3%')], INV(L1)), []);
+  });
+  it('קלט פגום – רשימה ריקה, בלי חריגה', () => {
+    assert.deepEqual(M([I('a', 'חלב 3%')], INV(L1, { id: 'bad/id' })), []);
+    assert.deepEqual(M([I('a', 'חלב 3%')], INV(null)), []);
+    assert.deepEqual(M(null, INV(L1)), []);
+    assert.deepEqual(J(C.matchInv([I('a', 'חלב')], INV(L1), null)), []);
+    assert.deepEqual(M([I('a', '3%')], INV([{ n: '3%', qty: 1 }])), []); // שם בלי מילה – לא מתאים
+  });
+  it('invEntry: רשומת היסטוריה לפי החוזה', () => {
+    const inv = INV(L1, { inv: 'x'.repeat(40), sup: 'תנובה' });
+    assert.deepEqual(J(C.invEntry({ k: 'inv' }, inv, 7, 'm', 'u1')), { k: 'inv', t: 7, byN: 'm', u: 'u1', pinv: 'iRQ1', inv: 'x'.repeat(30), sup: 'תנובה' });
+    assert.deepEqual(J(C.invEntry({ k: 'part', q0: 10, q: 6 }, inv, 7, 'm', 'u1')).q0, 10);
+  });
+  it('unpartQ: ביטול הגעה חלקית מחזיר בדיוק את הכמות הקודמת; לא אחרי שינוי', () => {
+    const e = { k: 'part', t: 5, byN: 'm', u: 'm', pinv: 'iRQ1', inv: '1', sup: '', q0: 10, q: 6 };
+    assert.equal(C.unpartQ({ st: 'open', q: 6, h: [e] }), 10);
+    assert.equal(C.unpartQ({ st: 'open', q: 5, h: [e] }), null);
+    assert.equal(C.unpartQ({ st: 'open', q: 6, h: [e, { k: 'unp' }] }), null);
+    assert.equal(C.unpartQ({ st: 'arr', q: 6, h: [e] }), null);
+  });
+});

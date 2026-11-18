@@ -123,6 +123,83 @@ function custText(it, biz) {
   return 'שלום' + nm + ',\nהמוצר "' + (it && it.n || '') + '" שביקשת הגיע' + (biz ? ' ל' + biz : ' לחנות') + '.\nאפשר לבוא לאסוף. תודה!';
 }
 
-const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, waText, custText, intl, phOk, nameId, keyOf, fmtQ };
+// ---------- שלב 2: הורדה אוטומטית בקליטת חשבונית ספק ----------
+// matchInv(items, inv, PM) → [{ id, it, k: 'inv' (הגיע כולו) | 'part' (חלקי, נשאר ההפרש), got, q0?, q?, ln: [שמות השורות] }]
+// inv: { id ('i'+בקשה), sup, supId?, inv, at? (מ"ש), lines: [{ n, qty }] }. סף מחמיר – עדיף לפספס מאשר להוריד בטעות:
+//  • רק פריט פתוח, שנוסף לפני החשבונית (t ≤ at), שלא טופל כבר באותה חשבונית (h עם pinv), ושספק החשבונית הוא אחד מספקיו
+//    (לפי supId; אין supId – לפי שם מנורמל) או פריט כללי.
+//  • כל מילה בשם הפריט נמצאת בשורה: זהה, אותה צורה (יחיד/רבים) או אותו שלד (כתיב מלא/חסר); מספרים – רק זהים; בלי קידומת.
+//    לפחות מילה אחת (לא מספר) זהה בדיוק – "חלב" לא יורד מ"חלבה".
+//  • שורה שמתאימה לכמה פריטים נזקפת רק לפריט/ים הספציפי ביותר (הכי הרבה ממילות השורה).
+//  • פריט (בכל מצב) שכבר טופל באותה חשבונית "תופס" את השורות שלו: שורה שהוא בין המתאימים ביותר לה לא נזקפת לאף פריט אחר –
+//    כך עיבוד חוזר (במכשיר אחר / אחרי ביטול) לא מוריד פריט כללי יותר במקום פריט שכבר ירד. לכן כדאי להעביר גם פריטים שהגיעו.
+//  • כמות: פריט בלי כמות – יורד כולו. עם כמות – סכום הכמויות בשורות; פחות מהנדרש = חלקי; אין כמות ידועה בשורות – לא יורד.
+const r3 = (v) => Math.round(v * 1000) / 1000;
+function wScore(PM, a, b) { try { return PM.tokScore(a, b); } catch (e) { return 0; } }
+const isNum = (t) => /^\d+(\.\d+)?$/.test(t);
+// ציון שם פריט מול שורה: null אם לא מתאים; אחרת { c: חלק ממילות השורה שכוסו, s: ממוצע ציוני המילים }
+function lineFit(PM, iw, lw) {
+  if (!iw.length || !lw.length) return null;
+  let ex = 0, sum = 0; const used = new Set();
+  for (const a of iw) {
+    let b = 0, bi = -1;
+    lw.forEach((w, i) => { const s = a === w ? 1 : wScore(PM, a, w); if (s > b) { b = s; bi = i; } });
+    const ok = b >= 0.95 || (b >= 0.85 && b < 0.9); // זהה / צורה / שלד – לא קידומת (0.9) ולא מרחק עריכה
+    if (!ok) return null;
+    if (b === 1 && !isNum(a)) ex++;
+    sum += b; used.add(bi);
+  }
+  if (!ex) return null;
+  return { c: used.size / lw.length, s: sum / iw.length };
+}
+function matchInv(items, inv, PM) {
+  if (!PM || typeof PM.words !== 'function' || typeof PM.tokScore !== 'function') return [];
+  inv = inv || {};
+  const pid = String(inv.id || ''); if (!ID.test(pid)) return [];
+  const sid = typeof inv.supId === 'string' && ID.test(inv.supId) ? inv.supId : '';
+  const sk = clean(inv.sup, 60) ? keyOf(clean(inv.sup, 60), PM) : '';
+  const at = typeof inv.at === 'number' && isFinite(inv.at) ? inv.at : Date.now();
+  const lines = (Array.isArray(inv.lines) ? inv.lines : []).slice(0, 200).map((l) => ({ n: clean(l && l.n, 300), qty: l && typeof l.qty === 'number' && isFinite(l.qty) && l.qty > 0 ? l.qty : 0 }))
+    .map((l) => Object.assign(l, { w: [...new Set(PM.words(l.n))] })).filter((l) => l.w.length);
+  if (!lines.length) return [];
+  const supOk = (x) => x.gen || (Array.isArray(x.sups) && (sid ? x.sups.includes(sid) : !!sk && (Array.isArray(x.supN) ? x.supN : []).some((n) => clean(n) && keyOf(clean(n, 60), PM) === sk)));
+  const done = (x) => Array.isArray(x.h) && x.h.some((e) => e && e.pinv === pid);
+  const C = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.id === 'string' && ID.test(x.id) && typeof x.n === 'string'
+    && (done(x) || (x.st === 'open' && typeof x.t === 'number' && x.t <= at && supOk(x))))
+    .map((x) => ({ x, w: [...new Set(PM.words(x.n))], cl: done(x) })).filter((c) => c.w.some((t) => !isNum(t)));
+  if (!C.some((c) => !c.cl)) return [];
+  const got = new Map(); // id → { q, unk, ln }
+  lines.forEach((l) => {
+    let best = null, B = [];
+    C.forEach((c) => { const f = lineFit(PM, c.w, l.w); if (!f) return;
+      const cmp = best ? (f.c - best.c) || (f.s - best.s) : 1;
+      if (cmp > 1e-9) { best = f; B = [c]; } else if (Math.abs(cmp) <= 1e-9) B.push(c); });
+    if (B.some((c) => c.cl)) return; // השורה כבר נזקפה בעבר באותה חשבונית
+    B.forEach((c) => { const g = got.get(c.x.id) || { q: 0, unk: 0, ln: [] }; if (l.qty) g.q += l.qty; else g.unk++; if (g.ln.length < 5) g.ln.push(l.n); got.set(c.x.id, g); });
+  });
+  const out = [];
+  C.forEach(({ x, cl }) => { const g = got.get(x.id); if (!g || cl) return;
+    const base = { id: x.id, it: x, got: r3(g.q), ln: g.ln };
+    if (!(typeof x.q === 'number' && x.q > 0)) { out.push(Object.assign(base, { k: 'inv' })); return; }
+    if (!(g.q > 0)) return; // יש כמות נדרשת ואין כמות ידועה בחשבונית – לא מורידים
+    const nq = r3(x.q - g.q);
+    if (nq <= 0) out.push(Object.assign(base, { k: 'inv' }));
+    else if (nq < x.q) out.push(Object.assign(base, { k: 'part', q0: x.q, q: nq }));
+  });
+  return out;
+}
+// רשומת היסטוריה להורדה מחשבונית (החוזה בכללים): { k: 'inv'|'part', t, byN, u, pinv, inv, sup, q0?, q? }
+function invEntry(r, inv, t, byN, u) {
+  const e = { k: r.k, t, byN, u, pinv: String(inv && inv.id || ''), inv: clean(inv && inv.inv, 30), sup: clean(inv && inv.sup, 60) };
+  if (r.k === 'part') { e.q0 = r.q0; e.q = r.q; }
+  return e;
+}
+// ביטול הגעה חלקית: רק אם הרשומה האחרונה היא 'part' והכמות עדיין כמו שהשאירה. מחזיר את הכמות לשחזור, או null
+function unpartQ(x) {
+  const h = x && Array.isArray(x.h) ? x.h : [], e = h[h.length - 1];
+  return x && x.st === 'open' && e && e.k === 'part' && typeof e.q0 === 'number' && e.q === x.q ? e.q0 : null;
+}
+
+const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.HsCore = api;
 })(typeof self !== 'undefined' ? self : this);

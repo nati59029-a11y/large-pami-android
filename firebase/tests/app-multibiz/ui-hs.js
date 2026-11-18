@@ -14,10 +14,10 @@ const T0 = H.T0;
 const DOCS = 'projects/demo-largpeami/databases/(default)/documents/';
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const SUPS = [{ id: 's1', name: 'תנובה' }, { id: 's2', name: 'שטראוס' }, { id: 's3', name: 'אסם' }];
-let DB, LOG, F403;
+let DB, LOG, F403, UT, STALE, REJ, VER = 0;
 const item = (o) => Object.assign({ n: S('מוצר'), nk: S('מוצר'), gen: B(false), sups: A([]), supN: A([]), why: S('store'), np: I(0), st: S('open'), by: S('m'), byN: S('m'), t: I(T0 - 36e5) }, o);
 const seed = () => {
-  DB = { hsr: {}, p: {}, hsx: {}, hsph: {}, supord: [], pinv: [] }; LOG = []; F403 = false;
+  DB = { hsr: {}, p: {}, hsx: {}, hsph: {}, supord: [], pinv: [] }; LOG = []; F403 = false; UT = {}; STALE = new Set(); REJ = new Set();
   DB.hsr.a1 = item({ n: S('קוטג 5%'), nk: S('קוטג 5'), sups: A(['s1']), supN: A(['תנובה']), q: I(4), byN: S('w1'), by: S('w1') });
   DB.hsr.g1 = item({ n: S('שקיות גדולות'), nk: S('שקיות גדולות'), gen: B(true), why: S('both') });
   DB.hsr.r1 = item({ n: S('במבה'), nk: S('במבה'), sups: A(['s3']), supN: A(['אסם']), st: S('arr'), ub: S('m'), ut: I(T0 - 6e4), h: { arrayValue: { values: [M({ k: S('man'), t: I(T0 - 6e4), byN: S('m') })] } } });
@@ -26,6 +26,8 @@ const seed = () => {
   DB.supord.push({ n: S('יוגורט פרי'), qty: I(2), sup: S('שטראוס'), st: S('ord'), ord: S('o9'), no: I(41), br: S('_'), at: I(T0 - 5000) });
 };
 const docOf = (name, f) => ({ name: DOCS + name, fields: f, createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
+// שלב 2: גרסה לכל פריט (updateTime) – PATCH עם currentDocument.updateTime שלא תואם נדחה (400), כמו ב-Firestore. STALE – השאילתה מחזירה גרסה ישנה (עדכון מקביל)
+const hdoc = (id, stale) => Object.assign(docOf('hsr/' + id, DB.hsr[id]), { updateTime: stale ? '2026-11-03T08:00:00Z' : UT[id] || '2026-11-03T09:00:00Z' });
 async function mockCloud(ctx, who) {
   await ctx.route((u) => new URL(u).port === '8080', async (route) => {
     const req = route.request(), u = new URL(req.url()), m = req.method(), p = decodeURIComponent(u.pathname), body = req.postData() || '';
@@ -37,7 +39,7 @@ async function mockCloud(ctx, who) {
     LOG.push({ who, m, R, coll, body: body ? JSON.parse(body) : null, q: u.search });
     if (F403 && (coll === 'hsr' || /^\/hs/.test(R))) return err(403, 'PERMISSION_DENIED');
     if (coll) { const sq = JSON.parse(body).structuredQuery, w = sq.where && sq.where.fieldFilter; let rows = [];
-      if (coll === 'hsr') rows = Object.keys(DB.hsr).filter((id) => !w || DB.hsr[id].st.stringValue === w.value.stringValue).map((id) => docOf('hsr/' + id, DB.hsr[id]));
+      if (coll === 'hsr') rows = Object.keys(DB.hsr).filter((id) => !w || DB.hsr[id].st.stringValue === w.value.stringValue).map((id) => { const st = STALE.has(id); STALE.delete(id); return hdoc(id, st); });
       if (coll === 'pinv') rows = DB.pinv.filter((d) => +d.at.integerValue > +w.value.integerValue).map((d, k) => docOf('pinv/i' + k, d));
       if (coll === 'supord') rows = DB.supord.map((d, k) => docOf('supord/so' + k, d));
       return ok(rows.length ? rows.map((d) => ({ document: d, readTime: 'x' })) : [{ readTime: 'x' }]); }
@@ -48,7 +50,8 @@ async function mockCloud(ctx, who) {
       if (m === 'PATCH') { DB.hsph[s[1]] = JSON.parse(body).fields; return ok({}); } }
     if (s[0] === 'hsr') {
       if (s.length === 1 && m === 'POST') { const id = u.searchParams.get('documentId'); DB.hsr[id] = JSON.parse(body).fields; return ok(docOf('hsr/' + id, DB.hsr[id])); }
-      if (s.length === 2 && m === 'PATCH') { const f = JSON.parse(body).fields, d = DB.hsr[s[1]]; if (!d) return err(404, 'NOT_FOUND'); for (const k of u.searchParams.getAll('updateMask.fieldPaths')) { if (f[k]) d[k] = f[k]; else delete d[k]; } return ok(docOf('hsr/' + s[1], d)); }
+      if (s.length === 2 && m === 'GET') return DB.hsr[s[1]] ? ok(hdoc(s[1])) : err(404, 'NOT_FOUND');
+      if (s.length === 2 && m === 'PATCH') { const f = JSON.parse(body).fields, d = DB.hsr[s[1]]; if (!d) return err(404, 'NOT_FOUND'); const pc = u.searchParams.get('currentDocument.updateTime'); if (pc && pc !== hdoc(s[1]).updateTime) return err(400, 'FAILED_PRECONDITION'); if (REJ.has(s[1])) { REJ.delete(s[1]); return err(403, 'PERMISSION_DENIED'); } for (const k of u.searchParams.getAll('updateMask.fieldPaths')) { if (f[k]) d[k] = f[k]; else delete d[k]; } UT[s[1]] = new Date(T0 + (++VER) * 1000).toISOString(); return ok(hdoc(s[1])); }
       if (s[2] === 'p') { if (m === 'GET') return DB.p[s[1]] ? ok(docOf('hsr/' + s[1] + '/p/1', DB.p[s[1]])) : err(404, 'NOT_FOUND');
         if (m === 'PATCH') { DB.p[s[1]] = JSON.parse(body).fields; return ok({}); } if (m === 'DELETE') { delete DB.p[s[1]]; return ok({}); } }
     }
@@ -61,6 +64,7 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
 const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('.toast')].map((x) => x.innerText).join('|'));
 const mainT = (page) => page.evaluate(() => document.getElementById('main').innerText);
 const posts = () => LOG.filter((l) => l.m === 'POST' && l.R === '/hsr');
+const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort().join();
 
 (async () => {
   const [www, shots] = process.argv.slice(2); const browser = await H.launch();
@@ -196,6 +200,80 @@ const posts = () => LOG.filter((l) => l.m === 'POST' && l.R === '/hsr');
   check('18א "תמונה": תצוגה מלאה עם כפתור שיתוף', await wp.evaluate(() => !!document.querySelector('#dlg[open] img') && !!document.querySelector('#dlg [data-a=hsImgShare]')));
   await wp.evaluate(() => closeDlg());
   check('19 עובד: אין גלילה לרוחב ואין שגיאות JS', await noOverflow(wp) && wp.__errors.length === 0, wp.__errors);
+  await x.ctx.close();
+
+  // ================= שלב 2: הורדה אוטומטית בקליטת חשבונית ספק =================
+  const hv = (id) => { const h = DB.hsr[id].h; return h ? h.arrayValue.values.map((v) => Object.fromEntries(Object.entries(v.mapValue.fields).map(([k, x]) => [k, x.stringValue !== undefined ? x.stringValue : +(x.integerValue || x.doubleValue)]))) : []; };
+  const stOf = (id) => DB.hsr[id].st.stringValue, qOf = (id) => DB.hsr[id].q ? +(DB.hsr[id].q.integerValue || DB.hsr[id].q.doubleValue) : null;
+  const seed2 = () => { seed();
+    DB.hsr.b1 = item({ n: S('חלב 3%'), nk: S('חלב 3'), sups: A(['s1']), supN: A(['תנובה']) });
+    DB.hsr.d1 = item({ n: S('חלב'), nk: S('חלב'), sups: A(['s1']), supN: A(['תנובה']), t: I(T0 - 50 * 864e5) });
+    DB.hsr.c1 = item({ n: S('יוגורט'), nk: S('יוגורט'), sups: A(['s2']), supN: A(['שטראוס']) });
+    DB.hsr.e1 = item({ n: S('חלבה'), nk: S('חלבה'), sups: A(['s1']), supN: A(['תנובה']) }); };
+  const INV1 = { id: 'iRQ1', sup: 'תנובה', supId: 's1', inv: '5001', date: '2026-11-01', lines: [{ n: "קוטג' 5% 250 גרם", qty: 2 }, { n: 'חלב 3% ליטר', qty: 6 }, { n: 'יוגורט פרי', qty: 3 }, { n: 'שקיות גדולות 50 יח', qty: 1 }] };
+  seed2(); x = await open('m-hs2', 'm@x.co'); mp = x.page;
+  await mp.evaluate((L) => { S.subs = S.subs.filter((s) => !/^s\d$/.test(s.id)); L.forEach((s) => S.subs.push({ id: s.id, cat: 'e_sup', name: s.name })); save(); }, SUPS);
+  await mp.evaluate(() => go('hs')); await waitFor(() => mp.evaluate(() => document.querySelectorAll('.hs-it').length >= 5));
+  STALE.add('b1'); LOG.length = 0;
+  await mp.evaluate((d) => window.hsOnInv(d), INV1);
+  await waitFor(() => mp.evaluate(() => !!document.getElementById('hsBn')), 5000);
+  const pt = (id) => LOG.filter((l) => l.m === 'PATCH' && l.R === '/hsr/' + id);
+  const ha = hv('a1').slice(-1)[0] || {}, hb = hv('b1').slice(-1)[0] || {};
+  check('22 חשבונית: קוטג (נדרשו 4, הגיעו 2) – נשאר פתוח עם 2; רשומת part עם q0=4, q=2, מספר החשבונית והספק', stOf('a1') === 'open' && qOf('a1') === 2 && ha.k === 'part' && ha.q0 === 4 && ha.q === 2 && ha.pinv === 'iRQ1' && ha.inv === '5001' && ha.sup === 'תנובה' && ha.byN === 'm' && ha.u === 'm', { st: stOf('a1'), q: qOf('a1'), ha });
+  check('22א חלב 3% (בלי כמות) – עבר ל"הגיע" עם רשומת inv; הפריט "חלב" הכללי יותר לא ירד', stOf('b1') === 'arr' && hb.k === 'inv' && hb.pinv === 'iRQ1' && hb.inv === '5001' && hb.t === +DB.hsr.b1.ut.integerValue && stOf('d1') === 'open' && !pt('d1').length, { b1: stOf('b1'), hb, d1: stOf('d1') });
+  check('22ב פריט כללי (שקיות) ירד; יוגורט של ספק אחר ו"חלבה" (שם דומה) – לא', stOf('g1') === 'arr' && hv('g1').slice(-1)[0].k === 'inv' && stOf('c1') === 'open' && !pt('c1').length && stOf('e1') === 'open' && !pt('e1').length);
+  const pa1 = pt('a1')[0], pb = pt('b1');
+  check('22ג PATCH עם תנאי גרסה: part – רק q,h,ub,ut; inv – רק st,h,ub,ut', pa1 && /currentDocument\.updateTime=/.test(pa1.q) && u2m(pa1.q) === 'h,q,ub,ut' && pb.length && u2m(pb[pb.length - 1].q) === 'h,st,ub,ut', pa1 && pa1.q);
+  check('22ד עדכון מקביל (גרסה ישנה) – נדחה, נקרא מחדש ונשמר פעם אחת בלבד', pb.length === 2 && hv('b1').filter((e) => e.pinv === 'iRQ1').length === 1 && LOG.some((l) => l.m === 'GET' && l.R === '/hsr/b1'), pb.length);
+  const bn = await mp.evaluate(() => document.getElementById('hsBn').innerText);
+  check('23 הודעה: "ירדו מהחוסרים (חשבונית 5001)" עם הפריטים, "נשארו 2" ו"בטל"', /ירדו מהחוסרים \(חשבונית 5001\)/.test(bn) && /חלב 3%/.test(bn) && /שקיות גדולות/.test(bn) && /קוטג 5% – הגיע חלקית, נשארו 2/.test(bn) && /בטל/.test(bn), bn);
+  await shot(mp, shots, 'hs-5-ירד-מחשבונית');
+  check('23א ההודעה בלי גלילה לרוחב (360px)', await noOverflow(mp));
+  const n0 = LOG.filter((l) => l.m === 'PATCH').length;
+  await mp.evaluate((d) => window.hsOnInv(d), INV1); await sleep(800);
+  check('24 אותה חשבונית שוב – אין שום עדכון נוסף', LOG.filter((l) => l.m === 'PATCH').length === n0, LOG.filter((l) => l.m === 'PATCH').length - n0);
+  mt = await mainT(mp);
+  check('24א רשימת הפתוחים מתעדכנת: קוטג עם "הגיע חלקית בחשבונית #5001 … נשארו 2 מתוך 4" וכפתור ביטול', /הגיע חלקית בחשבונית #5001[^\n]*נשארו 2 מתוך 4/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUnp][data-id=a1]') && !document.querySelector('[data-hs=b1]')), mt.slice(0, 400));
+  await mp.click('[data-a=hsTab][data-v=arr]'); await waitFor(() => mp.evaluate(() => /ירד אוטומטית/.test(document.getElementById('main').innerText)), 4000);
+  mt = await mainT(mp);
+  check('24ב "הגיעו": "ירד אוטומטית מחשבונית #5001 של תנובה" עם "החזר לחוסרים"', /ירד אוטומטית מחשבונית #5001 של תנובה/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUndo][data-id=b1]')), mt.slice(0, 300));
+  // "בטל" בהודעה: הכול חוזר בדיוק למצב הקודם (הכמות 4, open), עם רשומות undo / unp
+  LOG.length = 0; await mp.click('#hsBn [data-a=hsInvUndo]'); await waitFor(async () => stOf('b1') === 'open' && stOf('g1') === 'open' && qOf('a1') === 4, 4000);
+  check('25 "בטל": חלב ושקיות חזרו לפתוחים (undo), קוטג חזר לכמות 4 (unp); ההודעה נסגרה', stOf('b1') === 'open' && hv('b1').slice(-1)[0].k === 'undo' && stOf('g1') === 'open' && qOf('a1') === 4 && hv('a1').slice(-1)[0].k === 'unp' && u2m(pt('a1')[0].q) === 'h,q,ub,ut' && await mp.evaluate(() => !document.getElementById('hsBn')), { b1: stOf('b1'), a1: qOf('a1'), h: hv('a1').slice(-1) });
+  LOG.length = 0; await mp.evaluate((d) => window.hsOnInv(d), INV1); await sleep(800);
+  check('25א אחרי ביטול – אותה חשבונית לא מורידה שוב', !LOG.some((l) => l.m === 'PATCH'));
+  // חשבונית אחרת: חלקית ואז ביטול מהרשימה ("בטל הגעה חלקית")
+  await mp.evaluate((d) => window.hsOnInv(d), Object.assign({}, INV1, { id: 'iRQ2', inv: '5002', lines: [{ n: 'קוטג 5%', qty: 1 }] }));
+  await waitFor(async () => qOf('a1') === 3, 4000); await mp.click('[data-a=hsTab][data-v=open]'); await sleep(300);
+  await mp.click('[data-a=hsUnp][data-id=a1]'); await waitFor(async () => qOf('a1') === 4, 4000);
+  check('26 "בטל הגעה חלקית" ברשימה – הכמות חוזרת ל-4', qOf('a1') === 4 && hv('a1').slice(-1)[0].k === 'unp');
+  // הכללים דוחים (403) כי מישהו אחר שינה את הפריט במקביל: בהורדה האוטומטית – קריאה מחדש וניסיון אחד נוסף; במסך – רענון והודעה במקום שגיאה
+  await mp.evaluate(() => ACT.hsBnX()); REJ.add('d1'); LOG.length = 0;
+  await mp.evaluate((d) => window.hsOnInv(d), Object.assign({}, INV1, { id: 'iRQ4', inv: '5004', lines: [{ n: 'חלב', qty: 1 }] }));
+  await waitFor(async () => stOf('d1') === 'arr', 4000);
+  check('26א הורדה אוטומטית שנדחתה (403) – נקרא מחדש ונשמר בניסיון השני, פעם אחת', stOf('d1') === 'arr' && pt('d1').length === 2 && LOG.some((l) => l.m === 'GET' && l.R === '/hsr/d1') && hv('d1').filter((e) => e.pinv === 'iRQ4').length === 1, pt('d1').length);
+  await mp.evaluate(() => { ACT.hsBnX(); go('hs'); }); await mp.click('[data-a=hsTab][data-v=open]'); await sleep(300);
+  REJ.add('c1'); LOG.length = 0; await mp.click('[data-a=hsArr][data-id=c1]'); await sleep(600);
+  check('26ב "הגיע" ידני שנדחה (403) – הודעה "עודכן במכשיר אחר" והרשימה נטענת מחדש, לא "יופעלו בקרוב"', /עודכן במכשיר אחר/.test(await toasts(mp)) && !/יופעלו בקרוב/.test(await toasts(mp)) && LOG.some((l) => l.coll === 'hsr') && stOf('c1') === 'open', await toasts(mp));
+  // 403 בזמן ההורדה – בלי קריסה ובלי הודעה
+  await mp.evaluate(() => ACT.hsBnX()); F403 = true;
+  await mp.evaluate((d) => window.hsOnInv(d), Object.assign({}, INV1, { id: 'iRQ3' })); await sleep(800); F403 = false;
+  check('27 403 בזמן ההורדה – שום דבר לא נשבר, אין הודעה, אין שגיאות JS', await mp.evaluate(() => !document.getElementById('hsBn')) && mp.__errors.length === 0, mp.__errors);
+  check('27א קלט פגום ל-hsOnInv (מזהה עם נתיב / null) – בלי בקשות ובלי שגיאות', await mp.evaluate(() => { window.hsOnInv(null); window.hsOnInv({ id: '../x', lines: [] }); return true; }) && mp.__errors.length === 0);
+  await x.ctx.close();
+
+  // ---- השלמה אצל המנהל: חשבוניות (pinv) שנקלטו ולא טופלו ----
+  seed2();
+  DB.pinv.push({ supId: S('s1'), sup: S('תנובה'), inv: S('6001'), st: S('new'), at: I(T0 - 2000), lines: { arrayValue: { values: [M({ n: S('חלב 3% ליטר'), qty: I(1) })] } } });
+  DB.pinv.push({ supId: S('s1'), sup: S('תנובה'), inv: S('6002'), st: S('void'), at: I(T0 - 2000), lines: { arrayValue: { values: [M({ n: S('קוטג 5%'), qty: I(9) })] } } });
+  DB.pinv.push({ supId: S('s1'), sup: S('תנובה'), inv: S('6003'), st: S('new'), at: I(T0 - 40 * 864e5), lines: { arrayValue: { values: [M({ n: S('חלב'), qty: I(1) })] } } });
+  x = await open('m-hs3', 'm@x.co'); mp = x.page;
+  await mp.evaluate((L) => { S.subs = S.subs.filter((s) => !/^s\d$/.test(s.id)); L.forEach((s) => S.subs.push({ id: s.id, cat: 'e_sup', name: s.name })); save(); }, SUPS);
+  await mp.evaluate(() => go('hs')); await waitFor(async () => stOf('b1') === 'arr', 6000);
+  const pq = LOG.find((l) => l.coll === 'pinv');
+  check('28 השלמה: חשבונית שנקלטה ולא טופלה – חלב 3% ירד (pinv = מזהה החשבונית, מספר 6001)', stOf('b1') === 'arr' && hv('b1').slice(-1)[0].inv === '6001' && /^i\d$/.test(hv('b1').slice(-1)[0].pinv) && pq && pq.body.structuredQuery.select.fields.map((f) => f.fieldPath).sort().join() === 'at,inv,lines,st,sup,supId', hv('b1'));
+  check('28א חשבונית מבוטלת (void) וחשבונית מלפני 30 יום – לא מורידות', stOf('a1') === 'open' && qOf('a1') === 4 && stOf('d1') === 'open');
+  check('28ב אין שגיאות JS', mp.__errors.length === 0, mp.__errors);
   await x.ctx.close();
 
   // ================= כללים שלא פורסמו (403) =================

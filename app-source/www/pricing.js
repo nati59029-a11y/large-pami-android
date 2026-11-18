@@ -105,7 +105,7 @@ async function run(j){
   const L=qGet(),k=L.findIndex(y=>y.rq===j.rq&&y.t===j.t);if(k>=0){L[k].r=j.r;qSet(L)}}
  const r=j.r,d={reqId:j.rq,sup:String(j.sup||r.sup||'').slice(0,60),inv:String(j.inv||r.inv||'').slice(0,30),date:DATE_OK(j.date)?j.date:(DATE_OK(r.date)?r.date:''),lines:(r.lines||[]).slice(0,100)};
  if(ID_OK(j.supId))d.supId=j.supId;
- await fnc('piCreate',d);jSet(j,{cr:1});
+ await fnc('piCreate',d);jSet(j,{cr:1});try{window.hsOnInv&&window.hsOnInv(Object.assign({id:'i'+j.rq},d))}catch(e){}/* חוסרים, שלב 2: ברקע, לא מעכב ולא מפיל */
  if(j.fid)await upImg(j,P0)}
 /* שגיאה: קבועה (לא מנסים שוב) או זמנית. ביטול שעוד לא מצא את המסמך (העובד עוד לא שלח אותו) – מנסים עוד כמה פעמים */
 function kind(j,e){const rs=e&&(e.reason||e.rs)||'';

@@ -788,20 +788,39 @@ service cloud.firestore {
       // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
       // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
       // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
-      function hNewOk(e) {
-        return e is map && e.keys().hasAll(['k', 't', 'byN', 'u']) && e.keys().hasOnly(['k', 't', 'byN', 'u'])
-          && e.u == request.auth.uid && isMyName(e.byN) && e.t == request.resource.data.ut
-          && ((request.resource.data.st == 'arr' && e.k == 'man') || (request.resource.data.st == 'del' && e.k == 'del')
-            || (request.resource.data.st == 'open' && e.k in ['undo', 'res']));
+      // שלב 2 (19.11.2026) – הורדה אוטומטית מחשבונית ספק: רשומה { k, t, byN, u, pinv, inv, sup, q0?, q? } (pinv מזהה החשבונית, inv מספרה עד 30, sup ספק עד 60).
+      // 'inv' ← הגיע כולו (open → arr, הכמות לא משתנה, בלי q0 / q). 'part' ← הגיע חלקית: st נשאר open, q0 = הכמות הקודמת, q = החדשה (קטנה ממנה).
+      // 'unp' ← ביטול 'part' ({ k, t, byN, u }): st נשאר open, הרשומה הקודמת היא 'part', הכמות עדיין q שלה וחוזרת בדיוק ל-q0 שלה.
+      // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
+      function hInv(e) {
+        return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
+          && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60;
+      }
+      function hMoveOk(e, st) {
+        return (e.keys().hasOnly(['k', 't', 'byN', 'u']) && ((st == 'arr' && e.k == 'man') || (st == 'del' && e.k == 'del') || (st == 'open' && e.k in ['undo', 'res'])))
+          || (st == 'arr' && e.k == 'inv' && resource.data.st == 'open' && !e.keys().hasAny(['q0', 'q']) && hInv(e)
+            && request.resource.data.get('q', 0) == resource.data.get('q', 0));
+      }
+      function hSameOk(e, o, q0, q1) {
+        return request.resource.data.st == 'open' && (
+          (e.k == 'part' && q0 is number && q1 is number && e.get('q0', -1) == q0 && e.get('q', -1) == q1 && q1 < q0 && hInv(e))
+          || (e.k == 'unp' && e.keys().hasOnly(['k', 't', 'byN', 'u']) && o.size() > 0 && o[o.size() - 1].get('k', '') == 'part'
+            && q0 == o[o.size() - 1].get('q', -1) && q1 == o[o.size() - 1].get('q0', -1)));
       }
       function hAppOk(o, n) {
-        return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && hNewOk(n[n.size() - 1])
+        return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && n[n.size() - 1] is map
+          && n[n.size() - 1].keys().hasAll(['k', 't', 'byN', 'u']) && n[n.size() - 1].u == request.auth.uid
+          && n[n.size() - 1].t == request.resource.data.ut && isMyName(n[n.size() - 1].byN)
           && (o.size() == 0 || (o.size() < 30 ? n[0:o.size()] == o : n[0:29] == o[1:30]));
       }
       function hUpdOk() {
-        return request.resource.data.st == resource.data.st
-          ? request.resource.data.get('h', []) == resource.data.get('h', [])
-          : hAppOk(resource.data.get('h', []), request.resource.data.get('h', []));
+        let o = resource.data.get('h', []);
+        let n = request.resource.data.get('h', []);
+        let st = request.resource.data.st;
+        return (st == resource.data.st && n == o)
+          || (hAppOk(o, n) && (st == resource.data.st
+            ? hSameOk(n[n.size() - 1], o, resource.data.get('q', 0), request.resource.data.get('q', 0))
+            : hMoveOk(n[n.size() - 1], st)));
       }
       function itOk(d) {
         return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
@@ -824,10 +843,20 @@ service cloud.firestore {
           && d.by is string && d.byN is string && d.byN.size() <= 100 && d.t is int
           && (!d.keys().hasAny(['h']) || (d.h is list && d.h.size() <= 30));
       }
+      // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
+      // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
+      function updDataOk() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['st', 'q', 'h', 'ub', 'ut'])
+          ? (request.resource.data.st in ['open', 'arr', 'del']
+            && (!request.resource.data.keys().hasAny(['q']) || (request.resource.data.q is number && request.resource.data.q > 0 && request.resource.data.q <= 100000))
+            && (!request.resource.data.keys().hasAny(['h']) || (request.resource.data.h is list && request.resource.data.h.size() <= 30))
+            && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
+          : itOk(request.resource.data);
+      }
       allow read: if (isStaff());
       allow create: if lpW() && (isStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
         && !nw().keys().hasAny(['ub', 'ut', 'h']));
-      allow update: if lpW() && (isStaff() && itOk(nw()) && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
+      allow update: if lpW() && (isStaff() && updDataOk() && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
         && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
       allow delete: if lpW() && (isManager());
 
@@ -2432,20 +2461,39 @@ service cloud.firestore {
         // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
         // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
         // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
-        function hNewOk(e) {
-          return e is map && e.keys().hasAll(['k', 't', 'byN', 'u']) && e.keys().hasOnly(['k', 't', 'byN', 'u'])
-            && e.u == request.auth.uid && isMyName(e.byN) && e.t == request.resource.data.ut
-            && ((request.resource.data.st == 'arr' && e.k == 'man') || (request.resource.data.st == 'del' && e.k == 'del')
-              || (request.resource.data.st == 'open' && e.k in ['undo', 'res']));
+        // שלב 2 (19.11.2026) – הורדה אוטומטית מחשבונית ספק: רשומה { k, t, byN, u, pinv, inv, sup, q0?, q? } (pinv מזהה החשבונית, inv מספרה עד 30, sup ספק עד 60).
+        // 'inv' ← הגיע כולו (open → arr, הכמות לא משתנה, בלי q0 / q). 'part' ← הגיע חלקית: st נשאר open, q0 = הכמות הקודמת, q = החדשה (קטנה ממנה).
+        // 'unp' ← ביטול 'part' ({ k, t, byN, u }): st נשאר open, הרשומה הקודמת היא 'part', הכמות עדיין q שלה וחוזרת בדיוק ל-q0 שלה.
+        // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
+        function hInv(e) {
+          return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
+            && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60;
+        }
+        function hMoveOk(e, st) {
+          return (e.keys().hasOnly(['k', 't', 'byN', 'u']) && ((st == 'arr' && e.k == 'man') || (st == 'del' && e.k == 'del') || (st == 'open' && e.k in ['undo', 'res'])))
+            || (st == 'arr' && e.k == 'inv' && resource.data.st == 'open' && !e.keys().hasAny(['q0', 'q']) && hInv(e)
+              && request.resource.data.get('q', 0) == resource.data.get('q', 0));
+        }
+        function hSameOk(e, o, q0, q1) {
+          return request.resource.data.st == 'open' && (
+            (e.k == 'part' && q0 is number && q1 is number && e.get('q0', -1) == q0 && e.get('q', -1) == q1 && q1 < q0 && hInv(e))
+            || (e.k == 'unp' && e.keys().hasOnly(['k', 't', 'byN', 'u']) && o.size() > 0 && o[o.size() - 1].get('k', '') == 'part'
+              && q0 == o[o.size() - 1].get('q', -1) && q1 == o[o.size() - 1].get('q0', -1)));
         }
         function hAppOk(o, n) {
-          return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && hNewOk(n[n.size() - 1])
+          return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && n[n.size() - 1] is map
+            && n[n.size() - 1].keys().hasAll(['k', 't', 'byN', 'u']) && n[n.size() - 1].u == request.auth.uid
+            && n[n.size() - 1].t == request.resource.data.ut && isMyName(n[n.size() - 1].byN)
             && (o.size() == 0 || (o.size() < 30 ? n[0:o.size()] == o : n[0:29] == o[1:30]));
         }
         function hUpdOk() {
-          return request.resource.data.st == resource.data.st
-            ? request.resource.data.get('h', []) == resource.data.get('h', [])
-            : hAppOk(resource.data.get('h', []), request.resource.data.get('h', []));
+          let o = resource.data.get('h', []);
+          let n = request.resource.data.get('h', []);
+          let st = request.resource.data.st;
+          return (st == resource.data.st && n == o)
+            || (hAppOk(o, n) && (st == resource.data.st
+              ? hSameOk(n[n.size() - 1], o, resource.data.get('q', 0), request.resource.data.get('q', 0))
+              : hMoveOk(n[n.size() - 1], st)));
         }
         function itOk(d) {
           return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
@@ -2468,10 +2516,20 @@ service cloud.firestore {
             && d.by is string && d.byN is string && d.byN.size() <= 100 && d.t is int
             && (!d.keys().hasAny(['h']) || (d.h is list && d.h.size() <= 30));
         }
+        // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
+        // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
+        function updDataOk() {
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['st', 'q', 'h', 'ub', 'ut'])
+            ? (request.resource.data.st in ['open', 'arr', 'del']
+              && (!request.resource.data.keys().hasAny(['q']) || (request.resource.data.q is number && request.resource.data.q > 0 && request.resource.data.q <= 100000))
+              && (!request.resource.data.keys().hasAny(['h']) || (request.resource.data.h is list && request.resource.data.h.size() <= 30))
+              && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
+            : itOk(request.resource.data);
+        }
         allow read: if feat('suppliers') && (bStaff());
         allow create: if feat('suppliers') && (bStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
           && !nw().keys().hasAny(['ub', 'ut', 'h']));
-        allow update: if feat('suppliers') && (bStaff() && itOk(nw()) && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
+        allow update: if feat('suppliers') && (bStaff() && updDataOk() && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
           && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
         allow delete: if feat('suppliers') && (bMgr());
 
