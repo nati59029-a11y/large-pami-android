@@ -145,3 +145,12 @@ test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה
   await page.evaluate(() => document.querySelector('form').remove());
   assert.equal(await page.evaluate(() => window.CxSel.isLogin(document, window, { hash: ['#/login'] })), false);
 });
+
+test('selectors.json: דפי ההיכרות – זרימות קיימות; מסך הנוכחות לפי התפריט, בלי זרימה (בלי שום צעד/לחיצה)', () => {
+  for (const pg of SEL.disc) if (pg.flow) assert.ok(Array.isArray(SEL.flows[pg.flow]), pg.name);
+  const att = SEL.disc.find((p) => p.name === 'attendance');
+  assert.ok(att, 'attendance');
+  assert.equal(att.flow, undefined); assert.equal(att.hash, undefined); assert.equal(att.peek, undefined);
+  assert.deepEqual(att.menu, ['עובדים']); assert.equal(att.find, 'נוכחות');
+  assert.ok(SEL.v >= 3);
+});

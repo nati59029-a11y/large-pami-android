@@ -1,11 +1,16 @@
 'use strict';
 // רובוט כספית – צד השרת (שלב B, 18.11.2026). התוסף ב-Chrome במחשב החנות (caspit-extension/) פונה ל-cxBot; חוזה: caspit-extension/README.md.
-//   cxBotTok({ op:'new'|'revoke'|'info' })  – מנהל. new: אסימון '<bizId>.<32 בתים base64url>' מוצג פעם אחת; נשמר רק sha256
+//   cxBotTok({ op:'new'|'revoke'|'info'|'now' })  – מנהל. new: אסימון '<bizId>.<32 בתים base64url>' מוצג פעם אחת; נשמר רק sha256
 //                                             ב-b/{bizId}/private/cxbot { h, id, by, at, last, ua, ver, sd, lr }. מחשב אחד לעסק (חדש מבטל ישן).
 //                                             info: מצב, 14 הריצות האחרונות, newMax. אותו דפוס כמו yemot-hook.js (גיבוב, timingSafeEqual, מונה יומי).
+//                                             now ("סנכרן עכשיו", 18.11): בקשה req:{id,at,by} ב-private/cxbot (טרנזקציה). בלי הגבלה יומית (בעל העסק);
+//                                             מסרב: no-dev (אין מחשב), pending (בקשה ממתינה < 10 דקות – מחזיר אותה), running (סנכרון רץ).
+//                                             התוסף (0.1.5) בודק כל דקה ב-poll; hello עם req לוקח את הבקשה פעם אחת (req.took, req.run).
 //   cxBot (HTTP, europe-west1 בלבד, POST JSON, Authorization: Bearer) – העסק נקבע רק מהאסימון. עסק פעיל + תוספת orders.
-//          זהות סינתטית { uid:'cxbot:<id>', role:'manager', bot:true }. רק הפעולות שב-README (hello, cfg, upload, preview, apply, export, report, importResult)
+//          זהות סינתטית { uid:'cxbot:<id>', role:'manager', bot:true }. רק הפעולות שב-README (hello, cfg, upload, preview, apply, export, report, importResult, poll)
 //          – אף פעם לא cxSetCfg / cxDnOk / cxFix / אסימונים / לקוחות. מגבלות: 600 פניות ו-10 ריצות ביום לעסק; 30 ניסיונות כושלים ביום לכתובת IP (גיבוב);
+//          poll (כל דקה) – פטור מהמונה היומי (600), אבל עובר אימות אסימון ומונה ה-IP; כותב pl לכל היותר פעם ב-5 דקות.
+//          ריצה מבקשה בטלפון (hello עם req תקין) לא נספרת במגבלת 10 הריצות – כל בקשה נוצרה בלחיצה של מנהל.
 //          גוף עד 10MB (דוח היכרות עד 1MB). CORS רק לתוסף (chrome-extension://mianlmahikfdnffiipdfpojnfjhcipbp). השדה log – לרישום בלבד.
 //          קטלוג ראשון → 'first-manual' (רק באפליקציה). אישור קטלוג: take:'app' (האפליקציה מנצחת). מכירות: "לא בטוח" מסומן ולא עוצר.
 //          export: מעל המגבלה (≤500 מחיר, ≤ min(50, cxcfg.bot.newMax) פריטים חדשים) → 'limit' לפני שמשהו מסומן pd.
@@ -31,7 +36,7 @@ const CX = require('./caspit')._core;
 
 const EXT_ORIGIN = 'chrome-extension://mianlmahikfdnffiipdfpojnfjhcipbp';
 const MIN_VER = '0.1.0';
-const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult'];
+const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult', 'poll'];
 const MAX_BODY = 10 * 1024 * 1024;
 const DISC_MAX = 1024 * 1024;
 const DISC_PART = 300000; // תווים; גם ב-3 בייטים לתו – פחות מ-1MiB למסמך
@@ -42,6 +47,11 @@ const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
 const SRUN_RE = /^[A-Za-z0-9_-]{6,40}$/; // מזהה ריצה (runId מ-hello, או מזהה של התוסף אם hello נכשל)
 const TOK_RE = /^([a-z0-9-]{3,30})\.([A-Za-z0-9_-]{43})$/;
+// "סנכרן עכשיו": בקשה תקפה 10 דקות; סנכרון שהתחיל נחשב רץ עד 30 דקות (או עד הדיווח); pl נכתב לכל היותר פעם ב-5 דקות
+const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
+const REQ_RE = /^q[a-z0-9]{6,30}$/;
+const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
+const reqLive = (q, now) => !!(q && typeof q.id === 'string' && !q.took && now - (q.at || 0) < REQ_MS);
 const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty'];
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
@@ -111,10 +121,30 @@ async function cxBotTok(w, input) {
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120) } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
-      runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
+      req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
+      runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
     return out;
+  }
+  if (input.op === 'now') {
+    const now = Date.now(), id = 'q' + now.toString(36) + crypto.randomBytes(3).toString('hex');
+    const r = await ref.firestore.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const d = s.exists ? s.data() : {};
+      if (!d.h) return { no: 'no-dev' };
+      const q = d.req, lr = d.lr;
+      if (reqLive(q, now)) return { no: 'pending', req: { id: q.id, at: q.at } };
+      // סנכרון רץ: התחיל מבקשה קודמת ועוד לא דווח, או דיווח "רץ" אחרון – עד 30 דקות
+      if ((q && q.took && now - q.took < RUN_MS && !(lr && (lr.at || 0) >= q.took)) || (lr && lr.st === 'run' && now - (lr.at || 0) < RUN_MS)) return { no: 'running' };
+      tx.set(ref, { req: { id, at: now, by: w.uid } }, { merge: true });
+      return { req: { id, at: now } };
+    });
+    if (r.no === 'no-dev') throw pre('no-dev', 'אין מחשב מחובר. קודם מחברים את מחשב החנות.');
+    if (r.no === 'pending') throw new HttpsError('failed-precondition', 'כבר נשלחה בקשה – ממתינים למחשב.', { reason: 'pending', req: r.req });
+    if (r.no === 'running') throw pre('running', 'הסנכרון כבר רץ במחשב החנות.');
+    logger.info('cxBotTok: now', { biz: w.bizId });
+    return { ok: true, req: r.req };
   }
   throw bad('bad-op', 'פעולה לא מוכרת');
 }
@@ -177,7 +207,20 @@ const OPF = {
     const today = ilDay(x.now), sd = x.dev.sd || null;
     const days = mode === 'connect' ? [] : daysFor(sd, today);
     const runId = 'r' + x.now.toString(36) + crypto.randomBytes(5).toString('hex');
-    if (mode === 'sync') await runRef(runId).set({ at: x.now, d: today, st: 'run', ver: x.ver, manual: b.manual === true, days, dev: x.dev.id });
+    // ריצה מבקשה בטלפון ("סנכרן עכשיו"): לוקחים את הבקשה פעם אחת בלבד. בקשה שכבר נלקחה / פגה / אחרת → req-gone (בלי ריצה)
+    let req = null;
+    if (b.req !== undefined) {
+      if (mode !== 'sync' || typeof b.req !== 'string' || !REQ_RE.test(b.req)) throw bad('bad-req', 'בקשה לא תקינה');
+      const ref = priv(w.bizId, 'cxbot');
+      req = await ref.firestore.runTransaction(async (tx) => {
+        const s = await tx.get(ref), q = s.exists ? s.get('req') : null;
+        if (!reqLive(q, x.now) || q.id !== b.req) return null;
+        tx.set(ref, { req: Object.assign({}, q, { took: x.now, run: runId }) }, { merge: true });
+        return q.id;
+      });
+      if (!req) throw pre('req-gone', 'הבקשה מהטלפון כבר טופלה או פגה');
+    }
+    if (mode === 'sync') await runRef(runId).set(Object.assign({ at: x.now, d: today, st: 'run', ver: x.ver, manual: b.manual === true || !!req, days, dev: x.dev.id }, req ? { req } : {}));
     await priv(w.bizId, 'cxbot').set(Object.assign({ last: x.now, ver: x.ver, ua: x.ua }, x.dev.conn ? {} : { conn: x.now }), { merge: true });
     return { runId, minVer: MIN_VER, enabled: true, biz: { name: (w.biz && w.biz.name) || '' }, days, lastSales: sd, schedule: SCHED, limits: limitsOf(cfg) };
   },
@@ -322,8 +365,17 @@ async function handle(req, res, opts) {
   const op = b.op;
   if (typeof op !== 'string' || !OPS.includes(op)) { logger.warn('cxBot: rejected', { reason: 'bad-op', biz: v.bizId }); return no(400, 'bad-op', 'פעולה לא מותרת'); }
   const ver = str(b.ver, 20);
+  // poll (כל דקה): פטור מהמונה היומי – אסימון ועסק כבר נבדקו למעלה, ובלי קריאות נוספות למסד (חוץ מכתיבת pl פעם ב-5 דקות)
+  if (op === 'poll') {
+    if (Object.keys(b).some((k) => !['op', 'ver', 'log'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
+    const q = v.dev.req, pl = v.dev.pl || 0;
+    if (!(pl && now - pl < PL_MS && now >= pl)) await priv(v.bizId, 'cxbot').set(Object.assign({ pl: now }, ver ? { ver } : {}), { merge: true });
+    return send(200, reqLive(q, now) ? { ok: true, want: true, id: q.id } : { ok: true, want: false });
+  }
   const lim = { calls: o.calls || CALLS_DAY, runs: o.runs || RUNS_DAY };
-  if (!(await useOk(v.bizId, day, op === 'hello' && b.mode !== 'connect', lim))) { logger.warn('cxBot: rejected', { reason: 'rate', biz: v.bizId, op }); return no(429, 'rate', 'יותר מדי פניות היום'); }
+  // ריצה מבקשה בטלפון לא נספרת במגבלת הריצות היומית (בעל העסק: "סנכרן עכשיו" בלי הגבלה יומית)
+  const fromApp = op === 'hello' && typeof b.req === 'string' && reqLive(v.dev.req, now) && v.dev.req.id === b.req;
+  if (!(await useOk(v.bizId, day, op === 'hello' && b.mode !== 'connect' && !fromApp, lim))) { logger.warn('cxBot: rejected', { reason: 'rate', biz: v.bizId, op }); return no(429, 'rate', 'יותר מדי פניות היום'); }
   if (op !== 'hello' && cmpVer(ver, MIN_VER) < 0) return no(409, 'min-ver', 'צריך לעדכן את התוסף לגרסה חדשה');
   const body = Object.assign({}, b);
   delete body.op; delete body.ver;
@@ -449,4 +501,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });

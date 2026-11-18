@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "לארג' פעמי – סנכרון כספית",
   "short_name": "סנכרון כספית",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "מסנכרן כל לילה את הקטלוג והמכירות מכספית לאפליקציה לארג' פעמי, ומעלה לכספית פריטים חדשים ומחירים.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApM6f1OarOBGMcWgr+HAASVqV9cKDNISPOyJWKdSLnYswvZFpZtaoP9QpkVnuV8BZA8g50ETKdCjUwCSQmSpynSd4Q8Ey/+TE1VA42nRjpb6QV6q6pVpUYjF5xIv8CkS+Cgq9ZhUHRZeZaxW4yEz4JLywTLwIJwufogx/gEgdConnhZjVY8u3Jj6HVjBCWJM1gRl4ux9elbRCN40wuGLeCVnHivvLYSeJGHHROWSisJvGJKMKIH7WVo3THQcgDtECmF97IWZzFqxaiQ/bn2vWwg0GYX3NchiZQwSTY0KnimDeQEzt1XmLuatoyvLJpSdYOKWHukv36tWtvISmJvWtWwIDAQAB",
   "minimum_chrome_version": "116",

@@ -13,6 +13,7 @@ const GUARD = { origin: 'https://caspit.valu.co.il', path: '/bo' };
 const HASH_RE = /^#\/[\w\-/?=&.%]*$/; // מערכת הניהול של כספית נמצאת ב-/bo (נבדק מול צילום מסך של בעל העסק, 18.11) – בכתובת אחרת האתר נתקע ב"טוען תוכנה"
 const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות לפני ריצה (רשת, Chrome)
 const TICK_MIN = 15;
+const POLL_MIN = 1, POLL_SLOW_MIN = 15; // "סנכרן עכשיו" מהטלפון: בדיקה כל דקה (שרת ישן בלי poll – כל 15 דקות)
 
 // האסימון ב-storage.local: מגבילים את האחסון להקשרים של התוסף בלבד (לא לסקריפטי התוכן בלשונית כספית), אם הדפדפן תומך
 // (setAccessLevel נתמך בוודאות ב-storage.session; ב-local – לא מאומת, ולכן בניסיון בלבד). סקריפטי התוכן (bridge.js, selectors.js) לא קוראים אחסון בכלל.
@@ -37,6 +38,7 @@ async function setupAlarms() {
   const s = await sched();
   await chrome.alarms.create('daily', { when: D.nextAt(Date.now(), s.at, s.tz) }); // נוצר מחדש אחרי כל הפעלה – נכון גם במעבר שעון
   if (!(await chrome.alarms.get('tick'))) await chrome.alarms.create('tick', { periodInMinutes: TICK_MIN, delayInMinutes: 1 });
+  if (!(await chrome.alarms.get('poll'))) await chrome.alarms.create('poll', { periodInMinutes: POLL_MIN, delayInMinutes: POLL_MIN });
 }
 chrome.runtime.onInstalled.addListener(() => { setupAlarms(); trigger('install'); });
 chrome.runtime.onStartup.addListener(() => { setupAlarms(); trigger('startup'); });
@@ -46,7 +48,30 @@ chrome.alarms.onAlarm.addListener((a) => {
   else if (a.name === 'tick') tick().catch(() => {});
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
+  else if (a.name === 'poll') pollOnce().catch(() => {});
 });
+// "סנכרן עכשיו" מהטלפון: שואלים את השרת אם יש בקשה (בלי לפתוח את כספית). רק כשמחוברים, יש רשת ואין ריצה.
+// שרת ישן (bad-op) → בדיקה כל 15 דקות, בלי להציג תקלה. החיבור בוטל (auth) → מפסיקים לבדוק עד חיבור מחדש / הפעלה של Chrome.
+async function pollEvery(min) {
+  const a = await chrome.alarms.get('poll');
+  if (!a || a.periodInMinutes !== min) await chrome.alarms.create('poll', { periodInMinutes: min, delayInMinutes: min });
+}
+async function pollOnce() {
+  if (busy || !navigator.onLine || !(await get('token'))) return null;
+  let r;
+  try { r = await (await api()).call('poll', {}); } catch (e) {
+    if (e.code === 'bad-op') await pollEvery(POLL_SLOW_MIN);
+    else if (e.code === 'auth') await chrome.alarms.clear('poll');
+    return null; // רשת / שרת – הבדיקה הבאה תנסה שוב
+  }
+  await pollEvery(POLL_MIN);
+  const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
+  const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
+  if (!id) return null;
+  await set({ lastReq: id }); // לפני ההתחלה: גם אם ה-service worker נסגר באמצע – לא מתחילים פעמיים לאותה בקשה
+  startRun({ manual: true, req: id }).catch(() => {});
+  return id;
+}
 async function tick() {
   if (!(await chrome.alarms.get('daily'))) await setupAlarms();
   const run = await get('run');
@@ -256,7 +281,14 @@ const STEP = {
   async hello(run) {
     // העלאה לכספית (פריטים חדשים / מחירים) כבויה עד שנדע בוודאות איך מסך הייבוא מעלה קובץ – בלי export לשרת (לא מסמנים pd) ובלי ייבוא
     if ((await sel()).importEnabled !== true) run.flags.noImp = true;
-    const r = await (await api()).call('hello', { mode: run.mode, manual: run.manual });
+    const cl = await api(), body = Object.assign({ mode: run.mode, manual: run.manual }, run.req ? { req: run.req } : {});
+    let r;
+    try { r = await cl.call('hello', body); } catch (e) {
+      // ניסיון חוזר אחרי שהבקשה כבר נלקחה (התשובה הקודמת לא הגיעה) – ממשיכים כסנכרון ידני רגיל
+      if (e.code !== 'req-gone' || !run.attempt) throw e;
+      run.req = null; delete body.req;
+      r = await cl.call('hello', body);
+    }
     if (r.minVer && cmpVer(VER, r.minVer) < 0) throw P.err('min-ver');
     if (r.enabled === false && !run.manual) throw P.err('disabled');
     if (r.schedule && typeof r.schedule === 'object') {
@@ -412,7 +444,7 @@ async function startRun(o) {
   busy = true;
   try {
     const s = await sched();
-    const run = P.newRun({ id: U.rid('r'), now: Date.now(), manual: !!o.manual, slot: D.slotDay(Date.now(), s.at, s.tz) });
+    const run = P.newRun({ id: U.rid('r'), now: Date.now(), manual: !!o.manual, req: o.req || null, slot: D.slotDay(Date.now(), s.at, s.tz) });
     await chrome.alarms.clear('start');
     await loop(run);
     return { ok: true };
@@ -450,18 +482,54 @@ async function loop(run0) {
 async function finalize(run) {
   const st = (await get('st')) || {};
   const s = await sched(), today = D.dayStr(Date.now(), s.tz);
-  st.lastRun = { id: run.id, at: Date.now(), st: run.st, manual: run.manual, code: run.err && run.err.code, msg: run.err && run.err.msg, step: run.err && run.err.step, sum: summary(run) };
+  const code = run.err && run.err.code;
+  st.lastRun = { id: run.id, at: Date.now(), st: run.st, manual: run.manual, req: !!run.req, code, msg: run.err && run.err.msg, step: run.err && run.err.step, sum: summary(run) };
   if (run.st === 'ok') { if (!st.lastOkDay || run.slot > st.lastOkDay) st.lastOkDay = run.slot; st.loginDay = null; st.failSlot = null; }
-  else if (run.st === 'fail') st.failSlot = run.slot;
+  else if (run.st === 'fail' && code !== 'req-gone') st.failSlot = run.slot; // בקשה מהטלפון שכבר טופלה – לא חוסמת את הסנכרון האוטומטי
   await set({ st });
   if (run.st === 'ok') return;
-  const code = run.err && run.err.code;
-  if (code === 'auth') return; // החיבור בוטל – אין למי לדווח
+  if (code === 'auth' || code === 'req-gone') return; // החיבור בוטל – אין למי לדווח; בקשה שכבר טופלה – אין מה לדווח
   if (code === 'needs-login') { if (st.loginDay === today) return; st.loginDay = today; await set({ st }); } // הודעה אחת ביום
   try { await (await api()).call('report', { run: run.srv || run.id, kind: 'run', st: run.st, err: run.err, steps: run.log, info: summary(run) }); } catch (e) { /* ננסה בריצה הבאה */ }
 }
 
 // ---------- מצב היכרות ----------
+// קישורי התפריט (טקסט + hash), גם של תפריטים סגורים: קודם "מעבר עכבר" (mouseover, בלי לחיצה) על כותרות התפריט שבהגדרה.
+// רק קישורים פנימיים (#/...) מחוץ לטבלאות ולרשימות נתונים. רץ בעולם המבודד של התוסף (selectors.js כבר בדף); בודק /bo לפני הכול.
+const menuIn = async (heads, max, guard) => {
+  const S = self.CxSel;
+  if (!S.onPath(window, guard)) return { wrong: true };
+  for (const t of heads || []) {
+    const el = S.find(document, { text: t }) || S.find(document, { textAny: [t] });
+    if (!el) continue;
+    for (const ty of ['mouseover', 'mouseenter']) el.dispatchEvent(new MouseEvent(ty, { bubbles: ty === 'mouseover' }));
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  const out = [], seen = new Set();
+  for (const a of Array.from(document.querySelectorAll('a[href]'))) {
+    if (out.length >= (max || 200)) break;
+    const h = String(a.getAttribute('href') || '');
+    if (!/^#\//.test(h) || (a.closest && a.closest('table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]'))) continue;
+    const t = S.norm(a.textContent).slice(0, 40);
+    if (!t || seen.has(t + '|' + h)) continue;
+    seen.add(t + '|' + h);
+    out.push({ t, h: h.slice(0, 80) });
+  }
+  return { links: out };
+};
+// מסך לקריאה בלבד: כתובת, כותרת, פקדים וכותרות הטבלאות (בלי תוכן השורות) – בקריאה אחת, רק אם הדף ב-/bo
+const roIn = (guard) => {
+  const S = self.CxSel;
+  if (!S.onPath(window, guard)) return { wrong: true };
+  const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
+  return { hash: location.hash, title: document.title, controls: S.controls(document, 400), heads };
+};
+// הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
+function menuPick(links, find) {
+  const f = String(find || '').trim();
+  if (!f) return null;
+  return links.find((l) => l.t === f) || links.find((l) => l.t.includes(f)) || null;
+}
 async function runDisc() {
   if (busy) return { ok: false, code: 'busy' };
   busy = true;
@@ -477,9 +545,27 @@ async function runDisc() {
     await inMain(tab, () => window.__cxHook && window.__cxHook.discover(true));
     if (await isLoginTab(tab)) { rep.login = true; throw P.err('needs-login'); }
     await guardBo(tab);
+    // קישורי התפריט – גם אם הניווט למסך מסוים ייכשל, לומדים מהם את הכתובות
+    const heads = [...new Set((S0.disc || []).flatMap((p) => (Array.isArray(p.menu) ? p.menu : [])).map(String))];
+    const mr = await inIso(tab, menuIn, [heads, 200, GUARD]);
+    if (mr && mr.wrong) throw wrongPage();
+    const links = (mr && mr.links) || [];
+    rep.menu = links.map((l) => ({ t: l.t, h: l.h.replace(/\d+/g, '{n}') }));
     for (const pg of S0.disc || []) {
-      if (pg.hash) await navTo(tab, pg.hash, false, 3000);
+      // מסך בלי hash קבוע (למשל נוכחות תחת "עובדים"): הכתובת מקישור התפריט לפי הטקסט. רק #/... בתוך /bo (navTo + guardBo)
+      if (pg.find) {
+        const l = menuPick(links, pg.find);
+        if (!l || !(await navTo(tab, l.h, false, 3000))) { rep.pages.push({ name: pg.name, ok: false, nav: l ? 'bad-hash' : 'not-found', find: String(pg.find).slice(0, 40) }); continue; }
+      } else if (pg.hash) await navTo(tab, pg.hash, false, 3000);
       await guardBo(tab);
+      if (!pg.flow) {
+        // מסך לקריאה בלבד: בלי צעדים ובלי שום לחיצה – רק פקדים, כותרות טבלה, כתובת וכותרת
+        const r = (await inIso(tab, roIn, [GUARD])) || {};
+        if (r.wrong) throw wrongPage();
+        await guardBo(tab);
+        rep.pages.push({ name: pg.name, ok: true, ro: true, hash: String(r.hash || '').replace(/\d+/g, '{n}').slice(0, 80), title: String(r.title || '').slice(0, 60), controls: r.controls || [], heads: r.heads || [] });
+        continue;
+      }
       // היכרות v2: פותחים רשימות / לוח שנה רק כדי לראות אותם (בלי לבחור), לפני הצעדים
       const pk = [];
       for (const p of Array.isArray(pg.peek) ? pg.peek : []) { await guardBo(tab); const r = await inIso(tab, peekIn, [p, GUARD]); if (r && r.wrong) throw wrongPage(); pk.push(Object.assign({ name: String(p.name || '') }, r || {})); }
@@ -539,7 +625,7 @@ async function handle(m) {
   if (m.t === 'status') {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
-      run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual } : null,
+      run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
       disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
@@ -567,4 +653,4 @@ async function handle(m) {
   return { ok: false, code: 'bad-msg' };
 }
 // לבדיקות (Playwright): הפעלת טריגר ידנית
-self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun };
+self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, isBusy: () => busy };

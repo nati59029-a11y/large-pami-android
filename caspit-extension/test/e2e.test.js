@@ -1,7 +1,8 @@
 'use strict';
 // בדיקת קצה-לקצה: התוסף נטען (unpacked) ל-Chromium, כספית מדומה (context.route) ושרת cxBot מדומה (127.0.0.1).
 // מכסה: חיבור עם קוד, חיבור שפג בכספית (needs-login) והמשך אחרי התחברות, ריצה מלאה (קטלוג, מכירות לכל יום, קבצים לכספית),
-// טריגר כפול, אותו קובץ לא נשלח פעמיים, כפתור שהשתנה (selector-miss), מגבלת 500 מחירים, מצב היכרות + הורדת דוח בלי סודות.
+// טריגר כפול, אותו קובץ לא נשלח פעמיים, כפתור שהשתנה (selector-miss), מגבלת 500 מחירים, מצב היכרות + הורדת דוח בלי סודות,
+// "סנכרן עכשיו" מהטלפון (poll: ריצה אחת לכל בקשה, לא בזמן ריצה, שרת ישן), והיכרות עם מסך הנוכחות לפי התפריט (בלי לחיצות).
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -88,7 +89,7 @@ test.before(async () => {
 // במוצר העלאה לכספית כבויה (selectors.json importEnabled:false) – כדי לבדוק את זרימת הייבוא על כספית המדומה, מדליקים אותה בעותק של הבדיקה
 function impOn(dir) {
   const f = path.join(dir, 'selectors.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
-  assert.equal(j.importEnabled, true, 'במוצר – פעיל (0.1.4)');
+  assert.equal(j.importEnabled, true, 'במוצר – פעיל (מ-0.1.4)');
   j.importEnabled = true;
   fs.writeFileSync(f, JSON.stringify(j));
 }
@@ -103,8 +104,8 @@ test('התוסף נטען עם המזהה הקבוע (key), הרשאות מינ�
   const m = await sw.evaluate(() => chrome.runtime.getManifest());
   assert.deepEqual(m.permissions.sort(), ['alarms', 'idle', 'scripting', 'storage']);
   assert.deepEqual(m.host_permissions, ['https://caspit.valu.co.il/*', 'http://127.0.0.1/*']);
-  const al = await waitFor(async () => { const a = await sw.evaluate(async () => (await chrome.alarms.getAll()).map((x) => x.name)); return a.includes('daily') && a.includes('tick') ? a : null; }, 10e3, 'alarms');
-  assert.ok(al.length >= 2);
+  const al = await waitFor(async () => { const a = await sw.evaluate(async () => (await chrome.alarms.getAll()).map((x) => x.name)); return a.includes('daily') && a.includes('tick') && a.includes('poll') ? a : null; }, 10e3, 'alarms');
+  assert.ok(al.length >= 3);
 });
 
 test('חיבור: קוד שגוי נדחה, קוד נכון מתחבר (עמוד ההגדרות)', async () => {
@@ -191,6 +192,47 @@ test('טריגר כפול אחרי הצלחה – לא רץ שוב; ריצה י�
   assert.deepEqual(Object.values(s.st.lastRun.sum.sales).map((x) => x.skip), ['same', 'same']);
 });
 
+test('"סנכרן עכשיו" מהטלפון: בקשה → ריצה אחת (manual, req); poll נוסף לא מתחיל שוב; בזמן ריצה – לא; שרת ישן → כל 15 דקות', async () => {
+  const pollOnce = () => sw.evaluate(() => self.__cxTest.pollOnce());
+  const helloReq = (id) => srv.ops('hello').filter((h) => h.req === id);
+  // בלי בקשה – כלום
+  assert.equal(await pollOnce(), null);
+  srv.req = 'qtest0001aa'; srv.taken = false;
+  let t0 = Date.now();
+  if (!(await pollOnce())) await pollOnce(); // (ה-alarm של כל דקה יכול להקדים את הבדיקה)
+  let s = await waitFor(async () => { const x = await store(); return x.st && x.st.lastRun && x.st.lastRun.at > t0 && x.st.lastRun.req ? x : null; }, 240e3, 'remote run');
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(s.lastReq, 'qtest0001aa');
+  assert.equal(helloReq('qtest0001aa').length, 1, 'hello אחד עם הבקשה');
+  assert.equal(helloReq('qtest0001aa')[0].manual, true);
+  // שלוש בדיקות נוספות – גם אם השרת עדיין מחזיר את אותה בקשה – לא מתחילות ריצה נוספת
+  srv.taken = false;
+  const nHello = srv.ops('hello').length;
+  for (let i = 0; i < 3; i++) assert.equal(await pollOnce(), null);
+  assert.equal(srv.ops('hello').length, nHello);
+  srv.taken = true;
+  // בזמן ריצה (busy) – לא מתחילים, וגם לא פונים לשרת
+  await sw.evaluate(() => { self.__cxTest.startRun({ manual: true }); });
+  await waitFor(() => sw.evaluate(() => self.__cxTest.isBusy()), 10e3, 'busy');
+  srv.req = 'qtest0002bb'; srv.taken = false;
+  const nPoll = srv.ops('poll').length;
+  assert.equal(await pollOnce(), null);
+  assert.equal(srv.ops('poll').length, nPoll, 'בזמן ריצה – בלי פנייה לשרת');
+  await waitFor(() => sw.evaluate(() => !self.__cxTest.isBusy()), 240e3, 'run end');
+  t0 = Date.now();
+  if (!(await pollOnce())) await pollOnce();
+  s = await waitFor(async () => { const x = await store(); return x.st && x.st.lastRun && x.st.lastRun.at > t0 && x.st.lastRun.req ? x : null; }, 240e3, 'remote run 2');
+  assert.equal(helloReq('qtest0002bb').length, 1);
+  srv.req = null;
+  // שרת ישן (bad-op) → הבדיקה מאטה ל-15 דקות, בלי תקלה בחלון; שרת חדש → חזרה לכל דקה
+  srv.noPoll = true;
+  assert.equal(await pollOnce(), null);
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 15);
+  srv.noPoll = false;
+  await pollOnce();
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 1);
+});
+
 test('כפתור שהשתנה בכספית → selector-miss, דיווח לשרת, בלי ניסיון חוזר', async () => {
   const cp = caspitPage();
   await cp.evaluate(() => { localStorage.setItem('variant', 'new'); location.hash = '#/'; });
@@ -230,7 +272,16 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const txt = JSON.stringify(rep);
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales']);
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'attendance']);
+  // נוכחות: ניווט לפי קישור התפריט ("עובדים" → "דוח נוכחות", נחשף רק במעבר עכבר), בלי שום לחיצה; כותרות הטבלה בלי השורות
+  const att = rep.pages[3];
+  assert.equal(att.ok, true, JSON.stringify(att));
+  assert.equal(att.hash, '#/attendance-report');
+  assert.deepEqual(att.heads, [['שם עובד', 'תאריך', 'שעת כניסה', 'שעת יציאה', 'סה"כ שעות']]);
+  assert.ok(att.controls.some((c) => c.text === 'החתמת כניסה'), 'הפקדים נאספו');
+  assert.ok(!txt.includes('כהנוביץ') && !txt.includes('08:02'), 'שמות ושעות של עובדים לא בדוח');
+  assert.ok(rep.menu.some((l) => l.t === 'דוח נוכחות' && l.h === '#/attendance-report') && rep.menu.some((l) => l.t === 'רשימת עובדים'), JSON.stringify(rep.menu));
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור (גם לא "עובדים")');
   const imp = rep.pages[1];
   assert.ok(!imp.controls.some((c) => c.type === 'password'));
   assert.ok(imp.probe.every((p) => !p.done || ['nav', 'waitFor', 'text', 'select', 'histMark'].includes(p.op)), 'no change made on csv-imports: ' + JSON.stringify(imp.probe));
@@ -312,6 +363,25 @@ test('היכרות לא יוצאת מהמשרד האחורי: מסך שמעבי�
   assert.deepEqual(s.disc.rep.pages.map((p) => p.name), ['catalogs'], 'עצר לפני שאסף משהו מהקופה');
   for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
   await anyPage.evaluate(() => localStorage.removeItem('redir')).catch(() => {});
+  await pop.close();
+});
+
+test('היכרות נוכחות: הקישור מוביל אל מחוץ למשרד האחורי → wrong-page, בלי לאסוף מהקופה ובלי לחיצות', async () => {
+  const cp = caspitPage() || ctx.pages().find((p) => p.url().startsWith('https://caspit.valu.co.il/'));
+  await cp.evaluate(() => { localStorage.setItem('redir', '#/attendance-report'); localStorage.setItem('posHits', '0'); localStorage.removeItem('attHits'); });
+  await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
+  const pop = await ctx.newPage();
+  await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+  await pop.click('#disc');
+  const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 240e3, 'discovery');
+  assert.equal(s.discSt.st, 'fail');
+  assert.equal(s.disc.rep.err.code, 'wrong-page');
+  assert.deepEqual(s.disc.rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales'], 'עצר לפני שאסף משהו מהקופה');
+  assert.ok(s.disc.rep.menu.some((l) => l.h === '#/attendance-report'), 'רשימת הקישורים נשמרה גם כשהניווט נכשל');
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
+  const bo = ctx.pages().find((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  if (bo) assert.equal(await bo.evaluate(() => localStorage.getItem('attHits')), null);
+  await cp.evaluate(() => localStorage.removeItem('redir')).catch(() => {});
   await pop.close();
 });
 

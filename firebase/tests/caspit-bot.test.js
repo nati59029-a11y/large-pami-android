@@ -5,6 +5,7 @@
 //   - קטלוג ראשון → first-manual. אישור אוטומטי: האפליקציה מנצחת. מכירות: העלאה חוזרת לא מורידה פעמיים; "לא בטוח" לא עוצר.
 //   - מנעול משותף עם הטלפון. export מעל המגבלה – סירוב לפני סימון pd / קוד חדש. דיווח ריצה → היום האחרון שנקלט (days ב-hello).
 //   - cxBotWatch: התראות + פעם ביום לכל סוג + "לא סנכרן" רק אחרי 10:00. דוח היכרות – מנהל־על בלבד.
+//   - "סנכרן עכשיו": רק מנהל, pending / running / no-dev, poll פטור מהמונה, hello לוקח בקשה פעם אחת, בלי הגבלה יומית.
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -348,6 +349,89 @@ describe('רובוט כספית – חוזה מול הלקוח של התוסף (
     await ok('cxSetCfg', MGR, { newMax: 1 });
     assert.equal(await code(cl(TOK).call('export', { kind: 'new', max: 1, log: h.runId })), 'limit', '2 פריטים חדשים ממתינים, מגבלה 1');
     await cl(TOK).call('report', { run: h.runId, kind: 'run', st: 'fail', err: { code: 'limit', msg: 'x', step: 'exportNew' }, steps: [], info: { days: h.days, sales: {} } });
+  });
+});
+
+describe('רובוט כספית – "סנכרן עכשיו" מהטלפון (cxBotTok op:now, poll, hello עם req)', () => {
+  const U = () => adm().doc(`b/${A}/private/cxbot.use`);
+  const runsOf = async (id) => (await adm().collection(`b/${A}/cxBotRun`).where('req', '==', id).get()).size;
+  it('רק מנהל; בקשה נכתבת; בקשה שנייה בזמן המתנה → pending (בלי כתיבה); עסק בלי מחשב → no-dev', async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null, lr: null }, { merge: true });
+    assert.equal((await call('cxBotTok', E1, { op: 'now' })).reason, 'manager-only');
+    assert.notEqual((await call('cxBotTok', null, { op: 'now' })).status, 'OK');
+    assert.equal((await call('cxBotTok', MB, { op: 'now' })).reason, 'no-dev');
+    const r = await ok('cxBotTok', MGR, { op: 'now' });
+    assert.match(r.req.id, /^q[a-z0-9]{6,30}$/);
+    const d = await dev();
+    assert.equal(d.req.id, r.req.id); assert.equal(d.req.by, MGR); assert.equal(d.req.took, undefined);
+    const r2 = await call('cxBotTok', MGR, { op: 'now' });
+    assert.equal(r2.reason, 'pending'); assert.match(r2.text, /[א-ת]/);
+    assert.equal((await dev()).req.id, r.req.id, 'הבקשה הקיימת לא נדרסה');
+    const i = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.equal(i.req.id, r.req.id); assert.equal(i.nowVer, BOT.NOW_VER); assert.ok(i.now > 0);
+  });
+
+  it('poll: פטור מהמונה היומי (גם כשהמונה מלא); pl נכתב פעם ב-5 דקות; אסימון שגוי → 401 ונספר במונה ה-IP; שדה לא מוכר נדחה', async () => {
+    const day = BOT.ilDay(Date.now());
+    await U().set({ day, n: 0, runs: 0 });
+    const want = (await dev()).req.id;
+    const first = await okb(TOK, { op: 'poll', ver: '0.1.5' });
+    assert.equal(first.want, true); assert.equal(first.id, want);
+    const pl = (await dev()).pl;
+    assert.ok(pl > 0); assert.equal((await dev()).ver, '0.1.5');
+    for (let k = 0; k < 40; k += 10) await Promise.all(Array.from({ length: 10 }, () => okb(TOK, { op: 'poll', ver: '0.1.5' })));
+    assert.equal((await U().get()).get('n'), 0, 'poll לא נספר');
+    assert.equal((await dev()).pl, pl, 'pl לא נכתב שוב בתוך 5 דקות');
+    await U().set({ day, n: 600, runs: 0 });
+    assert.equal((await bot(TOK, { op: 'cfg', ver: '0.1.5' })).code, 429, 'המונה מלא');
+    await okb(TOK, { op: 'poll', ver: '0.1.5' }); // גם אז poll עובד
+    await U().set({ day, n: 0, runs: 0 });
+    assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.5', x: 1 })).body.reason, 'bad-field');
+    // אסימון שגוי: 401, והניסיון נספר במונה של ה-IP (הדלי של הכתובת)
+    const ip = '203.0.113.77', bucket = parseInt(crypto.createHash('sha256').update('cxip:' + ip, 'utf8').digest('hex').slice(0, 8), 16) % BOT.FAIL_BUCKETS;
+    await adm().doc('cxbot_fail/b' + bucket).set({ day, n: 0 });
+    const bad = await bot(A + '.' + 'C'.repeat(43), { op: 'poll', ver: '0.1.5' }, { ip });
+    assert.equal(bad.code, 401);
+    assert.equal((await adm().doc('cxbot_fail/b' + bucket).get()).get('n'), 1);
+  });
+
+  it('hello עם req לוקח את הבקשה פעם אחת; hello שני → req-gone בלי ריצה; בזמן הריצה → running; אחרי הדיווח – בקשה חדשה מותרת', async () => {
+    const id = (await dev()).req.id;
+    assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.5', req: '../x' })).body.reason, 'bad-req');
+    const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true, req: id });
+    let d = await dev();
+    assert.ok(d.req.took > 0); assert.equal(d.req.run, h.runId);
+    const run = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).data();
+    assert.equal(run.manual, true); assert.equal(run.req, id);
+    const again = await bot(TOK, { op: 'hello', mode: 'sync', manual: true, ver: '0.1.5', req: id });
+    assert.equal(again.code, 409); assert.equal(again.body.reason, 'req-gone');
+    assert.equal(await runsOf(id), 1, 'ריצה אחת לבקשה');
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5' })).want, false, 'הבקשה נלקחה');
+    assert.equal((await call('cxBotTok', MGR, { op: 'now' })).reason, 'running');
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
+    const r = await ok('cxBotTok', MGR, { op: 'now' });
+    assert.notEqual(r.req.id, id);
+    const i = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.equal(i.runs.find((x) => x.id === h.runId).req, true);
+  });
+
+  it('בלי הגבלה יומית: ריצה מבקשה בטלפון לא נספרת במגבלת 10 הריצות; בקשה שפגה (10 דקות) לא נלקחת ולא חוסמת בקשה חדשה', async () => {
+    const day = BOT.ilDay(Date.now());
+    await U().set({ day, n: 0, runs: 10 });
+    assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.5' })).code, 429, 'ריצה רגילה – מעל המגבלה');
+    const id = (await dev()).req.id;
+    const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true, req: id });
+    assert.equal((await U().get()).get('runs'), 10, 'לא נספרה');
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
+    await U().set({ day, n: 0, runs: 0 });
+    // בקשה ישנה (11 דקות) – poll לא מחזיר אותה, hello לא לוקח אותה, ובקשה חדשה מותרת
+    const old = await ok('cxBotTok', MGR, { op: 'now' });
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: { id: old.req.id, at: Date.now() - BOT.REQ_MS - 60e3, by: MGR } }, { merge: true });
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5' })).want, false);
+    assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.5', req: old.req.id })).body.reason, 'req-gone');
+    const nw = await ok('cxBotTok', MGR, { op: 'now' });
+    assert.notEqual(nw.req.id, old.req.id);
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null }, { merge: true });
   });
 });
 

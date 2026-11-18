@@ -8,6 +8,7 @@
 <header id="hdr" hidden>
   <span id="mnu" role="button">ממשקים</span>
   <div id="sub" hidden><a href="#/sales-items-reports">דוח מכירות לפריטים</a></div>
+  <span id="empm" role="button">עובדים</span><div id="empsub"></div>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -20,6 +21,10 @@ document.cookie = 'ASP.NET_SessionId=SESSIONabc123def456; path=/';
 window.ev = [];
 function dl(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); ev.push('dl:' + name); }
 document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
+// תפריט "עובדים": תת-התפריט נוצר רק במעבר עכבר (כמו תפריט נפתח); לחיצה נרשמת (אסור שהתוסף ילחץ)
+document.getElementById('empm').addEventListener('mouseover', () => { document.getElementById('empsub').innerHTML = '<a href="#/employees">רשימת עובדים</a> <a href="#/attendance-report">דוח נוכחות</a>'; });
+const hit = (k) => { ev.push(k); localStorage.setItem('attHits', (localStorage.getItem('attHits') || '') + k + ';'); };
+document.getElementById('empm').addEventListener('click', () => hit('emp-click'));
 const HE_M = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ']; // כמו בכספית: "נוב 2026"
 const pad = (n) => String(n).padStart(2, '0');
 // משימה של כספית: POST (run-as-job) → { job_id } ואחר כך הקובץ מ-get_job_result
@@ -126,6 +131,12 @@ function render() {
       drawQ(); drawH();
     };
     document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
+  } else if (h.startsWith('#/attendance-report')) {
+    // מסך נוכחות מדומה: טבלה עם שמות ושעות (אסור שיגיעו לדוח), וכפתורי פעולה (אסור ללחוץ)
+    app.innerHTML = '<div class="attendance"><h2>דוח נוכחות</h2><button class="btn btn-primary" id="attIn">החתמת כניסה</button><button class="btn" id="attX">ייצוא לאקסל</button>'
+      + '<table class="table"><thead><tr><th>שם עובד</th><th>תאריך</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה"כ שעות</th></tr></thead><tbody><tr><td>דנה כהנוביץ</td><td>17/11/2026</td><td>08:02</td><td>16:30</td><td>8:28</td></tr></tbody></table></div>';
+    document.getElementById('attIn').onclick = () => hit('att-in');
+    document.getElementById('attX').onclick = () => hit('att-x');
   } else {
     app.innerHTML = '<h1>ראשי</h1>';
   }
