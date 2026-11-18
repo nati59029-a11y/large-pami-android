@@ -233,7 +233,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   page.__step = 'perms';
   await page.click(`[data-a=admPerm][data-uid="${danaUid}"]`); await wait(page, 400);
   const dlg0 = await page.evaluate(() => ({ boxes: document.querySelectorAll('#dlg form[data-f=admPermSave] input[type=checkbox]').length, note: /עוד לא נקבעו מתגים/.test(document.getElementById('dlg').innerText), exp: (document.querySelector('#dlg select[name=p_expR]') || {}).value, on: [...document.querySelectorAll('#dlg input[type=checkbox]:checked')].map((c) => c.name).sort() }));
-  check('22ב חלון "הרשאות" לעובד בלי מתגים: 12 מתגים (כולל "רואה מצב העסק", "רווחיות הזמנות", "עדכון מחירים ומלאי" ו"שרטוט מפה (תלת מימד)" – כבוי) ובחירת "רואה הוצאות" (6ו), מסומנת ברירת המחדל של היום (incW, expR=הכול, expW, sup, ord) והערה', dlg0.boxes === 12 && dlg0.exp === 'all' && dlg0.note && dlg0.on.join() === 'p_expW,p_incW,p_ord,p_sup', dlg0);
+  check('22ב חלון "הרשאות" לעובד בלי מתגים: 13 מתגים (כולל "רואה מצב העסק", "רווחיות הזמנות", "עדכון מחירים ומלאי", "שרטוט מפה (תלת מימד)" ו"משמרות" – כבוי) ובחירת "רואה הוצאות" (6ו), מסומנת ברירת המחדל של היום (incW, expR=הכול, expW, sup, ord) והערה', dlg0.boxes === 13 && dlg0.exp === 'all' && dlg0.note && dlg0.on.join() === 'p_expW,p_incW,p_ord,p_sup', dlg0);
   const rid = await page.evaluate(() => ADM.ranks[0].id);
   await page.selectOption('#dlg select[name=rank]', rid); await wait(page, 200);
   await page.evaluate(() => { document.querySelector('#dlg [name=p_trf]').checked = true; });
