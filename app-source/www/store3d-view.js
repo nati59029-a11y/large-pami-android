@@ -65,7 +65,16 @@ function badge(k,px){const S=STAT[k]||STAT.out,c=document.createElement('canvas'
 
 /* ---- טעינת תמונות מ-Storage: מטמון משותף לכל התצוגות (Blob בזיכרון, עד ~48MB), עד 4 הורדות במקביל ---- */
 const okPath=p=>typeof p==='string'&&p.length>0&&p.length<=300&&/^b\/[^/]+\/store3d\/[A-Za-z0-9_./-]+\.jpg$/.test(p)&&p.indexOf('..')<0;
-function defLoad(p){if(typeof window.abkSt!=='function')return Promise.reject(new Error('no-loader'));return window.abkSt('/'+encodeURIComponent(p)+'?alt=media').then(r=>r.blob())}
+/* 18.11.2026: באנדרואיד ה-WebView חסם את תשובת השרת (Failed to fetch) – ניסיון שני דרך הרכיב המובנה של Capacitor (CapacitorHttp, בלי מגבלת CORS).
+   פרטי הכניסה נשלחים רק לכתובת שרת הקבצים (STB). קוד שגיאה אמיתי (403 וכו') חוזר כמו בדרך הרגילה. */
+async function natLoad(p){const C=window.Capacitor,H=C&&C.isNativePlatform&&C.isNativePlatform()&&C.Plugins&&C.Plugins.CapacitorHttp;
+  if(!H||typeof tok!=='function'||typeof STB!=='function')return null;
+  const r=await H.request({url:STB()+'/'+encodeURIComponent(p)+'?alt=media',method:'GET',headers:{Authorization:'Firebase '+await tok()},responseType:'blob'});
+  if(!r||r.status!==200){const e=new Error('שגיאה '+(r&&r.status));e.code=r&&r.status;e.raw='native';throw e}
+  const b64=String(r.data||'').replace(/^data:[^,]*,/,''),bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+  return new Blob([u],{type:'image/jpeg'})}
+function defLoad(p){if(typeof window.abkSt!=='function')return Promise.reject(new Error('no-loader'));return window.abkSt('/'+encodeURIComponent(p)+'?alt=media').then(r=>r.blob())
+  .catch(e=>{if(!e||!e.offline)throw e;return natLoad(p).then(b=>{if(!b)throw e;return b},x=>{if(x&&!x.code&&!x.raw)x.raw='native: '+String(x.message||x).slice(0,80);throw x})})}
 const BC=new Map(),NEG=new Map(),BC_MAX=48e6;let bcBytes=0,active=0;const DL={n:0,bytes:0};const waitq=[];
 const slot=()=>new Promise(r=>{if(active<4){active++;r()}else waitq.push(r)});
 const release=()=>{const n=waitq.shift();if(n)n();else active--};
