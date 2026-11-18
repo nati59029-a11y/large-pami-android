@@ -143,6 +143,15 @@ function make(T,el,tour,opts){
     tagG.visible=tagsOn;dirty=true}
   function showTags(on){tagsOn=!!on;tagG.visible=tagsOn;bTags.setAttribute('aria-pressed',String(tagsOn));bTags.style.background=tagsOn?'rgba(212,175,55,.9)':'rgba(21,21,26,.82)';bTags.style.color=tagsOn?'#141414':'#e8d9a8';dirty=true}
   function setTags(a){tags=Array.isArray(a)?a.slice():[];if(cur)buildTags()}
+  /* הסיבה האמיתית לכשל הטעינה, כדי שאפשר יהיה לדעת מה לתקן (e1 – הכשל בתמונה הקטנה, e2 – בגדולה) */
+  function loadMsg(e1,e2){const one=x=>!x?'':String(x.code||'')+(x.raw?' '+x.raw:'')+(x.message&&!x.code&&!x.raw?' '+x.message:'')||'?';
+    const det=' [פרטים: קטנה – '+one(e1).trim()+'; גדולה – '+one(e2).trim()+'; '+(navigator.onLine===false?'לא מחובר':'מחובר')+']';
+    const has=v=>[e1,e2].some(x=>x&&(x.code===v||x.message===v));
+    if(has(403))return'אין הרשאה לצפות בתמונה הזו (403).'+det;
+    if(has(404))return'התמונה לא נמצאה בשרת (404). אפשר לצלם את הנקודה מחדש.'+det;
+    if(has('ratio')||has('decode')||has('blob'))return'קובץ התמונה לא תקין. אפשר לצלם את הנקודה מחדש.'+det;
+    if([e1,e2].some(x=>x&&x.offline))return'הבקשה להורדת התמונה לא הגיעה לשרת.'+det;
+    return'טעינת התמונה נכשלה. נסו שוב.'+det}
   function err(code,txt){if(!alive)return;const d=msgBox(root,txt,mkBtn('נסו שוב',()=>{d.remove();if(cur)goTo(cur.id,true);else goTo(tour.start)}));if(opts.onError)try{opts.onError(code,txt)}catch(e){}}
   async function preloadAround(p,my){
     try{await Promise.all(nearNb(p).map(q=>q.sm?ensure(q,'sm').catch(()=>{}):0));
@@ -155,8 +164,8 @@ function make(T,el,tour,opts){
     const my=++tok;busy=true;spin.style.display='block';
     const prev=cur;cur=p;enforce();
     let t=bestTex(p);
-    if(!t){try{t=await(p.sm?ensure(p,'sm').catch(()=>p.full?ensure(p,'full'):Promise.reject(new Error('x'))):ensure(p,'full'))}catch(e){
-        if(my!==tok||!alive)return;cur=prev;busy=false;spin.style.display='none';err('load','טעינת התמונה נכשלה. בדקו את החיבור ונסו שוב.');return}}
+    if(!t){let e0=null;try{t=await(p.sm?ensure(p,'sm').catch(e=>{e0=e;return p.full?ensure(p,'full'):Promise.reject(e)}):ensure(p,'full'))}catch(e){
+        if(my!==tok||!alive)return;cur=prev;busy=false;spin.style.display='none';err('load',loadMsg(e0||e,e));return}}
     if(my!==tok||!alive)return;
     spin.style.display='none';
     if(!prev||force){setSphere(front,p,t);spheres[1-front].visible=false;shown[1-front]=null}
