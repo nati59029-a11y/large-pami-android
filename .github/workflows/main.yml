@@ -12,6 +12,10 @@ on:
     # A push that changes only workflow files does not build or publish (no empty update to phones).
     paths-ignore:
       - '.github/workflows/**'
+      # תוסף כספית למחשב (נבנה ב-caspit-ext.yml) – לא משנה את האפליקציה, לא בונה ולא מפרסם APK
+      - 'caspit-extension/**'
+      - 'docs/caspit-extension-install.md'
+      - 'scripts/sync-ext-core.js'
   workflow_dispatch:
     inputs:
       publish:

@@ -139,8 +139,8 @@ const vis = (page, sel) => page.evaluate((s) => { const e = document.querySelect
   let w = await open('w-r2b', 'w1@x.co'); let wp = w.page;
   await wp.evaluate(() => rqMine()); await sleep(900);
   const wb = await wp.evaluate(() => ({ cls: document.body.className, bar: [...document.querySelectorAll('.wbar button')].map((b) => ({ t: b.innerText.trim(), d: getComputedStyle(b).display, on: b.classList.contains('on'), bd: (b.querySelector('.bdg') || {}).innerText || '', bh: b.querySelector('.bdg') ? b.querySelector('.bdg').hidden : null })), old: getComputedStyle(document.querySelector('.bar:not(.wbar)')).display, wbd: getComputedStyle(document.querySelector('.wbar')).display }));
-  check('7 עובד: סרגל בית · משימות · בקשות · עוד; סרגל המנהל מוסתר; "בית" פעיל', wb.wbd === 'grid' && wb.old === 'none' && wb.bar.map((b) => b.t.replace(/\d+/g, '')).join('|').replace(/\s/g, '') === 'בית|משימות|בקשות|עוד' && wb.bar[0].on, wb);
-  check('7א מונה "בקשות" = תשובות שלא נקראו (4: r1,r3,r4,r5 נענו; r2 בלי תשובה)', wb.bar[2].bd === '4' && wb.bar[2].bh === false, wb.bar[2]);
+  check('7 עובד: סרגל בית · משימות · בקשות · עוד; סרגל המנהל מוסתר; "בית" פעיל', wb.wbd === 'grid' && wb.old === 'none' && /* סבב 3: כפתור "קבוצות" נוסף לסרגל ומוסתר כשהתכונה groups כבויה (כאן כבויה) */ wb.bar.filter((b) => b.d !== 'none').map((b) => b.t.replace(/\d+/g, '')).join('|').replace(/\s/g, '') === 'בית|משימות|בקשות|עוד' && wb.bar[0].on, wb);
+  check('7א מונה "בקשות" = תשובות שלא נקראו (4: r1,r3,r4,r5 נענו; r2 בלי תשובה)', /* סבב 3: אינדקס 3 – "קבוצות" נוסף לפני "בקשות" */ wb.bar[3].bd === '4' && wb.bar[3].bh === false, wb.bar[3]);
   check('7ב כל המסכים של בית עדיין נגישים לעובד: משבצות הבית קיימות', await wp.evaluate(() => document.querySelectorAll('#main .tile').length >= 3), await wp.evaluate(() => [...document.querySelectorAll('#main .tile')].map((x) => x.innerText.trim().slice(0, 12))));
   await shot(wp, shots, 'r2-ב-סרגל-עובד-בית');
   await wp.click('.wbar [data-w=tk]'); await sleep(900);

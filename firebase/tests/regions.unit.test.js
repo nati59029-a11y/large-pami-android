@@ -15,7 +15,7 @@ const hook = require(path.join(FN_DIR, 'yemot-hook.js')); // tzintukJoin מוש�
 const R = require(path.join(FN_DIR, 'lib', 'region.js'));
 
 const BOTH = ['europe-west1', 'us-central1'];
-const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks', 's3Rounds', 's3Clean', 'arFile', 'arRemind', 'secMediaClean', 'pushAct', 'drRemind'];
+const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks', 's3Rounds', 's3Clean', 'arFile', 'arRemind', 'secMediaClean', 'pushAct', 'drRemind', 'cxBotWatch'];
 const ep = (f) => f && f.__endpoint;
 const regions = (f) => [].concat(ep(f).region || []);
 const entries = Object.entries(ex).filter(([, f]) => ep(f));
@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'drRemind', 'expirePromosOnLine', 'posBackupDaily', 'posOpsWatch', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'posBackupDaily', 'posOpsWatch', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -80,6 +80,23 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.equal(e.eventTrigger.retry, false);
     assert.ok(e.maxInstances >= 1 && e.maxInstances <= 3, 'maxInstances נמוך');
   });
+  it('קבוצות התכתבות (17.11.2026): grpMsg / grpMsgB – טריגרי יצירת הודעה, grpDel / grpDelB – מחיקה מדורגת; grpMDel / grpMDelB – מחיקת הודעה; europe-west1 בלבד, בלי ניסיון חוזר', () => {
+    for (const [n, doc] of [['grpMsg', 'grp/{gid}/m/{mid}'], ['grpMsgB', 'b/{bizId}/grp/{gid}/m/{mid}']]) {
+      const e = ep(ex[n]);
+      assert.deepEqual(regions(ex[n]), ['europe-west1'], n);
+      assert.ok(e.eventTrigger && /document\.v1\.created$/.test(e.eventTrigger.eventType), n + ' – טריגר יצירת מסמך');
+      assert.equal(e.eventTrigger.eventFilterPathPatterns.document, doc);
+      assert.equal(e.eventTrigger.retry, false);
+      assert.ok(e.maxInstances >= 1 && e.maxInstances <= 5, 'maxInstances נמוך');
+    }
+    for (const [n, doc] of [['grpDel', 'grp/{gid}'], ['grpDelB', 'b/{bizId}/grp/{gid}'], ['grpMDel', 'grp/{gid}/m/{mid}'], ['grpMDelB', 'b/{bizId}/grp/{gid}/m/{mid}']]) {
+      const e = ep(ex[n]);
+      assert.deepEqual(regions(ex[n]), ['europe-west1'], n);
+      assert.ok(e.eventTrigger && /document\.v1\.deleted$/.test(e.eventTrigger.eventType), n + ' – טריגר מחיקת מסמך');
+      assert.equal(e.eventTrigger.eventFilterPathPatterns.document, doc);
+      assert.equal(e.eventTrigger.retry, false);
+    }
+  });
   it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
     const e = ep(ex.runImportChunk);
     assert.deepEqual(regions(ex.runImportChunk), ['europe-west1']);
@@ -90,6 +107,13 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.ok(e.timeoutSeconds > 60 && e.timeoutSeconds <= 540);
     assert.ok(ep(ex.startImport).callableTrigger);
     assert.deepEqual(regions(ex.startImport), BOTH);
+  });
+
+  it('רובוט כספית (18.11.2026): cxBot – onRequest ב-europe-west1 בלבד (כתובת קבועה בתוסף); cxBotWatch – מתוזמנת ב-us-central1 בלבד; cxBotTok/cxBotDisc – onCall בשני האזורים', () => {
+    assert.ok(ep(ex.cxBot).httpsTrigger, 'cxBot היא onRequest');
+    assert.deepEqual(regions(ex.cxBot), ['europe-west1']);
+    assert.ok(ep(ex.cxBotWatch).scheduleTrigger, 'cxBotWatch מתוזמנת');
+    for (const n of ['cxBotTok', 'cxBotDisc']) assert.deepEqual(regions(ex[n]), BOTH, n);
   });
 
   it('אין פונקציה שאינה onCall ביותר מאזור אחד', () => {

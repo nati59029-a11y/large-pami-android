@@ -605,6 +605,163 @@ service cloud.firestore {
       }
     }
 
+    // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
+    // קריאה וכתיבה – מנהלים בלבד (עובד ומנהל של עסק אחר נחסמים). תמונה: {img, t, uid}, jpeg/png/webp, 100 עד 900,000 תווים,
+    // רק יצירה (בלי דריסה), ורק כשהתבנית קיימת. מחיקת תבנית: מנהל (והאפליקציה מוחקת קודם את התמונה).
+    match /tkt/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function tOk() {
+        return nw().keys().hasAll(['txt', 't'])
+          && nw().keys().hasOnly(['txt', 't', 'to', 'np', 'dk', 'pri', 'cat', 'est', 'ck', 'im', 'by'])
+          && nw().txt is string && nw().txt.size() >= 1 && nw().txt.size() <= 500
+          && nw().t is int
+          && nw().get('to', []) is list && nw().get('to', []).size() <= 300
+          && (nw().get('to', []).size() == 0 || nw().get('to', []).join('\n').split('\n') == nw().get('to', []))
+          && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
+          && nw().get('dk', '') in ['', 'td', 'tm', 'none', 'd3', 'at']
+          && nw().get('pri', '') in ['', 'h', 'l']
+          && nw().get('cat', '') is string && nw().get('cat', '').size() <= 30
+          && nw().get('est', 0) is int && nw().get('est', 0) >= 0 && nw().get('est', 0) <= 1440
+          && tkCkOk(nw().get('ck', []))
+          && nw().get('im', 0) is int && nw().get('im', 0) >= 0 && nw().get('im', 0) <= 1
+          && nw().get('by', '') is string && nw().get('by', '').size() <= 100;
+      }
+      allow read: if isManager();
+      allow create, update: if lpW() && (isManager() && tOk());
+      allow delete: if lpW() && (isManager());
+      match /p/{pid} {
+        function imgOk() {
+          return nw().keys().hasAll(['img', 't', 'uid'])
+            && nw().keys().hasOnly(['img', 't', 'uid'])
+            && nw().uid == request.auth.uid
+            && nowOk(nw().t)
+            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+        }
+        allow read: if isManager();
+        allow create: if lpW() && (isManager() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/tkt/$(id)));
+        allow update: if false;
+        allow delete: if lpW() && (isManager());
+      }
+    }
+
+    // ---------- קבוצות התכתבות (grp) – סבב 3, 17.11.2026 ----------
+    // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
+    // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
+    // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. pin – ההודעה המוצמדת (ראו pinOk). השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
+    // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
+    // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
+    match /grp/{gid} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function lastOk(d) {
+        return !d.keys().hasAny(['last'])
+          || (d.last is map && d.last.keys().hasOnly(['txt', 'byN', 't', 'k'])
+            && d.last.get('txt', '') is string && d.last.get('txt', '').size() <= 120
+            && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
+            && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
+      }
+      // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
+      // ביטול הצמדה = מחיקת השדה. השרת (grpMDel) מוחק את pin כשההודעה המוצמדת נמחקת.
+      function pinOk(d) {
+        return !d.keys().hasAny(['pin'])
+          || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
+            && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+            && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
+            && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
+            && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
+      }
+      function grpOk(d) {
+        return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
+          && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
+          && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+          && d.mem is list && d.mem.size() <= 300
+          && d.ao is bool && d.md is bool
+          && d.by is string && d.t is int
+          && lastOk(d) && pinOk(d);
+      }
+      allow read: if (isManager() || (isActiveEmployee() && request.auth.uid in resource.data.mem));
+      allow create: if lpW() && (isManager() && grpOk(nw()) && nw().by == request.auth.uid && nowOk(nw().t));
+      allow update: if lpW() && (isManager() && grpOk(nw()) && nw().by == od().by && nw().t == od().t);
+      allow delete: if lpW() && (isManager());
+
+      // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid', txt? (<= 2000) }.
+      // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
+      // grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
+      // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
+      // אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
+      match /m/{mid} {
+        function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
+        function hasG() { return exists(/databases/$(database)/documents/grp/$(gid)); }
+        function isMem() { return isActiveEmployee() && request.auth.uid in g().mem; }
+        function canRead() { return hasG() && (isManager() || isMem()); }
+        function txtOk(d, need) {
+          return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
+            : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
+        }
+        function msgOk(d) {
+          return d.keys().hasAll(['by', 'byN', 't', 'k'])
+            && d.by == request.auth.uid
+            && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+            && nowOk(d.t)
+            && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, true))
+              || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, false) && g().md == true)
+              || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb'])
+                && txtOk(d, false) && g().md == true
+                && d.vp == 'grpv/' + gid + '/' + mid
+                && d.vs is int && d.vs >= 1 && d.vs <= 60
+                && d.vb is int && d.vb >= 1 && d.vb <= 31457280));
+        }
+        allow read: if (canRead());
+        allow create: if lpW() && (hasG() && (isManager() || (isMem() && g().get('ao', false) != true)) && msgOk(nw()));
+        allow update: if false;
+        allow delete: if lpW() && (isManager());
+
+        // תמונה בהודעה: grp/{gid}/m/{mid}/p/1 = { img, t, uid } – אותו מבנה ואותה הגבלה כמו תמונות בבקשות (rq/{id}/p):
+        // data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים. יצירה: רק שולח ההודעה, רק להודעה מסוג 'img', רק המזהה 1.
+        // בלי עדכון (בלי דריסה). קריאה: כמו הקבוצה. מחיקה: מנהל.
+        match /p/{pid} {
+          function msg() { return get(/databases/$(database)/documents/grp/$(gid)/m/$(mid)).data; }
+          function imgOk() {
+            return nw().keys().hasAll(['img', 't', 'uid'])
+              && nw().keys().hasOnly(['img', 't', 'uid'])
+              && nw().uid == request.auth.uid
+              && nowOk(nw().t)
+              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          allow read: if (canRead());
+          allow create: if lpW() && (pid == '1' && canRead() && imgOk()
+            && exists(/databases/$(database)/documents/grp/$(gid)/m/$(mid))
+            && msg().by == request.auth.uid && msg().k == 'img');
+          allow update: if false;
+          allow delete: if lpW() && (isManager());
+        }
+      }
+
+      // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
+      // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
+      // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
+      // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
+      match /r/{uid} {
+        function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
+        function canRead() {
+          return exists(/databases/$(database)/documents/grp/$(gid))
+            && (isManager() || (isActiveEmployee() && request.auth.uid in g().mem));
+        }
+        function rOk(d) {
+          return d.keys().hasOnly(['t', 'mu'])
+            && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
+            && (!d.keys().hasAny(['mu']) || d.mu is bool);
+        }
+        allow read: if (canRead() && (isSelf(uid) || isManager()));
+        allow create, update: if lpW() && (isSelf(uid) && canRead() && rOk(nw()));
+        allow delete: if lpW() && (isManager());
+      }
+    }
+
     // ---------- חשבוניות ספקים לעובד (supinv) ----------
     // טלפון המנהל משקף לכאן רק חשבוניות "ספקים" ו"ספקים אפייה" של החודש הנוכחי (כולל ממתינות לאישור), בלי שום נתון כספי אחר.
     // קריאה: עובד פעיל או מנהל. כתיבה ומחיקה: מנהל בלבד, ורק השדות שהאפליקציה כותבת (supSync).
@@ -1979,6 +2136,163 @@ service cloud.firestore {
               || (pid == 'r3' && req().get('np', 0) >= 3)));
           allow update: if false;
           allow delete: if feat('tasks') && (bMgr());
+        }
+      }
+
+      // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
+      // קריאה וכתיבה – מנהלים בלבד (עובד ומנהל של עסק אחר נחסמים). תמונה: {img, t, uid}, jpeg/png/webp, 100 עד 900,000 תווים,
+      // רק יצירה (בלי דריסה), ורק כשהתבנית קיימת. מחיקת תבנית: מנהל (והאפליקציה מוחקת קודם את התמונה).
+      match /tkt/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function tOk() {
+          return nw().keys().hasAll(['txt', 't'])
+            && nw().keys().hasOnly(['txt', 't', 'to', 'np', 'dk', 'pri', 'cat', 'est', 'ck', 'im', 'by'])
+            && nw().txt is string && nw().txt.size() >= 1 && nw().txt.size() <= 500
+            && nw().t is int
+            && nw().get('to', []) is list && nw().get('to', []).size() <= 300
+          && (nw().get('to', []).size() == 0 || nw().get('to', []).join('\n').split('\n') == nw().get('to', []))
+            && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
+            && nw().get('dk', '') in ['', 'td', 'tm', 'none', 'd3', 'at']
+            && nw().get('pri', '') in ['', 'h', 'l']
+            && nw().get('cat', '') is string && nw().get('cat', '').size() <= 30
+            && nw().get('est', 0) is int && nw().get('est', 0) >= 0 && nw().get('est', 0) <= 1440
+            && tkCkOk(nw().get('ck', []))
+            && nw().get('im', 0) is int && nw().get('im', 0) >= 0 && nw().get('im', 0) <= 1
+            && nw().get('by', '') is string && nw().get('by', '').size() <= 100;
+        }
+        allow read: if feat('tasks') && (bMgr());
+        allow create, update: if feat('tasks') && (bMgr() && tOk());
+        allow delete: if feat('tasks') && (bMgr());
+        match /p/{pid} {
+          function imgOk() {
+            return nw().keys().hasAll(['img', 't', 'uid'])
+              && nw().keys().hasOnly(['img', 't', 'uid'])
+              && nw().uid == request.auth.uid
+              && nowOk(nw().t)
+              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          allow read: if feat('tasks') && (bMgr());
+          allow create: if feat('tasks') && (bMgr() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/b/$(bizId)/tkt/$(id)));
+          allow update: if false;
+          allow delete: if feat('tasks') && (bMgr());
+        }
+      }
+
+      // grp: העתק של הכלל בשורש (תוספת 'groups' – מתג 'קבוצות התכתבות' של מנהל־העל), עם התפקידים של העסק (bMgr / bEmp)
+      // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
+      // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
+      // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. pin – ההודעה המוצמדת (ראו pinOk). השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
+      // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
+      // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
+      match /grp/{gid} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function lastOk(d) {
+          return !d.keys().hasAny(['last'])
+            || (d.last is map && d.last.keys().hasOnly(['txt', 'byN', 't', 'k'])
+              && d.last.get('txt', '') is string && d.last.get('txt', '').size() <= 120
+              && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
+              && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
+        }
+        // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
+        // ביטול הצמדה = מחיקת השדה. השרת (grpMDel) מוחק את pin כשההודעה המוצמדת נמחקת.
+        function pinOk(d) {
+          return !d.keys().hasAny(['pin'])
+            || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
+              && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+              && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
+              && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
+              && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
+        }
+        function grpOk(d) {
+          return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
+            && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
+            && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+            && d.mem is list && d.mem.size() <= 300
+            && d.ao is bool && d.md is bool
+            && d.by is string && d.t is int
+            && lastOk(d) && pinOk(d);
+        }
+        allow read: if feat('groups') && (bMgr() || (bEmp() && request.auth.uid in resource.data.mem));
+        allow create: if feat('groups') && (bMgr() && grpOk(nw()) && nw().by == request.auth.uid && nowOk(nw().t));
+        allow update: if feat('groups') && (bMgr() && grpOk(nw()) && nw().by == od().by && nw().t == od().t);
+        allow delete: if feat('groups') && (bMgr());
+
+        // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid', txt? (<= 2000) }.
+        // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
+        // b/{bizId}/grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
+        // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
+        // אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
+        match /m/{mid} {
+          function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
+          function hasG() { return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)); }
+          function isMem() { return bEmp() && request.auth.uid in g().mem; }
+          function canRead() { return hasG() && (bMgr() || isMem()); }
+          function txtOk(d, need) {
+            return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
+              : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
+          }
+          function msgOk(d) {
+            return d.keys().hasAll(['by', 'byN', 't', 'k'])
+              && d.by == request.auth.uid
+              && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+              && nowOk(d.t)
+              && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, true))
+                || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, false) && g().md == true)
+                || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb'])
+                  && txtOk(d, false) && g().md == true
+                  && d.vp == 'b/' + bizId + '/grpv/' + gid + '/' + mid
+                  && d.vs is int && d.vs >= 1 && d.vs <= 60
+                  && d.vb is int && d.vb >= 1 && d.vb <= 31457280));
+          }
+          allow read: if feat('groups') && (canRead());
+          allow create: if feat('groups') && (hasG() && (bMgr() || (isMem() && g().get('ao', false) != true)) && msgOk(nw()));
+          allow update: if false;
+          allow delete: if feat('groups') && (bMgr());
+
+          // תמונה בהודעה: grp/{gid}/m/{mid}/p/1 = { img, t, uid } – אותו מבנה ואותה הגבלה כמו תמונות בבקשות (rq/{id}/p):
+          // data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים. יצירה: רק שולח ההודעה, רק להודעה מסוג 'img', רק המזהה 1.
+          // בלי עדכון (בלי דריסה). קריאה: כמו הקבוצה. מחיקה: מנהל.
+          match /p/{pid} {
+            function msg() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(mid)).data; }
+            function imgOk() {
+              return nw().keys().hasAll(['img', 't', 'uid'])
+                && nw().keys().hasOnly(['img', 't', 'uid'])
+                && nw().uid == request.auth.uid
+                && nowOk(nw().t)
+                && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+                && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+            }
+            allow read: if feat('groups') && (canRead());
+            allow create: if feat('groups') && (pid == '1' && canRead() && imgOk()
+              && exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(mid))
+              && msg().by == request.auth.uid && msg().k == 'img');
+            allow update: if false;
+            allow delete: if feat('groups') && (bMgr());
+          }
+        }
+
+        // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
+        // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
+        // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
+        // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
+        match /r/{uid} {
+          function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
+          function canRead() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid))
+              && (bMgr() || (bEmp() && request.auth.uid in g().mem));
+          }
+          function rOk(d) {
+            return d.keys().hasOnly(['t', 'mu'])
+              && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
+              && (!d.keys().hasAny(['mu']) || d.mu is bool);
+          }
+          allow read: if feat('groups') && (canRead() && (isSelf(uid) || bMgr()));
+          allow create, update: if feat('groups') && (isSelf(uid) && canRead() && rOk(nw()));
+          allow delete: if feat('groups') && (bMgr());
         }
       }
 

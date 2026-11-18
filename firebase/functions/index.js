@@ -331,6 +331,8 @@ Object.assign(exports, require('./secretary-media'));
 Object.assign(exports, require('./recurring'));
 // מרכז עבודה סבב 3 (15.11.2026): tkNudge – "הזכר לעובד" בהתראת טלפון (tasks-nudge.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./tasks-nudge'));
+// קבוצות התכתבות סבב 3 (17.11.2026): grpMsg / grpMsgB – התראה לטלפון על הודעה חדשה בקבוצה ועדכון grp/{gid}.last; grpDel / grpDelB – מחיקה מדורגת של קבוצה; grpMDel / grpMDelB – מחיקת הודעה: last מחדש וקובץ הסרטון (grp-notify.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./grp-notify'));
 // דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./daily-rep'));
 // קופה (POS) שלב 0 (17.11.2026): posCfg, posCfgSet (מנהל / מנהל־על), posDev (קופות: הוספה, רישום מכשיר, פרישה, השבתה), posSale (שלד מכירה עם reqId).
@@ -380,3 +382,7 @@ Object.assign(exports, require('./s3capai'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));
+// סנכרון כספית A1 (17.11.2026): cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist – מנהל בלבד (caspit.js)
+Object.assign(exports, require('./caspit'));
+// רובוט כספית – שלב B (18.11.2026): cxBotTok, cxBotDisc (מנהל / מנהל־על), cxBot (HTTP לתוסף Chrome, europe-west1), cxBotWatch (מתוזמנת, us-central1) – caspit-bot.js
+Object.assign(exports, require('./caspit-bot'));

@@ -169,6 +169,8 @@ function mgr(w) { if (w.role !== 'manager') throw deny('manager-only', 'הפעו
 function logRef(db, ordId) { return db.collection(`ord/${ordId}/log`).doc(); }
 function logData(w, act, note) { return { t: Date.now(), by: w.uid, act, note: String(note || '').slice(0, 300) }; }
 function stockRef(db) { return db.collection('stockLog').doc(); }
+// 17.11.2026 (סנכרון כספית A1): היסטוריית מחיר ועלות – priceLog/{id} { prod, k:'p'|'c', old, new, src:'app'|'caspit', code?, run?, by, at }. רק השרת קורא/כותב
+function priceRef(db) { return db.collection('priceLog').doc(); }
 const qOf = (p, br) => { const q = p && p.q && typeof p.q === 'object' ? p.q[br] : 0; return typeof q === 'number' ? q : 0; };
 
 // =====================================================================================
@@ -249,6 +251,8 @@ function prodPut(tx, db, w, id, o, c, now, extra) {
     if (c.noteIn && (o.note || '') !== (typeof c.ext.note === 'string' ? c.ext.note : '')) ch.push('הערות');
     tx.update(ref, Object.assign({ name: c.name, price: c.price, barcode: c.barcode, on: c.on, upd: now }, c.ext, extra || {}));
     if (ch.length) tx.set(stockRef(db), { prod: id, name: c.name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
+    if (o.price !== c.price) tx.set(priceRef(db), { prod: id, k: 'p', old: typeof o.price === 'number' ? o.price : null, new: c.price, src: 'app', by: w.uid, at: now });
+    if (c.cost != null && 'oc' in c && c.oc !== c.cost) tx.set(priceRef(db), { prod: id, k: 'c', old: c.oc, new: c.cost, src: 'app', by: w.uid, at: now });
   } else {
     tx.set(ref, Object.assign({ name: c.name, price: c.price, barcode: c.barcode, on: c.on, q: {}, at: now, by: w.uid, upd: now }, noDel(c.ext), extra || {}));
   }
@@ -284,6 +288,7 @@ async function saveProduct(request) {
     await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+      if (c.cost != null) { const cs = await tx.get(db.doc(`prod/${id}/p/cost`)); c.oc = cs.exists && typeof cs.get('cost') === 'number' ? cs.get('cost') : null; } // להיסטוריית העלות
       prodPut(tx, db, w, id, s.data() || {}, c, now);
     });
     await cpAlert(db, w, cp0);
@@ -340,8 +345,8 @@ async function stockIn(request) {
       const d = sum.get(s.id);
       const nq = r3(qOf(s.data(), br) + d);
       const o = s.data() || {}, nm = nms.get(s.id), ren = !!nm && nm !== o.name;
-      if (ren) tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now, 'name', nm, 'al', alJoin(o.al, [o.name], nm));
-      else tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now);
+      if (ren) tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now, 'name', nm, 'al', alJoin(o.al, [o.name], nm), 'nc', FV().delete()); // nc = "לא נספר" (ייבוא מכספית) – יורד בהכנסת מלאי
+      else tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now, 'nc', FV().delete());
       if (ren) tx.set(stockRef(db), { prod: s.id, name: nm, br: NB, delta: 0, why: 'prod', note: `שם: ${String(o.name || '').slice(0, 60)} → ${nm}`, by: w.uid, at: now });
       tx.set(stockRef(db), { prod: s.id, name: ren ? nm : (s.get('name') || ''), br, delta: d, why: 'in', by: w.uid, at: now });
       out[s.id] = nq;
@@ -373,7 +378,7 @@ async function stockSet(request) {
     if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
     const old = qOf(s.data(), br);
     const delta = r3(qty - old);
-    tx.update(ref, new FieldPath('q', br), qty, 'upd', now);
+    tx.update(ref, new FieldPath('q', br), qty, 'upd', now, 'nc', FV().delete());
     if (delta !== 0) tx.set(stockRef(db), { prod: pid, name: s.get('name') || '', br, delta, why: qty === 0 ? 'zero' : 'set', by: w.uid, at: now });
     tx.set(mark, { t: now, by: w.uid, k: 'stockSet' });
     res = { ok: true, dup: false, q: qty, delta };
@@ -462,6 +467,19 @@ async function restoreAll(db, w, coll, bak, mark) {
   await b0.ref.update({ st: 'restored', rAt: now, rBy: w.uid });
   await mark.set({ t: now, by: w.uid, k: 'restore:' + coll, n, skip, bak: b0.id });
   return { ok: true, dup: false, n, skip };
+}
+// 17.11.2026 (סנכרון כספית A1): גיבוי מלא בלי מחיקה, באותו מבנה של wipeAll (bak/{id} + items/{pid} { d, p }). st: partial → snap.
+// נשמר באוסף נפרד (caspit.js: cxBak) – לא נכנס לרשימת הגיבויים של מחיקת מלאי/שחזור (stockBak). לעיון ולשחזור ידני של מוצרים.
+async function snapAll(db, w, coll, bak, note) {
+  const all = await db.collection(coll).get();
+  const now = Date.now();
+  const bref = db.collection(bak).doc();
+  await bref.set({ at: now, by: w.uid, byName: w.name || '', n: all.size, st: 'partial', note: String(note || '').slice(0, 60) });
+  const subs = [];
+  for (let i = 0; i < all.docs.length; i += 50) subs.push(...await Promise.all(all.docs.slice(i, i + 50).map((d) => d.ref.collection('p').get())));
+  await inChunks(db, all.docs.map((d, i) => { const p = {}; subs[i].docs.forEach((x) => { p[x.id] = x.data(); }); return [(b) => b.set(bref.collection('items').doc(d.id), { d: d.data(), p })]; }));
+  await bref.update({ st: 'snap' });
+  return { id: bref.id, n: all.size };
 }
 async function wipeStock(request) {
   const w = await who(request);
@@ -1707,6 +1725,10 @@ async function prodRows(w, input) {
     const cats = new Map();
     for (const o of ok) if (o.cat) { cats.set(catIdOf(o.cat, ''), { name: o.cat }); if (o.sub) cats.set(catIdOf(o.sub, catIdOf(o.cat, '')), { name: o.sub, parent: catIdOf(o.cat, '') }); }
     const catSnaps = cats.size ? await tx.getAll(...[...cats.keys()].map((id) => db.doc('cat/' + id))) : [];
+    // 17.11.2026 (סנכרון כספית, תיקון סבב 1): עלות קודמת של מוצרים קיימים – להיסטוריית העלות (priceLog k:'c'). נקרא לפני כל כתיבה
+    const oldCost = new Map();
+    const exIds = [...new Set(ok.filter((o) => o.cost != null && !skipEx).map((o) => ((o.barcode && byBc.get(o.barcode)) || (o.sku && bySku.get(o.sku)) || byName.get(o.name) || {}).id).filter(Boolean))];
+    if (exIds.length) (await tx.getAll(...exIds.map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((x) => oldCost.set(x.ref.parent.parent.id, x.exists && typeof x.get('cost') === 'number' ? x.get('cost') : null));
     const now = Date.now();
     catSnaps.forEach((s) => { if (!s.exists) tx.set(s.ref, Object.assign({ ord: 0, upd: now }, cats.get(s.id))); });
     const seen = new Map(); // מוצר חדש שכבר נוצר במנה הזו (שורה כפולה בקובץ)
@@ -1724,6 +1746,7 @@ async function prodRows(w, input) {
       if (ex && ex.ref) {
         id = ex.id;
         const upd = Object.assign({ name: o.name, price: o.price }, o.barcode ? { barcode: o.barcode } : {}, ext);
+        if (ex.get('price') !== o.price) tx.set(priceRef(db), { prod: ex.id, k: 'p', old: typeof ex.get('price') === 'number' ? ex.get('price') : null, new: o.price, src: 'app', by: w.uid, at: now });
         if (br && addQty && o.qty) { qty = o.qty; upd[`q.${br}`] = FV().increment(qty); }
         tx.update(ex.ref, upd);
         res.updated++;
@@ -1739,6 +1762,7 @@ async function prodRows(w, input) {
       }
       if (o.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: o.wp, at: now, by: w.uid });
       if (o.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: o.cost, at: now, by: w.uid });
+      if (o.cost != null && ex && ex.ref && oldCost.has(id) && oldCost.get(id) !== o.cost) tx.set(priceRef(db), { prod: id, k: 'c', old: oldCost.get(id), new: o.cost, src: 'app', by: w.uid, at: now });
       if (qty) tx.set(stockRef(db), { prod: id, name: o.name, br, delta: qty, why: 'in', note: 'ייבוא', by: w.uid, at: now });
     }
     tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated, same: res.same } });
@@ -2208,4 +2232,4 @@ const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכנ
 const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
 const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, priceRef, snapAll, ixDrop, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });

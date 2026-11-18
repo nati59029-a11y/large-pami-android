@@ -15,6 +15,8 @@ require('./39-cashout');
 require('./41-closing-logic');
 require('./42-closing-checks');
 require('./43-rq-photos-zcthr');
+require('./44-groups'); // קבוצות התכתבות (סבב 3, 17.11.2026)
+require('./45-templates'); // תבניות משימה בענן (סבב 4, 18.11.2026)
 require('./40-storage-matrix');
 require('./50-functions');
 require('./60-yemot');

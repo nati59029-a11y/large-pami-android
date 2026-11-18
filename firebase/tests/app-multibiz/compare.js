@@ -20,11 +20,22 @@ if (mode === 'legacy') {
   /* main כבר כולל את קריאות הזיהוי (אחרי המיזוג של ריבוי עסקים), לכן מסננים אותן משני הצדדים */
   /* cfg/zc (סף פער מזומן, #117–#118): אחרי שנכנס ל-main גם main קורא אותו – מסננים משני הצדדים (17.11.2026) */
   const zcT = (r) => r.method === 'GET' && /\/documents\/cfg\/zc$/.test(new URL(r.url).pathname);
-  const A = A0.filter((r) => !ident(r) && !zcT(r));
+  /* סבב 4 (18.11.2026): תבניות משימה בענן – המנהל קורא את רשימת tkt בכניסה לטופס "משימה חדשה" (GET של האוסף, עד 5 דקות). אחרי שנכנס ל-main גם main קורא אותו – מסננים משני הצדדים */
+  const tkT = (r) => r.method === 'GET' && /\/documents\/(b\/[^/]+\/)?tkt$/.test(new URL(r.url).pathname);
+  /* סבב 3 (קבוצות, #122): אחרי שנכנס ל-main גם main שולח את שאילתת grp של העובד – מסננים משני הצדדים (18.11.2026); בענף נבדקת בחריג הצר למטה */
+  const grT = (r) => r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && /"collectionId":"grp"/.test(r.body || '');
+  const A = A0.filter((r) => !ident(r) && !zcT(r) && !tkT(r) && !grT(r));
   const idn = B.filter(ident); let B2 = B.filter((r) => !ident(r));
   /* סבב 2 (17.11.2026): סף פער מזומן משותף – המנהל קורא את cfg/zc (GET בלבד). חריג צר: רק GET של המסמך הזה, לכל היותר פעם אחת למשתמש, ורק אצל מנהל */
   const zcR = B2.filter(zcT); B2 = B2.filter((r) => !zcT(r));
   if (zcR.some((r) => r.who !== 'm@x.co') || new Set(zcR.map((r) => r.who + '|' + r.step)).size !== zcR.length) { console.log('נכשל: קריאת cfg/zc לא צפויה', zcR.map((r) => r.who + '|' + r.step)); fail++; }
+  /* סבב 4: חריג צר – רק GET של רשימת tkt (בלי מסמך מסוים), רק אצל מנהל, לכל היותר פעם אחת למשתמש בכל שלב */
+  const tkR = B2.filter(tkT); B2 = B2.filter((r) => !tkT(r));
+  if (tkR.some((r) => r.who !== 'm@x.co') || new Set(tkR.map((r) => r.who + '|' + r.step)).size !== tkR.length) { console.log('נכשל: קריאת רשימת tkt לא צפויה', tkR.map((r) => r.who + '|' + r.step)); fail++; }
+  /* סבב 3 (17.11.2026): קבוצות התכתבות – העובד מושך את רשימת הקבוצות שהוא חבר בהן (runQuery על grp, mem ARRAY_CONTAINS ה-uid שלו). חריג צר: רק השאילתה הזו, רק עם ה-uid של המשתמש עצמו, לכל היותר פעם אחת לשלב */
+  const grR = B2.filter(grT); B2 = B2.filter((r) => !grT(r));
+  const grOk = (r) => { try { const q = JSON.parse(r.body).structuredQuery; const f = q.where.fieldFilter; return f.field.fieldPath === 'mem' && f.op === 'ARRAY_CONTAINS' && f.value.stringValue === r.who.split('@')[0]; } catch (e) { return false; } };
+  if (grR.some((r) => !grOk(r)) || new Set(grR.map((r) => r.who + '|' + r.step)).size !== grR.length) { console.log('נכשל: שאילתת grp לא צפויה', grR.map((r) => r.who + '|' + r.step + '|' + r.body)); fail++; }
   console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
   if (idn.some((r) => r.method !== 'GET')) { console.log('נכשל: קריאת זיהוי שאינה GET'); fail++; }
   /* הגעה מיידית (feature/inbox-live, 11.11.2026): אצל מנהל, inbox (status==new) ו-mq (st==new) נמשכים גם 3 שניות אחרי הפתיחה, כל 20 שניות ובחזרה לאפליקציה,
@@ -54,6 +65,13 @@ if (mode === 'legacy') {
   let dcA = 0, dcB = 0; for (let i = B2.length - 1; i >= 0; i--) if (dcQ(B2[i])) { dcB++; B2.splice(i, 1); }
   for (let i = A.length - 1; i >= 0; i--) if (dcQ(A[i])) { dcA++; A.splice(i, 1); }
   console.log(`מכשיר אחד – קריאות devClaim: main ${dcA}, ענף ${dcB}`);
+  /* סנכרון כספית A1 (17.11.2026): המוצרים נטענים בעמודים (orderBy __name__, startAt בעמוד הבא). חריג צר: רק runQuery על prod –
+     עמוד ראשון (בלי startAt) שאחרי הסרת orderBy זהה בדיוק לגוף של main מנורמל לגוף של main; עמודי המשך (startAt) – רק בענף, מוצאים */
+  const pdQ = (r) => { try { const q = JSON.parse(r.body).structuredQuery; return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && q.from[0].collectionId === 'prod' ? q : null; } catch (e) { return null; } };
+  let pdN = 0; for (let i = B2.length - 1; i >= 0; i--) { const q = pdQ(B2[i]); if (q && q.startAt) { pdN++; B2.splice(i, 1); } }
+  A.forEach((r, i) => { const b = B2[i], qb = b && pdQ(b); if (!qb || !pdQ(r) || r.url !== b.url) return; const o = JSON.parse(b.body); delete o.structuredQuery.orderBy;
+    const nb = JSON.stringify({ structuredQuery: { from: o.structuredQuery.from, limit: o.structuredQuery.limit } }); if (nb === r.body) b.body = nb; });
+  console.log(`כספית – עמודי המשך של prod: ענף ${pdN}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');
