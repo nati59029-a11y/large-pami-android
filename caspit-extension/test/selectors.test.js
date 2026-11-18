@@ -154,3 +154,11 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; מס�
   assert.deepEqual(att.menu, ['עובדים']); assert.equal(att.find, 'נוכחות');
   assert.ok(SEL.v >= 3);
 });
+
+test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, בלי aria ובלי אפשרויות – רק מספרן', async () => {
+  const c = await page.evaluate(() => window.CxSel.controls(document, 400, { noText: true }));
+  const s = JSON.stringify(c);
+  assert.ok(!s.includes('טעינת פריטים חדשים') && !s.includes('ייצוא לאקסל') && !s.includes('סגור חלון'), s);
+  assert.equal(c.find((x) => x.tag === 'select').optN, 3);
+  assert.ok(c.filter((x) => x.href).every((x) => x.href === '(int)' || x.href === '(ext)'));
+});

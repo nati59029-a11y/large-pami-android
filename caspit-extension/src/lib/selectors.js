@@ -338,8 +338,10 @@ async function runSteps(steps, ctx) {
   }
   return res;
 }
-// היכרות: רשימת הפקדים בדף – בלי ערכים, בלי שדות סיסמה
-function controls(doc, max) {
+// היכרות: רשימת הפקדים בדף – בלי ערכים, בלי שדות סיסמה. o.noText (דף לקריאה בלבד): בלי טקסט, בלי aria, בלי אפשרויות בחירה
+// (רק מספרן), ו-href רק כסימן לקישור פנימי – כדי ששמות (למשל עובדים במסך הנוכחות) לא ייכנסו לדוח
+function controls(doc, max, o) {
+  const noText = !!(o && o.noText);
   const out = [];
   const els = all(doc, 'button,a,input,select,textarea,[role=button],[role=menuitem],[role=tab],[role=link],label').filter(visible);
   for (const el of els) {
@@ -350,6 +352,13 @@ function controls(doc, max) {
     const type = g('type'); if (type) c.type = type;
     for (const k of ['name', 'id', 'aria-label', 'placeholder', 'role', 'href']) { const v = g(k); if (v) c[k === 'aria-label' ? 'aria' : k] = String(v).slice(0, 80); }
     if (c.href && !/^#/.test(c.href)) c.href = '(ext)';
+    if (noText) {
+      delete c.aria; delete c.placeholder;
+      if (c.href && c.href !== '(ext)') c.href = '(int)';
+      if (tag === 'select') c.optN = (el.options || []).length;
+      out.push(c);
+      continue;
+    }
     // פרטיות (בדיקת אבטחה סבב 1): טקסט רק לכפתורים ולקישורים שמחוץ לטבלאות ולרשימות נתונים (שם יש שמות פריטים ולקוחות);
     // אפשרויות של רשימת בחירה – רק ברשימה קצרה (עד 30, כמו "סוג ייבוא"), אחרת רק המספר. הכול עובר גם את הסינון (sanitize) לפני היציאה
     const inData = el.closest && el.closest('table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]');

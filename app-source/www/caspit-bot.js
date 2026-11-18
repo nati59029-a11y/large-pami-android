@@ -21,13 +21,15 @@ const errTxt=(code,msg)=>ERR[code]||msg||ERR.fail;
 async function load(){if(B.ld)return;B.ld=1;try{B.i=await fnCall('cxBotTok',{op:'info'});B.at=Date.now();B.err=''}catch(e){B.err=e&&e.message||'הטעינה נכשלה'}B.ld=0;if(cur().v==='cxSync')rerender()}
 const tm=t=>t?new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}):'';
 const verLt=(a,b)=>{const p=v=>String(v||'0').split('.').map(x=>parseInt(x,10)||0),x=p(a),y=p(b);for(let k=0;k<3;k++)if((x[k]||0)!==(y[k]||0))return(x[k]||0)<(y[k]||0);return false};
-/* מצב "סנכרן עכשיו" לפי שעון השרת (i.now + הזמן שעבר מאז הטעינה): wait = נשלח וממתין למחשב, run = המחשב התחיל, late = המחשב לא הגיב */
-function nowSt(i){const q=i.req;if(!q)return'';const sn=(i.now||Date.now())+(Date.now()-(B.at||Date.now())),lr=i.lr;
- if(!q.took)return sn-q.at<(i.reqMs||600000)?'wait':sn-q.at<864e5&&!(lr&&(lr.at||0)>=q.at)?'late':'';
+/* מצב "סנכרן עכשיו" לפי שעון השרת (i.now + הזמן שעבר מאז הטעינה): wait = נשלח וממתין למחשב, run = המחשב התחיל, late = המחשב לא הגיב,
+   retry / retryOld = המחשב באמצע סנכרון שממתין לניסיון חוזר (q.wait) – בזמן הבקשה / אחרי שפגה */
+function nowSt(i){const q=i.req;if(!q)return'';const sn=(i.now||Date.now())+(Date.now()-(B.at||Date.now())),lr=i.lr,live=sn-q.at<(i.reqMs||600000);
+ if(!q.took&&q.wait&&sn-q.at<864e5&&!(lr&&(lr.at||0)>=q.at))return live?'retry':'retryOld';
+ if(!q.took)return live?'wait':sn-q.at<864e5&&!(lr&&(lr.at||0)>=q.at)?'late':'';
  return !(lr&&(lr.at||0)>=q.took)&&sn-q.took<18e5?'run':''}
 /* רענון בזמן המתנה / ריצה: כל 20 שניות, רק כשהמסך הזה פתוח והאפליקציה גלויה */
 function nowTick(on){if(!on||B.tm)return;B.tm=setTimeout(()=>{B.tm=0;if(cur().v==='cxSync'&&!document.hidden)load()},20000)}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&B.i&&/wait|run/.test(nowSt(B.i))&&cur().v==='cxSync')load()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&B.i&&/^(wait|run|retry)$/.test(nowSt(B.i))&&cur().v==='cxSync')load()});
 const big='style="min-height:48px"';
 
 /* הכרטיס – נקרא מ-V.cxSync (caspit-sync.js) */
@@ -41,12 +43,13 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
    h+=`<div class="kg"><div class="k"><small>סנכרון אחרון</small><b>${lr?esc(ST[lr.st]||lr.st):'עוד לא'}</b><small>${lr?dt(lr.at)+' · '+(lr.manual?'ידני':'אוטומטי'):''}</small></div><div class="k"><small>מכירות נקלטו עד</small><b>${dd(i.sd)}</b></div><div class="k"><small>המחשב נראה לאחרונה</small><b>${dt(Math.max(i.dev.last||0,i.pl||0))}</b><small>${i.dev.ver?'גרסה '+esc(i.dev.ver):''}</small></div></div>`;
    /* "סנכרן עכשיו" – בקשה למחשב החנות */
    const ns=nowSt(i),q=i.req,nv=i.nowVer||'0.1.5';
-   h+=`<button class="btn w" data-a="cxBotNow" ${/wait|run/.test(ns)?'disabled':''} style="min-height:48px;margin-bottom:8px">סנכרן עכשיו</button>`;
+   h+=`<button class="btn w" data-a="cxBotNow" ${/^(wait|run|retry)$/.test(ns)?'disabled':''} style="min-height:48px;margin-bottom:8px">סנכרן עכשיו</button>`;
    if(ns==='wait')h+=`<p class="note" role="status">נשלח – ממתין למחשב (${tm(q.at)}). המחשב בודק כל דקה.</p>`;
    else if(ns==='run')h+=`<p class="note" role="status">המחשב התחיל (${tm(q.took)}). התוצאה תופיע כאן בסיום.</p>`;
+   else if(/retry/.test(ns))h+=`<p class="note" role="status">המחשב באמצע סנכרון קודם שנתקל בתקלה זמנית – ${q.wait<Date.now()?'ניסה שוב':'ינסה שוב'} ב-${tm(q.wait)}.</p>`;
    else if(ns==='late')h+=`<p class="note" role="alert">⚠ המחשב לא הגיב לבקשה (${tm(q.at)}) – בדקו שהוא דלוק ו-Chrome פתוח.</p>`;
    if(!i.pl||verLt(i.dev.ver,nv))h+=`<p class="note">כדי ש"סנכרן עכשיו" יעבוד צריך לעדכן את התוסף במחשב לגרסה ${esc(nv)} ומעלה ("הורדת התוסף" למטה).</p>`;
-   nowTick(/wait|run/.test(ns));
+   nowTick(/^(wait|run|retry)$/.test(ns));
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;

@@ -133,7 +133,10 @@ function render() {
     document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
   } else if (h.startsWith('#/attendance-report')) {
     // מסך נוכחות מדומה: טבלה עם שמות ושעות (אסור שיגיעו לדוח), וכפתורי פעולה (אסור ללחוץ)
+    // גם מחוץ לטבלה: מסנן "עובד" עם שמות, וכרטיסי עובדים (קישור, תווית, כפתור עם שם) – אסור שהשמות יגיעו לדוח
     app.innerHTML = '<div class="attendance"><h2>דוח נוכחות</h2><button class="btn btn-primary" id="attIn">החתמת כניסה</button><button class="btn" id="attX">ייצוא לאקסל</button>'
+      + '<label for="empSel">עובד</label><select id="empSel"><option>כל העובדים</option><option>יוסי מזרחיאן</option><option>רותם בלומנפלד</option></select>'
+      + '<div class="cards"><div class="card"><a href="#/employee/7">שירה אבוטבולי</a><label>נועם קרליבך</label><button class="btn" aria-label="פרטי אלמוג זילברשטיין">אלמוג זילברשטיין</button></div></div>'
       + '<table class="table"><thead><tr><th>שם עובד</th><th>תאריך</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה"כ שעות</th></tr></thead><tbody><tr><td>דנה כהנוביץ</td><td>17/11/2026</td><td>08:02</td><td>16:30</td><td>8:28</td></tr></tbody></table></div>';
     document.getElementById('attIn').onclick = () => hit('att-in');
     document.getElementById('attX').onclick = () => hit('att-x');

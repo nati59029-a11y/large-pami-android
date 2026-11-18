@@ -59,17 +59,22 @@ async function pollEvery(min) {
 async function pollOnce() {
   if (busy || !navigator.onLine || !(await get('token'))) return null;
   let r;
-  try { r = await (await api()).call('poll', {}); } catch (e) {
-    if (e.code === 'bad-op') await pollEvery(POLL_SLOW_MIN);
+  // ריצה שממתינה לניסיון חוזר: מדווחים מתי (wait) – הטלפון מציג "ינסה שוב ב-HH:MM" ולא "לא הגיב"
+  const run0 = await get('run');
+  const wait = run0 && run0.st === 'wait' && !P.isTerminal(run0) && +run0.retryAt > 0 ? +run0.retryAt : 0;
+  try { r = await (await api()).call('poll', wait ? { wait } : {}); } catch (e) {
+    // שרת ישן (bad-op) / העסק כבוי זמנית (403) → כל 15 דקות; האסימון בוטל (401) → מפסיקים עד חיבור מחדש / הפעלת Chrome
+    if (e.code === 'bad-op' || (e.code === 'auth' && e.status === 403)) await pollEvery(POLL_SLOW_MIN);
     else if (e.code === 'auth') await chrome.alarms.clear('poll');
     return null; // רשת / שרת – הבדיקה הבאה תנסה שוב
   }
   await pollEvery(POLL_MIN);
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
-  if (!id) return null;
-  await set({ lastReq: id }); // לפני ההתחלה: גם אם ה-service worker נסגר באמצע – לא מתחילים פעמיים לאותה בקשה
-  startRun({ manual: true, req: id }).catch(() => {});
+  if (!id || busy) return null; // עסוק – לא מסמנים את הבקשה; הבדיקה הבאה תיקח אותה
+  const p = startRun({ manual: true, req: id }); // לוקח את הנעילה מיד (בלי await לפני כן)
+  await set({ lastReq: id }); // גם אם ה-service worker נסגר באמצע – לא מתחילים פעמיים לאותה בקשה
+  p.catch(() => {});
   return id;
 }
 async function tick() {
@@ -438,11 +443,12 @@ function summary(run) {
 }
 
 // ---------- ריצה ----------
+// נעילה: busy נקבע מיד אחרי הבדיקה, לפני כל await – כך בדיקת בקשה מהטלפון והתחלה אוטומטית שמגיעות יחד לא מתחילות שתי ריצות
 async function startRun(o) {
   if (busy) return { ok: false, code: 'busy' };
-  if (!(await get('token'))) return { ok: false, code: 'auth' };
   busy = true;
   try {
+    if (!(await get('token'))) return { ok: false, code: 'auth' };
     const s = await sched();
     const run = P.newRun({ id: U.rid('r'), now: Date.now(), manual: !!o.manual, req: o.req || null, slot: D.slotDay(Date.now(), s.at, s.tz) });
     await chrome.alarms.clear('start');
@@ -452,11 +458,13 @@ async function startRun(o) {
 }
 async function resume() {
   if (busy) return;
-  let run = await get('run');
-  if (!P.canResume(run, Date.now())) return;
-  if (!navigator.onLine && run.st === 'wait') { await chrome.alarms.create('retry', { delayInMinutes: 5 }); return; }
   busy = true;
-  try { run = P.resumeFrom(run); await loop(run); } finally { busy = false; }
+  try {
+    let run = await get('run');
+    if (!P.canResume(run, Date.now())) return;
+    if (!navigator.onLine && run.st === 'wait') { await chrome.alarms.create('retry', { delayInMinutes: 5 }); return; }
+    run = P.resumeFrom(run); await loop(run);
+  } finally { busy = false; }
 }
 async function loop(run0) {
   let run = run0;
@@ -522,7 +530,8 @@ const roIn = (guard) => {
   const S = self.CxSel;
   if (!S.onPath(window, guard)) return { wrong: true };
   const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
-  return { hash: location.hash, title: document.title, controls: S.controls(document, 400), heads };
+  // פרטיות: בדף לקריאה בלבד (למשל נוכחות) – בלי טקסט של פקדים ובלי אפשרויות של רשימות בחירה (שמות עובדים); רק תגית/סוג/מזהה ומספר אפשרויות
+  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true }), heads };
 };
 // הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
 function menuPick(links, find) {

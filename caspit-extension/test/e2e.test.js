@@ -231,6 +231,23 @@ test('"סנכרן עכשיו" מהטלפון: בקשה → ריצה אחת (manu
   srv.noPoll = false;
   await pollOnce();
   assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 1);
+  // העסק כבוי זמנית (403) → לא מפסיקים לבדוק, רק כל 15 דקות
+  srv.bizOff = true;
+  assert.equal(await pollOnce(), null);
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 15);
+  srv.bizOff = false;
+  await pollOnce();
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 1);
+  // ריצה שממתינה לניסיון חוזר: הבקשה לא מתחילה ריצה, ו-poll מדווח מתי הניסיון הבא (wait)
+  const saved = await sw.evaluate(async () => (await chrome.storage.local.get('run')).run);
+  await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ run: Object.assign({}, run, { st: 'wait', retryAt: Date.now() + 600e3, touchedAt: Date.now() }) }); });
+  srv.req = 'qtest0003cc'; srv.taken = false;
+  assert.equal(await pollOnce(), null);
+  assert.ok(srv.ops('poll').at(-1).wait > Date.now(), JSON.stringify(srv.ops('poll').at(-1)));
+  assert.equal(helloReq('qtest0003cc').length, 0);
+  assert.notEqual((await store()).lastReq, 'qtest0003cc', 'בקשה שלא התחילה – לא מסומנת');
+  await sw.evaluate(async (r) => chrome.storage.local.set({ run: r }), saved);
+  srv.req = null;
 });
 
 test('כפתור שהשתנה בכספית → selector-miss, דיווח לשרת, בלי ניסיון חוזר', async () => {
@@ -278,8 +295,10 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.equal(att.ok, true, JSON.stringify(att));
   assert.equal(att.hash, '#/attendance-report');
   assert.deepEqual(att.heads, [['שם עובד', 'תאריך', 'שעת כניסה', 'שעת יציאה', 'סה"כ שעות']]);
-  assert.ok(att.controls.some((c) => c.text === 'החתמת כניסה'), 'הפקדים נאספו');
-  assert.ok(!txt.includes('כהנוביץ') && !txt.includes('08:02'), 'שמות ושעות של עובדים לא בדוח');
+  assert.ok(att.controls.some((c) => c.id === 'attIn' && c.tag === 'button'), 'הפקדים נאספו (תגית/מזהה)');
+  assert.ok(att.controls.every((c) => c.text === undefined && c.options === undefined && c.aria === undefined), 'דף לקריאה בלבד – בלי טקסט ובלי אפשרויות: ' + JSON.stringify(att.controls));
+  assert.equal(att.controls.find((c) => c.id === 'empSel').optN, 3, 'רשימת בחירה – רק מספר האפשרויות');
+  for (const nm of ['כהנוביץ', '08:02', 'מזרחיאן', 'בלומנפלד', 'אבוטבולי', 'קרליבך', 'זילברשטיין']) assert.ok(!txt.includes(nm), 'שם / שעה של עובד בדוח: ' + nm);
   assert.ok(rep.menu.some((l) => l.t === 'דוח נוכחות' && l.h === '#/attendance-report') && rep.menu.some((l) => l.t === 'רשימת עובדים'), JSON.stringify(rep.menu));
   assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור (גם לא "עובדים")');
   const imp = rep.pages[1];

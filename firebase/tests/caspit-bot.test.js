@@ -433,6 +433,35 @@ describe('רובוט כספית – "סנכרן עכשיו" מהטלפון (cxBo
     assert.notEqual(nw.req.id, old.req.id);
     await adm().doc(`b/${A}/private/cxbot`).set({ req: null }, { merge: true });
   });
+
+  it('במקביל: שתי בקשות "סנכרן עכשיו" → אחת נכתבת, השנייה pending; שני hello עם אותה בקשה → ריצה אחת בלבד', async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null, lr: null }, { merge: true });
+    const two = await Promise.all([call('cxBotTok', MGR, { op: 'now' }), call('cxBotTok', MGR, { op: 'now' })]);
+    assert.equal(two.filter((r) => r.status === 'OK').length, 1, JSON.stringify(two));
+    assert.equal(two.filter((r) => r.reason === 'pending').length, 1, JSON.stringify(two));
+    const id = (await dev()).req.id;
+    assert.equal(two.find((r) => r.status === 'OK').result.req.id, id);
+    const day = BOT.ilDay(Date.now());
+    await U().set({ day, n: 0, runs: 0 });
+    const hs = await Promise.all([1, 2].map(() => bot(TOK, { op: 'hello', mode: 'sync', manual: true, ver: '0.1.5', req: id })));
+    assert.equal(hs.filter((r) => r.code === 200).length, 1, JSON.stringify(hs.map((r) => r.body)));
+    assert.equal(hs.filter((r) => r.body.reason === 'req-gone').length, 1);
+    assert.equal(await runsOf(id), 1, 'ריצה אחת לבקשה');
+    const h = hs.find((r) => r.code === 200).body;
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
+  });
+
+  it('poll עם wait (ריצה שממתינה לניסיון חוזר) נרשם על הבקשה ומוצג ב-info; wait לא תקין נדחה', async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null, lr: null }, { merge: true });
+    const r = await ok('cxBotTok', MGR, { op: 'now' });
+    const w = Date.now() + 240e3;
+    assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.5', wait: 'x' })).body.reason, 'bad-field');
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5', wait: w })).want, true);
+    assert.equal((await dev()).req.wait, w);
+    assert.equal((await dev()).req.id, r.req.id, 'שאר שדות הבקשה נשמרו');
+    assert.equal((await ok('cxBotTok', MGR, { op: 'info' })).req.wait, w);
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null }, { merge: true });
+  });
 });
 
 describe('רובוט כספית – cxBotWatch', () => {

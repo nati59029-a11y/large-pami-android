@@ -121,7 +121,7 @@ async function cxBotTok(w, input) {
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120) } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
-      req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
+      req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
@@ -367,9 +367,13 @@ async function handle(req, res, opts) {
   const ver = str(b.ver, 20);
   // poll (כל דקה): פטור מהמונה היומי – אסימון ועסק כבר נבדקו למעלה, ובלי קריאות נוספות למסד (חוץ מכתיבת pl פעם ב-5 דקות)
   if (op === 'poll') {
-    if (Object.keys(b).some((k) => !['op', 'ver', 'log'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
+    if (Object.keys(b).some((k) => !['op', 'ver', 'log', 'wait'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
+    if (b.wait !== undefined && !(Number.isInteger(b.wait) && b.wait > 0 && b.wait < now + 24 * 3600e3)) return no(400, 'bad-field', 'שדה לא תקין');
     const q = v.dev.req, pl = v.dev.pl || 0;
-    if (!(pl && now - pl < PL_MS && now >= pl)) await priv(v.bizId, 'cxbot').set(Object.assign({ pl: now }, ver ? { ver } : {}), { merge: true });
+    const up = !(pl && now - pl < PL_MS && now >= pl) ? Object.assign({ pl: now }, ver ? { ver } : {}) : {};
+    // המחשב באמצע ריצה שממתינה לניסיון חוזר (wait = מתי): נרשם על הבקשה, כדי שהטלפון יציג "ינסה שוב ב-HH:MM" ולא "לא הגיב"
+    if (reqLive(q, now) && b.wait && q.wait !== b.wait) up.req = { wait: b.wait };
+    if (Object.keys(up).length) await priv(v.bizId, 'cxbot').set(up, { merge: true });
     return send(200, reqLive(q, now) ? { ok: true, want: true, id: q.id } : { ok: true, want: false });
   }
   const lim = { calls: o.calls || CALLS_DAY, runs: o.runs || RUNS_DAY };
