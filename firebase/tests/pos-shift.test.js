@@ -38,7 +38,7 @@ async function seed() {
     b.set(d.doc('superadmins/' + SUPER), {});
     const biz = (id, f) => b.set(d.doc('b/' + id), { name: id, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: f });
     biz(A, { pos: true }); biz(OFF, { orders: true });
-    b.set(d.doc(`b/${A}/admins/${MGR}`), { email: 'm@x.invalid' });
+    b.set(d.doc(`b/${A}/admins/${MGR}`), { email: 'm@x.invalid', perms: { pos: true, posMgr: true } }); // 18.11.2026: מנהל בקופה רק עם המתג (מנהל־על)
     b.set(d.doc(`b/${A}/staff/${MGR}`), { name: 'מנהל', role: 'manager', active: true, pushTokens: [TOK] });
     b.set(d.doc(`b/${A}/staff/${CASH}`), { name: 'קופאית', role: 'employee', active: true, perms: W({ pos: true }) });
     b.set(d.doc(`b/${A}/staff/${CASH2}`), { name: 'קופאי', role: 'employee', active: true, perms: W({ pos: true }) });

@@ -11,7 +11,7 @@ if(typeof ACT==='undefined'||typeof V==='undefined')return;
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const on=()=>{try{return bzF('pos')&&bzB()&&!SY.mg}catch(e){return false}};
 const mgr=()=>isA()||!!(SY&&SY.sa);
-const seller=()=>{try{if(mgr())return true;if(!isW())return false;const p=SY.perms;return !!(p&&typeof p==='object'&&(p.pos===true||p.posMgr===true))}catch(e){return false}};
+/* 18.11.2026: גם מנהל רק עם pos / posMgr שמנהל־על הדליק (wp, SY.pp). ניהול קופה (mgr) – כמו היום */const seller=()=>{try{if(SY&&SY.sa)return true;if(!isW()&&!isA())return false;return wp('pos')||wp('posMgr')}catch(e){return false}};
 const P={cfg:null,devs:null,err:'',busy:0};
 const ld={};
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');

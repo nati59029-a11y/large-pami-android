@@ -6,11 +6,13 @@ process.env.FUNCTIONS_EMULATOR = 'true';
 
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { assertFails } = require('@firebase/rules-unit-testing');
+const { assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
 const A = 'biz-pos';
 const SUPER = 'pos_super', MGR = 'pos_mgr', CASH = 'pos_cash', LEAD = 'pos_lead';
+// 18.11.2026 (הכרעת בעל העסק): מנהל בקופה רק עם המתג שמנהל־על הדליק (admins/{uid}.perms). MGR – מנהל עם pos + posMgr; MGR0 – מנהל בלי קופה
+const MGR0 = 'pos_mgr0';
 const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false };
 const W = (o) => Object.assign({}, NONE, o);
 const INST1 = 'inst_aaaaaaaaaaaaaaaa', INST2 = 'inst_bbbbbbbbbbbbbbbb';
@@ -42,11 +44,12 @@ async function seed() {
     const b = d.batch();
     b.set(d.doc('superadmins/' + SUPER), {});
     b.set(d.doc('b/' + A), { name: A, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: { orders: true, pos: true } });
-    b.set(d.doc(`b/${A}/admins/${MGR}`), { email: 'm@x.invalid' });
+    b.set(d.doc(`b/${A}/admins/${MGR}`), { email: 'm@x.invalid', perms: { pos: true, posMgr: true } });
     b.set(d.doc(`b/${A}/staff/${MGR}`), { name: 'מנהל', role: 'manager', active: true });
+    b.set(d.doc(`b/${A}/admins/${MGR0}`), { email: 'm0@x.invalid' });
     b.set(d.doc(`b/${A}/staff/${CASH}`), { name: 'קופאית', role: 'employee', active: true, perms: W({ pos: true }) });
     b.set(d.doc(`b/${A}/staff/${LEAD}`), { name: 'אחראי', role: 'employee', active: true, perms: W({ posMgr: true }) });
-    for (const [u, role] of [[MGR, 'admin'], [CASH, 'worker'], [LEAD, 'worker']]) b.set(d.doc('users/' + u), { bizId: A, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
+    for (const [u, role] of [[MGR, 'admin'], [MGR0, 'admin'], [CASH, 'worker'], [LEAD, 'worker']]) b.set(d.doc('users/' + u), { bizId: A, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
     b.set(d.doc(P('poscfg/main')), { type: 'general', v: {} });
     for (const [k, inst] of [['K1', INST1], ['K2', INST2]]) b.set(d.doc(P('posdev/' + k)), { name: 'קופה ' + k, code: k, br: 'b1', on: true, st: 'active', inst, lastSeq: 0, at: 1, appr: { by: 'seed', at: 1 } }); // appr – POS:W2: devApprove (ש7) דלוק כברירת מחדל
     b.set(d.doc(P('prod/p1')), { name: 'מטען', price: 49.9, q: { b1: 5 }, cat: 'c1' });
@@ -756,5 +759,98 @@ describe('POS:W2 – החזרה מהקופה (pos-data.returnSrv → posReturn) 
     const bad = devGross(false);
     assert.equal(bad, 9980);
     assert.equal(R(await call('posSale', CASH, sale({ lines: [L({ qty: 2 })], gross: bad, pays: [{ m: 'cash', amt: bad }] }))), 'bad-total');
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// 18.11.2026 – הכרעת בעל העסק: רק מנהל־על מחליט מי מקבל קופה, כולל מנהלים. שאר ההרשאות של מנהל לא השתנו.
+describe('קופה למנהל – רק לפי המתג שמנהל־על הדליק (pos / posMgr)', () => {
+  const AG = require('../functions/lib/pos-agg');
+  const core = (f) => require('../functions/' + f)._core;
+  const wrapCall = async (fn, uid, data) => { try { return { ok: true, r: await fn(req(uid, data)) }; } catch (e) { return { ok: false, reason: e.details && e.details.reason, msg: e.message }; } };
+  const auth = (uid, data) => wrapCall(core('pos-auth.js').call(), uid, data);
+  const cashF = (uid, data) => wrapCall(core('pos-cash.js').call(), uid, data);
+  const bizF = (fn, uid, data) => wrapCall(core('business.js')[fn], uid, data);
+  const pin = async (u, p) => { const h = AG.pinHash(p); await set('pospin/' + u, { h: h.h, s: h.s, fails: 0, lockUntil: 0, upd: 1 }); };
+  beforeEach(seed);
+
+  it('מנהל בלי pos: לא מוכר ולא פותח את הקופה (מכירה, כניסה בקוד, פתיחת משמרת, עגלה מושהית) – בשרת', async () => {
+    assert.equal(R(await call('posSale', MGR0, sale())), 'not-pos');
+    assert.equal(R(await call('posPark', MGR0, { op: 'list', dev: 'K1' })), 'not-pos');
+    await pin(MGR0, '7391');
+    assert.equal(R(await auth(MGR0, { op: 'verify', pin: '7391' })), 'not-pos');
+    assert.equal(R(await cashF(MGR0, { op: 'open', dev: 'K1', inst: INST1 })), 'not-pos');
+    assert.equal((await all('possale')).length, 0);
+    // קופאי לא יכול לבחור את המנהל בלי הקופה כמי שנכנס / מאשר
+    assert.equal(R(await auth(CASH, { op: 'verify', uid: MGR0, pin: '7391' })), 'no-user');
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'void', by: MGR0, pin: '7391' })), 'no-user');
+    const l = await auth(CASH, { op: 'leads' });
+    assert.ok(!l.r.staff.some((x) => x.uid === MGR0));
+  });
+
+  it('שאר ההרשאות של מנהל בלי pos לא השתנו: ניהול מבצעים, קוד אישי, וקריאת מכירות במסך הניהול', async () => {
+    assert.equal(R(await call('posPromo', MGR0, { op: 'set', p: { n: '1+1', type: 'bxgy', buy: ['p1'], get: ['p1'], on: true, from: '2026-11-01', to: '2026-12-31' } })), 'ok');
+    assert.equal(R(await auth(MGR0, { op: 'set', pin: '2580' })), 'ok');
+    const s = await sell(CASH);
+    await assertSucceeds(fsu(MGR0).doc(P('possale/' + s.id)).get());
+    await assertSucceeds(fsu(MGR0).collection(P('posdev')).get());
+    await assertSucceeds(fsu(MGR0).collection(P('promo')).get());
+  });
+
+  it('כללים: מנהל בלי pos לא קורא עגלות מושהות של הקופה; מנהל עם posMgr – כן; מנהל עם pos בלבד – רק את שלו', async () => {
+    assert.equal(R(await call('posPark', CASH, { op: 'save', dev: 'K1', id: 'park0001', name: 'עגלה', lines: [L()] })), 'ok');
+    const pk = (await all('pospark'))[0]._id;
+    await assertFails(fsu(MGR0).doc(P('pospark/' + pk)).get());
+    await assertSucceeds(fsu(MGR).doc(P('pospark/' + pk)).get());
+    await set(`admins/${MGR0}`, { perms: { pos: true, posMgr: false } }, true);
+    await assertFails(fsu(MGR0).doc(P('pospark/' + pk)).get());
+    assert.equal(R(await call('posPark', MGR0, { op: 'save', dev: 'K1', id: 'park0002', name: 'שלי', lines: [L()] })), 'ok');
+    const mine = (await all('pospark', ['cashier', MGR0]))[0]._id;
+    await assertSucceeds(fsu(MGR0).doc(P('pospark/' + mine)).get());
+  });
+
+  it('מנהל עם pos (שמנהל־על הדליק) מוכר; אישור "מנהל" בקופה דורש גם posMgr', async () => {
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, perms: { pos: true } })), 'ok');
+    assert.deepEqual((await get(`admins/${MGR0}`)).perms, { pos: true, posMgr: false });
+    const s = await sell(MGR0);
+    assert.equal((await get('possale/' + s.id)).cashier, MGR0);
+    await pin(MGR0, '7391');
+    assert.equal((await auth(MGR0, { op: 'verify', pin: '7391' })).r.role, 'cashier');
+    // pos בלבד: לא מאשר כמנהל, וגם לא כאחראי
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'void', by: MGR0, pin: '7391' })), 'need-lead');
+    assert.equal(R(await auth(CASH, { op: 'approve', act: 'disc', pct: 40, by: MGR0, pin: '7391', need: 'manager' })), 'need-manager');
+    // posMgr דלוק = מנהל בקופה, כולל אישור "מנהל"
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, perms: { posMgr: true } })), 'ok');
+    assert.deepEqual((await get(`admins/${MGR0}`)).perms, { pos: true, posMgr: true });
+    const ok = await auth(CASH, { op: 'approve', act: 'disc', pct: 40, by: MGR0, pin: '7391', need: 'manager' });
+    assert.equal(R(ok), 'ok', ok.msg); assert.equal(ok.r.role, 'manager');
+  });
+
+  it('רק מנהל־על מדליק קופה: מנהל עסק לא מדליק pos לעצמו או לעובד; אין קיצור דרך מהאפליקציה', async () => {
+    for (const uid of [MGR0, CASH, LEAD]) {
+      assert.equal(R(await bizF('setStaffPerms', MGR, { bizId: A, uid, perms: { pos: true } })), 'not-superadmin');
+      assert.equal(R(await bizF('setStaffPerms', MGR0, { bizId: A, uid, perms: { pos: true, posMgr: true } })), 'not-superadmin');
+    }
+    assert.equal((await get(`admins/${MGR0}`)).perms, undefined);
+    // כתיבה ישירה למסמכי admins / staff – נחסמת בחוקים
+    await assertFails(fsu(MGR0).doc(P('admins/' + MGR0)).set({ perms: { pos: true } }, { merge: true }));
+    await assertFails(fsu(MGR).doc(P('staff/' + CASH)).set({ perms: { pos: true } }, { merge: true }));
+    // רשימת המנהלים (מסך העובדים) – רק מנהל־על
+    await assertFails(fsu(MGR).collection(P('admins')).get());
+    await assertSucceeds(fsu(SUPER).collection(P('admins')).get());
+    // מנהל־על: רק pos / posMgr למנהל; הרשאה אחרת למנהל – is-admin, ולא השתנה כלום
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, perms: { sal: true } })), 'is-admin');
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, perms: { pos: 'yes' } })), 'is-admin');
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, rank: 'x', perms: { pos: true } })), 'is-admin');
+    assert.equal((await get(`admins/${MGR0}`)).perms, undefined);
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, perms: { pos: true, posMgr: false } })), 'ok');
+    assert.equal(R(await call('posSale', MGR0, sale())), 'ok');
+    // כיבוי – שוב אין קופה
+    assert.equal(R(await bizF('setStaffPerms', SUPER, { bizId: A, uid: MGR0, perms: { pos: false } })), 'ok');
+    assert.equal(R(await call('posSale', MGR0, sale())), 'not-pos');
+  });
+
+  it('מנהל־על שנכנס לעסק – כמו היום: מוכר ומאשר כמנהל בלי מתג', async () => {
+    assert.equal(R(await call('posSale', SUPER, Object.assign(sale(), { bizId: A }))), 'ok');
   });
 });

@@ -17,7 +17,21 @@ describe('pos – מתג עסק והרשאות', () => {
       assert.equal(R.DEFAULT_PERMS[k], false);
       assert.equal(R.hasPerm({ role: 'employee', staff: { get: () => undefined } }, k), false);
       assert.equal(R.hasPerm({ role: 'employee', staff: { get: () => ({ [k]: true }) } }, k), true);
-      assert.equal(R.hasPerm({ role: 'manager' }, k), true);
+      // 18.11.2026 (הכרעת בעל העסק): מנהל – רק עם המתג ב-admins/{uid}.perms (מנהל־על מדליק). מנהל־על – הכול
+      assert.equal(R.hasPerm({ role: 'manager' }, k), false);
+      assert.equal(R.hasPerm({ role: 'manager', admin: { get: () => undefined } }, k), false);
+      assert.equal(R.hasPerm({ role: 'manager', admin: { get: () => ({ [k]: false }) } }, k), false);
+      assert.equal(R.hasPerm({ role: 'manager', admin: { get: () => ({ [k]: true }) } }, k), true);
+      assert.equal(R.hasPerm({ role: 'manager', superadmin: true }, k), true);
+      // perms של staff לא נותנים קופה למנהל (רק admins/{uid}.perms)
+      assert.equal(R.hasPerm({ role: 'manager', staff: { get: () => ({ [k]: true }) } }, k), false);
+    }
+  });
+  it('18.11.2026: שאר ההרשאות של מנהל לא השתנו – כל מתג שאינו קופה = כן, גם בלי perms', () => {
+    assert.deepEqual([...R.SA_ONLY].sort(), ['pos', 'posMgr']);
+    for (const k of R.PERM_KEYS.filter((x) => !R.SA_ONLY.includes(x))) {
+      assert.equal(R.hasPerm({ role: 'manager' }, k), true, k);
+      assert.equal(R.hasPerm({ role: 'manager', admin: { get: () => ({ pos: false }) } }, k), true, k);
     }
   });
 });

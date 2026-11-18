@@ -102,7 +102,8 @@ const CODE_RE = /^[0-9]{12}$/;
 const CPN_RE = /^[A-Za-z0-9_-]{3,40}$/;
 const DAY = 86400000;
 
-const roleOf = (who) => (who.role === 'manager' ? 'mgr' : hasPerm(who, 'posMgr') ? 'lead' : 'cashier');
+// 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm). מנהל עם posMgr = 'mgr', מנהל עם pos בלבד = 'cashier'. פעולות ניהול (o.mgr) – כל מנהל, כמו היום.
+const roleOf = (who) => (hasPerm(who, 'posMgr') ? (who.role === 'manager' ? 'mgr' : 'lead') : 'cashier');
 const RANK = { cashier: 0, lead: 1, mgr: 2 };
 const atLeast = (who, r) => RANK[roleOf(who)] >= RANK[r];
 async function gate(request, o) {
@@ -110,7 +111,7 @@ async function gate(request, o) {
   if (!who.prefix) throw pre('legacy', 'הקופה זמינה רק אחרי מעבר העסק למבנה החדש');
   if (!who.superadmin) T.requireFeature(who.biz, 'pos');
   if (o && o.mgr && who.role !== 'manager') throw deny('not-manager', 'הפעולה זמינה למנהל בלבד');
-  if (!(who.role === 'manager' || hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה');
+  if (!(o && o.mgr) && !(hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה');
   return { who, db: T.tdb() };
 }
 const keysOk = (o, ks) => { for (const k of Object.keys(o)) if (!ks.includes(k)) throw bad('bad-input', 'קלט לא תקין: ' + String(k).slice(0, 20)); };

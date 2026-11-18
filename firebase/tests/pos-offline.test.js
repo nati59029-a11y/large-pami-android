@@ -28,7 +28,7 @@ before(async () => {
     const b = d.batch();
     b.set(d.doc('superadmins/' + SUPER), {});
     b.set(d.doc('b/' + A), { name: A, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: { pos: true, orders: true } });
-    b.set(d.doc(`b/${A}/admins/${MGR}`), { email: 'm@x.invalid' });
+    b.set(d.doc(`b/${A}/admins/${MGR}`), { email: 'm@x.invalid', perms: { pos: true, posMgr: true } }); // 18.11.2026: מנהל בקופה רק עם המתג (מנהל־על)
     b.set(d.doc(`b/${A}/staff/${MGR}`), { name: 'מנהל', role: 'manager', active: true });
     b.set(d.doc('users/' + MGR), { bizId: A, role: 'admin', active: true, bizStatus: 'active', email: MGR + '@x.invalid', createdAt: 1 });
     CASH.forEach((u, i) => {

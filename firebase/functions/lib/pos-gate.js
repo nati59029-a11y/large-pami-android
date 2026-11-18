@@ -1,7 +1,7 @@
 'use strict';
 // קופה (POS), ש5 – עזרים משותפים לפונקציות המשמרת (pos-auth / pos-cash / pos-z / pos-clock): שער הרשאות, שגיאות, טרנזקציה, אימות PIN, התראה למנהל.
 // אותם כללים כמו pos.js (שלב 0): רק עסק b/{bizId}, התוספת 'pos' דלוקה, וכל כתיבה מהשרת בלבד.
-// תפקיד בקופה (roleOf): 'manager' (מנהל / מנהל־על = "בעלים"), 'lead' (posMgr – אחראי משמרת), 'cashier' (pos), או null.
+// תפקיד בקופה (roleOf): 'manager' (מנהל עם posMgr / מנהל־על = "בעלים"), 'lead' (posMgr – אחראי משמרת), 'cashier' (pos), או null.
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
@@ -19,20 +19,22 @@ const UID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 // שגיאה מ-pos-agg (e.reason) → HttpsError
 const aggErr = (e) => (e && e.reason && !(e instanceof HttpsError) ? bad(e.reason, e.message) : e);
 
+// 18.11.2026 (הכרעת בעל העסק): מנהל עסק בקופה רק לפי המתגים שמנהל־על הדליק לו (admins/{uid}.perms, hasPerm):
+// posMgr = 'manager' (גם אישור "מנהל"), pos בלבד = 'cashier', בלי שניהם = לא בקופה. מנהל־על = 'manager', כמו היום.
 function roleOf(who) {
-  if (who.role === 'manager') return 'manager';
-  if (hasPerm(who, 'posMgr')) return 'lead';
+  if (who.role === 'manager' && hasPerm(who, 'posMgr')) return 'manager';
+  if (who.role !== 'manager' && hasPerm(who, 'posMgr')) return 'lead';
   if (hasPerm(who, 'pos')) return 'cashier';
   return null;
 }
-// o.sell – כל מי שבקופה; o.lead – אחראי משמרת או מנהל; o.mgr – מנהל בלבד
+// o.sell – כל מי שבקופה; o.lead – אחראי משמרת או מנהל; o.mgr – מנהל בלבד (פעולות ניהול – כל מנהל, גם בלי מתג קופה, כמו היום)
 async function gate(request, o) {
   const who = await requireStaff(request);
   if (!who.prefix) throw pre('legacy', 'הקופה זמינה רק אחרי מעבר העסק למבנה החדש');
   if (!who.superadmin) T.requireFeature(who.biz, 'pos');
   const role = roleOf(who);
-  if (o && o.mgr && role !== 'manager') throw deny('not-manager', 'הפעולה זמינה למנהל בלבד');
-  if (o && o.lead && role !== 'manager' && role !== 'lead') throw deny('not-lead', 'הפעולה זמינה לאחראי משמרת או למנהל');
+  if (o && o.mgr && who.role !== 'manager') throw deny('not-manager', 'הפעולה זמינה למנהל בלבד');
+  if (o && o.lead && who.role !== 'manager' && role !== 'lead') throw deny('not-lead', 'הפעולה זמינה לאחראי משמרת או למנהל');
   if (o && o.sell && !role) throw deny('not-pos', 'אין לך הרשאת קופה');
   return { who, role, db: T.tdb() };
 }
@@ -48,10 +50,10 @@ async function runTx(db, fn) {
   }
 }
 
-// תפקיד של עובד אחר (לפי uid): מנהל = admins/{uid}; אחרת staff/{uid} פעיל עם perms
+// תפקיד של עובד אחר (לפי uid): מנהל = admins/{uid} (בקופה רק לפי המתגים שלו – roleOf); אחרת staff/{uid} פעיל עם perms
 async function roleOfUid(db, uid) {
   const [a, s] = await Promise.all([db.doc('admins/' + uid).get(), db.doc('staff/' + uid).get()]);
-  if (a.exists) return { role: 'manager', name: (s.exists && s.get('name')) || a.get('name') || a.get('email') || '' };
+  if (a.exists) return { role: roleOf({ role: 'manager', admin: a }), name: (s.exists && s.get('name')) || a.get('name') || a.get('email') || '' };
   if (!s.exists || s.get('active') !== true) return { role: null, name: '' };
   return { role: roleOf({ role: 'employee', staff: s }), name: s.get('name') || '', br: s.get('br') };
 }

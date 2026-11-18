@@ -47,7 +47,7 @@ async function gate(request, o) {
   const mgr = who.role === 'manager';
   if (o.mgr && !mgr) throw deny('not-manager', 'הפעולה זמינה למנהל בלבד');
   if (o.lead && !(mgr || hasPerm(who, 'posMgr'))) throw deny('not-lead', 'הפעולה זמינה לאחראי משמרת ולמנהל');
-  if (o.sell && !(mgr || hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה');
+  if (o.sell && !(hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה'); // 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm).
   return { who, db: T.tdb() };
 }
 const only = (o, keys) => { for (const k of Object.keys(o)) if (!keys.includes(k)) throw bad('bad-field', 'שדה לא מוכר: ' + String(k).slice(0, 30)); };

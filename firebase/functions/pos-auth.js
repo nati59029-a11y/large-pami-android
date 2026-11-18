@@ -49,22 +49,30 @@ async function staffOf(db) {
   const [st, ad, pins] = await Promise.all([db.collection('staff').limit(500).get(), db.collection('admins').limit(100).get(), db.collection('pospin').limit(600).get()]);
   const pm = new Map(pins.docs.map((d) => [d.id, d.data()]));
   const now = Date.now();
-  const adm = new Set(ad.docs.map((d) => d.id));
+  const adm = new Map(ad.docs.map((d) => [d.id, d])); // 18.11.2026: מנהל בקופה רק לפי admins/{uid}.perms (pos / posMgr, מנהל־על מדליק)
   const out = [];
   for (const d of st.docs) {
     if (d.get('active') !== true) continue;
-    const role = adm.has(d.id) ? 'manager' : G.roleOf({ role: 'employee', staff: d });
+    const role = adm.has(d.id) ? G.roleOf({ role: 'manager', admin: adm.get(d.id) }) : G.roleOf({ role: 'employee', staff: d });
     if (!role) continue;
     const p = pm.get(d.id), ls = AG.lockState(p, now);
     out.push({ uid: d.id, name: d.get('name') || '', role, hasPin: !!(p && p.h), locked: ls.locked, wait: ls.wait });
   }
-  for (const u of adm) if (!out.some((x) => x.uid === u)) { const p = pm.get(u), ls = AG.lockState(p, now); out.push({ uid: u, name: '', role: 'manager', hasPin: !!(p && p.h), locked: ls.locked, wait: ls.wait }); }
+  for (const [u, a] of adm) {
+    if (out.some((x) => x.uid === u)) continue;
+    const role = G.roleOf({ role: 'manager', admin: a });
+    if (!role) continue;
+    const p = pm.get(u), ls = AG.lockState(p, now);
+    out.push({ uid: u, name: '', role, hasPin: !!(p && p.h), locked: ls.locked, wait: ls.wait });
+  }
   out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'he'));
   return out;
 }
 
 async function setPin(request, input) {
-  const { who, db } = await G.gate(request, { sell: true });
+  // 18.11.2026: כל מנהל קובע לעצמו קוד גם בלי מתג קופה (קוד הבעלים משמש גם לאישור שינויי הגדרות – pos-pin.verifyOwner); עובד – רק עם pos / posMgr
+  const { who, db, role } = await G.gate(request, {});
+  if (!role && who.role !== 'manager') throw G.deny('not-pos', 'אין לך הרשאת קופה');
   try { AG.pinCheckNew(input.pin); } catch (e) { throw G.aggErr(e); }
   const now = Date.now();
   let r = null;
@@ -86,8 +94,8 @@ async function setPin(request, input) {
 
 // איפוס – רק לבעלים: מנהל העסק (admins) או מנהל־על. אחראי משמרת – לא.
 async function reset(request, input) {
-  const { who, db, role } = await G.gate(request, {});
-  if (role !== 'manager') throw G.deny('not-owner', 'איפוס קוד – רק לבעלים');
+  const { who, db } = await G.gate(request, {});
+  if (who.role !== 'manager') throw G.deny('not-owner', 'איפוס קוד – רק לבעלים');
   if (typeof input.uid !== 'string' || !G.UID_RE.test(input.uid)) throw G.bad('bad-input', 'עובד לא תקין');
   const now = Date.now();
   await G.runTx(db, async (tx) => {

@@ -36,7 +36,8 @@ const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason
 const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason });
 const nf = (reason, msg) => new HttpsError('not-found', msg, { reason });
 const str = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
-const isSeller = (who) => who.role === 'manager' || hasPerm(who, 'pos') || hasPerm(who, 'posMgr');
+// 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm). 
+const isSeller = (who) => hasPerm(who, 'pos') || hasPerm(who, 'posMgr');
 // יומן התקלות טכני בלבד: מיילים ורצף ספרות ארוך (טלפון, כרטיס, ת"ז) נמחקים גם אם הגיעו מהמכשיר
 const scrub = (v) => String(v == null ? '' : v).replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[mail]').replace(/\d[\d\s-]{6,}\d/g, '[num]');
 

@@ -2,7 +2,8 @@
 // קופה שלב 0 (17.11.2026): pos-base.js בדפדפן, רשת מדומה. בדיקה 6 בתוכנית – מתג כבוי = אין שינוי במסכים קיימים:
 //   כבוי (עסק b) ועסק legacy (לארג' פעמי בשורש, גם כשהמתג "דלוק" במסמך): אין אריח, מסך "הוספה" זהה לגמרי למסך בלי pos-base.js,
 //   V.pos / V.posAdm לא נפתחים, אין שום קריאה לפונקציות pos* ולאוספי pos*.
-//   דלוק: מנהל – "קופה" + "ניהול קופה"; עובד עם pos – "קופה" בלבד; עובד בלי pos – כלום. מסך הניהול מציג הגדרות לפי posCfg.
+//   דלוק: מנהל עם pos (מנהל־על הדליק, 18.11.2026) – "קופה" + "ניהול קופה"; מנהל בלי pos – "ניהול קופה" בלבד; עובד עם pos – "קופה" בלבד;
+//   עובד בלי pos – כלום. מסך הניהול מציג הגדרות לפי posCfg.
 //   מתגי pos / posMgr ב-PMK ו-pos ב-ADM_FT. אין שגיאות JS. שימוש: node ui-pos.js <www-dir> [out.json]
 const fs = require('fs'); const H = require('./harness');
 let fail = 0; const res = [];
@@ -38,7 +39,7 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
 (async () => {
   const [www, out] = process.argv.slice(2);
   const browser = await H.launch();
-  const cB = (feat) => ({ mode: 'new', users: { m: 'biz-p', w: 'biz-p', wn: 'biz-p' }, biz: { 'biz-p': { dataRoot: 'b', features: feat, name: 'עסק קופה' } }, admins: { 'b/biz-p/|m': 1 }, staff: { 'b/biz-p/|w': 1, 'b/biz-p/|wn': 1 } });
+  const cB = (feat, adm) => ({ mode: 'new', users: { m: 'biz-p', w: 'biz-p', wn: 'biz-p' }, biz: { 'biz-p': { dataRoot: 'b', features: feat, name: 'עסק קופה' } }, admins: { 'b/biz-p/|m': adm || { perms: { pos: true, posMgr: true } } }, staff: { 'b/biz-p/|w': 1, 'b/biz-p/|wn': 1 } });
   const BZ0 = ['larg', 'peami'].join('');
 
   // ---- 1. מתג כבוי, עסק b, מנהל ----
@@ -89,6 +90,16 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
   check('3ו בלי גלישה ב-360px', o.sw <= o.W, o);
   check('3ז אין שגיאות JS', !A.errs.length, A.errs);
   await A.ctx.close();
+
+  // ---- 3ח. 18.11.2026 (הכרעת בעל העסק): מנהל בלי מתג קופה – "ניהול קופה" כמו היום, בלי "קופה" ובלי מסך המכירה ----
+  for (const [nm, adm] of [['בלי perms', 1], ['pos כבוי', { perms: { pos: false, posMgr: false } }]]) {
+    A = await open(browser, www, cB({ tasks: true, orders: true, pos: true }, adm), 'm@x.co');
+    s = await sheetHtml(A.page);
+    v = await A.page.evaluate(() => ({ pos: V.pos().h, adm: V.posAdm().h, wp: [wp('pos'), wp('posMgr'), wp('sal'), wp('rep')], more: V.more().h }));
+    check('3ח מנהל ' + nm + ': "ניהול קופה" בלי "קופה"; מסך הקופה לא נפתח; שאר ההרשאות – כן', /data-v="posAdm"/.test(s.a) && !/data-v="pos"/.test(s.a) && /לא פעילה/.test(v.pos) && !/לא פעילה/.test(v.adm) && !/data-v="pos"/.test(v.more) && JSON.stringify(v.wp) === '[false,false,true,true]', { tile: s.tile, wp: v.wp });
+    check('3ט מנהל ' + nm + ': אין שגיאות JS', !A.errs.length, A.errs);
+    await A.ctx.close();
+  }
 
   // ---- 4. עובד עם pos / בלי ----
   A = await open(browser, www, cB({ tasks: true, orders: true, pos: true }), 'w@x.co', Object.assign({}, W0, { pos: true }));

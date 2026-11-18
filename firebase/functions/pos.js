@@ -63,8 +63,9 @@ const nf = (reason, msg) => new HttpsError('not-found', msg, { reason });
 const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const BR_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
-// הרשאות: who.role 'manager' (כולל מנהל־על) = הכול. עובד: pos (קופאי) או posMgr (אחראי משמרת).
-const isSeller = (who) => who.role === 'manager' || hasPerm(who, 'pos') || hasPerm(who, 'posMgr');
+// הרשאות: פעולות ניהול – מנהל (כולל מנהל־על). מכירה: pos (קופאי) או posMgr (אחראי משמרת).
+// 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm). 
+const isSeller = (who) => hasPerm(who, 'pos') || hasPerm(who, 'posMgr');
 
 async function gate(request, o) {
   const who = await requireStaff(request);
@@ -72,7 +73,7 @@ async function gate(request, o) {
   if (!who.superadmin) T.requireFeature(who.biz, 'pos');
   if (o && o.sup && !who.superadmin) throw deny('not-superadmin', 'הפעולה זמינה למנהל־על בלבד');
   if (o && o.mgr && who.role !== 'manager') throw deny('not-manager', 'הפעולה זמינה למנהל בלבד');
-  if (o && o.sell && !isSeller(who)) throw deny('not-pos', 'אין לך הרשאת קופה');
+  if (o && o.sell && !isSeller(who) && !(o.mgrOk && who.role === 'manager')) throw deny('not-pos', 'אין לך הרשאת קופה');
   return { who, db: T.tdb() };
 }
 const cfgErr = (e) => (e && e.reason ? (e.reason === 'not-allowed' ? deny(e.reason, e.message) : bad(e.reason, e.message)) : e);
@@ -81,7 +82,7 @@ const cfgErr = (e) => (e && e.reason ? (e.reason === 'not-allowed' ? deny(e.reas
 async function cfgDoc(db) { const s = await db.doc('poscfg/main').get(); return s.exists ? s.data() : null; }
 async function cfgGet(request) {
   inputObject(request);
-  const { who, db } = await gate(request, { sell: true });
+  const { who, db } = await gate(request, { sell: true, mgrOk: true }); // ההגדרות – גם למסך ניהול הקופה (כל מנהל)
   const e = CF.eff(await cfgDoc(db));
   return Object.assign({ ok: true }, e, CF.describe(), { who: who.superadmin ? 'sa' : who.role === 'manager' ? 'mgr' : 'staff' });
 }

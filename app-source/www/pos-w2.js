@@ -49,7 +49,7 @@ const fn=(n,d)=>{d=d&&typeof d==='object'?d:{};const s=gSY();if(s&&s.sa&&s.bizId
 const rid=()=>{const a=new Uint8Array(9);try{root.crypto.getRandomValues(a)}catch(e){for(let i=0;i<9;i++)a[i]=Math.floor(Math.random()*256)}return'w'+Date.now().toString(36)+Array.from(a,b=>b.toString(16).padStart(2,'0')).join('')};
 
 /* ---------- תפקיד ומשמרת (ש1 צריך cashier.role ו-cashier.no) ---------- */
-function myRole(){const s=gSY();try{if(s&&(s.sa||(s.role==='admin'&&s.refresh)))return'mgr';if(s&&s.perms&&s.perms.posMgr===true)return'lead'}catch(e){}return'cashier'}
+function myRole(){const s=gSY();try{if(s&&s.sa)return'mgr';if(s&&s.role==='admin'&&s.refresh)return s.pp&&s.pp.posMgr===true?'mgr':'cashier';if(s&&s.perms&&s.perms.posMgr===true)return'lead'}catch(e){}return'cashier'} /* 18.11.2026: מנהל = 'mgr' רק עם posMgr (SY.pp) */
 const getSession0=PD.getSession;
 PD.getSession=async function(){const r=await getSession0.apply(null,arguments);r.cashier=Object.assign({},r.cashier,{role:myRole()});if(r.cashier.no==null)r.cashier.no=r.cashier.name||'';
  try{const sh=root.PosShift&&root.PosShift.shift();if(sh){const m=/S0*([0-9]+)$/.exec(sh);r.shift=Object.assign({},r.shift,{id:sh,no:m?+m[1]:r.shift.no})}}catch(e){}

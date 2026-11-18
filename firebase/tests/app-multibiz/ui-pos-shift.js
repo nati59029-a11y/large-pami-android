@@ -58,7 +58,7 @@ const text = (page) => page.evaluate(() => document.getElementById('main').inner
 (async () => {
   const [www, out] = process.argv.slice(2);
   const browser = await H.launch();
-  const cB = (feat) => ({ mode: 'new', users: { m: 'biz-p', w: 'biz-p', wn: 'biz-p' }, biz: { 'biz-p': { dataRoot: 'b', features: feat, name: 'עסק קופה' } }, admins: { 'b/biz-p/|m': 1 }, staff: { 'b/biz-p/|w': 1, 'b/biz-p/|wn': 1 } });
+  const cB = (feat) => ({ mode: 'new', users: { m: 'biz-p', w: 'biz-p', wn: 'biz-p' }, biz: { 'biz-p': { dataRoot: 'b', features: feat, name: 'עסק קופה' } }, admins: { 'b/biz-p/|m': { perms: { pos: true, posMgr: true } } } /* 18.11.2026: מנהל בקופה רק עם המתג */, staff: { 'b/biz-p/|w': 1, 'b/biz-p/|wn': 1 } });
 
   // ---- 1. כבוי ----
   let A = await open(browser, www, cB({ tasks: true }), 'm@x.co');

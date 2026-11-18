@@ -15,7 +15,7 @@ const on=()=>{try{return bzF('pos')&&bzB()&&!SY.mg}catch(e){return false}};
 const mgr=()=>{try{return isA()||!!(SY&&SY.sa)}catch(e){return false}};
 const pv=k=>{try{const p=SY.perms;return !!(p&&typeof p==='object'&&p[k]===true)}catch(e){return false}};
 const lead=()=>mgr()||(isW()&&pv('posMgr'));
-const seller=()=>{try{return mgr()||(isW()&&(pv('pos')||pv('posMgr')))}catch(e){return false}};
+const seller=()=>{try{if(SY&&SY.sa)return true;if(!isW()&&!isA())return false;return wp('pos')||wp('posMgr')}catch(e){return false}}; // 18.11.2026: גם מנהל רק עם המתג (wp)
 const ls=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);if(v===null)localStorage.removeItem(k);else localStorage.setItem(k,v)}catch(e){return null}};
 function myDev(){try{const o=JSON.parse(ls('lp-pos-dev')||'null');return o&&o.bizId===SY.bizId&&/^K[1-9][0-9]{0,3}$/.test(o.dev||'')?o.dev:''}catch(e){return ''}}
 const inst=()=>ls('lp-pos-inst')||'';
@@ -108,7 +108,7 @@ ACT.pshZv=async el=>{try{const j=await fsx('/posz/'+encodeURIComponent(el.datase
 /* ---------- V.posStaff ---------- */
 const dayStart=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
 async function staffLoad(){if(mgr()){S.staff=(await fnCall('posAuth',{op:'list'})).staff;const to=Date.now(),from=dayStart(to-6*86400000);S.clk=await fnCall('posClock',{op:'list',from,to:to+1})}else{S.staff=[];S.clk=null}}
-V.posStaff=()=>{const T='עובדים וקוד';if(!on()||!seller())return deny(T);
+V.posStaff=()=>{const T='עובדים וקוד';if(!on()||!(seller()||mgr()))return deny(T);
  if(!S.staff){load('st',staffLoad);return loading(T)}
  let h=`<div class="card"><h3 style="margin-top:0">הקוד שלי</h3><form data-f="pshPin"><label class="f"><span>קוד נוכחי (אם כבר יש)</span><input name="old" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>
   <label class="f"><span>קוד חדש (4–6 ספרות)</span><input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" required></label><button class="btn w">שמירת הקוד</button></form>
@@ -128,7 +128,7 @@ ACT.pshFix=async el=>{const t=+el.dataset.in,o=el.dataset.out?+el.dataset.out:nu
  try{await fnCall('posClock',{op:'fix',id:el.dataset.id,out:d.getTime(),note:note.trim()});toast('ההחתמה תוקנה');S.staff=null;rerender()}catch(e){err(e)}};
 
 /* אריחים: "משמרת ומזומן" (כל מי שבקופה) ו"עובדים וקוד" (כל מי שבקופה – הקוד שלו; מנהל – גם הניהול). נוסף אחרי האריחים של pos-base.js */
-{const o=window.posTile;window.posTile=function(){let h=typeof o==='function'?o.apply(this,arguments):'';try{if(on()&&seller())h+=`<button class="tile" data-a="addGo" data-v="posShift" style="font-size:1rem">${ico('swap')}משמרת ומזומן</button><button class="tile" data-a="addGo" data-v="posStaff" style="font-size:1rem">${ico('swap')}עובדים וקוד</button>`}catch(e){}return h}}
+{const o=window.posTile;window.posTile=function(){let h=typeof o==='function'?o.apply(this,arguments):'';try{if(on()&&seller())h+=`<button class="tile" data-a="addGo" data-v="posShift" style="font-size:1rem">${ico('swap')}משמרת ומזומן</button>`;if(on()&&(seller()||mgr()))h+=`<button class="tile" data-a="addGo" data-v="posStaff" style="font-size:1rem">${ico('swap')}עובדים וקוד</button>`/* 18.11.2026: "עובדים וקוד" – ניהול, גם למנהל בלי מתג קופה */}catch(e){}return h}}
 /* במסך הקופה – קיצור למשמרת */
 {const o=V.pos;if(typeof o==='function')V.pos=function(){const r=o.apply(this,arguments);try{if(on()&&seller()&&r&&typeof r.h==='string'&&myDev())r.h+='<div class="card"><button class="btn w" data-a="go" data-v="posShift">משמרת ומזומן</button></div>'}catch(e){}return r}}
 window.addEventListener('lp-biz-change',reset);

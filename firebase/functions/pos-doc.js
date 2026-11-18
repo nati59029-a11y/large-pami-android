@@ -141,7 +141,7 @@ async function docIn(request) {
   const who = await requireStaff(request);
   if (!who.prefix) throw pre('legacy', 'הקופה זמינה רק אחרי מעבר העסק למבנה החדש');
   if (!who.superadmin) T.requireFeature(who.biz, 'pos');
-  if (!(who.role === 'manager' || hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה');
+  if (!(hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה'); // 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm).
   for (const k of Object.keys(input)) if (!['op', 'sale', 'ok', 'ch'].includes(k)) throw bad('bad-input', 'קלט לא תקין');
   if (!['get', 'printed', 'gift', 'send'].includes(input.op)) throw bad('bad-op', 'פעולה לא מוכרת');
   if (typeof input.sale !== 'string' || !SALE_RE.test(input.sale)) throw bad('bad-sale', 'מספר מכירה לא תקין');
