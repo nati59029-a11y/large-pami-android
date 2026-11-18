@@ -605,6 +605,46 @@ service cloud.firestore {
       }
     }
 
+    // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
+    // קריאה וכתיבה – מנהלים בלבד (עובד ומנהל של עסק אחר נחסמים). תמונה: {img, t, uid}, jpeg/png/webp, 100 עד 900,000 תווים,
+    // רק יצירה (בלי דריסה), ורק כשהתבנית קיימת. מחיקת תבנית: מנהל (והאפליקציה מוחקת קודם את התמונה).
+    match /tkt/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function tOk() {
+        return nw().keys().hasAll(['txt', 't'])
+          && nw().keys().hasOnly(['txt', 't', 'to', 'np', 'dk', 'pri', 'cat', 'est', 'ck', 'im', 'by'])
+          && nw().txt is string && nw().txt.size() >= 1 && nw().txt.size() <= 500
+          && nw().t is int
+          && nw().get('to', []) is list && nw().get('to', []).size() <= 300
+          && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
+          && nw().get('dk', '') is string && nw().get('dk', '').size() <= 10
+          && nw().get('pri', '') is string && nw().get('pri', '').size() <= 1
+          && nw().get('cat', '') is string && nw().get('cat', '').size() <= 30
+          && nw().get('est', 0) is int && nw().get('est', 0) >= 0 && nw().get('est', 0) <= 1440
+          && nw().get('ck', []) is list && nw().get('ck', []).size() <= 20
+          && nw().get('im', 0) is int && nw().get('im', 0) >= 0 && nw().get('im', 0) <= 1
+          && nw().get('by', '') is string && nw().get('by', '').size() <= 100;
+      }
+      allow read: if lpW() && (isManager());
+      allow create, update: if lpW() && (isManager() && tOk());
+      allow delete: if lpW() && (isManager());
+      match /p/{pid} {
+        function imgOk() {
+          return nw().keys().hasAll(['img', 't', 'uid'])
+            && nw().keys().hasOnly(['img', 't', 'uid'])
+            && nw().uid == request.auth.uid
+            && nowOk(nw().t)
+            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+        }
+        allow read: if lpW() && (isManager());
+        allow create: if lpW() && (isManager() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/tkt/$(id)));
+        allow update: if false;
+        allow delete: if lpW() && (isManager());
+      }
+    }
+
     // ---------- קבוצות התכתבות (grp) – סבב 3, 17.11.2026 ----------
     // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
     // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
@@ -2093,6 +2133,46 @@ service cloud.firestore {
             && ((pid == 'r1' && req().get('np', 0) >= 1)
               || (pid == 'r2' && req().get('np', 0) >= 2)
               || (pid == 'r3' && req().get('np', 0) >= 3)));
+          allow update: if false;
+          allow delete: if feat('tasks') && (bMgr());
+        }
+      }
+
+      // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
+      // קריאה וכתיבה – מנהלים בלבד (עובד ומנהל של עסק אחר נחסמים). תמונה: {img, t, uid}, jpeg/png/webp, 100 עד 900,000 תווים,
+      // רק יצירה (בלי דריסה), ורק כשהתבנית קיימת. מחיקת תבנית: מנהל (והאפליקציה מוחקת קודם את התמונה).
+      match /tkt/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function tOk() {
+          return nw().keys().hasAll(['txt', 't'])
+            && nw().keys().hasOnly(['txt', 't', 'to', 'np', 'dk', 'pri', 'cat', 'est', 'ck', 'im', 'by'])
+            && nw().txt is string && nw().txt.size() >= 1 && nw().txt.size() <= 500
+            && nw().t is int
+            && nw().get('to', []) is list && nw().get('to', []).size() <= 300
+            && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
+            && nw().get('dk', '') is string && nw().get('dk', '').size() <= 10
+            && nw().get('pri', '') is string && nw().get('pri', '').size() <= 1
+            && nw().get('cat', '') is string && nw().get('cat', '').size() <= 30
+            && nw().get('est', 0) is int && nw().get('est', 0) >= 0 && nw().get('est', 0) <= 1440
+            && nw().get('ck', []) is list && nw().get('ck', []).size() <= 20
+            && nw().get('im', 0) is int && nw().get('im', 0) >= 0 && nw().get('im', 0) <= 1
+            && nw().get('by', '') is string && nw().get('by', '').size() <= 100;
+        }
+        allow read: if feat('tasks') && (bMgr());
+        allow create, update: if feat('tasks') && (bMgr() && tOk());
+        allow delete: if feat('tasks') && (bMgr());
+        match /p/{pid} {
+          function imgOk() {
+            return nw().keys().hasAll(['img', 't', 'uid'])
+              && nw().keys().hasOnly(['img', 't', 'uid'])
+              && nw().uid == request.auth.uid
+              && nowOk(nw().t)
+              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          allow read: if feat('tasks') && (bMgr());
+          allow create: if feat('tasks') && (bMgr() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/b/$(bizId)/tkt/$(id)));
           allow update: if false;
           allow delete: if feat('tasks') && (bMgr());
         }
