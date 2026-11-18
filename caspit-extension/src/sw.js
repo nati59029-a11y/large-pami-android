@@ -5,6 +5,12 @@ importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/da
 const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi;
 const VER = chrome.runtime.getManifest().version;
 const CASPIT = 'https://caspit.valu.co.il/';
+const CASPIT_APP = CASPIT + 'bo';
+// שמירה (בעל העסק, 18.11): התוסף פועל רק במשרד האחורי (/bo). קופת המכירה (שורש האתר ושאר הנתיבים) – אסור לגעת:
+// לפני כל צעד בודקים את כתובת הלשונית (וגם בתוך הדף – runSteps guard); אחרת עוצרים מיד ב-'wrong-page' (בלי ניסיון חוזר).
+const BO_RE = /^https:\/\/caspit\.valu\.co\.il\/bo(?:[/?#]|$)/;
+const GUARD = { origin: 'https://caspit.valu.co.il', path: '/bo' };
+const HASH_RE = /^#\/[\w\-/?=&.%]*$/; // מערכת הניהול של כספית נמצאת ב-/bo (נבדק מול צילום מסך של בעל העסק, 18.11) – בכתובת אחרת האתר נתקע ב"טוען תוכנה"
 const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות לפני ריצה (רשת, Chrome)
 const TICK_MIN = 15;
 
@@ -95,11 +101,11 @@ async function ownTab(active) {
   if (id) {
     try {
       const t = await chrome.tabs.get(id);
-      if (t && String(t.url || t.pendingUrl || '').startsWith(CASPIT)) { if (active) await chrome.tabs.update(id, { active: true }); return t.id; }
+      if (t && BO_RE.test(String(t.url || t.pendingUrl || ''))) { if (active) await chrome.tabs.update(id, { active: true }); return t.id; }
     } catch (e) { /* הלשונית נסגרה */ }
   }
   const S0 = await sel();
-  const t = await chrome.tabs.create({ url: CASPIT + (S0.start || ''), pinned: true, active: !!active });
+  const t = await chrome.tabs.create({ url: CASPIT_APP + (S0.start || ''), pinned: true, active: !!active });
   await chrome.storage.session.set({ tab: t.id });
   await waitLoaded(t.id);
   await ensurePage(t.id);
@@ -136,11 +142,49 @@ async function inMain(tabId, func, args) {
   const [r] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args: args || [] });
   return r && r.result;
 }
-const runFlowIn = (steps, vars, files, probe) => self.CxSel.runSteps(steps, { doc: document, win: window, vars, files, probe });
+const runFlowIn = (steps, vars, files, probe, guard) => self.CxSel.runSteps(steps, { doc: document, win: window, vars, files, probe, guard });
+const wrongPage = () => P.err('wrong-page');
+async function onBo(tabId) { const t = await chrome.tabs.get(tabId).catch(() => null); return !!t && BO_RE.test(String(t.url || '')) && !t.pendingUrl; }
+async function guardBo(tabId) { if (!(await onBo(tabId))) throw wrongPage(); }
+// מעבר מסך: תמיד בכתובת מלאה https://caspit.valu.co.il/bo#/<מסך> (tabs.update), ורק מלשונית שכבר במשרד האחורי
+async function navTo(tabId, hash, fresh, ms) {
+  if (!HASH_RE.test(String(hash || ''))) return false;
+  await guardBo(tabId);
+  const cur = String(((await chrome.tabs.get(tabId)) || {}).url || '');
+  if (fresh && cur.endsWith(hash)) { await chrome.tabs.update(tabId, { url: CASPIT_APP + '#/' }); await sleep(ms || 1500); await guardBo(tabId); }
+  await chrome.tabs.update(tabId, { url: CASPIT_APP + hash });
+  const end = Date.now() + 30e3;
+  for (;;) { const t = await chrome.tabs.get(tabId).catch(() => null); if (!t || t.status === 'complete' || Date.now() > end) break; await sleep(300); }
+  await sleep(ms || 1500);
+  await guardBo(tabId);
+  return true;
+}
+// הצעדים רצים בדף בחלקים בין מעברי מסך (nav – מכאן, בכתובת מלאה); לפני כל חלק ואחרי הכול – בדיקת /bo
 async function runFlow(tabId, name, vars, files, probe) {
   const steps = ((await sel()).flows || {})[name];
   if (!Array.isArray(steps)) throw P.err('selector-miss', 'אין הגדרה למסך ' + name);
-  return inIso(tabId, runFlowIn, [steps, vars || {}, files || null, !!probe]);
+  const out = { ok: true, steps: [], miss: null, text: '' };
+  for (let i = 0; i < steps.length;) {
+    const s = steps[i] || {};
+    if (s.op === 'nav') {
+      const ok = await navTo(tabId, s.hash, !!s.fresh, s.ms);
+      out.steps.push({ i, op: 'nav', found: ok, done: ok });
+      if (!ok) { out.ok = false; if (out.miss == null) out.miss = i; if (!probe) return out; }
+      i++; continue;
+    }
+    let j = i;
+    while (j < steps.length && (steps[j] || {}).op !== 'nav') j++;
+    await guardBo(tabId);
+    const r = await inIso(tabId, runFlowIn, [steps.slice(i, j), vars || {}, files || null, !!probe, GUARD]);
+    if (!r) { out.ok = false; if (out.miss == null) out.miss = i; return out; }
+    for (const x of r.steps || []) out.steps.push(Object.assign(x, { i: x.i + i }));
+    if (r.text) out.text = r.text;
+    if (r.wrong) throw wrongPage();
+    if (!r.ok) { out.ok = false; if (out.miss == null && r.miss != null) out.miss = r.miss + i; if (!probe) return out; }
+    i = j;
+  }
+  await guardBo(tabId);
+  return out;
 }
 async function isLoginTab(tabId) {
   const L = (await sel()).login || {};
@@ -178,6 +222,7 @@ async function disarm(tabId) {
 const missErr = (name, r) => P.err('selector-miss', `לא נמצא רכיב במסך "${name}" (צעד ${(r.miss || 0) + 1})`, { miss: r.steps && r.steps[r.miss] });
 // קובץ מכספית: קודם נקודת קצה (אם הוגדרה), ואם אין או נכשלה – דרך המסך
 async function capture(tabId, name, vars, ms) {
+  await guardBo(tabId);
   const ep = ((await sel()).endpoints || {})[name];
   if (ep && ep.pathTemplate) {
     const r = await inMain(tabId, (e, v) => window.__cxHook && window.__cxHook.call(e, v), [ep, vars]).catch(() => null);
@@ -226,10 +271,12 @@ const STEP = {
     const tab = await ownTab(false);
     await waitLoaded(tab);
     await ensurePage(tab);
+    // לא במשרד האחורי (למשל כספית העבירה לקופה): דף התחברות → "צריך התחברות"; אחרת עוצרים בלי לגעת
+    if (!(await onBo(tab))) { if ((await loginState(tab, 10e3)).login) throw P.err('needs-login'); throw wrongPage(); }
     const ok = await chrome.tabs.sendMessage(tab, { t: 'cx-ping' }).catch(() => null);
     // דף התחברות או לשונית בלי הגשר → טוענים מחדש פעם אחת (אולי בעל העסק כבר התחבר בלשונית אחרת).
     // מחכים שהמסך יצויר (loginState) – בדיקה מיידית במחשב איטי ראתה דף ריק והמשיכה כאילו מחוברים
-    if (!ok || (await loginState(tab)).login) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); if ((await loginState(tab)).login) throw P.err('needs-login'); }
+    if (!ok || (await loginState(tab)).login) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); if ((await loginState(tab)).login) throw P.err('needs-login'); await guardBo(tab); }
     run.tab = tab;
     return {};
   },
@@ -399,8 +446,10 @@ async function runDisc() {
     await ensurePage(tab);
     await inMain(tab, () => window.__cxHook && window.__cxHook.discover(true));
     if (await isLoginTab(tab)) { rep.login = true; throw P.err('needs-login'); }
+    await guardBo(tab);
     for (const pg of S0.disc || []) {
-      if (pg.hash) { await inIso(tab, runFlowIn, [[{ op: 'nav', hash: pg.hash, ms: 3000 }], {}, null, false]); }
+      if (pg.hash) await navTo(tab, pg.hash, false, 3000);
+      await guardBo(tab);
       const nonce = U.rid('n') + U.rid('');
       const got = waitFile(nonce, tab, 25e3);
       got.catch(() => {});
@@ -419,6 +468,7 @@ async function runDisc() {
       }
       waiting.delete(nonce);
       await disarm(tab);
+      await guardBo(tab); // היכרות – לא יוצאים מהמשרד האחורי
       page.hash = String(await inIso(tab, () => location.hash) || '').replace(/\d+/g, '{n}').slice(0, 80);
       page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
       page.controls = await inIso(tab, () => self.CxSel.controls(document, 400));
@@ -444,7 +494,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (!m || sender.id !== chrome.runtime.id) return;
   if (m.t === 'cx-file') {
     const w = waiting.get(m.nonce);
-    if (w && sender.tab && sender.tab.id === w.tabId && String(sender.url || '').startsWith(CASPIT)) w.resolve(m);
+    if (w && sender.tab && sender.tab.id === w.tabId && BO_RE.test(String(sender.url || ''))) w.resolve(m);
     return;
   }
   if (!String(sender.url || '').startsWith(chrome.runtime.getURL(''))) return; // רק מהחלון הקופץ / עמוד ההגדרות

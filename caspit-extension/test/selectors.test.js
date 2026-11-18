@@ -113,6 +113,15 @@ test('לעולם לא נוגע בשדה סיסמה', async () => {
   assert.equal(await page.evaluate(() => document.querySelector('[name=pw]').value), 'secret1');
 });
 
+test('guard: דף שאינו המשרד האחורי (/bo) – אף צעד לא מבוצע, wrong', async () => {
+  const r = await page.evaluate(async () => { window.ev.length = 0; return window.CxSel.runSteps([{ op: 'click', t: { text: 'ייצוא לאקסל' }, safe: true }], { doc: document, win: window, guard: { origin: 'https://caspit.valu.co.il', path: '/bo' }, sleep: () => Promise.resolve() }); });
+  assert.equal(r.ok, false); assert.equal(r.wrong, true); assert.equal(r.steps[0].err, 'wrong-page');
+  assert.deepEqual(await page.evaluate(() => window.ev), [], 'לא נלחץ כלום');
+  assert.equal(await page.evaluate(() => window.CxSel.onPath({ location: { origin: 'https://caspit.valu.co.il', pathname: '/bo' } }, { origin: 'https://caspit.valu.co.il', path: '/bo' })), true);
+  assert.equal(await page.evaluate(() => window.CxSel.onPath({ location: { origin: 'https://caspit.valu.co.il', pathname: '/csv-imports' } }, { origin: 'https://caspit.valu.co.il', path: '/bo' })), false);
+  assert.equal(await page.evaluate(() => window.CxSel.onPath({ location: { origin: 'https://caspit.valu.co.il', pathname: '/bogus' } }, { origin: 'https://caspit.valu.co.il', path: '/bo' })), false);
+});
+
 test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה שדה סיסמה', async () => {
   const c = await page.evaluate(() => window.CxSel.controls(document));
   const s = JSON.stringify(c);

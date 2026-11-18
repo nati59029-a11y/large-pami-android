@@ -42,7 +42,7 @@ const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
 const SRUN_RE = /^[A-Za-z0-9_-]{6,40}$/; // מזהה ריצה (runId מ-hello, או מזהה של התוסף אם hello נכשל)
 const TOK_RE = /^([a-z0-9-]{3,30})\.([A-Za-z0-9_-]{43})$/;
-const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit'];
+const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page'];
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
 const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason });
@@ -344,6 +344,7 @@ async function handle(req, res, opts) {
 const MSG = {
   'needs-login': 'צריך להתחבר מחדש לכספית בדפדפן Chrome במחשב החנות. אחרי ההתחברות הסנכרון ימשיך לבד.',
   'selector-miss': 'מסך בכספית השתנה והרובוט לא מצא כפתור או קובץ. הסנכרון נעצר – פרטים באפליקציה, בסנכרון כספית.',
+  'wrong-page': 'התוסף הגיע לדף שאינו המשרד האחורי של כספית ועצר (בלי לגעת בקופה). פרטים באפליקציה, בסנכרון כספית.',
   limit: 'יותר מדי שינויים לכספית בריצה אחת – הרובוט עצר לבדיקה. פרטים באפליקציה, בסנכרון כספית.',
   nosync: 'המחשב בחנות לא סנכרן מול כספית הלילה. בדקו שהמחשב דלוק ו-Chrome פתוח.',
   nosync2: 'כבר יומיים ויותר המחשב בחנות לא סנכרן מול כספית! בדקו שהמחשב דלוק, ש-Chrome פתוח ושאתם מחוברים לכספית.',

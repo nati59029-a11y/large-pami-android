@@ -20,6 +20,8 @@ function dl(blob, name) { const a = document.createElement('a'); a.href = URL.cr
 document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
 function render() {
   const h = location.hash || '#/';
+  // מדמה את כספית האמיתית: מסך מסוים (redir) / כל טעינה (redirLoad) מעבירים אל מחוץ למשרד האחורי (/bo) – לקופה
+  if (localStorage.getItem('redirLoad') === '1' || (localStorage.getItem('redir') && h.startsWith(localStorage.getItem('redir')))) { location.href = '/' + h.slice(2).split('/')[0] + h; return; }
   const app = document.getElementById('app');
   document.getElementById('hdr').hidden = !authed();
   document.getElementById('sub').hidden = true;

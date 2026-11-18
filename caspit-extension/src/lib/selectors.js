@@ -105,6 +105,10 @@ async function choose(doc, el, option, ctx) {
   o.click();
   return true;
 }
+// guard = { origin, path }: הדף חייב להיות באותו מקור, ובנתיב path (או מתחתיו)
+function onPath(win, g) {
+  try { const L = win.location, p = String(L.pathname || ''); return L.origin === g.origin && (p === g.path || p.startsWith(g.path + '/')); } catch (e) { return false; }
+}
 // מריץ את הצעדים. ctx: { doc, win, vars, files:{name:{name,mime,b64}}, probe, sleep, now, onCapture(i) }
 // → { ok, steps:[{ i, op, found, done, el }], miss: i | null, text }
 async function runSteps(steps, ctx) {
@@ -117,6 +121,8 @@ async function runSteps(steps, ctx) {
     const rec = { i, op: s.op, found: false, done: false };
     res.steps.push(rec);
     if (!OPS.has(s.op)) { rec.err = 'bad-op'; res.ok = false; res.miss = i; break; }
+    // שמירה (בעל העסק, 18.11): רק במערכת הניהול של כספית (/bo). קופת המכירה (שורש האתר) – לא נוגעים בכלל
+    if (ctx.guard && !onPath(ctx.win, ctx.guard)) { rec.err = 'wrong-page'; res.ok = false; res.wrong = true; res.miss = i; break; }
     if (s.op === 'nav') {
       const h = fill(s.hash || '', ctx.vars);
       if (!/^#\/[\w\-/?=&.%]*$/.test(h)) { rec.err = 'bad-hash'; res.ok = false; res.miss = i; break; }
@@ -186,6 +192,6 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, norm, find, runSteps, controls, isLogin, dateFor, fill, cssPath, b64bytes };
+const api = { OPS, norm, find, onPath, runSteps, controls, isLogin, dateFor, fill, cssPath, b64bytes };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);
