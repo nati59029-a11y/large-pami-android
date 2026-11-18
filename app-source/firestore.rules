@@ -2507,6 +2507,11 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // /POS:M2
+      // POS:M5 – pospin/{uid}: קוד PIN מגובב, מונה ניסיונות ונעילה (ש5, pos-auth.js). אף אחד מהאפליקציה – גם לא מנהל
+      match /pospin/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // /POS:M5
 
       // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
       // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid של מסמך האב. x/m (טיוטת המנהל) – מנהל בלבד.
