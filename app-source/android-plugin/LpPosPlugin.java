@@ -379,8 +379,8 @@ public class LpPosPlugin extends Plugin {
             r.put("bytes", data.length);
             if (p != null && !"none".equals(p.getString("type", ""))) {
                 boolean[] reused = { false };
-                LpPosTransport t0 = connect(p, reused);
-                paperCheck(t0); // before: no paper = do not even start (the receipt goes to the "waiting to print" queue)
+                LpPosTransport pre = connect(p, reused);
+                paperCheck(pre); // before: no paper = do not even start (the receipt goes to the "waiting to print" queue)
                 LpPosTransport t = send(p, data);
                 LpPosEscPos.Status after = paperCheck(t); // after: paper ended in the middle = the receipt is not trusted
                 r.put("printed", true);
