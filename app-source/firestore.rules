@@ -2496,6 +2496,17 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // /POS:M4
+      // POS:M2 – ש2 (17.11.2026): עגלות מושהות (pospark) – אחראי / מנהל, או הקופאי שהשהה. קופונים אישיים (poscpn) – מנהל (הבדיקה בקופה דרך posCouponUse).
+      // כתיבה – רק השרת (pos-sale.js).
+      match /pospark/{id} {
+        allow read: if posLead() || (posAny() && resource.data.cashier == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /poscpn/{code} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // /POS:M2
 
       // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
       // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid של מסמך האב. x/m (טיוטת המנהל) – מנהל בלבד.

@@ -340,6 +340,10 @@ Object.assign(exports, require('./pos'));
 // posCfg, posCfgSet (מחליפים את השלד של שלב 0 – לכן אחרי require('./pos')), posCfgUndo, posSa (מנהל־על), posBug. pos-cfg.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./pos-cfg'));
 // /POS:M4
+// POS:M2 – קופה גל 2, ש2 (17.11.2026): שרת מכירה, החזרה, השהיה, תשלום חוב, קופונים, כרטיס מתנה, מבצעים (pos-sale.js) ומסמכים (pos-doc.js).
+// נטען אחרי pos.js, ולכן posSale המלא כאן מחליף את השלד של שלב 0.
+Object.assign(exports, require('./pos-sale'), require('./pos-doc'));
+// /POS:M2
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
 // מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js
