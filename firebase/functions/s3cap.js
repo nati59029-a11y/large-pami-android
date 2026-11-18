@@ -2,8 +2,9 @@
 // הקמת חנות – שלב 3 (17.11.2026, משימה 2026-11-17_תהליך-הקמת-חנות): צילום החנות לפי תוכנית הצילום. חוזה: תוצרים/0-חוזה-נתונים.md, סעיפים 3.1, 3.3, 3.4, 3.6, 4, 5.
 // התוכנית עצמה (capPlan) – lib/store3d-capplan.js, אותו קובץ בדיוק כמו באפליקציה (www/store3d-capplan.js), כך שהטלפון והשרת מחשבים אותה תוכנית.
 //   s3CapPut { qid, mapId, key, op, lv?, img?, th?, why?, man?, n? } – מנהל או עובד עם "שרטוט מפה" (s3m). בלי AI ובלי מכסה.
-//     op 'ph'     – תמונה לפריט: img (JPEG, צלע ארוכה עד 1600, עד 1.5MB) + th (JPEG, עד 512, עד 150KB). lv: מדף גבוה – 't'/'b', אחר – 'a'.
-//                   נשמר ב-Storage: b/{biz}/store3d/{br}/cap/{mapId}/{key}_{n}.jpg (+ _t). עד 6 תמונות לכל גובה ועד 12 לפריט, n = 1..99.
+//     op 'ph'     – תמונה לפריט: img (JPEG, צלע ארוכה עד 1600, עד 1.5MB) + th (JPEG, עד 512, עד 150KB). lv: מדף גבוה – 't'/'b'; קיר (w/iw) – 'a'/'t'/'b' (18.11.2026);
+//                   אחר – 'a'.
+//                   נשמר ב-Storage: b/{biz}/store3d/{br}/cap/{mapId}/{key}_{n}.jpg (+ _t). עד 20 תמונות לכל גובה ועד 40 לפריט, n = 1..99 (storage.rules – n דו-ספרתי).
 //     op 'front'  – חזית מחוברת (שלב 4) או ידנית: img עד 2048, th עד 512. front/{mapId}/{key}_{v}.jpg (+ _t), v = 1..999, 5 קודמות ב-frH.
 //                   man: true = חזית שאדם בחר/חתך ואישר ← הפריט 'ok' (okBy). בלי man – 'part' עד בדיקת ה-AI (שלב 5).
 //                   מקטע ← s3sum.b[bay].fr/frT (מיזוג, בלי לגעת ב-th/s של הסבבים); שאר הפריטים ← s3look.it[key].
@@ -32,12 +33,13 @@ const NK = require('./lib/store3d-notekey');
 if (!getApps().length) initializeApp();
 
 const QID_DAYS = 30, D1 = 86400000;
-const PH_LV = 6, PH_MAX = 12, N_MAX = 99, V_MAX = 999, FR_HIST = 5, LOOK_MAX = 1500, NOTES_MAX = 20;
+const PH_LV = 20, PH_MAX = 40, N_MAX = 99, V_MAX = 999, FR_HIST = 5, LOOK_MAX = 1500, NOTES_MAX = 20;
 const LIM = {
   ph: { min: 1000, max: 1500000, longMin: 200, longMax: 1600, shortMin: 100, shortMax: 1600 },
   fr: { min: 1000, max: 1500000, longMin: 200, longMax: 2048, shortMin: 50, shortMax: 2048 },
   th: { min: 100, max: 150000, longMin: 32, longMax: 512, shortMin: 16, shortMax: 512 },
 };
+const WALL_LV = ['a', 't', 'b'];
 const OPS = ['ph', 'front', 'skip', 'unskip', 'off', 'geo'];
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const isExists = (e) => e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)));
@@ -220,7 +222,9 @@ async function capPut(db, who, input, now, bucket) {
   const mref = db.doc('smap/' + mapId), cref = db.doc(`s3setup/${mapId}/cap/${key}`), sref = db.doc('s3setup/' + mapId);
   const [ms0, c0] = await Promise.all([mref.get(), cref.get()]);
   const { item: item0 } = planItem(ms0, key);
-  if (x.op === 'ph' && !item0.lv.includes(x.lv)) throw bad('bad-lv', item0.lv.length > 1 ? 'במדף גבוה בחרו תמונה עליונה או תחתונה' : 'לפריט הזה יש תמונה אחת לכל גובה', 'invalid-argument');
+  // קיר (w/iw): התוכנית נותנת lv ['a'], אבל מותר גם 't'/'b' (קיר גבוה – צילום עליון/תחתון). התוכנית עצמה (store3d-capplan.js) לא משתנה
+  const isWall = item0.k === 'w' || item0.k === 'iw', lvOk = isWall ? WALL_LV : item0.lv;
+  if (x.op === 'ph' && !lvOk.includes(x.lv)) throw bad('bad-lv', isWall ? 'בקיר בחרו תמונה כללית, עליונה או תחתונה' : item0.lv.length > 1 ? 'במדף גבוה בחרו תמונה עליונה או תחתונה' : 'לפריט הזה יש תמונה אחת לכל גובה', 'invalid-argument');
   const old0 = c0.exists ? c0.data() : null;
   // העלאה (לפני הטרנזקציה): נעילה על הנתיב, ואז שמירה עם ifGenerationMatch: 0. נתיב תפוס ← המספר הבא
   const bk = bucket || getStorage().bucket();

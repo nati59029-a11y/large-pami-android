@@ -151,3 +151,51 @@ describe('cleanMap: fx.st (חוזה 3.5)', () => {
     assert.equal(c({}).dropped.includes('fx.st'), false);
   });
 });
+
+describe('בדיקה חכמה: עד 40 תמונות לפריט (18.11.2026)', () => {
+  const X = require(path.join(FN, 's3capai.js'))._capai;
+  const C = require(path.join(FN, 's3cap.js'))._cap;
+  // Storage מדומה: נתיב ← Buffer בגודל הנתון; downloads – כמה פעמים כל נתיב נקרא
+  const fakeBucket = (sizes) => ({ file: (p) => ({ download: async () => { if (!(p in sizes)) throw Object.assign(new Error('no'), { code: 404 }); return [Buffer.alloc(sizes[p])]; } }) });
+  const pre = 'b/x/store3d/main/cap/s-main/w_r1-1-1_';
+  const phs = (n, full, th) => {
+    const ph = [], sizes = {};
+    for (let i = 1; i <= n; i++) {
+      const lv = i <= 20 ? 't' : 'b', p = pre + i + '.jpg', t = pre + i + '_t.jpg';
+      ph.push({ n: i, lv, p, th: t }); sizes[p] = full; sizes[t] = th;
+    }
+    return { ph, sizes };
+  };
+  it('LIM: ph = 40 (per עד 40 עובר, 41 – per-max); ההנחיה מפרטת את כל 40 התמונות; גבולות s3CapPut 20/40', () => {
+    assert.equal(PB.LIM.ph, 40);
+    const per = Array.from({ length: 40 }, (_, i) => i + 1);
+    assert.equal(PB.cleanBayScan(ok({ per }), { k: 'w', nPh: 40 }).per.length, 40);
+    assert.equal(why(() => PB.cleanBayScan(ok({ per: per.concat([1]) }), { k: 'w', nPh: 40 })), 'per-max');
+    const photos = per.map((i) => ({ i }));
+    assert.equal(PB.cleanBayScan(ok({ photos }), { k: 'w', nPh: 40 }).photos.length, 40);
+    const prompt = PB.buildBayPrompt({ k: 'w', label: 'קיר', photos: per.map((i) => ({ i, lv: i <= 20 ? 't' : 'b' })) });
+    const text = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
+    assert.ok(text.includes('"i":40'), 'תמונה 40 בהנחיה');
+    assert.equal(C.phRoom({ ph: per.slice(0, 39).map((n) => ({ n, lv: n <= 20 ? 't' : 'b' })) }, 'b'), 40);
+  });
+  it('readPhotos: 40 תמונות מלאות של 1.5MB – כולן נשלחות, בתוך 13MB (מלאות כל עוד יש מקום, השאר מוקטנות)', async () => {
+    const { ph, sizes } = phs(40, 1500000, 150000);
+    const out = await X.readPhotos(fakeBucket(sizes), ph, pre);
+    assert.equal(out.length, 40);
+    assert.deepEqual(out.map((o) => o.i), Array.from({ length: 40 }, (_, i) => i + 1));
+    const total = out.reduce((s, o) => s + Buffer.from(o.b64, 'base64').length, 0);
+    assert.ok(total <= 13000000, 'סך הכול ' + total);
+    const full = out.filter((o) => Buffer.from(o.b64, 'base64').length === 1500000).length;
+    assert.ok(full >= 1 && full < 40, 'חלק מלאות, השאר מוקטנות: ' + full);
+    assert.equal(out[0].lv, 't'); assert.equal(out[39].lv, 'b');
+  });
+  it('readPhotos: 40 תמונות קטנות – כולן מלאות; off לא נשלחת; נתיב מחוץ לפריט לא נקרא', async () => {
+    const { ph, sizes } = phs(40, 200000, 20000);
+    let out = await X.readPhotos(fakeBucket(sizes), ph, pre);
+    assert.equal(out.length, 40);
+    assert.ok(out.every((o) => Buffer.from(o.b64, 'base64').length === 200000));
+    ph[4].off = true; ph[5].p = 'b/y/other.jpg';
+    out = await X.readPhotos(fakeBucket(sizes), ph, pre);
+    assert.equal(out.length, 38);
+  });
+});
