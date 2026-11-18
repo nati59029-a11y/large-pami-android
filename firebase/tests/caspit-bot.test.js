@@ -411,6 +411,10 @@ describe('רובוט כספית – "סנכרן עכשיו" מהטלפון (cxBo
     await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
     const r = await ok('cxBotTok', MGR, { op: 'now' });
     assert.notEqual(r.req.id, id);
+    d = await dev();
+    assert.equal(d.req.id, r.req.id);
+    assert.ok(!d.req.took && !d.req.run && !d.req.wait, 'בקשה חדשה לא יורשת took/run/wait מהקודמת: ' + JSON.stringify(d.req));
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5' })).want, true, 'הבקשה השנייה פעילה ונלקחת');
     const i = await ok('cxBotTok', MGR, { op: 'info' });
     assert.equal(i.runs.find((x) => x.id === h.runId).req, true);
   });

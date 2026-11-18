@@ -137,7 +137,8 @@ async function cxBotTok(w, input) {
       if (reqLive(q, now)) return { no: 'pending', req: { id: q.id, at: q.at } };
       // סנכרון רץ: התחיל מבקשה קודמת ועוד לא דווח, או דיווח "רץ" אחרון – עד 30 דקות
       if ((q && q.took && now - q.took < RUN_MS && !(lr && (lr.at || 0) >= q.took)) || (lr && lr.st === 'run' && now - (lr.at || 0) < RUN_MS)) return { no: 'running' };
-      tx.set(ref, { req: { id, at: now, by: w.uid } }, { merge: true });
+      // update מחליף את המפה req כולה (set+merge היה ממזג took/run/wait מהבקשה הקודמת)
+      tx.update(ref, { req: { id, at: now, by: w.uid } });
       return { req: { id, at: now } };
     });
     if (r.no === 'no-dev') throw pre('no-dev', 'אין מחשב מחובר. קודם מחברים את מחשב החנות.');
