@@ -41,6 +41,9 @@ async function open(browser, www, cfg, email, perms) {
     const fn = u.pathname.split('/').pop(); calls.push({ fn, b });
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: answer(fn, b, st) }) }); } return route.fallback(); });
   await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-p\/posdev$/.test(u.pathname), (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+  // POS:W2 (איחוד גל 2): אחרי המיזוג עם ש4 ההגדרות נקראות ב-PosCfg מהמסמך poscfg/main (לא מ-posCfg) – אותם ערכים כאן
+  await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-p\/poscfg\/main$/.test(u.pathname), (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ name: 'projects/x/databases/(default)/documents/b/biz-p/poscfg/main', fields: { openCashDef: { integerValue: '50000' }, cashMax: { integerValue: String(CAP) } } }) }));
   const uid = email.split('@')[0];
   if (perms) await ctx.route((u) => u.port === '8080' && new RegExp('/staff/' + uid + '$').test(u.pathname), (route) => route.fulfill({ status: 200, contentType: 'application/json',
     body: JSON.stringify({ name: 'x', fields: { active: { booleanValue: true }, perms: { mapValue: { fields: Object.fromEntries(Object.entries(perms).map(([k, v]) => [k, { booleanValue: v }])) } } } }) }));

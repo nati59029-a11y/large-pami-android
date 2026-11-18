@@ -24,7 +24,8 @@ const G = require('./lib/pos-gate');
 const SHIFT_RE = /^K[1-9][0-9]{0,3}-S[0-9]{6}$/;
 const shiftId = (dev, no) => dev + '-S' + String(no).padStart(6, '0');
 
-async function cfgOf(db) { const s = await db.doc('poscfg/main').get(); return CF.eff(s.exists ? s.data() : null).cfg; }
+// POS:W2 (איחוד גל 2): לפי הסכמה של ש4 (גם הפורמט של שלב 0 נקרא) – lib/pos-cfg-read.js
+async function cfgOf(db) { return require('./lib/pos-cfg-read').cfgOf(db); }
 
 // הרשומות של המשמרת (מכירות, תשלומים, החזרות – צורת ש2). tx – אופציונלי
 async function shiftData(db, id, tx) {

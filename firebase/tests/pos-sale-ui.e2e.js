@@ -19,10 +19,15 @@ async function run(width, height, ds, role) {
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e)));
   await page.addInitScript((r) => { try { localStorage.removeItem('lp-pos-mock-v2'); localStorage.setItem('lp-pos-mock-role', r); } catch (e) {} }, role);
+  // POS:W2 (איחוד גל 2): pos-data.js האמיתי (ש3) נטען לפני המדומה ותופס את window.PosData. הבדיקה הזו בודקת את הממשק על הנתונים המדומים,
+  // ולכן כאן (בבדיקה בלבד) window.PosData מקבל רק את המדומה (isMock). החיבור לנתונים האמיתיים – pos-w2.js
+  await page.addInitScript(() => { let v; Object.defineProperty(window, 'PosData', { configurable: true, get: () => v, set: (x) => { if (x && x.isMock === false) return; v = x; } }); });
   await page.goto(URL);
   await page.waitForFunction(() => typeof window.posOpen === 'function' && !!window.PosData && !!window.PosCalc);
   // מדמה משתמש מחובר: מסך הכניסה (body.gate) מסתיר את כל השאר
   await page.evaluate((t) => { document.body.classList.remove('gate', 'susp'); const g = document.getElementById('gate'); if (g) g.style.display = 'none'; document.documentElement.dataset.ds = t; }, ds);
+  // POS:W2: גם הציוד של ש7 (Devices) מנותק כאן – הבדיקה סופרת הדפסות ופתיחות מגירה דרך הגרסה המדומה של PosUI.Dev
+  await page.evaluate(() => { window.Devices = undefined; });
   await page.evaluate(() => window.posOpen());
   await page.waitForSelector('#pos .pos-row');
   const tag = `${width}/${ds}/${role}`;

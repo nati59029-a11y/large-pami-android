@@ -48,7 +48,7 @@ async function seed() {
     b.set(d.doc(`b/${A}/staff/${LEAD}`), { name: 'אחראי', role: 'employee', active: true, perms: W({ posMgr: true }) });
     for (const [u, role] of [[MGR, 'admin'], [CASH, 'worker'], [LEAD, 'worker']]) b.set(d.doc('users/' + u), { bizId: A, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
     b.set(d.doc(P('poscfg/main')), { type: 'general', v: {} });
-    for (const [k, inst] of [['K1', INST1], ['K2', INST2]]) b.set(d.doc(P('posdev/' + k)), { name: 'קופה ' + k, code: k, br: 'b1', on: true, st: 'active', inst, lastSeq: 0, at: 1 });
+    for (const [k, inst] of [['K1', INST1], ['K2', INST2]]) b.set(d.doc(P('posdev/' + k)), { name: 'קופה ' + k, code: k, br: 'b1', on: true, st: 'active', inst, lastSeq: 0, at: 1, appr: { by: 'seed', at: 1 } }); // appr – POS:W2: devApprove (ש7) דלוק כברירת מחדל
     b.set(d.doc(P('prod/p1')), { name: 'מטען', price: 49.9, q: { b1: 5 }, cat: 'c1' });
     b.set(d.doc(P('prod/p0')), { name: 'כוסות', price: 10, q: { b1: 0 }, cat: 'c2' });
     b.set(d.doc(P('prod/pm')), { name: 'מגש', price: 100, minP: 90, q: { b1: 9 }, cat: 'c2' });
@@ -84,6 +84,13 @@ describe('posSale – מכירה, תשלום, מסמך', () => {
     const doc = await get('ardoc/irD-K1-1');
     assert.equal(doc.gross, 5990); assert.equal(doc.t, 'ir'); assert.equal(doc.dev, 'K1');
     assert.equal((await get('prod/p0')).q.b1, -1); assert.equal((await get('prod/p1')).q.b1, 4);
+  });
+
+  it('POS:W2 (איחוד, ש7): devApprove דלוק – מכשיר בלי posdev.appr לא מוכר; devApprove כבוי בהגדרות (ש4) – מוכר', async () => {
+    await set('posdev/K2', { appr: null }, true);
+    assert.equal(R(await call('posSale', CASH, sale({ dev: 'K2', inst: INST2 }))), 'dev-unapproved');
+    await set('poscfg/main', { devApprove: false }, true);
+    assert.equal(R(await call('posSale', CASH, sale({ dev: 'K2', inst: INST2 }))), 'ok');
   });
 
   it('(7) אותו reqId פעמיים = מכירה אחת, מסמך אחד', async () => {

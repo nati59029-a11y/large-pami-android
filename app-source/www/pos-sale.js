@@ -149,6 +149,8 @@ async function parks(){const{modal,E,fmt,hm}=UI();const L=await D().parked();
 
 /* ---------- תשלום וסיום ---------- */
 async function pay(){const t=calc();if(!(t.gross>0)||S.busy)return;/* ס18: אין תשלום בעגלה ריקה */
+ /* POS:W2 (איחוד): קופה שנותקה מרחוק / מושבתת / מחכה לאישור מכשיר (ש7) – לא מתחילים תשלום */
+ try{const DV=root.Devices;if(DV&&typeof DV.blocked==='function'&&DV.blocked()){UI().toast((DV.msg&&DV.msg('BLOCKED'))||'הקופה חסומה למכירה. פנו למנהל','bad');return}}catch(e){}
  const r=await root.PosPay.open({gross:t.gross,cust:S.cust,role:role()});if(!r)return;await finish(t,r)}
 async function finish(t,r){const{cfg,toast,fmt}=UI();S.busy=1;const s=S.sess||{};
  const sale={reqId:UI().reqId(),dev:s.dev,shift:(s.shift||{}).id,cashier:(s.cashier||{}).id,cust:S.cust?S.cust.id:null,note:S.note||'',

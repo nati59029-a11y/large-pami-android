@@ -132,6 +132,21 @@ function create(deps) {
           reqId, dev: d, inst: deps.inst(), soldAt: at, gross: sale.total, off: !deps.online(),
           lines: sale.lines.map((l) => Object.assign({ pid: String(l.pid || ''), n: String(l.name || '').slice(0, 120), qty: l.qty, unit: l.price }, l.barcode ? { bc: String(l.barcode).slice(0, 40) } : {})),
         };
+        // POS:W2 (איחוד גל 2): התשלומים, העודף, ההקפה, הלקוח וההנחות של מסך המכירה (ש1) – ל-posSale של ש2 (כלל הסגירה נבדק בשרת)
+        if (Array.isArray(sale.pays)) {
+          payload.pays = sale.pays;
+          if (sale.chg) payload.chg = sale.chg;
+          if (sale.debt) payload.debt = sale.debt;
+          if (sale.cust) payload.cust = String(sale.cust);
+          if (sale.note) payload.note = String(sale.note).slice(0, 300);
+          if (sale.manDisc) payload.manDisc = { amt: sale.manDisc.amt, why: String(sale.manDisc.why || '').slice(0, 80) }; // הסכום שהקופאי ראה (לא האחוז – בלי הפרשי עיגול)
+          payload.lines = sale.lines.map((l, i) => {
+            const o = payload.lines[i];
+            if (l.gen || !o.pid || o.pid === 'gen') { delete o.pid; o.free = true; }
+            if (l.mdisc) o.mdisc = { amt: l.mdisc.amt, why: String(l.mdisc.why || '').slice(0, 80) };
+            return o;
+          });
+        }
         const it = q().add({ reqId, fn: 'posSale', kind: 'sale', payload }, { seq: true }); // נכתב למכשיר כאן, לפני הקבלה
         no = it.seq; id = d + '-' + pad(no);
       }
@@ -153,6 +168,8 @@ function create(deps) {
       return { sales: S.length, total: S.reduce((a, s) => a + s.total, 0), returns: R.length, returnsTotal: R.reduce((a, r) => a + r.total, 0), pending: q().pending() };
     },
     net: () => q().status(),
+    // POS:W2: מצב התור לש7 (Devices → posOps op:'hw') – כמה ממתינים, ומתי נכנס הוותיק שבהם
+    stats: () => { const w = q().items().filter((x) => x.st !== 'ok'); return { n: w.length, oldest: w.length ? Math.min(...w.map((x) => x.at || 0)) : 0 }; },
     onNet: (f) => { netSubs.add(f); return () => netSubs.delete(f); },
     mark: (reqId) => q().mark(reqId),
     flush: () => q().flush(),
@@ -208,7 +225,7 @@ function data() {
 // ממשק קבוע (window.PosData) שמפנה לעסק / לקופה הנוכחיים
 const PD = {};
 ['getSession', 'getProducts', 'refreshProducts', 'search', 'searchSync', 'explain', 'byBarcode', 'saveSale', 'getSales', 'getSale', 'returnedQty', 'saveReturn', 'dayStats',
-  'net', 'onNet', 'mark', 'flush', 'retry', 'netChanged', 'cart', 'practice', '_reset'].forEach((k) => { PD[k] = function () { return data()[k].apply(null, arguments); }; });
+  'net', 'stats', 'onNet', 'mark', 'flush', 'retry', 'netChanged', 'cart', 'practice', '_reset'].forEach((k) => { PD[k] = function () { return data()[k].apply(null, arguments); }; });
 PD.isMock = false;
 PD.normalize = root.PosCatalog.norm;
 PD.light = () => root.PosOffline.light(data().net());

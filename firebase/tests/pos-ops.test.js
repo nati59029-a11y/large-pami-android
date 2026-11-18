@@ -165,8 +165,8 @@ describe('posOps – התנגשויות והזנה ידנית (O15, O9)', () => 
     assert.equal(again.r.id, r.r.id); assert.equal(again.r.dup, true);
     assert.equal(R(await call(OP, 'posOps', MGR, Object.assign({}, body, { why: '', reqId: reqId() }))), 'bad-why');
     assert.equal(R(await call(OP, 'posOps', MGR, Object.assign({}, body, { realAt: Date.now() + 864e5, reqId: reqId() }))), 'bad-real');
-    // manEntry:'off' (ערך שמור, עוד לפני שש4 מוסיף את המפתח לסכמה)
-    await prep((d) => d.doc(`b/${A}/poscfg/main`).set({ type: 'general', v: { manEntry: 'off' } }));
+    // manEntry כבוי – בסכמה של ש4 הערך הוא 'none' (POS:W2: נשמר כמו ש-posCfgSet שומר, ישירות ב-poscfg/main)
+    await prep((d) => d.doc(`b/${A}/poscfg/main`).set({ type: 'general', manEntry: 'none' }));
     assert.equal(R(await call(OP, 'posOps', MGR, Object.assign({}, body, { reqId: reqId() }))), 'man-off');
   });
 });

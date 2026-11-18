@@ -109,8 +109,7 @@ async function approve(request, input) {
   if (typeof input.pin !== 'string') throw G.bad('bad-pin', 'כתבו קוד');
   let need = 'lead';
   if (input.act === 'disc') {
-    const s = await db.doc('poscfg/main').get();
-    const cfg = CF.eff(s.exists ? s.data() : null).cfg;
+    const cfg = await require('./lib/pos-cfg-read').cfgOf(db); // POS:W2: לפי הסכמה של ש4
     try { need = AG.discNeed(input.pct, cfg); } catch (e) { throw G.aggErr(e); }
     if (need === null) return { ok: true, ap: null, need: null };
   }

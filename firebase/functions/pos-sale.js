@@ -54,7 +54,8 @@ const sameT = (a, b) => (Array.isArray(a) ? Array.isArray(b) : typeof a === type
 async function cfgOf(db) {
   const s = await db.doc('poscfg/main').get();
   const doc = s.exists ? s.data() : null;
-  if (SCH && typeof SCH.eff === 'function') { const e = SCH.eff(doc); return Object.assign({}, CFG0, (e && e.cfg) || e || {}); }
+  // POS:W2 (איחוד גל 2): הסכמה של ש4 – ערכי העסק ב-poscfg/main ומתגי המודולים ב-poscfg/sa (כמו posCfg ב-pos-cfg.js), כולל vatRate
+  if (SCH && typeof SCH.eff === 'function') return Object.assign({}, CFG0, await require('./lib/pos-cfg-read').cfgOf(db));
   const out = Object.assign({}, CFG0);
   const e = CF.eff(doc);
   for (const k of Object.keys(e.cfg)) if (e.src[k] === 'biz' || !(k in CFG0)) out[k] = e.cfg[k];
@@ -113,12 +114,14 @@ async function gate(request, o) {
 }
 const keysOk = (o, ks) => { for (const k of Object.keys(o)) if (!ks.includes(k)) throw bad('bad-input', 'קלט לא תקין: ' + String(k).slice(0, 20)); };
 // מכשיר: קיים, פעיל, רשום על ההתקנה הזו
-function devOk(s, inst) {
+function devOk(s, inst, cfg) {
   if (!s.exists) throw nf('no-dev', 'הקופה לא נמצאה');
   const d = s.data();
   if (d.st === 'retired') throw pre('retired', 'הקופה הוצאה משימוש');
   if (d.on !== true) throw pre('dev-off', 'הקופה מושבתת');
   if (!d.inst || d.inst !== inst) throw pre('dev-taken', 'המכשיר לא רשום על הקופה הזו');
+  // POS:W2 (איחוד, ש7): devApprove דלוק – מכשיר שנרשם ועוד לא אושר ע"י מנהל (posdev.appr, posOps op:'approve') לא מוכר
+  if (cfg && cfg.devApprove !== false && !d.appr) throw pre('dev-unapproved', 'המכשיר מחכה לאישור מנהל');
   return d;
 }
 function idsIn(input) {
@@ -373,7 +376,7 @@ async function saleIn(request) {
     const snaps = await tx.getAll(...refs.concat(gr));
     const [m, s] = snaps;
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res') || { id: m.get('sale'), seq: m.get('seq'), gross: m.get('gross') }); return; }
-    const d = devOk(s, input.inst);
+    const d = devOk(s, input.inst, cfg);
     const prods = {};
     pids.forEach((p, i) => { const x = snaps[2 + i]; if (x.exists) prods[p] = x.data(); });
     const cps = cpnCodes.map((c, i) => ({ code: c, s: snaps[2 + pids.length + i] }));
@@ -648,7 +651,7 @@ async function retIn(request) {
     const sn = await tx.getAll(...reads);
     const ds = sn[0], ms = mark ? sn[1] : null, ss = sref ? sn[mark ? 2 : 1] : null;
     if (ms && ms.exists) { res = Object.assign({ ok: true, dup: true }, ms.get('res')); return; }
-    const d = op === 'do' ? devOk(ds, input.inst) : (ds.exists ? ds.data() : (() => { throw nf('no-dev', 'הקופה לא נמצאה'); })());
+    const d = op === 'do' ? devOk(ds, input.inst, cfg) : (ds.exists ? ds.data() : (() => { throw nf('no-dev', 'הקופה לא נמצאה'); })());
     const br = d.br || '_';
     let sale = null, rl, R, plan, rate;
     if (withSale) {
@@ -846,7 +849,7 @@ async function debtIn(request) {
   await serial(who.bizId + '/' + input.dev, () => runTx(db, async (tx) => {
     const [m, s] = await tx.getAll(mark, dref);
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res')); return; }
-    const d = devOk(s, input.inst);
+    const d = devOk(s, input.inst, cfg);
     const { B, c } = await D.prep(tx, db, { uid: who.uid }, now, cfg, input.dev, cust);
     if (!c.data) throw nf('no-cust', 'הלקוח לא נמצא');
     const open = await B.openDocs(cust);
@@ -990,7 +993,7 @@ async function giftIn(request) {
   await serial(who.bizId + '/' + input.dev, () => runTx(db, async (tx) => {
     const [m, s] = await tx.getAll(mark, dref);
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res')); return; }
-    const d = devOk(s, input.inst);
+    const d = devOk(s, input.inst, cfg);
     const { B } = await D.prep(tx, db, { uid: who.uid }, now, cfg, input.dev, '');
     const code = await newCode(tx, db);
     const br = d.br || '_';

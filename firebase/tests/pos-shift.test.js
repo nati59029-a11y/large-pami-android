@@ -48,9 +48,9 @@ async function seed() {
     for (const [u, z, role] of [[MGR, A, 'admin'], [CASH, A, 'worker'], [CASH2, A, 'worker'], [LEAD, A, 'worker'], [NOPOS, A, 'worker'], [FMGR, OFF, 'admin']]) {
       b.set(d.doc('users/' + u), { bizId: z, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
     }
-    b.set(d.doc(`b/${A}/posdev/K1`), { name: 'קופה 1', code: 'K1', br: 'b1', on: true, st: 'active', lastSeq: 0, inst: INST1 });
-    b.set(d.doc(`b/${A}/posdev/K2`), { name: 'קופה 2', code: 'K2', br: 'b1', on: false, st: 'active', lastSeq: 0, inst: INST2 });
-    b.set(d.doc(`b/${A}/poscfg/main`), { type: 'general', v: {} });
+    b.set(d.doc(`b/${A}/posdev/K1`), { name: 'קופה 1', code: 'K1', br: 'b1', on: true, st: 'active', lastSeq: 0, inst: INST1, appr: { by: 'seed', at: 1 } }); // appr – POS:W2 (devApprove של ש7)
+    b.set(d.doc(`b/${A}/posdev/K2`), { name: 'קופה 2', code: 'K2', br: 'b1', on: false, st: 'active', lastSeq: 0, inst: INST2, appr: { by: 'seed', at: 1 } });
+    b.set(d.doc(`b/${A}/poscfg/main`), { type: 'general', v: {}, openCashDef: 50000 }); // POS:W2: ערך העסק בפורמט של ש4 (ברירת המחדל באפיון – 100000)
     await b.commit();
   });
 }
@@ -95,6 +95,20 @@ describe('ש5 – עובדים ו-PIN', () => {
     assert.equal(R(await auth(CASH, { op: 'set', pin: '9753', old: '2580' })), 'ok');
     assert.equal(R(await auth(CASH, { op: 'verify', pin: '9753' })), 'ok');
     assert.equal(R(await auth(NOPOS, { op: 'set', pin: '2580' })), 'not-pos');
+  });
+
+  it('POS:W2 (איחוד, ש4↔ש5): lib/pos-pin.verifyOwner – רק הקוד של בעל העסק (admins.own); מנהל בלי own, קוד שגוי או קוד נעול – null', async () => {
+    const PIN = require('../functions/lib/pos-pin');
+    const tdb = (d) => ({ doc: (x) => d.doc(`b/${A}/${x}`), collection: (x) => d.collection(`b/${A}/${x}`) });
+    const vo = async (pin) => { let v; await prep(async (d) => { v = await PIN.verifyOwner(tdb(d), pin); }); return v; };
+    assert.equal(R(await auth(MGR, { op: 'set', pin: '2580' })), 'ok');
+    assert.equal(await vo('2580'), null); // אין בעלים מסומן – מנהל לא מאשר לעצמו
+    await put(`b/${A}/admins/${MGR}`, { own: true });
+    assert.equal(await vo('2580'), MGR);
+    assert.equal(await vo('9999'), null);
+    assert.equal(await vo('12'), null);
+    await put(`b/${A}/pospin/${MGR}`, { lockUntil: Date.now() + 30000 });
+    assert.equal(await vo('2580'), null);
   });
 
   it('5 קודים שגויים: נעילה ל-30 שניות, התראה למנהל (יומן + טלפון); בזמן הנעילה גם קוד נכון נחסם; אחרי 30 שניות – נפתח', async () => {
@@ -158,6 +172,7 @@ describe('ש5 – אישור אחראי', () => {
 
   it('הנחה: עד 5% – בלי אישור; אחראי משמרת מאשר עד 10%; מעל 10% – רק מנהל; קופאי לא מאשר', async () => {
     await pins(LEAD, MGR, CASH2);
+    await put(`b/${A}/poscfg/main`, { discMax: { cashier: 5, lead: 10 } }); // POS:W2: בסכמה של ש4 ברירת המחדל לקופאי היא 0 – כאן העסק קבע 5
     let r = await auth(CASH, { op: 'approve', act: 'disc', pct: 5, by: LEAD, pin: 'x' });
     assert.equal(R(r), 'ok'); assert.equal(r.r.ap, null);
     r = await auth(CASH, { op: 'approve', act: 'disc', pct: 10, by: LEAD, pin: PIN[LEAD], ref: 'K1-000001', dev: 'K1' });

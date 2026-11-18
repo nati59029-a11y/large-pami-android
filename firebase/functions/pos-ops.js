@@ -47,8 +47,17 @@ async function gate(request, o) {
   if (o && o.sell && !isSeller(who)) throw deny('not-pos', 'אין לך הרשאת קופה');
   return { who, db: T.tdb() };
 }
+// POS:W2 (איחוד גל 2): 9 המפתחות של ש7 כבר בסכמה של ש4 (lib/pos-cfg-schema.js) – הערך נקרא דרכה (poscfg/main + poscfg/sa)
+let SCH = null;
+try { SCH = require('./lib/pos-cfg-schema'); } catch (e) { SCH = null; }
 async function cfgOf(db) {
   const s = await db.doc('poscfg/main').get();
+  if (SCH && typeof SCH.eff === 'function') {
+    const e = await require('./lib/pos-cfg-read').cfgOf(db);
+    const c = Object.assign({}, M7_DEF);
+    for (const k of Object.keys(M7_DEF)) if (e[k] !== undefined) c[k] = e[k];
+    return c;
+  }
   const e = CF.eff(s.exists ? s.data() : null);
   const c = Object.assign({}, M7_DEF);
   const raw = s.exists && s.get('v') && typeof s.get('v') === 'object' ? s.get('v') : {};
@@ -171,7 +180,7 @@ async function confOp(db, who, input) {
 
 // ---------- הזנה ידנית אחרי תקלה ----------
 async function manualOp(request, db, who, input, cfg) {
-  if (cfg.manEntry === 'off') throw pre('man-off', 'הזנה ידנית כבויה בעסק הזה');
+  if (cfg.manEntry === 'off' || cfg.manEntry === 'none') throw pre('man-off', 'הזנה ידנית כבויה בעסק הזה'); // POS:W2: בסכמה של ש4 כבוי = 'none'
   const why = str(input.why, 200);
   if (!why) throw bad('bad-why', 'חסרה סיבה');
   const now = Date.now();
