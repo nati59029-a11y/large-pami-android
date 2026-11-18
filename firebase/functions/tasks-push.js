@@ -6,7 +6,9 @@
 // מי מקבל:
 //   עובד – משימה חדשה שנשלחה אליו (role 'a', לא קבועה), משימה שהוחזרה אליו, תגובה של מנהל.
 //   כל המנהלים – משימה שעובד יצר (גם פרטית), ממתינה לאישור, בוצעה על ידי עובד, תגובה של עובד.
-// בלי התראה: משימה קבועה (rc), משימה ישנה בלי to שלא נתפסה, תפיסה/העברה, "נקרא", סימון רשימה, אישור מנהל (wait → done).
+// בלי התראה: משימה קבועה (rc), משימה ישנה בלי to שלא נתפסה, תפיסה/העברה, "נקרא", סימון רשימה, אישור מנהל (wait → done),
+//   משימה מהמייל של המזכירה (ml / owner ריק), ויצירה של משימה שאינה פתוחה או שנוצרה (cr) לפני יותר מ-10 דקות (העתקה / migrate.js).
+// מנהל־על (superadmins/{uid}) נחשב מנהל כשקובעים מי עשה את הפעולה, ולעולם לא מקבל התראה כעובד.
 // לעולם לא למי שעשה את הפעולה; עובד – רק פעיל (staff/{uid}.active == true); מנהלים – מ-admins.
 // תנאים לעסק: עסק קיים ופעיל, תוספת tasks מופעלת (b/). בשורש – רק כשלארג' פעמי במצב legacy.
 // שבת וחג: בחלון השקט (tk-time.js, quietAt) לא נשלח כלום, וגם לא נשלח אחר כך.
@@ -22,12 +24,17 @@ const TK = require('./lib/tk-time');
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_TO = 30; // כמו מגבלת to בחוקים
 const BODY = 400;
+const NEW_MS = 10 * 60 * 1000; // יצירה "טרייה": cr בטווח 10 דקות מעכשיו
 
 const clean = (v) => String(typeof v === 'string' ? v : '').replace(/\s+/g, ' ').trim();
 const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const isId = (u) => typeof u === 'string' && ID_RE.test(u);
 const ids = (a) => (Array.isArray(a) ? a.filter(isId) : []);
+// יצירה שמותר להתריע עליה: פתוחה, ו-cr קרוב לעכשיו (לא מסמך ישן שהועתק)
+const fresh = (a, now) => !!a && a.st === 'open' && Math.abs(now - num(a.cr)) <= NEW_MS;
+// שדה טקסט שהשתנה בכתיבה הזו (אחרת '') – כדי לא להציג תגובה/הערה ישנה
+const chg = (b, a, f) => { const v = clean(a && a[f]); return v && v !== clean(b && b[f]) ? v : ''; };
 
 // האם הכתיבה בכלל מעניינת (בלי קריאה מהמסד): יצירה, שינוי st, או cAt שגדל. מחיקה – לא
 function trig(b, a) {
@@ -45,15 +52,15 @@ function handlerOf(a) {
 }
 
 // הליבה הטהורה. b/a = המשימה לפני/אחרי (null = לא קיימת). actor = מי שכתב (authId של משתמש באפליקציה, '' = שרת/לא ידוע).
-// adm = Set של מזהי המנהלים. מחזיר { k, to: [uid] | 'adm', actor } או null
+// adm = Set של מזהי המנהלים (כולל מנהלי־על). מחזיר { k, to: [uid] | 'adm', actor } או null
 function evOf(b, a, actor, adm) {
   if (!trig(b, a)) return null;
   const A = adm || new Set();
   const who = isId(actor) ? actor : '';
   if (!b || typeof b !== 'object') {
-    if (a.rc) return null;
-    if (a.role === 'a') { const to = ids(a.to).filter((u) => u !== a.owner); return to.length ? { k: 'new', to, actor: a.owner } : null; }
-    if (a.role === 'w') return { k: 'newW', to: 'adm', actor: a.owner };
+    if (a.rc || a.ml || !isId(a.owner)) return null; // משימת מייל של המזכירה (ml, owner '') – בלי התראה
+    if (a.role === 'a') { const to = ids(a.to).filter((u) => u !== a.owner && !A.has(u)); return to.length ? { k: 'new', to, actor: a.owner } : null; } // רק עובדים
+    if (a.role === 'w') return A.has(a.owner) ? null : { k: 'newW', to: 'adm', actor: a.owner };
     return null;
   }
   if (a.st !== b.st) {
@@ -66,15 +73,16 @@ function evOf(b, a, actor, adm) {
   return null;
 }
 
-// הטקסט. ev = תוצאת evOf, a = המשימה, name = שם מי שעשה (רק להודעות למנהלים)
+// הטקסט. ev = תוצאת evOf, a = המשימה, name = שם מי שעשה (מ-staff, ואם אין – מהמשימה).
+// cT / cN / note ב-a – רק אם השתנו בכתיבה הזו (onTask מנקה אותם אחרת), כדי לא להציג תגובה ישנה
 function msgOf(ev, a, name) {
   const txt = cut(clean(a.txt), BODY);
   const nm = cut(clean(name), 40) || 'עובד';
   switch (ev.k) {
     case 'new': return { title: 'משימה חדשה', body: txt };
-    case 'back': return { title: 'המשימה הוחזרה אליך', body: cut(clean(a.cT) || clean(a.note) || clean(a.txt), BODY) };
+    case 'back': return { title: 'המשימה הוחזרה אליך', body: cut(clean(a.note) || clean(a.cT) || clean(a.txt), BODY) };
     case 'cm':
-      if (ev.mgr) { const cT = clean(a.cT), cN = clean(a.cN); return { title: 'תגובה חדשה מהמנהל', body: cT ? cut((cN ? cut(cN, 40) + ': ' : '') + cT, BODY) : txt }; }
+      if (ev.mgr) { const cT = clean(a.cT), cN = clean(a.cN) || clean(name); return { title: 'תגובה חדשה מהמנהל', body: cT ? cut((cN ? cut(cN, 40) + ': ' : '') + cT, BODY) : txt }; }
       return { title: 'תגובה חדשה מ' + nm, body: cut(clean(a.cT), BODY) || txt };
     case 'newW': return { title: 'משימה חדשה מ' + nm, body: txt };
     case 'ptk': return { title: 'משימה פרטית חדשה של ' + nm, body: txt };
@@ -103,18 +111,27 @@ async function deliver(bizId, id, kind, mk, opts) {
   const prefix = bizId ? 'b/' + bizId + '/' : '';
   return T.runInBiz({ bizId: biz.bizId, prefix }, async () => {
     const db = T.tdb();
-    const adm = new Set((await db.collection('admins').get()).docs.map((d) => d.id).filter(isId));
-    const x = mk(adm);
+    const { getFirestore } = require('firebase-admin/firestore');
+    const [ad, sa] = await Promise.all([db.collection('admins').get(), getFirestore().collection('superadmins').get()]);
+    const adm = new Set(ad.docs.map((d) => d.id).filter(isId));
+    const sup = new Set(sa.docs.map((d) => d.id).filter(isId)); // מנהלי־על – בשורש, לא בתוך העסק
+    const x = mk(new Set([...adm, ...sup]));
     if (!x || !x.ev) return { ok: true, r: 'none' };
     const { ev, a } = x;
-    const staffOf = async (u) => { const s = await db.doc('staff/' + u).get(); return s.exists ? s.data() || {} : null; };
+    // staff/{uid} נקרא פעם אחת לכל משתמש (שם / פעיל / טלפונים)
+    const SC = new Map();
+    const snap = (u) => { if (!SC.has(u)) SC.set(u, db.doc('staff/' + u).get()); return SC.get(u); };
+    const staffOf = async (u) => { const s = await snap(u); return s.exists ? s.data() || {} : null; };
+    const pt = (d) => (d.exists && Array.isArray(d.get('pushTokens')) ? d.get('pushTokens').filter((t) => typeof t === 'string') : []);
+    const tokensOf = async (u) => { const [s, p] = await Promise.all([snap(u), db.doc('push_tokens/' + u).get()]); return [...new Set(pt(s).concat(pt(p)))]; }; // כמו RM.tokensOf
     let name = '';
-    if (ev.to === 'adm' && isId(ev.actor)) { const s = await staffOf(ev.actor); name = clean((s && s.name) || x.name); }
+    if ((ev.to === 'adm' || ev.mgr) && isId(ev.actor)) { const s = await staffOf(ev.actor); name = clean((s && s.name) || x.name); }
     const msg = msgOf(ev, a, name);
     const list = ev.to === 'adm' ? [...adm] : ev.to.slice(0, MAX_TO);
     const to = [];
     for (const u of [...new Set(list)]) {
       if (u === ev.actor) continue;
+      if (ev.to !== 'adm' && sup.has(u)) continue; // מנהל־על לא מקבל התראה כעובד
       if (!adm.has(u)) { const s = await staffOf(u); if (!s || s.active !== true) continue; }
       to.push(u);
     }
@@ -124,7 +141,7 @@ async function deliver(bizId, id, kind, mk, opts) {
     let sent = 0;
     for (const u of to) {
       try {
-        const toks = await RM.tokensOf(db, u);
+        const toks = await tokensOf(u);
         if (!toks.length) continue;
         if (!send) { sent++; continue; } // אמולטור בלי שליחה מדומה – רק ספירה
         const res = await send(toks, Object.assign({ id }, msg), tag);
@@ -141,25 +158,29 @@ async function deliver(bizId, id, kind, mk, opts) {
 // משימה (tasks). b/a = לפני/אחרי, actor = מזהה המשתמש שכתב ('' = שרת)
 async function onTask(bizId, id, b, a, actor, opts) {
   if (!trig(b, a)) return { ok: true, r: 'skip' }; // לפני כל קריאה מהמסד
-  const nameOf = (ev) => (ev.k === 'newW' ? a.by : ev.k === 'cm' ? a.cN : a.doneBy);
-  return deliver(bizId, id, 'tk', (adm) => { const ev = evOf(b, a, actor, adm); return ev ? { ev, a, name: nameOf(ev) } : null; }, opts);
+  if (!b && !fresh(a, (opts && opts.now) || Date.now())) return { ok: true, r: 'skip' };
+  // cT / cN / note – רק מה שנכתב עכשיו (דחייה כותבת רק note; כשל בכתיבת התגובה כותב רק cAt/cBy)
+  const v = Object.assign({}, a, { cT: chg(b, a, 'cT'), cN: chg(b, a, 'cN'), note: chg(b, a, 'note') });
+  const nameOf = (ev) => (ev.k === 'newW' ? a.by : ev.k === 'cm' ? v.cN : a.doneBy);
+  return deliver(bizId, id, 'tk', (adm) => { const ev = evOf(b, a, actor, adm); return ev ? { ev, a: v, name: nameOf(ev) } : null; }, opts);
 }
 
 // משימה פרטית חדשה (ptk): עובד (לא מנהל) יצר – לכל המנהלים
 async function onPtk(bizId, id, d, opts) {
-  if (!d || typeof d !== 'object' || d.rc || !isId(d.owner)) return { ok: true, r: 'skip' };
+  if (!d || typeof d !== 'object' || d.rc || !isId(d.owner) || !fresh(d, (opts && opts.now) || Date.now())) return { ok: true, r: 'skip' };
   return deliver(bizId, id, 'ptk', (adm) => (adm.has(d.owner) ? null : { ev: { k: 'ptk', to: 'adm', actor: d.owner }, a: d, name: d.by }), opts);
 }
 
 const OPTS = { region: NEW_REGION, retry: false, timeoutSeconds: 60, memory: '256MiB', maxInstances: 5 };
 const fail = (e) => { logger.error('tkPush failed', { reason: 'internal', name: e && e.name, code: e && e.code }); };
 const dat = (s) => (s && s.exists && typeof s.data === 'function' ? s.data() || {} : null);
-const runTk = (bizId, ev) => {
+// opts – רק לבדיקות (שליחה מדומה, now). שגיאה – גם סינכרונית – נרשמת ולא נזרקת החוצה
+const runTk = (bizId, ev, opts) => Promise.resolve().then(() => {
   const ch = ev.data || {};
   const actor = ev.authType === 'app_user' && isId(ev.authId) ? ev.authId : '';
-  return onTask(bizId, ev.params.id, dat(ch.before), dat(ch.after), actor).catch(fail);
-};
-const runPtk = (bizId, ev) => onPtk(bizId, ev.params.id, ev.data && typeof ev.data.data === 'function' ? ev.data.data() : null).catch(fail);
+  return onTask(bizId, ev.params.id, dat(ch.before), dat(ch.after), actor, opts);
+}).catch(fail);
+const runPtk = (bizId, ev, opts) => Promise.resolve().then(() => onPtk(bizId, ev.params.id, ev.data && typeof ev.data.data === 'function' ? ev.data.data() : null, opts)).catch(fail);
 exports.tkPush = onDocumentWrittenWithAuthContext(Object.assign({ document: 'tasks/{id}' }, OPTS), (ev) => runTk(null, ev));
 exports.tkPushB = onDocumentWrittenWithAuthContext(Object.assign({ document: 'b/{bizId}/tasks/{id}' }, OPTS), (ev) => {
   if (!T.BIZ_RE.test(String(ev.params.bizId || ''))) return null;
@@ -170,4 +191,4 @@ exports.ptkPushB = onDocumentCreated(Object.assign({ document: 'b/{bizId}/ptk/{i
   if (!T.BIZ_RE.test(String(ev.params.bizId || ''))) return null;
   return runPtk(ev.params.bizId, ev);
 });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { trig, evOf, handlerOf, msgOf, onTask, onPtk } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { trig, evOf, handlerOf, msgOf, onTask, onPtk, runTk, runPtk, fresh, NEW_MS } });
