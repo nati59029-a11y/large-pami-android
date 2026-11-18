@@ -1,0 +1,70 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head><meta charset="utf-8"><title>כספית (דמה לבדיקות)</title></head>
+<body>
+<!-- כספית מדומה לבדיקות התוסף בלבד: נתיבי # כמו בכספית, הורדות דרך XHR/fetch + blob + a.download, וסודות "שתולים" לבדיקת הניקוי -->
+<header id="hdr" hidden>
+  <span id="mnu" role="button">ממשקים</span>
+  <div id="sub" hidden><a href="#/reports/items-sales">דוח מכירות לפריטים</a></div>
+  <span class="contact">owner@example.co.il · 052-1234567</span>
+</header>
+<main id="app"></main>
+<script>
+'use strict';
+const TOK = 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.sflKxwRJSMeKKF2QT4fwpM';
+const V = () => localStorage.getItem('variant') || '';
+const authed = () => localStorage.getItem('auth') === '1';
+document.cookie = 'ASP.NET_SessionId=SESSIONabc123def456; path=/';
+window.ev = [];
+function dl(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); ev.push('dl:' + name); }
+document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
+function render() {
+  const h = location.hash || '#/';
+  const app = document.getElementById('app');
+  document.getElementById('hdr').hidden = !authed();
+  document.getElementById('sub').hidden = true;
+  if (!authed()) {
+    app.innerHTML = '<h1>כניסה למערכת</h1><input name="user" id="u" placeholder="שם משתמש"><input type="password" id="p" placeholder="סיסמה"><button id="login">כניסה</button>';
+    if (h !== '#/login') location.hash = '#/login';
+    return;
+  }
+  fetch('/api/me?token=Zx9kQ2mP7vL4nR8sT1wY6bC3', { headers: { Authorization: TOK } }).then((r) => r.json()).then((j) => { window.me = j; });
+  if (h.startsWith('#/catalogs')) {
+    app.innerHTML = `<h1>קטלוג פריטים</h1><button id="x">${V() === 'new' ? 'שמירת קובץ' : 'ייצוא לאקסל'}</button><table><tr><td>כרטיס 4580123412341234</td></tr></table>`;
+    document.getElementById('x').onclick = () => {
+      const x = new XMLHttpRequest();
+      x.open('GET', '/api/catalogs/export?branch=1&token=Zx9kQ2mP7vL4nR8sT1wY6bC3');
+      x.setRequestHeader('Authorization', TOK);
+      x.responseType = 'blob';
+      x.onload = () => dl(x.response, 'catalog.xlsx');
+      x.send();
+    };
+  } else if (h.startsWith('#/reports/items-sales')) {
+    app.innerHTML = '<h1>דוח מכירות לפריטים</h1><input id="from" placeholder="מתאריך"><input id="to" placeholder="עד תאריך"><button id="run">הפק דוח</button><div id="tbl"></div><button id="xl">ייצוא לאקסל</button>';
+    document.getElementById('run').onclick = () => { document.getElementById('tbl').textContent = 'הדוח מוכן'; ev.push('run'); };
+    document.getElementById('xl').onclick = async () => {
+      const q = new URLSearchParams({ from: document.getElementById('from').value, to: document.getElementById('to').value });
+      const r = await fetch('/api/reports/items-sales?' + q, { headers: { Authorization: TOK } });
+      dl(await r.blob(), 'items-sales.csv');
+    };
+  } else if (h.startsWith('#/csv-imports')) {
+    app.innerHTML = `<h1>ייבוא קבצים</h1><label>סוג <select id="t"><option value="">בחר</option><option value="new">טעינת פריטים חדשים</option><option value="price">עדכון מחיר לצרכן ו/או מחיר עלות לפריטים</option><option value="cust">טעינת לקוחות</option></select></label>
+      <input type="file" id="f"><label>סיסמת מנהל <input type="password" id="mp" value="hunter2pass"></label><input id="note" value="owner-secret-value">
+      <button id="go">טען קובץ</button><div class="result" role="alert"></div>`;
+    document.getElementById('go').onclick = async () => {
+      const t = document.getElementById('t').value, f = document.getElementById('f').files[0];
+      if (!t || !f) { document.querySelector('.result').textContent = 'שגיאה: חסר סוג או קובץ'; return; }
+      const text = await f.text();
+      const r = await fetch('/api/csv-imports', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK }, body: JSON.stringify({ type: t, name: f.name, text }) });
+      const j = await r.json();
+      setTimeout(() => { document.querySelector('.result').textContent = `הטעינה הסתיימה: ${j.n} פריטים נטענו`; }, 300);
+    };
+  } else {
+    app.innerHTML = '<h1>ראשי</h1>';
+  }
+}
+window.addEventListener('hashchange', render);
+render();
+</script>
+</body>
+</html>

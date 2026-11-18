@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>סנכרון כספית</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body class="pop">
+<h1><img src="icon.png" alt="">סנכרון כספית</h1>
+<div class="card">
+  <div class="st"><span class="dot" id="dot"></span><div><b id="stT">טוען…</b><p class="note" id="stN"></p></div></div>
+</div>
+<div class="card" id="infoC">
+  <dl>
+    <dt>עסק</dt><dd id="biz">—</dd>
+    <dt>סנכרון אחרון שהצליח</dt><dd id="last">—</dd>
+    <dt>הסנכרון הבא</dt><dd id="next">—</dd>
+  </dl>
+</div>
+<div id="conn">
+  <button class="btn" id="sync">סנכרן עכשיו</button>
+  <button class="btn g" id="disc">מצב היכרות עם כספית</button>
+  <button class="btn g hide" id="dl">הורדת דוח</button>
+  <button class="btn g hide" id="send">שליחת הדוח לאפליקציה</button>
+</div>
+<button class="btn g" id="opt">חיבור לאפליקציה והגדרות</button>
+<p class="msg" id="msg" role="status" aria-live="polite"></p>
+<script src="lib/plan.js"></script>
+<script src="ui.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

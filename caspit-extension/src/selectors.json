@@ -1,0 +1,44 @@
+{
+  "v": 0,
+  "note": "גרסה 0 – ניחוש בלבד (לא מאומת מול כספית). מצב ההיכרות מגלה את הנתיבים והכפתורים האמיתיים, ואז מעדכנים כאן.",
+  "base": "https://caspit.valu.co.il/",
+  "start": "#/catalogs",
+  "login": { "hash": ["#/login", "#/signin", "/login"], "css": "input[type=password]", "shell": { "text": "ממשקים" } },
+  "endpoints": {},
+  "flows": {
+    "catalog": [
+      { "op": "nav", "hash": "#/catalogs", "ms": 2500, "fresh": true },
+      { "op": "waitFor", "t": { "textAny": ["ייצוא לאקסל", "יצוא לאקסל", "ייצוא", "יצוא", "Excel", "הורדה"], "tag": "button,a,[role=button],[role=menuitem]" }, "ms": 30000 },
+      { "op": "click", "t": { "textAny": ["ייצוא לאקסל", "יצוא לאקסל", "ייצוא", "יצוא", "Excel", "הורדה"], "tag": "button,a,[role=button],[role=menuitem]" }, "capture": true, "safe": true }
+    ],
+    "sales": [
+      { "op": "click", "t": { "text": "ממשקים" }, "safe": true, "wait": 800 },
+      { "op": "click", "t": { "text": "דוח מכירות לפריטים" }, "safe": true, "wait": 2500 },
+      { "op": "setDate", "t": { "css": "input[placeholder*=\"מתאריך\"],input[name*=from i]", "aria": "מתאריך", "alt": { "css": "input[type=date]", "nth": 0 } }, "value": "{day}" },
+      { "op": "setDate", "t": { "css": "input[placeholder*=\"עד תאריך\"],input[name*=to i]", "aria": "עד תאריך", "alt": { "css": "input[type=date]", "nth": 1 } }, "value": "{day}" },
+      { "op": "click", "t": { "textAny": ["הפק דוח", "הצג", "חפש", "הפק"], "tag": "button,a,[role=button],input[type=button],input[type=submit]" }, "safe": true, "wait": 3000 },
+      { "op": "click", "t": { "textAny": ["ייצוא לאקסל", "יצוא לאקסל", "ייצוא", "יצוא", "Excel"], "tag": "button,a,[role=button],[role=menuitem]" }, "capture": true, "safe": true, "ms": 300000 }
+    ],
+    "importNew": [
+      { "op": "nav", "hash": "#/csv-imports", "ms": 2500, "fresh": true },
+      { "op": "select", "t": { "tag": "select,[role=combobox],[role=listbox]" }, "option": "טעינת פריטים חדשים" },
+      { "op": "setFile", "t": { "css": "input[type=file]" }, "file": "csv" },
+      { "op": "click", "t": { "textAny": ["טען קובץ", "טעינה", "טען", "ייבוא", "העלה"], "tag": "button,[role=button],input[type=submit],input[type=button]" }, "submit": true, "wait": 3000 },
+      { "op": "waitFor", "t": { "textAny": ["הסתיים", "נטענו", "בהצלחה", "שגיאה", "שגיאות"] }, "ms": 180000 },
+      { "op": "text", "t": { "css": "[role=alert],.alert,.modal-body,.toast,.result", "textAny": ["הסתיים", "נטענו", "בהצלחה", "שגיאה", "שגיאות"] }, "optional": true }
+    ],
+    "importPrice": [
+      { "op": "nav", "hash": "#/csv-imports", "ms": 2500, "fresh": true },
+      { "op": "select", "t": { "tag": "select,[role=combobox],[role=listbox]" }, "option": "עדכון מחיר לצרכן ו/או מחיר עלות לפריטים" },
+      { "op": "setFile", "t": { "css": "input[type=file]" }, "file": "csv" },
+      { "op": "click", "t": { "textAny": ["טען קובץ", "טעינה", "טען", "ייבוא", "העלה"], "tag": "button,[role=button],input[type=submit],input[type=button]" }, "submit": true, "wait": 3000 },
+      { "op": "waitFor", "t": { "textAny": ["הסתיים", "נטענו", "בהצלחה", "שגיאה", "שגיאות"] }, "ms": 180000 },
+      { "op": "text", "t": { "css": "[role=alert],.alert,.modal-body,.toast,.result", "textAny": ["הסתיים", "נטענו", "בהצלחה", "שגיאה", "שגיאות"] }, "optional": true }
+    ]
+  },
+  "disc": [
+    { "name": "catalogs", "hash": "#/catalogs", "flow": "catalog" },
+    { "name": "csv-imports", "hash": "#/csv-imports", "flow": "importNew" },
+    { "name": "sales", "hash": "", "flow": "sales" }
+  ]
+}

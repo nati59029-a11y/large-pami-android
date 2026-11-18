@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "לארג' פעמי – סנכרון כספית",
+  "short_name": "סנכרון כספית",
+  "version": "0.1.0",
+  "description": "מסנכרן כל לילה את הקטלוג והמכירות מכספית לאפליקציה לארג' פעמי, ומעלה לכספית פריטים חדשים ומחירים.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApM6f1OarOBGMcWgr+HAASVqV9cKDNISPOyJWKdSLnYswvZFpZtaoP9QpkVnuV8BZA8g50ETKdCjUwCSQmSpynSd4Q8Ey/+TE1VA42nRjpb6QV6q6pVpUYjF5xIv8CkS+Cgq9ZhUHRZeZaxW4yEz4JLywTLwIJwufogx/gEgdConnhZjVY8u3Jj6HVjBCWJM1gRl4ux9elbRCN40wuGLeCVnHivvLYSeJGHHROWSisJvGJKMKIH7WVo3THQcgDtECmF97IWZzFqxaiQ/bn2vWwg0GYX3NchiZQwSTY0KnimDeQEzt1XmLuatoyvLJpSdYOKWHukv36tWtvISmJvWtWwIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["alarms", "storage", "scripting", "idle"],
+  "host_permissions": ["https://caspit.valu.co.il/*", "__CXBOT_ORIGIN__/*"],
+  "background": { "service_worker": "sw.js" },
+  "action": { "default_popup": "popup.html", "default_title": "סנכרון כספית", "default_icon": { "128": "icon.png" } },
+  "options_page": "options.html",
+  "icons": { "128": "icon.png" },
+  "content_scripts": [
+    { "matches": ["https://caspit.valu.co.il/*"], "js": ["content/hook-main.js"], "run_at": "document_start", "world": "MAIN", "all_frames": false },
+    { "matches": ["https://caspit.valu.co.il/*"], "js": ["content/bridge.js"], "run_at": "document_start", "all_frames": false }
+  ],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'" }
+}
