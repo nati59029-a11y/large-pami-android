@@ -1,7 +1,7 @@
 'use strict';
 // הקמת חנות – שלב 3 (17.11.2026): s3CapPut / s3SetupDone (s3cap.js), באמולטור. חלק מ-test:multibiz:4.
 //   1. הליבה (capPut, setupDone) מול Firestore ו-Storage של האמולטור: תמונה לפריט (JPEG בלבד, נתיב cap/, מוקטנת), qid חוזר בלי כפילות,
-//      מדף גבוה (t/b), תקרת 6 לגובה, חזית ידנית = ok + s3sum.fr (בלי לגעת ב-th של הסבב) / s3look, דילוג רק עם סיבה, פריט שלא בתוכנית,
+//      מדף גבוה (t/b), תקרת 20 לגובה ו-40 לפריט, קיר (w/iw) עם a/t/b, חזית ידנית = ok + s3sum.fr (בלי לגעת ב-th של הסבב) / s3look, דילוג רק עם סיבה, פריט שלא בתוכנית,
 //      פריט שזז במפה חוזר ל-part, orph כשהפריט נמחק מהמפה, מונים, סיום רק כשהכול ok/skip, הערות מקטע ← bay.notes פעם אחת.
 //   2. הפונקציות דרך אמולטור הפונקציות: מנהל ו-s3m – כן; עובד בלי s3m – לא מעלה; עסק עם store3d כבוי – לא.
 const { describe, it, before, beforeEach } = require('node:test');
@@ -105,16 +105,58 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     assert.equal(files.length, 0);
   });
 
-  it('מדף גבוה: עליון ותחתון באותו מפתח; עד 6 לכל גובה (ph-full); off מסמן ולא מוחק', async () => {
-    for (let i = 0; i < 6; i++) assert.equal((await put({ key: 'b_f2-a-1', op: 'ph', lv: 't', img: IMG, th: TH })).n, i + 1);
-    assert.equal(await err(put({ key: 'b_f2-a-1', op: 'ph', lv: 't', img: IMG, th: TH })), 'ph-full');
-    assert.equal((await put({ key: 'b_f2-a-1', op: 'ph', lv: 'b', img: IMG, th: TH })).n, 7);
+  it('מדף גבוה: עליון ותחתון באותו מפתח; עד 20 לכל גובה (ph-full); off מסמן ולא מוחק', async () => {
+    for (let i = 0; i < 20; i++) assert.equal((await put({ key: 'b_f2-a-1', op: 'ph', lv: 't', img: IMG, th: TH })).n, i + 1);
+    assert.equal(await err(put({ key: 'b_f2-a-1', op: 'ph', lv: 't', img: IMG, th: TH })), 'ph-full', 'ה-21 בגובה אחד');
+    assert.equal((await put({ key: 'b_f2-a-1', op: 'ph', lv: 'b', img: IMG, th: TH })).n, 21);
     const r = await put({ key: 'b_f2-a-1', op: 'off', n: 3 });
     assert.equal(r.off, true);
     const d = await get(`b/${A}/s3setup/s-main/cap/b_f2-a-1`);
-    assert.equal(d.ph.length, 7); assert.equal(d.ph[2].off, true); assert.deepEqual(d.ph.map((p) => p.lv).join(''), 'ttttttb');
+    assert.equal(d.ph.length, 21); assert.equal(d.ph[2].off, true); assert.deepEqual(d.ph.map((p) => p.lv).join(''), 't'.repeat(20) + 'b');
     assert.equal((await put({ key: 'b_f2-a-1', op: 'off', n: 3 })).off, false, 'שוב – חוזרת לשימוש');
     assert.equal(await err(put({ key: 'b_f2-a-1', op: 'off', n: 50 })), 'no-photo');
+  });
+
+  it('קיר (18.11.2026): w מקבל a/t/b; 40 לפריט עוברות וה-41 ph-full; n עד 99; מקטע רגיל עדיין דוחה t, מדף גבוה עדיין דוחה a', async () => {
+    const W = 'w_r1-1-1';
+    for (const lv of ['a', 't', 'b']) assert.equal((await put({ key: W, op: 'ph', lv, img: IMG, th: TH })).ph >= 1, true, 'קיר – ' + lv);
+    assert.equal(await err(put({ key: W, op: 'ph', lv: 'x', img: IMG, th: TH })), 'bad-lv', 'גובה לא מוכר');
+    for (let i = 0; i < 19; i++) await put({ key: W, op: 'ph', lv: 't', img: IMG, th: TH });
+    assert.equal(await err(put({ key: W, op: 'ph', lv: 't', img: IMG, th: TH })), 'ph-full', 'ה-21 עליונה');
+    for (let i = 0; i < 18; i++) await put({ key: W, op: 'ph', lv: 'b', img: IMG, th: TH });
+    let d = await get(`b/${A}/s3setup/s-main/cap/${W}`);
+    assert.equal(d.ph.length, 40); assert.deepEqual(d.ph.map((p) => p.n), Array.from({ length: 40 }, (_, i) => i + 1));
+    assert.equal(await err(put({ key: W, op: 'ph', lv: 'a', img: IMG, th: TH })), 'ph-full', 'ה-41 לפריט');
+    assert.equal(await err(put({ key: W, op: 'ph', lv: 'b', img: IMG, th: TH })), 'ph-full');
+    // מעורב a+t+b: off ו-geo עובדים על תמונות מכל הגבהים
+    assert.equal((await put({ key: W, op: 'off', n: 1 })).off, true);
+    assert.equal((await put({ key: W, op: 'geo', n: 2, xr: { a: 0, b: 500 } })).ok, true);
+    assert.equal((await put({ key: W, op: 'geo', n: 40, yr: { a: 100, b: 900 } })).ok, true);
+    d = await get(`b/${A}/s3setup/s-main/cap/${W}`);
+    assert.deepEqual([d.ph[0].lv, d.ph[0].off, d.ph[1].lv, d.ph[1].xr, d.ph[39].lv, d.ph[39].yr], ['a', true, 't', { a: 0, b: 500 }, 'b', { a: 100, b: 900 }]);
+    assert.equal(await err(put({ key: W, op: 'ph', lv: 'a', img: IMG, th: TH })), 'ph-full', 'off נספרת – גם תמונה שלא בשימוש תופסת מקום');
+    // n: עד 99 (storage.rules – דו-ספרתי)
+    assert.equal(C.phRoom({ ph: [{ n: 98, lv: 'a' }] }, 'a'), 99);
+    assert.equal(await err(Promise.resolve().then(() => C.phRoom({ ph: [{ n: 99, lv: 'a' }] }, 'a'))), 'ph-full', 'n 100 – לא');
+    assert.equal(await err(put({ key: W, op: 'geo', n: 100, xr: { a: 0, b: 500 } })), 'bad-n');
+    // שאר הפריטים – כמו קודם
+    assert.equal(await err(put({ key: 'b_f1-a-1', op: 'ph', lv: 't', img: IMG, th: TH })), 'bad-lv', 'מקטע רגיל – רק a');
+    assert.equal(await err(put({ key: 'b_f1-a-1', op: 'ph', lv: 'b', img: IMG, th: TH })), 'bad-lv');
+    assert.equal(await err(put({ key: 'b_f2-a-1', op: 'ph', lv: 'a', img: IMG, th: TH })), 'bad-lv', 'מדף גבוה – לא a');
+    assert.equal(await err(put({ key: 'd_d1', op: 'ph', lv: 't', img: IMG, th: TH })), 'bad-lv', 'דלת – רק a');
+    try { await put({ key: 'b_f1-a-1', op: 'ph', lv: 't', img: IMG, th: TH }); } catch (e) { assert.match(e.message, /תמונה אחת לכל גובה/); }
+    try { await put({ key: W, op: 'ph', lv: 'x', img: IMG, th: TH }); } catch (e) { assert.equal(e.details.reason, 'bad-lv'); }
+  });
+
+  it('קיר פנימי (iw) מקבל a/t/b; התוכנית עצמה לא השתנתה (lv של קיר עדיין [a])', async () => {
+    const m = MAP({ walls: [{ id: 'w1', p: [100, 50, 100, 350], t: 10 }] });
+    await seed(m);
+    const plan = P.capPlan(m), iw = plan.items.find((x) => x.k === 'iw'), w = plan.items.find((x) => x.k === 'w');
+    assert.ok(iw, 'יש קטע קיר פנימי בתוכנית');
+    assert.deepEqual([iw.lv, w.lv], [['a'], ['a']]);
+    for (const lv of ['t', 'b', 'a']) assert.equal((await put({ key: iw.key, op: 'ph', lv, img: IMG, th: TH })).st, 'part');
+    const d = await get(`b/${A}/s3setup/s-main/cap/${iw.key}`);
+    assert.equal(d.ph.map((p) => p.lv).join(''), 'tba');
   });
 
   it('geo (שלב 4ב): תיקון ידני נשמר ב-ph[n] בלבד, בלי קובץ ובלי שינוי st; קלט לא תקין / n לא קיים נדחים; qid חוזר – אותה תשובה', async () => {

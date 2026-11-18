@@ -11,7 +11,8 @@ const VERSION = 'bayscan-v1'; // נכנס ל-ai.ver. מעלים בכל שינו�
 const KINDS = ['gon', 'wall', 'fridge', 'table', 'stand', 'bin', 'dfr', 'ofr', 'frz', 'pal', 'rack', 'ctr', 'oth'];
 const KIND_HE = { gon: 'גונדולה', wall: 'מדף קיר', fridge: 'מקרר', table: 'שולחן', stand: 'מעמד', bin: 'סל', dfr: 'מקרר דלתות', ofr: 'מקרר פתוח', frz: 'מקפיא', pal: 'משטח', rack: 'סטנד / מתלה', ctr: 'דלפק', oth: 'אחר' };
 const ITEM_HE = { b: 'מקטע מדף', w: 'קטע קיר היקפי', iw: 'קטע קיר פנימי', fl: 'אזור רצפה', ce: 'אזור תקרה', d: 'דלת', k: 'עמדת קופה', c: 'עמוד' };
-const LIM = { prods: 80, diff: 20, gaps: 10, ph: 12, n: 60, brand: 40, var: 40, size: 20, cat: 30, was: 60, retake: 120 };
+// ph: עד 40 תמונות לפריט (18.11.2026 – כמו PH_MAX ב-s3cap.js; כל התמונות נשלחות לבדיקה). משמש גם לגבול של per
+const LIM = { prods: 80, diff: 20, gaps: 10, ph: 40, n: 60, brand: 40, var: 40, size: 20, cat: 30, was: 60, retake: 120 };
 const DIFF_K = ['prod', 'cat', 'w']; // kind / lvl / bays – השרת מחשב בעצמו מול המפה (לא מהמודל)
 const RE_BC = /^[0-9]{8,14}$/;
 
