@@ -125,57 +125,80 @@ function custText(it, biz) {
 
 // ---------- שלב 2: הורדה אוטומטית בקליטת חשבונית ספק ----------
 // matchInv(items, inv, PM) → [{ id, it, k: 'inv' (הגיע כולו) | 'part' (חלקי, נשאר ההפרש), got, q0?, q?, ln: [שמות השורות] }]
-// inv: { id ('i'+בקשה), sup, supId?, inv, at? (מ"ש), lines: [{ n, qty }] }. סף מחמיר – עדיף לפספס מאשר להוריד בטעות:
-//  • רק פריט פתוח, שנוסף לפני החשבונית (t ≤ at), שלא טופל כבר באותה חשבונית (h עם pinv), ושספק החשבונית הוא אחד מספקיו
-//    (לפי supId; אין supId – לפי שם מנורמל) או פריט כללי.
-//  • כל מילה בשם הפריט נמצאת בשורה: זהה, אותה צורה (יחיד/רבים) או אותו שלד (כתיב מלא/חסר); מספרים – רק זהים; בלי קידומת.
-//    לפחות מילה אחת (לא מספר) זהה בדיוק – "חלב" לא יורד מ"חלבה".
-//  • שורה שמתאימה לכמה פריטים נזקפת רק לפריט/ים הספציפי ביותר (הכי הרבה ממילות השורה).
-//  • פריט (בכל מצב) שכבר טופל באותה חשבונית "תופס" את השורות שלו: שורה שהוא בין המתאימים ביותר לה לא נזקפת לאף פריט אחר –
-//    כך עיבוד חוזר (במכשיר אחר / אחרי ביטול) לא מוריד פריט כללי יותר במקום פריט שכבר ירד. לכן כדאי להעביר גם פריטים שהגיעו.
-//  • כמות: פריט בלי כמות – יורד כולו. עם כמות – סכום הכמויות בשורות; פחות מהנדרש = חלקי; אין כמות ידועה בשורות – לא יורד.
+// inv: { id ('i'+בקשה), sup, supId?, inv, at? (מ"ש), lines: [{ n, qty }] }. סף מחמיר – עדיף לפספס מאשר להוריד בטעות (סבב בדיקה 1, 19.11.2026):
+//  • רק פריט פתוח, שנוסף לפני החשבונית (t ≤ at), שלא טופל כבר באותה חשבונית (h עם pinv), שלא הוחזר ידנית אחרי החשבונית
+//    (undo / unp / res עם t ≥ at), ושספק החשבונית הוא אחד מספקיו (לפי supId; אין supId – לפי שם מנורמל) או פריט כללי.
+//  • מילים: זהה, יחיד/רבים (ים / ות, וגם ה/ת → ות במילה של 4+ אותיות) או כתיב מלא/חסר (ו/י, 4+ אותיות). הוספה או הסרה של ה'
+//    בסוף לבד אינה התאמה ("חלב" ≠ "חלבה"). לפחות מילה אחת זהה בדיוק.
+//  • מספר מתאים רק למספר עם אותה יחידה: "3%" רק ל-"3%" (לא ל-"3 ליטר"); מספר בלי יחידה – לכל יחידה חוץ מאחוז.
+//  • המילה הראשונה בשורה (שאינה מספר / יחידה) היא מילה של הפריט ("משקה יוגורט" לא מוריד "יוגורט"),
+//    והפריט מכסה לפחות חצי ממילות השורה ("מסטיק ללא סוכר" לא מוריד "סוכר").
+//  • כמה פריטים שכל מילותיהם בשורה: יורד רק הספציפי ביותר, ורק אם השאר כלולים בו ("חלב" ⊂ "חלב 3%").
+//    שני פריטים שאינם כלולים זה בזה ("שוקולד" ו"חלב" בשורה "שוקולד חלב") או זהים – לא יורד אף אחד.
+//  • פריט (בכל מצב) שכבר טופל באותה חשבונית "תופס" את השורות שלו (עיבוד חוזר לא מוריד פריט אחר במקומו).
+//  • כמות: פריט בלי כמות – יורד כולו. עם כמות – סכום הכמויות בשורות (ביחידות של שורת החשבונית); פחות מהנדרש = חלקי;
+//    אין כמות ידועה בשורות – לא יורד.
 const r3 = (v) => Math.round(v * 1000) / 1000;
-function wScore(PM, a, b) { try { return PM.tokScore(a, b); } catch (e) { return 0; } }
-const isNum = (t) => /^\d+(\.\d+)?$/.test(t);
-// ציון שם פריט מול שורה: null אם לא מתאים; אחרת { c: חלק ממילות השורה שכוסו, s: ממוצע ציוני המילים }
-function lineFit(PM, iw, lw) {
-  if (!iw.length || !lw.length) return null;
-  let ex = 0, sum = 0; const used = new Set();
-  for (const a of iw) {
-    let b = 0, bi = -1;
-    lw.forEach((w, i) => { const s = a === w ? 1 : wScore(PM, a, w); if (s > b) { b = s; bi = i; } });
-    const ok = b >= 0.95 || (b >= 0.85 && b < 0.9); // זהה / צורה / שלד – לא קידומת (0.9) ולא מרחק עריכה
-    if (!ok) return null;
-    if (b === 1 && !isNum(a)) ex++;
-    sum += b; used.add(bi);
+const UNIT = { 'אחוז': '%', 'ליטר': 'l', 'ליטרימ': 'l', 'ל': 'l', 'מל': 'ml', 'מיליליטר': 'ml', 'גרמ': 'g', 'גר': 'g', 'ג': 'g', 'קג': 'kg', 'קילו': 'kg',
+  'יח': 'u', 'יחידות': 'u', 'יחידה': 'u', 'מטר': 'm', 'מ': 'm', 'סמ': 'cm', 'ממ': 'mm' };
+// טקסט → { w: מילים (בלי מספרים ויחידות), n: מספרים עם יחידה ['3|%', '1|l'] }
+function toks(PM, s) {
+  const raw = String(s == null ? '' : s).replace(/(\d)\s*%/g, '$1 אחוז ');
+  const W = PM.words(raw), w = [], n = [];
+  for (let i = 0; i < W.length; i++) {
+    const t = W[i];
+    if (/^\d+(\.\d+)?$/.test(t)) { const u = UNIT[W[i + 1]]; if (u) i++; n.push(String(+t) + '|' + (u || '')); }
+    else if (!UNIT[t]) w.push(t);
   }
-  if (!ex) return null;
-  return { c: used.size / lw.length, s: sum / iw.length };
+  return { w: [...new Set(w)], n: [...new Set(n)] };
 }
+const HEBW = /^[א-ת]+$/;
+const skel = (x) => x[0] + x.slice(1).replace(/[וי]/g, '');
+const plural = (x, y) => y === x + 'ימ' || y === x + 'ות' || (x.length >= 4 && /[הת]$/.test(x) && y === x.slice(0, -1) + 'ות');
+// 2 – זהה, 1 – אותה מילה (יחיד/רבים, כתיב מלא/חסר), 0 – לא
+function wEq(a, b) {
+  if (a === b) return 2;
+  if (!HEBW.test(a) || !HEBW.test(b)) return 0;
+  if (plural(a, b) || plural(b, a)) return 1;
+  if (a.length >= 4 && b.length >= 4 && Math.abs(a.length - b.length) <= 2 && skel(a) === skel(b)) return 1;
+  return 0;
+}
+const nEq = (a, b) => { const [x, u] = a.split('|'), [y, v] = b.split('|'); return x === y && (u === v || (!u && v !== '%')); };
+// כל מילות הפריט ומספריו נמצאים בשורה?
+const inLine = (c, l) => c.w.every((a) => l.w.some((b) => wEq(a, b))) && c.n.every((a) => l.n.some((b) => nEq(a, b)));
+// בנוסף לכך: מילה זהה, המילה הראשונה בשורה של הפריט, וכיסוי של חצי ממילות השורה
+function fits(c, l) {
+  if (!c.w.some((a) => l.w.includes(a))) return false;
+  if (!c.w.some((a) => wEq(a, l.w[0]))) return false;
+  return l.w.filter((b) => c.w.some((a) => wEq(a, b))).length * 2 >= l.w.length;
+}
+// c1 כלול ב-c2 (כל מילה ומספר של c1 נמצאים ב-c2)
+const sub = (c1, c2) => c1.w.every((a) => c2.w.some((b) => wEq(a, b))) && c1.n.every((a) => c2.n.some((b) => nEq(a, b)));
 function matchInv(items, inv, PM) {
-  if (!PM || typeof PM.words !== 'function' || typeof PM.tokScore !== 'function') return [];
+  if (!PM || typeof PM.words !== 'function') return [];
   inv = inv || {};
   const pid = String(inv.id || ''); if (!ID.test(pid)) return [];
   const sid = typeof inv.supId === 'string' && ID.test(inv.supId) ? inv.supId : '';
   const sk = clean(inv.sup, 60) ? keyOf(clean(inv.sup, 60), PM) : '';
   const at = typeof inv.at === 'number' && isFinite(inv.at) ? inv.at : Date.now();
-  const lines = (Array.isArray(inv.lines) ? inv.lines : []).slice(0, 200).map((l) => ({ n: clean(l && l.n, 300), qty: l && typeof l.qty === 'number' && isFinite(l.qty) && l.qty > 0 ? l.qty : 0 }))
-    .map((l) => Object.assign(l, { w: [...new Set(PM.words(l.n))] })).filter((l) => l.w.length);
+  const lines = (Array.isArray(inv.lines) ? inv.lines : []).slice(0, 200).map((l) => Object.assign({ n: clean(l && l.n, 300), qty: l && typeof l.qty === 'number' && isFinite(l.qty) && l.qty > 0 ? l.qty : 0 }, toks(PM, l && l.n)))
+    .filter((l) => l.w.length);
   if (!lines.length) return [];
   const supOk = (x) => x.gen || (Array.isArray(x.sups) && (sid ? x.sups.includes(sid) : !!sk && (Array.isArray(x.supN) ? x.supN : []).some((n) => clean(n) && keyOf(clean(n, 60), PM) === sk)));
-  const done = (x) => Array.isArray(x.h) && x.h.some((e) => e && e.pinv === pid);
+  const hh = (x) => (Array.isArray(x.h) ? x.h : []).filter((e) => e && typeof e === 'object');
+  const done = (x) => hh(x).some((e) => e.pinv === pid);
+  const back = (x) => hh(x).some((e) => ['undo', 'unp', 'res'].includes(e.k) && typeof e.t === 'number' && e.t >= at);
   const C = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.id === 'string' && ID.test(x.id) && typeof x.n === 'string'
-    && (done(x) || (x.st === 'open' && typeof x.t === 'number' && x.t <= at && supOk(x))))
-    .map((x) => ({ x, w: [...new Set(PM.words(x.n))], cl: done(x) })).filter((c) => c.w.some((t) => !isNum(t)));
+    && (done(x) || (x.st === 'open' && typeof x.t === 'number' && x.t <= at && !back(x) && supOk(x))))
+    .map((x) => Object.assign({ x, cl: done(x) }, toks(PM, x.n))).filter((c) => c.w.length);
   if (!C.some((c) => !c.cl)) return [];
   const got = new Map(); // id → { q, unk, ln }
   lines.forEach((l) => {
-    let best = null, B = [];
-    C.forEach((c) => { const f = lineFit(PM, c.w, l.w); if (!f) return;
-      const cmp = best ? (f.c - best.c) || (f.s - best.s) : 1;
-      if (cmp > 1e-9) { best = f; B = [c]; } else if (Math.abs(cmp) <= 1e-9) B.push(c); });
-    if (B.some((c) => c.cl)) return; // השורה כבר נזקפה בעבר באותה חשבונית
-    B.forEach((c) => { const g = got.get(c.x.id) || { q: 0, unk: 0, ln: [] }; if (l.qty) g.q += l.qty; else g.unk++; if (g.ln.length < 5) g.ln.push(l.n); got.set(c.x.id, g); });
+    const T = C.filter((c) => inLine(c, l)); if (!T.length) return;
+    const top = T.filter((c) => T.every((d) => sub(d, c))); // פריט שכל השאר כלולים בו
+    if (top.length !== 1) return; // לא כלולים זה בזה, או זהים – לא מורידים אף אחד
+    const c = top[0]; if (c.cl || !fits(c, l)) return;
+    const g = got.get(c.x.id) || { q: 0, unk: 0, ln: [] }; if (l.qty) g.q += l.qty; else g.unk++; if (g.ln.length < 5) g.ln.push(l.n); got.set(c.x.id, g);
   });
   const out = [];
   C.forEach(({ x, cl }) => { const g = got.get(x.id); if (!g || cl) return;

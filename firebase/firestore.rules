@@ -794,7 +794,14 @@ service cloud.firestore {
       // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
       function hInv(e) {
         return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
-          && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60;
+          && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60
+          && pinvOk(e.pinv);
+      }
+      // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף (get – לא תלוי בהרשאת הקריאה של pinv).
+      // inv / sup נשמרים כפי שהאפליקציה קיבלה אותם (השרת מנקה אותם אחרת) ולכן לא מושווים; הרשומה תמיד בשם המבצע (u, byN).
+      function pinvOk(p) {
+        let d = get(/databases/$(database)/documents/pinv/$(p)).data;
+        return d.get('st', '') != 'void' && d.get('at', 0) is int && d.get('at', 0) >= resource.data.t;
       }
       function hMoveOk(e, st) {
         return (e.keys().hasOnly(['k', 't', 'byN', 'u']) && ((st == 'arr' && e.k == 'man') || (st == 'del' && e.k == 'del') || (st == 'open' && e.k in ['undo', 'res'])))
@@ -2467,7 +2474,14 @@ service cloud.firestore {
         // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
         function hInv(e) {
           return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
-            && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60;
+            && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60
+            && pinvOk(e.pinv);
+        }
+        // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף (get – לא תלוי בהרשאת הקריאה של pinv).
+        // inv / sup נשמרים כפי שהאפליקציה קיבלה אותם (השרת מנקה אותם אחרת) ולכן לא מושווים; הרשומה תמיד בשם המבצע (u, byN).
+        function pinvOk(p) {
+          let d = get(/databases/$(database)/documents/b/$(bizId)/pinv/$(p)).data;
+          return d.get('st', '') != 'void' && d.get('at', 0) is int && d.get('at', 0) >= resource.data.t;
         }
         function hMoveOk(e, st) {
           return (e.keys().hasOnly(['k', 't', 'byN', 'u']) && ((st == 'arr' && e.k == 'man') || (st == 'del' && e.k == 'del') || (st == 'open' && e.k in ['undo', 'res'])))

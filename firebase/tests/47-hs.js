@@ -155,7 +155,16 @@ for (const E of ENVS) {
       const doc = (u) => fs(u).doc(R('hsr/h1'));
       const nu = () => { const ut = Math.max(Date.now(), lastUt + 1); lastUt = ut; return ut; };
       const ie = (u, ut, o) => Object.assign({ k: 'inv', t: ut, byN: u, u, pinv: 'iRQ1', inv: '5001', sup: 'תנובה' }, o);
-      await prep((d) => d.doc(R('hsr/h1')).update({ q: 10 }));
+      await prep(async (d) => { await d.doc(R('hsr/h1')).update({ q: 10, t: 1000 });
+        await d.doc(R('pinv/iRQ1')).set({ st: 'new', at: Date.now(), inv: '5001', sup: 'תנובה' });
+        await d.doc(R('pinv/iVOID')).set({ st: 'void', at: Date.now(), inv: '5002', sup: 'תנובה' });
+        await d.doc(R('pinv/iOLD')).set({ st: 'new', at: 500, inv: '5003', sup: 'תנובה' }); });
+      // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף
+      for (const [pv, why] of [['iFAKE999', 'pinv שאינו קיים'], ['iVOID', 'חשבונית מבוטלת'], ['iOLD', 'חשבונית מלפני שהפריט נוסף']]) {
+        const o = await cur(), ut = nu();
+        await assertFails(doc(E.e2).update({ st: 'arr', ub: E.e2, ut, h: (o.h || []).concat([ie(E.e2, ut, { pinv: pv })]) }), why + ' (inv)');
+        await assertFails(doc(E.e2).update({ q: 6, ub: E.e2, ut, h: (o.h || []).concat([ie(E.e2, ut, { pinv: pv, k: 'part', q0: 10, q: 6 })]) }), why + ' (part)');
+      }
       // עדכון של שדות מצב בלבד (בלי itOk המלא) – עדיין נבדקים הערכים שהשתנו
       await assertFails(doc(E.e2).update(upd(E.e2, { q: -1 })), 'כמות שלילית בעדכון מצב');
       await assertFails(doc(E.e2).update(upd(E.e2, { q: 'x' })), 'כמות לא מספר');

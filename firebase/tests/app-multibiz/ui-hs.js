@@ -233,16 +233,17 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   await mp.evaluate((d) => window.hsOnInv(d), INV1); await sleep(800);
   check('24 אותה חשבונית שוב – אין שום עדכון נוסף', LOG.filter((l) => l.m === 'PATCH').length === n0, LOG.filter((l) => l.m === 'PATCH').length - n0);
   mt = await mainT(mp);
-  check('24א רשימת הפתוחים מתעדכנת: קוטג עם "הגיע חלקית בחשבונית #5001 … נשארו 2 מתוך 4" וכפתור ביטול', /הגיע חלקית בחשבונית #5001[^\n]*נשארו 2 מתוך 4/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUnp][data-id=a1]') && !document.querySelector('[data-hs=b1]')), mt.slice(0, 400));
+  check('24א רשימת הפתוחים מתעדכנת: קוטג עם "הגיע חלקית בחשבונית #5001 … נשארו 2 מתוך 4" וכפתור ביטול', /הגיע חלקית בחשבונית #5001 · [^\n]* · m · נשארו 2 מתוך 4/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUnp][data-id=a1]') && !document.querySelector('[data-hs=b1]')), mt.slice(0, 400));
   await mp.click('[data-a=hsTab][data-v=arr]'); await waitFor(() => mp.evaluate(() => /ירד אוטומטית/.test(document.getElementById('main').innerText)), 4000);
   mt = await mainT(mp);
-  check('24ב "הגיעו": "ירד אוטומטית מחשבונית #5001 של תנובה" עם "החזר לחוסרים"', /ירד אוטומטית מחשבונית #5001 של תנובה/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUndo][data-id=b1]')), mt.slice(0, 300));
+  check('24ב "הגיעו": "ירד אוטומטית מחשבונית #5001 של תנובה" עם "החזר לחוסרים"', /ירד אוטומטית מחשבונית #5001 של תנובה · [^\n]* · m/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUndo][data-id=b1]')), mt.slice(0, 300));
   // "בטל" בהודעה: הכול חוזר בדיוק למצב הקודם (הכמות 4, open), עם רשומות undo / unp
   LOG.length = 0; await mp.click('#hsBn [data-a=hsInvUndo]'); await waitFor(async () => stOf('b1') === 'open' && stOf('g1') === 'open' && qOf('a1') === 4, 4000);
   check('25 "בטל": חלב ושקיות חזרו לפתוחים (undo), קוטג חזר לכמות 4 (unp); ההודעה נסגרה', stOf('b1') === 'open' && hv('b1').slice(-1)[0].k === 'undo' && stOf('g1') === 'open' && qOf('a1') === 4 && hv('a1').slice(-1)[0].k === 'unp' && u2m(pt('a1')[0].q) === 'h,q,ub,ut' && await mp.evaluate(() => !document.getElementById('hsBn')), { b1: stOf('b1'), a1: qOf('a1'), h: hv('a1').slice(-1) });
   LOG.length = 0; await mp.evaluate((d) => window.hsOnInv(d), INV1); await sleep(800);
   check('25א אחרי ביטול – אותה חשבונית לא מורידה שוב', !LOG.some((l) => l.m === 'PATCH'));
   // חשבונית אחרת: חלקית ואז ביטול מהרשימה ("בטל הגעה חלקית")
+  await mp.clock.setFixedTime(T0 + 600000); // אחרי ה"בטל" (חשבונית שנקלטה אחרי ההחזרה)
   await mp.evaluate((d) => window.hsOnInv(d), Object.assign({}, INV1, { id: 'iRQ2', inv: '5002', lines: [{ n: 'קוטג 5%', qty: 1 }] }));
   await waitFor(async () => qOf('a1') === 3, 4000); await mp.click('[data-a=hsTab][data-v=open]'); await sleep(300);
   await mp.click('[data-a=hsUnp][data-id=a1]'); await waitFor(async () => qOf('a1') === 4, 4000);

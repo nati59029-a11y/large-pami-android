@@ -119,7 +119,7 @@ function itemH(x,mode){
  if(x.ord&&x.ord.id&&ordOn())acts+=`<button type="button" class="btn g s" data-a="go" data-v="oxOrd" data-arg="${esc(x.ord.id)}">להזמנה #${esc(x.ord.no||'')}</button>`;
  return `<div class="card hs-it" data-hs="${esc(x.id)}" style="padding:10px 12px"><div class="m"><b>${esc(x.n)}</b>
  <div class="hs-tg">${supTags(x)}<span class="tag">${esc(WHYT(x.why))}</span>${x.ord&&x.ord.id?`<span class="tag">הזמנה #${esc(x.ord.no||'')}</span>`:''}</div>
- ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t)):`הגיע · ${esc(tm(hA.t))} · ${esc(hA.byN||'')}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))}</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(hD.byN||'')}</small>`:''}</div>
+ ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t))+' · '+esc(hA.byN||''):`הגיע · ${esc(tm(hA.t))} · ${esc(hA.byN||'')}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · ${esc(hP.byN||'')} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))} (לפי יחידות החשבונית)</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(hD.byN||'')}</small>`:''}</div>
  <div class="hs-acts">${acts}</div></div>`}
 function listH(L,mode,empty){return L===null?'<div class="empty">טוען…</div>':L.length?L.map(x=>itemH(x,mode)).join(''):`<div class="empty">${empty}</div>`}
 
