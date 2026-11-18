@@ -10,7 +10,7 @@ const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fai
 const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
 const T0 = Date.UTC(2026, 10, 18, 1, 10);
 const RUNS = [{ id: 'r2', at: T0, end: T0 + 600e3, st: 'fail', manual: false, days: ['2026-11-17'], err: { code: 'selector-miss', msg: 'x', step: 'catalog' }, imp: null },
-  { id: 'r1', at: T0 - 864e5, st: 'ok', manual: true, days: ['2026-11-15', '2026-11-16'], err: null, imp: { price: { n: 3, ok: true, text: '' } } }];
+  { id: 'r1', at: T0 - 864e5, st: 'ok', manual: true, days: ['2026-11-15', '2026-11-16'], err: null, imp: { price: { n: 3, ok: true, text: '', id: 25520, status: 'בוצע', errors: 0, loaded: 3 } } }];
 
 async function scenario(browser, www, sa, shots) {
   const cfg = { mode: 'new', users: { m: 'biz-o' }, biz: { 'biz-o': { dataRoot: 'b', features: ALL, name: 'עסק בדיקה' } }, admins: { 'b/biz-o/|m': 1 }, ctx: { hasTouch: true, isMobile: true } };
@@ -28,7 +28,7 @@ async function scenario(browser, www, sa, shots) {
     calls.push({ n, d });
     let R = { ok: true };
     if (n === 'cxCfg') R = { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa };
-    if (n === 'cxBotTok' && d.op === 'info') R = { dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'x', step: 'catalog', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
+    if (n === 'cxBotTok' && d.op === 'info') R = { dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'x', step: 'catalog', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, li: st.dev ? { kind: 'price', at: T0, id: 25521, status: 'בוצע', errors: 0, loaded: 1 } : null, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
     if (n === 'cxBotTok' && d.op === 'new') { st.dev = { id: 'ab12cd34', at: T0, last: T0 + 60e3, ver: '0.1.0', ua: '' }; R = { token: 'biz-o.' + 'A'.repeat(43), id: 'ab12cd34' }; }
     if (n === 'cxBotTok' && d.op === 'revoke') { st.dev = null; R = { ok: true }; }
     if (n === 'cxBotDisc') R = { id: 'd1', at: T0, size: 30, data: JSON.stringify({ pages: [{ p: '#/catalogs' }] }) };
@@ -55,11 +55,11 @@ async function scenario(browser, www, sa, shots) {
   await page.evaluate(() => closeDlg()); await H.settle(page, 400);
   check(P + '2ב הקוד נמחק מהמסך בסגירה', await page.evaluate(() => !document.getElementById('cxBotTok')));
   v = await q(); await shot((sa ? 'sa-' : '') + 'bot-3-status');
-  check(P + '3 מצב: סנכרון אחרון נכשל · אוטומטי, מכירות עד 16/11, תקלה בעברית פשוטה, newMax=1', /סנכרון אחרון/.test(v.text) && /נכשל/.test(v.text) && /אוטומטי/.test(v.text) && /16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && (await page.inputValue('form[data-f=cxBotMaxF] input[name=n]')) === '1' && fine(v), { small: v.small, t: v.text.slice(0, 300) });
+  check(P + '3 מצב: סנכרון אחרון נכשל · אוטומטי, מכירות עד 16/11, תקלה בעברית פשוטה, newMax=1', /סנכרון אחרון/.test(v.text) && /נכשל/.test(v.text) && /אוטומטי/.test(v.text) && /16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /טעינה אחרונה לכספית \(מחירים[^)]*\): מזהה 25521 · בוצע · נטענו 1 · שגויים 0/.test(v.text) && (await page.inputValue('form[data-f=cxBotMaxF] input[name=n]')) === '1' && fine(v), { small: v.small, t: v.text.slice(0, 300) });
   check(P + '3ב דוח היכרות – ' + (sa ? 'מוצג למנהל־על' : 'מוסתר ממנהל רגיל'), sa === /דוח היכרות/.test(v.text));
   await page.click('[data-a=cxBotRuns]'); await H.settle(page, 400);
   v = await q(); await shot((sa ? 'sa-' : '') + 'bot-4-runs');
-  check(P + '4 הריצות האחרונות: אוטומטי/ידני, ימים, תקלה, טעינת מחירים', /ידני – "סנכרן עכשיו"/.test(v.text) && /אוטומטי/.test(v.text) && /15\/11, 16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /מחירים לכספית: 3/.test(v.text) && fine(v), v.small);
+  check(P + '4 הריצות האחרונות: אוטומטי/ידני, ימים, תקלה, טעינת מחירים', /ידני – "סנכרן עכשיו"/.test(v.text) && /אוטומטי/.test(v.text) && /15\/11, 16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /מחירים לכספית: 3 \(טעינה 25520: נטענו 3, שגויים 0\)/.test(v.text) && fine(v), v.small);
   await page.evaluate(() => closeDlg()); await H.settle(page, 300);
   await page.fill('form[data-f=cxBotMaxF] input[name=n]', '5');
   await page.click('form[data-f=cxBotMaxF] button'); await H.settle(page, 400);

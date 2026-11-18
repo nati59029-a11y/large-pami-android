@@ -8,6 +8,7 @@
 <header id="hdr" hidden>
   <span id="mnu" role="button">ממשקים</span>
   <div id="sub" hidden><a href="#/sales-items-reports">דוח מכירות לפריטים</a></div>
+  <span id="empm" role="button">עובדים</span><div id="empsub"></div>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -20,7 +21,11 @@ document.cookie = 'ASP.NET_SessionId=SESSIONabc123def456; path=/';
 window.ev = [];
 function dl(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); ev.push('dl:' + name); }
 document.getElementById('mnu').onclick = () => { document.getElementById('sub').hidden = false; };
-const HE_M = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+// תפריט "עובדים": תת-התפריט נוצר רק במעבר עכבר (כמו תפריט נפתח); לחיצה נרשמת (אסור שהתוסף ילחץ)
+document.getElementById('empm').addEventListener('mouseover', () => { document.getElementById('empsub').innerHTML = '<a href="#/employees">רשימת עובדים</a> <a href="#/attendance-report">דוח נוכחות</a>'; });
+const hit = (k) => { ev.push(k); localStorage.setItem('attHits', (localStorage.getItem('attHits') || '') + k + ';'); };
+document.getElementById('empm').addEventListener('click', () => hit('emp-click'));
+const HE_M = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ']; // כמו בכספית: "נוב 2026"
 const pad = (n) => String(n).padStart(2, '0');
 // משימה של כספית: POST (run-as-job) → { job_id } ואחר כך הקובץ מ-get_job_result
 function job(url, body, filename) {
@@ -43,7 +48,8 @@ function datePicker(host, init) {
   const draw = () => {
     const y = view.getFullYear(), m = view.getMonth(), n = new Date(y, m + 1, 0).getDate(), off = new Date(y, m, 1).getDay();
     cal.innerHTML = '<header><span class="prev">&lt;</span><span class="day__month_btn up">' + HE_M[m] + ' ' + y + '</span><span class="next">&gt;</span></header><div>'
-      + Array.from({ length: off }, () => '<span class="cell day blank"></span>').join('') + Array.from({ length: n }, (_, k) => '<span class="cell day">' + (k + 1) + '</span>').join('') + '</div>';
+      + '<span class="cell day-header">א</span><span class="cell day-header">ב</span><span class="cell day-header">ג</span><span class="cell day-header">ד</span><span class="cell day-header">ה</span><span class="cell day-header">ו</span><span class="cell day-header">ש</span>'
+      + Array.from({ length: off }, () => '<span class="cell day blank"></span>').join('') + Array.from({ length: n }, (_, k) => { const wd = (off + k) % 7, cur = new Date(y, m, k + 1); return '<span class="cell day' + (wd >= 5 ? ' weekend' : '') + (+cur === +new Date(v.getFullYear(), v.getMonth(), v.getDate()) ? ' selected' : '') + '">' + (k + 1) + '</span>'; }).join('') + '</div>';
     cal.querySelector('.prev').onclick = (e) => { e.stopPropagation(); view = new Date(y, m + 1, 1); draw(); };
     cal.querySelector('.next').onclick = (e) => { e.stopPropagation(); view = new Date(y, m - 1, 1); draw(); };
     cal.querySelectorAll('.cell.day:not(.blank)').forEach((c) => { c.onclick = (e) => { e.stopPropagation(); v = new Date(y, m, +c.textContent); show(); cal.style.display = 'none'; }; });
@@ -76,26 +82,64 @@ function render() {
     document.getElementById('mk').onclick = () => { const a = f(), b = t(); const k = (d) => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()); ev.push('mk:' + k(a) + '-' + k(b)); job('/bo/merkaz/reports/sales_items', { from: k(a), to: k(b) }, 'sales_items_' + k(a) + '_' + k(b) + '.csv'); };
   } else if (h.startsWith('#/csv-imports')) {
     fetch('/bo/merkaz/upload_csv_index', { headers: { Authorization: TOK } });
-    const O = [['new', 'טעינת פריטים חדשים'], ['price', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים'], ['cust', 'טעינת לקוחות']];
-    app.innerHTML = '<div class="csv-import-form app-page"><div class="form-group title-on-top"><label>בחר סוג קובץ טעינה</label><div class="multiselect"><div class="multiselect__tags"><input id="job_type" type="text" class="multiselect__input" placeholder="בחר"></div><div class="multiselect__content-wrapper" style="display:none"><ul class="multiselect__content">'
-      + O.map(([v, t]) => '<li class="multiselect__element"><span class="multiselect__option" data-v="' + v + '"><span>' + t + '</span></span></li>').join('') + '</ul></div></div></div><div id="more"></div>'
+    const O = [['new', 'טעינת פריטים חדשים'], ['club', 'טעינת מועדון לקוחות'], ['cust', 'טעינת לקוחות הקפה'], ['price', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים'], ['sprice', 'עדכון מחיר בחנות'], ['upd', 'עדכון פריטים'], ['newnp', 'טעינת פריטים חדשים מנטפוס']];
+    app.innerHTML = '<div class="csv-import-form app-page"><p>טעינה עבור חברה: עסק בדיקה חנות: עסק בדיקה-סניף א</p><div class="form-group title-on-top"><label>בחר סוג קובץ טעינה</label><div class="multiselect"><div class="multiselect__tags"><input id="job_type" type="text" class="multiselect__input" placeholder="בחר"></div><div class="multiselect__content-wrapper" style="display:none"><ul class="multiselect__content">'
+      + O.map(([v, t]) => '<li class="multiselect__element"><span class="multiselect__option" data-v="' + v + '"><span>\u00a0' + t + ' </span></span></li>').join('') + '</ul></div></div></div><div id="more"></div><div id="queue"></div><button type="button" class="btn btn-primary" id="run">העלה קבצים והרץ טעינה</button><div id="hist"></div>'
       + '<label>סיסמת מנהל <input type="password" id="mp" value="hunter2pass"></label><input id="note" value="owner-secret-value"><div class="result" role="alert"></div></div>';
     const wrap = app.querySelector('.multiselect__content-wrapper'), jt = document.getElementById('job_type');
     let t = '';
     jt.addEventListener('focus', () => { wrap.style.display = 'block'; });
-    jt.addEventListener('click', () => { wrap.style.display = 'block'; });
     jt.addEventListener('keydown', (e) => { if (e.key === 'Escape') wrap.style.display = 'none'; });
     app.querySelectorAll('.multiselect__option').forEach((o) => { o.onclick = (e) => { e.stopPropagation(); t = o.dataset.v; jt.value = o.textContent; wrap.style.display = 'none'; ev.push('type:' + t);
-      document.getElementById('more').innerHTML = '<input type="file" id="f" style="display:none"><label for="f" class="btn btn-default">בחר קובץ</label> <button id="go" class="btn btn-primary">טען קובץ</button>';
-      document.getElementById('go').onclick = async () => {
-        const f = document.getElementById('f').files[0];
-        if (!t || !f) { document.querySelector('.result').textContent = 'שגיאה: חסר סוג או קובץ'; return; }
-        const text = await f.text();
-        const r = await fetch('/bo/merkaz/upload_csv', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK }, body: JSON.stringify({ type: t, name: f.name, text }) });
-        const j = await r.json();
-        setTimeout(() => { document.querySelector('.result').textContent = `הטעינה הסתיימה: ${j.n} פריטים נטענו`; }, 300);
-      }; }; });
+      // כמו בכספית האמיתית (היכרות 3 + צילום מסך): "בחר קובץ" (#positive-file-uploader) ו"הורד קובץ דוגמה"; בחירת קובץ לא מעלה –
+      // מוסיפה שורה לטבלה "ממתין לטעינה" (שם | סוג קובץ | פעולות: הסר). "העלה קבצים והרץ טעינה" מעלה את כל השורות.
+      document.getElementById('more').innerHTML = '<label for="positive-file-uploader">בחר קובץ</label> <input type="file" id="positive-file-uploader"> <button type="button" class="btn btn-default" id="sample">הורד קובץ דוגמה</button>';
+      document.getElementById('sample').onclick = () => ev.push('sample');
+      document.getElementById('positive-file-uploader').onchange = (e) => { const f = e.target.files[0]; if (f) { Q.push({ f, t, tn: jt.value.trim() }); drawQ(); } e.target.value = ''; };
+    }; });
+    const Q = [];
+    // קובץ שמישהו כבר הוסיף ולא העלה (בדיקת "התור לא ריק")
+    if (localStorage.getItem('preq')) Q.push({ f: new File(['x'], localStorage.getItem('preq')), t: 'upd', tn: 'עדכון פריטים' });
+    const drawQ = () => {
+      document.getElementById('queue').innerHTML = Q.length ? '<h4>ממתין לטעינה</h4><table class="table"><thead><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr></thead><tbody>'
+        + Q.map((q, k) => '<tr><td>' + q.f.name + '</td><td>' + q.tn + '</td><td><button class="btn btn-danger" data-rm="' + k + '">הסר</button></td></tr>').join('') + '</tbody></table>' : '';
+      document.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => { ev.push('rm'); Q.splice(+b.dataset.rm, 1); drawQ(); }; });
+    };
+    drawQ();
+    // "טעינות קודמות" (כמו בכספית): מזהה | שם (קישור) | סוג קובץ | סטטוס | שם משתמש | שגויים/סה"כ שורות | קובץ שגויים | ביטול טעינה... – נשמר בין טעינות הדף
+    const HK = 'hist', H = () => JSON.parse(localStorage.getItem(HK) || '[{"id":25519,"name":"ישן.csv","tn":"עדכון פריטים","st":"בוצע","c":"שגויים: 0, נטענו: 3"},{"id":25520,"name":"עדכון מחיר (1).csv","tn":"עדכון מחיר לצרכן ו/או מחיר עלות לפריטים","st":"בוצע","c":"שגויים: 0, נטענו: 1"}]');
+    const drawH = () => {
+      const L = H().slice().sort((a, b) => b.id - a.id);
+      document.getElementById('hist').innerHTML = '<h4>טעינות קודמות</h4><table class="table"><thead><tr><th>מזהה</th><th>שם</th><th>סוג קובץ</th><th>סטטוס</th><th>שם משתמש שביצע טעינה</th><th>שגויים/סה"כ שורות</th><th>קובץ שגויים</th><th>סטטוס ביטול טעינה</th><th>שם משתמש שביצע ביטול טעינה</th><th>פרטים ביטול טעינה</th></tr></thead><tbody>'
+        + L.map((x) => '<tr><td>' + x.id + '</td><td><a href="#/csv-imports" class="hl">' + x.name + '</a></td><td>' + x.tn + '</td><td>' + x.st + '</td><td>בעל העסק</td><td>' + (x.c || '') + '</td><td></td><td><button class="btn btn-warning cx">בטל טעינה</button></td><td></td><td></td></tr>').join('') + '</tbody></table>';
+      document.querySelectorAll('#hist .cx').forEach((b) => { b.onclick = () => ev.push('cancel'); });
+      document.querySelectorAll('#hist .hl').forEach((b) => { b.onclick = (e) => { e.preventDefault(); ev.push('histlink'); }; });
+    };
+    // histlate: הטבלה מופיעה באיחור (3 שניות); histnone: הטבלה לא מופיעה בכלל
+    if (localStorage.getItem('histlate')) setTimeout(drawH, 3000); else if (!localStorage.getItem('histnone')) drawH();
+    document.getElementById('run').onclick = async () => {
+      ev.push('run');
+      if (!Q.length) { document.querySelector('.result').textContent = 'שגיאה: אין קבצים'; return; }
+      for (const q of Q.splice(0)) {
+        const text = await q.f.text();
+        const r = await fetch('/bo/merkaz/upload_csv', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK }, body: JSON.stringify({ type: q.t, name: q.f.name, text }) });
+        const n = (await r.json()).n, L = H(), id = Math.max(...L.map((x) => x.id)) + 1;
+        L.push({ id, name: q.f.name, tn: q.tn, st: 'בתהליך', c: '' });
+        localStorage.setItem(HK, JSON.stringify(L));
+        setTimeout(() => { if (localStorage.getItem('imphang')) return; const M = H(), x = M.find((y) => y.id === id); const e = +(localStorage.getItem('imperr') || 0); x.st = 'בוצע'; x.c = 'שגויים: ' + e + ', נטענו: ' + (n - e); localStorage.setItem(HK, JSON.stringify(M)); drawH(); }, 1500);
+      }
+      drawQ(); drawH();
+    };
     document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
+  } else if (h.startsWith('#/attendance-report')) {
+    // מסך נוכחות מדומה: טבלה עם שמות ושעות (אסור שיגיעו לדוח), וכפתורי פעולה (אסור ללחוץ)
+    // גם מחוץ לטבלה: מסנן "עובד" עם שמות, וכרטיסי עובדים (קישור, תווית, כפתור עם שם) – אסור שהשמות יגיעו לדוח
+    app.innerHTML = '<div class="attendance"><h2>דוח נוכחות</h2><button class="btn btn-primary" id="attIn">החתמת כניסה</button><button class="btn" id="attX">ייצוא לאקסל</button>'
+      + '<label for="empSel">עובד</label><select id="empSel"><option>כל העובדים</option><option>יוסי מזרחיאן</option><option>רותם בלומנפלד</option></select>'
+      + '<div class="cards"><div class="card"><a href="#/employee/7">שירה אבוטבולי</a><label>נועם קרליבך</label><button class="btn" aria-label="פרטי אלמוג זילברשטיין">אלמוג זילברשטיין</button></div></div>'
+      + '<table class="table"><thead><tr><th>שם עובד</th><th>תאריך</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה"כ שעות</th></tr></thead><tbody><tr><td>דנה כהנוביץ</td><td>17/11/2026</td><td>08:02</td><td>16:30</td><td>8:28</td></tr></tbody></table></div>';
+    document.getElementById('attIn').onclick = () => hit('att-in');
+    document.getElementById('attX').onclick = () => hit('att-x');
   } else {
     app.innerHTML = '<h1>ראשי</h1>';
   }

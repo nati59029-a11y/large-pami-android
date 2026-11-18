@@ -336,6 +336,8 @@ Object.assign(exports, require('./recurring'));
 Object.assign(exports, require('./tasks-nudge'));
 // קבוצות התכתבות סבב 3 (17.11.2026): grpMsg / grpMsgB – התראה לטלפון על הודעה חדשה בקבוצה ועדכון grp/{gid}.last; grpDel / grpDelB – מחיקה מדורגת של קבוצה; grpMDel / grpMDelB – מחיקת הודעה: last מחדש וקובץ הסרטון (grp-notify.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./grp-notify'));
+// התראות משימות (18.11.2026): tkPush / tkPushB – משימה חדשה, הוחזרה, ממתינה לאישור, בוצעה ותגובה; ptkPush / ptkPushB – משימה פרטית חדשה של עובד. בלי שליחה בשבת ובחג (tasks-push.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./tasks-push'));
 // דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./daily-rep'));
 // קופה (POS) שלב 0 (17.11.2026): posCfg, posCfgSet (מנהל / מנהל־על), posDev (קופות: הוספה, רישום מכשיר, פרישה, השבתה), posSale (שלד מכירה עם reqId).
@@ -389,3 +391,5 @@ Object.assign(exports, require('./biz-apk'));
 Object.assign(exports, require('./caspit'));
 // רובוט כספית – שלב B (18.11.2026): cxBotTok, cxBotDisc (מנהל / מנהל־על), cxBot (HTTP לתוסף Chrome, europe-west1), cxBotWatch (מתוזמנת, us-central1) – caspit-bot.js
 Object.assign(exports, require('./caspit-bot'));
+// משמרות – שלב 3 (18.11.2026): shApi (טבלה שבועית, עריכה, משימות למשמרת, הגדרות), shTick (מתוזמנת כל 10 דקות, us-central1) – shifts.js
+Object.assign(exports, require('./shifts'));

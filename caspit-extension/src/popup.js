@@ -11,6 +11,7 @@ async function load() {
   $('biz').textContent = (s.biz && s.biz.name) || '—';
   $('last').textContent = s.st && s.st.lastOkDay ? dayHe(s.st.lastOkDay) : '—';
   $('next').textContent = s.connected ? when(s.next) : '—';
+  $('impN').classList.toggle('hide', s.imp !== false);
   $('sync').disabled = !s.connected || s.busy;
   $('disc').disabled = s.busy;
   $('dl').classList.toggle('hide', !s.disc);

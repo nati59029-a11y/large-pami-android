@@ -3,7 +3,7 @@
 // תשובה: { ok:true, ... } או { ok:false, reason, msg }. סיווג שגיאות: network/timeout/server/rate – ניסיון חוזר; השאר – לא.
 (function (root) {
 'use strict';
-const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult'];
+const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult', 'poll'];
 const TOKEN_RE = /^[A-Za-z0-9_-]{4,64}\.[A-Za-z0-9_-]{40,48}$/;
 const SLOW = new Set(['upload', 'apply', 'preview']);
 function mk(code, msg, extra) { const e = new Error(msg || code); e.code = code; if (extra) Object.assign(e, extra); return e; }

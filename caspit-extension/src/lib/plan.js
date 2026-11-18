@@ -17,8 +17,13 @@ const MSG = {
   'needs-login': 'צריך להתחבר לכספית בדפדפן הזה. אחרי ההתחברות הסנכרון ימשיך לבד תוך רבע שעה.',
   'selector-miss': 'מסך בכספית השתנה ולא נמצא כפתור או שדה. נשלחה הודעה למנהל.',
   'endpoint-changed': 'הקובץ שהתקבל מכספית לא נראה כמו שציפינו. נשלחה הודעה למנהל.',
+  'import-errors': 'כספית טענה את הקובץ עם שגיאות (או שהטעינה נכשלה). הפרטים נשלחו למנהל.',
+  'import-timeout': 'כספית לא סיימה את הטעינה בזמן. נשלחה הודעה למנהל – כדאי לבדוק ב"טעינות קודמות".',
+  'import-queue-not-empty': 'במסך הייבוא של כספית כבר ממתינים קבצים אחרים – התוסף לא העלה כלום ולא נגע בהם. נשלחה הודעה למנהל.',
   'wrong-page': 'התוסף הגיע לדף שאינו המשרד האחורי של כספית ועצר בלי לגעת בו. נשלחה הודעה למנהל.',
   'first-manual': 'את הסנכרון הראשון של הקטלוג עושים באפליקציה. המכירות ממשיכות להיקלט.',
+  remote: 'הסנכרון התחיל מבקשה בטלפון ("סנכרן עכשיו" באפליקציה).',
+  'req-gone': 'הבקשה מהטלפון כבר טופלה או פגה – לא הופעל סנכרון נוסף.',
   limit: 'יותר מדי שינויים בבת אחת – הסנכרון נעצר לבדיקה של המנהל.',
   auth: 'החיבור לאפליקציה בוטל או לא תקין. יש לחבר מחדש עם קוד חדש מהאפליקציה.',
   'min-ver': 'צריך לעדכן את התוסף לגרסה חדשה.',
@@ -43,7 +48,7 @@ function err(code, msg, extra) {
 const codeOf = (e) => (e && typeof e.code === 'string' ? e.code : 'fail');
 function newRun(o) {
   const now = o.now;
-  return { id: o.id, mode: o.mode || 'sync', manual: !!o.manual, slot: o.slot || null, st: 'run', step: STEPS[0], day: 0, days: [], attempt: 0,
+  return { id: o.id, mode: o.mode || 'sync', manual: !!o.manual, req: o.req || null, slot: o.slot || null, st: 'run', step: STEPS[0], day: 0, days: [], attempt: 0,
     retryAt: 0, startedAt: now, touchedAt: now, err: null, flags: {}, info: {}, log: [] };
 }
 function push(run, rec) {
@@ -64,7 +69,7 @@ function advance(run, now, info) {
   for (;;) {
     const s = STEPS[i];
     if (s === 'sales' && !r.days.length) { i++; continue; }
-    if ((s === 'exportNew' || s === 'exportPrice') && r.flags.noCat) { i++; continue; }
+    if ((s === 'exportNew' || s === 'exportPrice') && (r.flags.noCat || r.flags.noImp)) { i++; continue; } // noImp: העלאה לכספית כבויה (selectors.json importEnabled:false)
     break;
   }
   if (i >= STEPS.length) { r.st = 'ok'; r.step = 'done'; return r; }
@@ -104,6 +109,17 @@ function resumeFrom(run) {
   return r;
 }
 const msgOf = (code) => MSG[code] || MSG.fail;
-const api = { STEPS, BACKOFF, RETRY, STALE_MS, MSG, err, codeOf, newRun, advance, fail, isTerminal, canResume, resumeFrom, msgOf };
+// "סנכרן עכשיו" מהטלפון: תשובת poll → מזהה הבקשה להתחיל, או null. מתחילים רק כשיש בקשה חדשה (לא זו שכבר התחלנו – lastReq),
+// כשאין ריצה עכשיו (busy) וכשאין ריצה שממתינה לניסיון חוזר (כמו trigger). o: { busy, run, lastReq, now }
+const REQ_RE = /^q[a-z0-9]{6,30}$/;
+function wantRemote(r, o) {
+  const x = o || {};
+  if (!r || r.want !== true || typeof r.id !== 'string' || !REQ_RE.test(r.id)) return null;
+  if (x.busy || r.id === x.lastReq) return null;
+  const run = x.run;
+  if (run && !isTerminal(run) && x.now - (run.touchedAt || run.startedAt || 0) < STALE_MS) return null;
+  return r.id;
+}
+const api = { STEPS, BACKOFF, RETRY, STALE_MS, MSG, REQ_RE, err, codeOf, newRun, advance, fail, isTerminal, canResume, resumeFrom, msgOf, wantRemote };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxPlan = api;
 })(typeof self !== 'undefined' ? self : this);

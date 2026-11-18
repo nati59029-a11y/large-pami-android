@@ -45,6 +45,8 @@ const COPY = [
   's3br', 's3set', 'smap', 's3draft', 'sround', 'srun', 's3sum', 's3fix', 's3appeal', 's3short', 's3use', 's3perf', 's3qid', 's3ntf',
   // הקמת חנות (17.11.2026, שלב 3): תתי-האוספים n ו-cap מועתקים עם s3setup. התמונות כבר תחת b/largpeami/store3d/ ב-Storage.
   's3setup', 's3look',
+  // משמרות (שלב 3, 18.11.2026, functions/shifts.js): השרת בלבד כותב דרך T.tdb(); ב-legacy בשורש, באותם שמות כמו ב-b/{bizId}
+  'shf', 'shft', 'shfcfg', 'shfsent',
   // השלמה לפני ההעברה (15.11.2026): כל אוסף שהשרת כותב דרך T.tdb()/bizPrefix, או שיש לו כלל ב-b/{bizId} – ב-legacy נמצא בשורש.
   // תתי-האוספים (cust/p, pinv/p, rq/c, mq/p, sec_chat/m, sec_inv/p, sec_note/n, custBak/items, stockBak/items) מועתקים עם ההורה.
   'ptk', 'rtk', 'rq', 'mq', // משימות פרטיות, משימות חוזרות, בקשות, בקשות מנהל

@@ -50,7 +50,8 @@ test('find: טקסט מדויק, הרכיב הקטן ביותר, בלי רכיב
 
 test('ייבוא: בחירת אפשרות לפי הטקסט, קובץ דרך DataTransfer, לחיצה, קריאת התוצאה', async () => {
   // הזרימה האמיתית (#job_type) נבדקת ב-e2e; כאן – אותם סוגי צעדים על <select> רגיל
-  const flow = [{ op: 'select', t: { css: '#kind' }, option: 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים' }].concat(SEL.flows.importPrice.filter((s) => ['setFile', 'click', 'waitFor', 'text'].includes(s.op) && !(s.op === 'waitFor' && s.t.css)));
+  const flow = [{ op: 'select', t: { css: '#kind' }, option: 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים' }, { op: 'setFile', t: { css: 'input[type=file]' }, file: 'csv' },
+    { op: 'click', t: { text: 'טען קובץ' }, submit: true, wait: 300 }, { op: 'waitFor', t: { textAny: ['הסתיימה'] }, ms: 5000 }, { op: 'text', t: { css: '[role=alert]' }, optional: true }];
   const r = await run(flow, { files: { csv: { name: 'p.csv', mime: 'text/csv', b64: Buffer.from('קוד,מחיר\n1,2\n').toString('base64') } } });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.match(r.text, /הסתיימה/);
@@ -124,8 +125,8 @@ test('guard: דף שאינו המשרד האחורי (/bo) – אף צעד לא 
 });
 
 test('monthYear: עברית, אנגלית, מספרים', async () => {
-  const r = await page.evaluate(() => [window.CxSel.monthYear('נובמבר 2026'), window.CxSel.monthYear('January 2027'), window.CxSel.monthYear('3/2026'), window.CxSel.monthYear('xx')]);
-  assert.deepEqual(r, [{ y: 2026, m: 10 }, { y: 2027, m: 0 }, { y: 2026, m: 2 }, null]);
+  const r = await page.evaluate(() => [window.CxSel.monthYear('נובמבר 2026'), window.CxSel.monthYear('January 2027'), window.CxSel.monthYear('3/2026'), window.CxSel.monthYear('xx'), window.CxSel.monthYear('נוב 2026'), window.CxSel.monthYear('דצמ׳ 2026'), window.CxSel.monthYear('\u200fינו 2027'), window.CxSel.monthYear('מאי 2026'), window.CxSel.monthYear('Nov 2026')]);
+  assert.deepEqual(r, [{ y: 2026, m: 10 }, { y: 2027, m: 0 }, { y: 2026, m: 2 }, null, { y: 2026, m: 10 }, { y: 2026, m: 11 }, { y: 2027, m: 0 }, { y: 2026, m: 4 }, { y: 2026, m: 10 }]);
 });
 
 test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה שדה סיסמה', async () => {
@@ -143,4 +144,21 @@ test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה
   await page.evaluate(() => { location.hash = ''; });
   await page.evaluate(() => document.querySelector('form').remove());
   assert.equal(await page.evaluate(() => window.CxSel.isLogin(document, window, { hash: ['#/login'] })), false);
+});
+
+test('selectors.json: דפי ההיכרות – זרימות קיימות; מסך הנוכחות לפי התפריט, בלי זרימה (בלי שום צעד/לחיצה)', () => {
+  for (const pg of SEL.disc) if (pg.flow) assert.ok(Array.isArray(SEL.flows[pg.flow]), pg.name);
+  const att = SEL.disc.find((p) => p.name === 'attendance');
+  assert.ok(att, 'attendance');
+  assert.equal(att.flow, undefined); assert.equal(att.hash, undefined); assert.equal(att.peek, undefined);
+  assert.deepEqual(att.menu, ['עובדים']); assert.equal(att.find, 'נוכחות');
+  assert.ok(SEL.v >= 3);
+});
+
+test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, בלי aria ובלי אפשרויות – רק מספרן', async () => {
+  const c = await page.evaluate(() => window.CxSel.controls(document, 400, { noText: true }));
+  const s = JSON.stringify(c);
+  assert.ok(!s.includes('טעינת פריטים חדשים') && !s.includes('ייצוא לאקסל') && !s.includes('סגור חלון'), s);
+  assert.equal(c.find((x) => x.tag === 'select').optN, 3);
+  assert.ok(c.filter((x) => x.href).every((x) => x.href === '(int)' || x.href === '(ext)'));
 });
