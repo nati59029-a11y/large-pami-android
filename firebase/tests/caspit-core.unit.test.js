@@ -195,3 +195,104 @@ it('ביצועים: 9,000 קודים (11,000 שורות) – קיבוץ וניק
   assert.equal(r.cnt.keep, 9000);
   assert.ok(Date.now() - t0 < 1000, 'זמן: ' + (Date.now() - t0));
 });
+
+// ---------- A2/A3: דוח מכירות, כמות, מניעת כפילות, סיכום תקופה, התאמה מול סגירת קופה ----------
+const SH = ['תאריך מכירה', 'שם פריט', 'מספר ברקוד', 'מספר עסקה', 'שם סניף', 'מספר סניף', 'משקל', 'הנחה', 'פדיון'];
+const sl = (d, c, tx, a, ds, br, w) => [d, 'פריט ' + c, c, tx, (br || ['סניף א', '6200'])[0], (br || ['סניף א', '6200'])[1], w || '', ds == null ? '0.0' : ds, a];
+describe('דוח מכירות (A2)', () => {
+  it('תאריכים: dd/mm/yyyy, dd.mm.yy, ISO, מספר Excel; לא תקין → ריק', () => {
+    assert.equal(C.dateOf('16/11/2026'), '2026-11-16');
+    assert.equal(C.dateOf('6.1.26'), '2026-01-06');
+    assert.equal(C.dateOf('2026-11-16'), '2026-11-16');
+    assert.equal(C.dateOf(46342), '2026-11-16');
+    assert.equal(C.dateOf('31/02/2026'), '');
+    assert.equal(C.dateOf('x'), '');
+  });
+  it('מספר בכתיב מדעי (הנחה 1.77e-15) = כמעט 0, לא נדחה', () => {
+    assert.ok(Math.abs(C.num('1.7763568394002505e-15')) < 1e-9);
+    assert.ok(Math.abs(C.num('-8.881784197001252e-16')) < 1e-9);
+  });
+  it('windows-1255: קידוד מזוהה, הדוח מזוהה ומפוענח (שורות, סניף, החזרה, שורה פגומה)', () => {
+    const txt = [SH, sl('16/11/2026', '300001', '5001', '29.700000000000003', '0.0'), sl('16/11/2026', '300002', '5001', '-4.5'), sl('xx', '300003', '5002', '1')].map((r) => r.join(',')).join('\r\n');
+    const enc = new TextEncoder().encode(txt); // UTF-8 → מדמים windows-1255 בטבלת המרה פשוטה לאותיות עבריות
+    const w1255 = []; for (const ch of txt) { const cp = ch.codePointAt(0); w1255.push(cp >= 0x5d0 && cp <= 0x5ea ? cp - 0x5d0 + 0xe0 : cp); }
+    const dec = C.decode(Uint8Array.from(w1255));
+    assert.ok(enc.length > w1255.length);
+    assert.ok(dec.startsWith('תאריך מכירה'));
+    const rows = dec.split(/\r?\n/).map((l) => l.split(','));
+    assert.equal(C.detect(rows).kind, 'sales');
+    const p = C.parseSales(rows);
+    assert.equal(p.rows, 3); assert.equal(p.lines.length, 2); assert.deepEqual(p.bad, [{ r: 4, why: 'date' }]);
+    assert.deepEqual(p.lines[0], { d: '2026-11-16', c: '300001', n: 'פריט 300001', tx: '5001', bk: '6200', bn: 'סניף א', w: null, ds: 0, a: 29.7 });
+    assert.equal(p.lines[1].a, -4.5);
+  });
+  it('מפתח סניף: מספר, ואם אין – השם בלי סימנים', () => {
+    assert.equal(C.brKey('6200', 'x'), '6200');
+    assert.equal(C.brKey('', "סניף נחל/לכיש"), 'סניף-נחל-לכיש');
+  });
+  it('מניעת כפילות: מפתח = קוד|פדיון|הנחה|מופע – לא תלוי בסדר השורות; שורות זהות באותה עסקה נספרות בנפרד', () => {
+    const rows = [SH, sl('16/11/2026', '1', '9', '10'), sl('16/11/2026', '1', '9', '10'), sl('16/11/2026', '2', '9', '5'), sl('16/11/2026', '1', '8', '10')];
+    const k = (rs) => C.salesGroup(C.parseSales(rs).lines).flatMap((g) => g.L.map((l) => g.id + '#' + l.k)).sort();
+    const a = k(rows), b = k([SH].concat(rows.slice(1).reverse()));
+    assert.deepEqual(a, b);
+    assert.deepEqual(a, ['6200_20261116_8#1|10|0|0', '6200_20261116_9#1|10|0|0', '6200_20261116_9#1|10|0|1', '6200_20261116_9#2|5|0|0']);
+  });
+  it('כמות: בטוח, לפי הנחה, החזרה, לא בטוח (שבר / אין מחיר / שקיל)', () => {
+    assert.deepEqual(C.qtyOf(29.700000000000003, 0, 9.9), { q: 3, qs: 'sure' });
+    assert.deepEqual(C.qtyOf(7, 3, 10), { q: 1, qs: 'disc' });
+    assert.deepEqual(C.qtyOf(-10.9, 0, 10.9), { q: -1, qs: 'sure' });
+    assert.deepEqual(C.qtyOf(13, 0, 10), { q: 1, qs: 'unsure', why: 'frac' });
+    assert.deepEqual(C.qtyOf(26, 0, 10), { q: 3, qs: 'unsure', why: 'frac' });
+    assert.deepEqual(C.qtyOf(-13, 0, 10), { q: -1, qs: 'unsure', why: 'frac' });
+    assert.deepEqual(C.qtyOf(8, 0, null), { q: 1, qs: 'unsure', why: 'noprice' });
+    assert.deepEqual(C.qtyOf(12, 0, 10, 1.2), { q: 1.2, qs: 'unsure', why: 'weight' });
+    assert.ok(C.stockQ({ qs: 'sure', pid: 'p', q: 1 }) && !C.stockQ({ qs: 'skip', q: null }) && !C.stockQ({ qs: 'unsure', q: 1 }));
+  });
+});
+describe('סיכום תקופה והתאמה (A3)', () => {
+  const DAYS = [
+    { d: '2026-11-16', bk: '6200', bn: 'א', gross: 100, ret: 10, disc: 5, ntx: 3, nl: 5, sp: 20, un: 1, it: { 300001: { n: 'מוצר א', cat: 'k1', q: 3, r: 1, a: 40, ds: 5, u: 1 }, 1000: { n: 'כללי', cat: '', q: 0, r: 0, a: 20, ds: 0, u: 0, sp: true } } },
+    { d: '2026-11-16', bk: '7700', bn: 'ב', gross: 50, ret: 0, disc: 0, ntx: 1, nl: 1, sp: 0, un: 0, it: { 300002: { n: 'מוצר ב', cat: 'k1', q: 5, r: 0, a: 50, ds: 0, u: 0 } } },
+    { d: '2026-11-17', bk: '6200', bn: 'א', gross: 30, ret: 0, disc: 0, ntx: 1, nl: 1, sp: 0, un: 0, it: { 300001: { n: 'מוצר א', cat: 'k1', q: 2, r: 0, a: 30, ds: 0, u: 0 } } },
+  ];
+  it('aggDays: סכומים (נטו = פדיון − החזרות − הנחות), מוצרים לפי יום, סניפים, קטגוריות, סינון לפי סניף', () => {
+    const T = C.aggDays(DAYS);
+    assert.deepEqual([T.gross, T.ret, T.disc, T.net, T.ntx, T.un, T.sp], [180, 10, 5, 165, 5, 1, 20]);
+    const a = T.items.find((x) => x.c === '300001');
+    assert.deepEqual([a.q, a.r, a.a, a.u, Object.keys(a.days).sort()], [5, 1, 65, 1, ['2026-11-16', '2026-11-17']]);
+    assert.deepEqual([T.br['6200'].net, T.br['7700'].net], [115, 50]);
+    assert.deepEqual([T.cats.k1.a, T.cats.k1.q, T.cats[''].a], [115, 9, 20]);
+    assert.deepEqual(T.days.map((d) => [d.d, d.net]), [['2026-11-17', 30], ['2026-11-16', 135]]);
+    assert.equal(C.aggDays(DAYS, { bk: '7700' }).net, 50);
+  });
+  it('itemList: מיון לפי כמות / פדיון, חיפוש בשם ובקוד', () => {
+    const T = C.aggDays(DAYS);
+    assert.deepEqual(C.itemList(T.items, 'q').map((x) => x.c), ['300001', '300002', '1000']);
+    assert.deepEqual(C.itemList(T.items, 'a').map((x) => x.c), ['300001', '300002', '1000']);
+    assert.deepEqual(C.itemList(T.items, 'q', 'מוצר ב').map((x) => x.c), ['300002']);
+    assert.deepEqual(C.itemList(T.items, 'q', '1000').map((x) => x.c), ['1000']);
+  });
+  it('recon: תואם, פער מתחת/מעל הסף, אין סגירה, סגירה שנפתחה ביום אחר, סניף לא ממופה, סך יומי', () => {
+    const reg = { 6200: 'i_yh', 7700: 'i_nl' };
+    const zc = [{ id: 'z1', reg: 'i_yh', d: '2026-11-16', od: '2026-11-16', amt: 85 }, { id: 'z2', reg: 'i_nl', d: '2026-11-16', od: '', amt: 30 }, { id: 'z3', reg: 'i_yh', d: '2026-11-17', od: '2026-11-16', amt: 30 }];
+    const R = C.recon(DAYS, reg, zc, 10, ['i_yh', 'i_nl']);
+    assert.deepEqual(R.map((x) => x.d), ['2026-11-17', '2026-11-16']);
+    const d16 = R[1];
+    assert.deepEqual(d16.regs.map((c) => [c.reg, c.cx, c.z, c.st, c.gap]), [['i_yh', 85, 85, 'ok', 0], ['i_nl', 50, 30, 'over', 20]]);
+    assert.deepEqual([d16.tot.cx, d16.tot.z, d16.tot.st, d16.tot.gap], [135, 115, 'over', 20]);
+    assert.deepEqual(R[0].regs.map((c) => c.st), ['span', 'none']);
+    assert.equal(R[0].tot.st, 'part');
+    assert.equal(C.recon(DAYS, reg, zc, 0, ['i_yh', 'i_nl'])[1].regs[1].st, 'gap'); // בלי סף – פער רגיל
+    const u = C.recon(DAYS, { 6200: 'i_yh' }, [], 0, ['i_yh', 'i_nl']);
+    assert.deepEqual(u[1].un, [{ bk: '7700', bn: 'ב', net: 50 }]);
+    assert.equal(u[1].regs[0].st, 'noz');
+  });
+  it('ביצועים: 30 ימים × 2 סניפים × 600 מוצרים – סיכום מתחת ל-300ms', () => {
+    const D = [];
+    for (let d = 1; d <= 30; d++) for (const bk of ['6200', '7700']) { const it = {}; for (let i = 0; i < 600; i++) it[String(300000 + i)] = { n: 'מוצר ' + i, cat: 'k' + (i % 20), q: 2, r: 0, a: 20, ds: 0, u: 0 }; D.push({ d: '2026-11-' + String(d).padStart(2, '0'), bk, bn: bk, gross: 12000, ret: 0, disc: 0, ntx: 100, nl: 600, sp: 0, un: 0, it }); }
+    const t0 = Date.now();
+    const T = C.aggDays(D); const L = C.itemList(T.items, 'a', 'מוצר 5');
+    assert.equal(T.items.length, 600); assert.ok(L.length > 0);
+    assert.ok(Date.now() - t0 < 300, 'זמן: ' + (Date.now() - t0));
+  });
+});

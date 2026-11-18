@@ -1,0 +1,206 @@
+/* סנכרון כספית – שלבים A2 ו-A3 (17.11.2026). מנהל בלבד (השרת אוכף: functions/caspit.js; כאן רק מה מוצג).
+   A2 – V.cxSalesPv: "דוח מכירות לפריטים" מכספית → מלאי. הקובץ נקרא בטלפון (CaspitCore.parseSales, כולל windows-1255), נשלח בחלקים (cxUpload kind:'sales'),
+        תצוגה מקדימה (cxPreview) עם משבצות לחיצות, תיקון כמויות "לא בטוח", ואישור (cxApply). שורה שכבר נקלטה לא נספרת שוב.
+   A3 – V.cxSales: "מכירות כספית": תקופה (היום, אתמול, שבוע, חודש, טווח), סיכומים, "כמה נמכר מכל מוצר", קופות, קטגוריות,
+        שורות "לא בטוח" לאישור/תיקון (cxFix), התאמה מול סגירת קופה (S.zc במכשיר, לכל יום ולכל קופה + סך יומי), ומקור ההכנסות (מנהל־על; "כספית" עוד לא זמין).
+   כל מספר לחיץ ומציג את השורות שמאחוריו (החלטה 12). רכיבי העיצוב הקיימים בלבד (.card .btn .chip .li .tag .note .kg .k .empty .f).
+   משתמש ב: V, ACT, CHG, INP, FRM, fnCall, esc, ils, toast, dlg, closeDlg, ask, rerender, go, cur, fd, SY, S, ZREG, zcThr, bzF, dfmt, subName, CaspitCore. */
+(function(){
+'use strict';
+if(typeof ACT==='undefined'||typeof V==='undefined'||typeof CaspitCore==='undefined')return;
+const C=CaspitCore;
+const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
+const ok=()=>typeof window.oxImpOk==='function'&&window.oxImpOk();
+const err=e=>toast(e&&e.message||'הפעולה נכשלה');
+const nf=n=>Number(n||0).toLocaleString('he-IL',{maximumFractionDigits:3});
+const pz=v=>v==null?'—':ils(v);
+const df=d=>typeof dfmt==='function'?dfmt(d):d;
+const PG=100;
+const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'cs'+[...a].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,22)};
+const btn=(a,attrs,inner,extra)=>`<button type="button" class="li" data-a="${a}" ${attrs} style="cursor:pointer;color:inherit;font:inherit${extra?';'+extra:''}">${inner}</button>`;
+const tile=(l,v,cls,a,k,money)=>`<button type="button" class="k${cls?' '+cls:''}" data-a="${a}" data-k="${k}" style="width:100%;min-height:64px;text-align:start;color:inherit;font:inherit;cursor:pointer"><small>${l}</small><b${money?' dir="ltr"':''}>${money?ils(v):nf(v)}</b></button>`;
+const brName=(bk,m)=>esc((m&&m[bk])||bk);
+const qsTag=(qs,why)=>{const t=C.QS[qs]||qs;const cls=qs==='unsure'?'t1':qs==='own'||qs==='ok'?'t3':qs==='nolink'||qs==='skip'?'':'t3';return `<span class="tag ${cls}">${esc(t)}${qs==='unsure'&&why&&C.UNSURE_WHY[why]?' – '+esc(C.UNSURE_WHY[why]):''}</span>`};
+const goBack=()=>{if(NAV.length>1){NAV.pop();render(-1)}else rerender()};
+const zcOn=()=>typeof bzF==='function'&&bzF('cashClose')&&typeof ZREG!=='undefined';
+
+/* ===================== A2: קליטת דוח מכירות ===================== */
+const X={st:'',R:null,qty:{},file:'',bad:[],res:null,dl:null};
+/* נקרא מ-caspit-sync.js (CHG.cxFile) כשהקובץ זוהה כדוח מכירות */
+window.cxSalesFile=async(f,rows,det,prog)=>{
+ const p=C.parseSales(rows,det);
+ if(!p.lines.length)throw new Error('לא נמצאו שורות מכירה תקינות בקובץ'+(p.bad.length?` (${nf(p.bad.length)} שורות פגומות)`:''));
+ const P=C.parts(p.lines,1000),run=rid();
+ for(let k=0;k<P.length;k++){prog(`זוהה דוח מכירות: ${nf(p.lines.length)} שורות. שולח חלק ${k+1} מתוך ${P.length}…`);await fnCall('cxUpload',{run,kind:'sales',part:k,parts:P.length,lines:P[k]})}
+ prog('בודק מה כבר נקלט ומחשב כמויות…');
+ const r=await fnCall('cxPreview',{run});
+ Object.assign(X,{st:'pv',run,R:r,qty:{},file:f.name,bad:p.bad,res:null});
+ go('cxSalesPv')};
+const L0=()=>(X.R&&X.R.rows)||[];
+const SDL={
+ all:['כל השורות בקובץ',()=>L0()],
+ nw:['שורות חדשות',()=>L0().filter(r=>r[8]!=='dup')],
+ dup:['כבר נקלטו קודם – לא ייספרו שוב',()=>L0().filter(r=>r[8]==='dup')],
+ sure:['כמות בטוחה',()=>L0().filter(r=>r[8]==='sure'||r[8]==='disc')],
+ unsure:['לא בטוח – לבדיקה',()=>L0().filter(r=>r[8]==='unsure')],
+ ret:['החזרות',()=>L0().filter(r=>r[8]!=='dup'&&r[5]<0)],
+ skip:['קודים מיוחדים (בלי מלאי)',()=>L0().filter(r=>r[8]==='skip')],
+ nolink:['קודים לא מוכרים (בלי מלאי)',()=>L0().filter(r=>r[8]==='nolink')],
+ gross:['פדיון השורות החדשות',()=>L0().filter(r=>r[8]!=='dup'&&r[5]>=0)],
+ disc:['שורות עם הנחה',()=>L0().filter(r=>r[8]!=='dup'&&r[6])],
+};
+const qOf=r=>X.qty[r[0]]!==undefined?X.qty[r[0]]:r[9];
+function lineRow(r){const bks=X.R&&X.R.bks,q=qOf(r),own=X.qty[r[0]]!==undefined;
+ return `<div class="li" style="cursor:default"><div class="m"><b>${esc(r[4]||'(בלי שם)')}</b><small>קוד ${esc(r[3])} · עסקה ${esc(r[2])} · ${esc(df(r[1]))} · ${brName(r[7],bks)}</small><small>פדיון <bdi dir="ltr">${ils(r[5])}</bdi>${r[6]?' · הנחה <bdi dir="ltr">'+ils(r[6])+'</bdi>':''}${q!=null?' · כמות <b>'+nf(q)+'</b>':''}${r[10]?' · מחיר <bdi dir="ltr">'+ils(r[10])+'</bdi>':''}</small><small>${r[8]==='dup'?'<span class="tag">כבר נקלט</span>':own?qsTag('own'):qsTag(r[8],r[11])}</small></div></div>`}
+const sdlH=()=>{const D=X.dl,L=SDL[D.k][1](),S=L.slice(0,D.n);return `<h3>${esc(SDL[D.k][0])} · ${nf(L.length)}</h3><div data-sc style="max-height:60vh;overflow:auto">${S.map(lineRow).join('')||'<p class="note">אין שורות</p>'}</div>${L.length>S.length?`<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="cxSDlMore">הצג עוד (${nf(L.length-S.length)})</button>`:''}<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`};
+ACT.cxSDl=el=>{if(!X.R||!SDL[el.dataset.k])return;X.dl={k:el.dataset.k,n:PG};dlg(sdlH())};
+ACT.cxSDlMore=()=>{if(!X.dl)return;X.dl.n+=PG;const sc=document.querySelector('#dlg [data-sc]'),t=sc?sc.scrollTop:0;dlg(sdlH());const s2=document.querySelector('#dlg [data-sc]');if(s2)s2.scrollTop=t};
+ACT.cxSBad=()=>dlg(`<h3>שורות פגומות · ${nf(X.bad.length)}</h3><p class="note">השורות האלה לא נשלחו (לא ייקלטו).</p><div style="max-height:55vh;overflow:auto">${X.bad.slice(0,300).map(b=>`<div class="li" style="cursor:default"><div class="m"><b>שורה ${b.r} בקובץ</b><small>${esc(C.SBAD[b.why]||b.why)}</small></div></div>`).join('')}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`);
+const brSel=()=>{const B=typeof brAll==='function'?brAll().filter(b=>b.on):[];if(!B.length)return '';return `<form class="card" data-f="cxBrF" style="border-color:var(--warn)"><b>מאיזה סניף יורד המלאי?</b><p class="note" style="margin:4px 0">שתי הקופות בכספית נכנסות לאותו מלאי. בוחרים פעם אחת.</p><label class="f"><span>סניף</span><select name="br" required><option value="">בחרו סניף</option>${B.map(b=>`<option value="${esc(b.id)}">${esc(b.name||b.n||b.id)}</option>`).join('')}</select></label><button class="btn w" style="min-height:48px">שמירה</button></form>`};
+FRM.cxBrF=async f=>{const x=fd(f);if(!x.br)return;const b=f.querySelector('button');b.disabled=true;try{await fnCall('cxSetCfg',{br:x.br});X.R.br=x.br;toast('נשמר');rerender()}catch(e){b.disabled=false;err(e)}};
+function spvH(){const R=X.R,c=R.cnt,bks=Object.values(R.bks||{});
+ const un=SDL.unsure[1]();
+ return `<div class="card"><p class="note" style="margin-top:0">${esc(X.file)} · ${nf(c.lines)} שורות · ${nf(c.tx)} עסקאות · ${c.days.length?esc(df(c.days[0]))+(c.days.length>1?' – '+esc(df(c.days[c.days.length-1])):''):''}${bks.length?' · '+bks.map(esc).join(', '):''}</p>
+ <div class="kg">${tile('שורות חדשות',c.nw,'pos','cxSDl','nw')}${tile('כבר נקלטו קודם',c.dup,'','cxSDl','dup')}${tile('כמות בטוחה',c.sure+c.disc,'','cxSDl','sure')}${tile('לא בטוח – לבדיקה',c.unsure,c.unsure?'neg':'','cxSDl','unsure')}${tile('החזרות',c.ret,'','cxSDl','ret')}${tile('קודים מיוחדים',c.skip,'','cxSDl','skip')}${tile('קודים לא מוכרים',c.nolink,c.nolink?'neg':'','cxSDl','nolink')}${tile('פדיון (חדש)',c.gross,'','cxSDl','gross',1)}${c.discA?tile('הנחות (חדש)',c.discA,'','cxSDl','disc',1):''}${tile('כל השורות בקובץ',c.lines,'','cxSDl','all')}</div>
+ <p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את השורות שמאחורי המספר. קודים מיוחדים (למשל 1000) וקודים שאינם באפליקציה לא משנים מלאי, אבל נספרים במכירות.</p>
+ ${X.bad.length?`<button class="btn g s w" style="margin-top:8px;min-height:44px" data-a="cxSBad">${nf(X.bad.length)} שורות פגומות בקובץ – לא נשלחו</button>`:''}
+ ${c.gone?`<p class="note" style="color:var(--warn)">${nf(c.gone)} שורות שנקלטו בעבר לא מופיעות בקובץ הזה (באותן עסקאות). הן נשארות כמו שהן – המלאי לא מתבטל.</p>`:''}</div>
+ ${R.br?'':brSel()}
+ ${un.length?`<div class="card"><h3 style="margin-top:0">לא בטוח – ${nf(un.length)} שורות</h3><p class="note" style="margin-top:0">הכמות חושבה מהפדיון ומהמחיר, ולא יצאה מספר שלם. הכמות המוצעת תרד מהמלאי והשורה תסומן לבדיקה. אפשר לתקן כבר עכשיו, או אחר כך במסך המכירות.</p>
+ ${un.slice(0,X.un||30).map(r=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m" style="flex:1 1 100%;min-width:0"><b>${esc(r[4]||'(בלי שם)')}</b><small>קוד ${esc(r[3])} · עסקה ${esc(r[2])} · פדיון <bdi dir="ltr">${ils(r[5])}</bdi>${r[10]?' · מחיר <bdi dir="ltr">'+ils(r[10])+'</bdi>':''} · ${esc(C.UNSURE_WHY[r[11]]||'')}</small></div><label class="f" style="margin:0;flex:1 1 100%"><span>כמות (מוצעת: ${esc(String(r[9]))})</span><input inputmode="decimal" dir="ltr" data-c="cxSQ" data-k="${r[0]}" value="${esc(String(qOf(r)))}" style="min-height:44px"></label></div>`).join('')}
+ ${un.length>(X.un||30)?`<button class="btn g w" style="min-height:44px" data-a="cxSUnMore">הצג עוד (${nf(un.length-(X.un||30))})</button>`:''}</div>`:''}
+ <div class="row" style="margin-top:16px"><button class="btn grow" style="min-height:48px" data-a="cxSApply"${c.nw?'':' disabled'}>אשר ושמור</button><button class="btn g grow" style="min-height:48px" data-a="cxSX">ביטול</button></div>
+ ${c.nw?'':'<p class="note">אין שורות חדשות – הכול כבר נקלט.</p>'}`}
+ACT.cxSUnMore=()=>{X.un=(X.un||30)+50;rerender()};
+CHG.cxSQ=el=>{const i=+el.dataset.k,r=L0().find(x=>x[0]===i);if(!r)return;const v=C.num(el.value);if(Number.isNaN(v)||Math.abs(v)>100000){toast('כמות לא תקינה');el.value=String(qOf(r));return}
+ if(v===r[9])delete X.qty[i];else X.qty[i]=Math.round(v*1000)/1000};
+ACT.cxSX=()=>ask('לבטל את קליטת הדוח? שום דבר לא נשמר.',()=>{X.st='';X.R=null;goBack()},'כן, בטל');
+function moveSum(){let out=0,back=0,un=0;for(const r of L0()){if(['dup','skip','nolink'].includes(r[8]))continue;const q=qOf(r);if(typeof q!=='number')continue;if(q>0)out+=q;else back+=-q;if(r[8]==='unsure'&&X.qty[r[0]]===undefined)un++}return{out,back,un}}
+ACT.cxSApply=()=>{const R=X.R;if(!R.br)return toast('קודם בוחרים מאיזה סניף יורד המלאי');const m=moveSum();
+ dlg(`<h3>לשמור את המכירות?</h3><div class="kg">${[['שורות חדשות',R.cnt.nw],['יחידות יורדות מהמלאי',m.out],['יחידות חוזרות למלאי (החזרות)',m.back],['לא בטוח – יסומנו לבדיקה',m.un]].map(([l,v])=>`<div class="k"><small>${l}</small><b>${nf(v)}</b></div>`).join('')}</div>
+ <p class="note">כל תנועה נרשמת בהיסטוריית המלאי ("מכירה בכספית"). שורות שכבר נקלטו לא ייספרו שוב.</p>
+ <div class="row"><button class="btn grow" style="min-height:48px" data-a="cxSGo">כן, לשמור</button><button type="button" class="btn g grow" style="min-height:48px" data-a="closeDlg">ביטול</button></div>`)};
+ACT.cxSGo=async()=>{closeDlg();X.st='busy';rerender();
+ try{let r,first=true;for(let i=0;i<20;i++){r=await fnCall('cxApply',first?{run:X.run,qty:X.qty}:{run:X.run});first=false;if(r.done)break}
+  if(!r||!r.done)throw new Error('השמירה לא הסתיימה. לחצו שוב "אשר ושמור" – מה שכבר נשמר לא יישמר פעמיים.');
+  X.res=r.res||{};X.st='done';Y.D=null;rerender();toast('✓ המכירות נשמרו');if(typeof window.__oxReload==='function')window.__oxReload()}
+ catch(e){X.st='pv';rerender();err(e)}};
+V.cxSalesPv=()=>{const T='קליטת דוח מכירות';if(!ok())return{t:T,h:'<div class="empty">המסך מיועד למנהל בלבד</div>'};
+ if(X.st==='busy')return{t:T,s:'שומר…',h:'<div class="card"><p style="margin:0">שומר את המכירות ומעדכן את המלאי…</p><p class="note">אל תסגרו את האפליקציה עד שהפעולה מסתיימת.</p></div>'};
+ if(X.st==='done'){const r=X.res||{};return{t:T,s:'נשמר',h:`<div class="card"><h3 style="margin-top:0">✓ המכירות נשמרו</h3><div class="kg">${tile('שורות שנקלטו',r.lines,'pos','cxSDl','nw')}${tile('יחידות שירדו מהמלאי',r.sold,'','cxSDl','sure')}${tile('יחידות שחזרו (החזרות)',r.back,'','cxSDl','ret')}${tile('לא בטוח – לבדיקה',r.unsure,r.unsure?'neg':'','cxSDl','unsure')}${tile('קודים מיוחדים',r.skip,'','cxSDl','skip')}${tile('קודים לא מוכרים',r.nolink,'','cxSDl','nolink')}</div><p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את השורות.${r.dup?' '+nf(r.dup)+' שורות נקלטו בינתיים ממקום אחר ולא נספרו שוב.':''}</p></div>
+ <div class="row"><button class="btn grow" style="min-height:48px" data-a="cxGoSales">למסך המכירות</button><button class="btn g grow" style="min-height:48px" data-a="cxSDone">סיום</button></div>`}}
+ if(X.st!=='pv'||!X.R)return{t:T,h:'<div class="empty">אין דוח פתוח. בוחרים קובץ במסך "סנכרון כספית".</div>'};
+ return{t:T,s:'תצוגה מקדימה – עוד לא נשמר כלום',h:spvH()}};
+ACT.cxSDone=()=>{X.st='';X.R=null;goBack()};
+ACT.cxGoSales=()=>{X.st='';X.R=null;NAV.pop();Y.D=null;go('cxSales')};
+
+/* ===================== A3: מסך "מכירות כספית" ===================== */
+const Y={per:'today',from:'',to:'',D:null,T:null,tab:'prod',sort:'q',s:'',n:PG,cat:null,U:null,load:0,err:''};
+const ymd=t=>{try{return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).format(t)}catch(e){return new Date(t).toISOString().slice(0,10)}};
+const addD=(d,n)=>new Date(Date.parse(d+'T12:00:00Z')+n*864e5).toISOString().slice(0,10);
+function range(p){const t=ymd(new Date());if(p==='yday'){const y=addD(t,-1);return[y,y]}if(p==='week')return[addD(t,-6),t];if(p==='month')return[t.slice(0,8)+'01',t];if(p==='custom'&&Y.from&&Y.to)return[Y.from,Y.to];return[t,t]}
+const PER=[['today','היום'],['yday','אתמול'],['week','שבוע'],['month','חודש'],['custom','טווח']];
+async function yLoad(){const [f,t]=range(Y.per);Y.load=1;Y.err='';
+ try{const r=await fnCall('cxSales',{from:f,to:t});Y.D=Object.assign(r,{f,t});Y.T=C.aggDays(r.days);Y.U=null}catch(e){Y.err=e.message||'הטעינה נכשלה';Y.D=null}
+ Y.load=0;if(cur().v==='cxSales')rerender()}
+const catN=c=>c?(Y.D&&Y.D.cats&&Y.D.cats[c])||'קטגוריה':'בלי קטגוריה';
+const bkN=bk=>{const b=Y.T&&Y.T.br[bk];return esc((b&&b.bn)||bk)};
+V.cxSales=()=>{const T='מכירות כספית';if(!ok())return{t:T,h:'<div class="empty">המסך מיועד למנהל בלבד</div>'};
+ const per=`<div class="chips scroll-x nw" role="group" style="margin-bottom:8px">${PER.map(([k,l])=>`<button class="chip${Y.per===k?' on':''}" data-a="cxYPer" data-k="${k}" aria-pressed="${Y.per===k}" style="min-height:44px">${l}</button>`).join('')}</div>
+ ${Y.per==='custom'?`<form class="card" data-f="cxYRange"><div class="row"><label class="f grow"><span>מתאריך</span><input type="date" name="from" value="${esc(Y.from)}" required style="min-height:44px"></label><label class="f grow"><span>עד תאריך</span><input type="date" name="to" value="${esc(Y.to)}" required style="min-height:44px"></label></div><button class="btn w" style="min-height:48px">הצג</button></form>`:''}`;
+ if(!Y.D&&!Y.load&&!Y.err&&(Y.per!=='custom'||(Y.from&&Y.to)))yLoad();
+ if(Y.err)return{t:T,h:per+`<div class="card"><p>${esc(Y.err)}</p><button class="btn w" style="min-height:48px" data-a="cxYRe">נסה שוב</button></div>`};
+ if(!Y.D)return{t:T,s:Y.per==='custom'&&!(Y.from&&Y.to)?'בחרו טווח תאריכים':'טוען…',h:per};
+ const A=Y.T,D=Y.D,[f,t]=[D.f,D.t];
+ const k=(l,v,cls,key,m)=>tile(l,v,cls,'cxYDl',key,m);
+ const tabs=[['prod','מוצרים'],['reg','קופות'],['cat','קטגוריות'],['rec','התאמה לסגירת קופה'],['un','לא בטוח'+(A.un?' '+nf(A.un):'')]];
+ let body='';
+ if(Y.tab==='prod')body=prodH();else if(Y.tab==='reg')body=regH();else if(Y.tab==='cat')body=catH();else if(Y.tab==='rec')body=recH();else body=unH();
+ return{t:T,s:(f===t?df(f):df(f)+' – '+df(t))+(D.cfg&&D.cfg.lastSales?' · דוח אחרון נקלט '+new Date(D.cfg.lastSales.at).toLocaleDateString('he-IL'):''),h:per+(!D.days.length?`<div class="card"><p style="margin-top:0">אין מכירות מכספית בתקופה הזו.</p><p class="note">מעלים "דוח מכירות לפריטים" מכספית במסך "סנכרון כספית".</p><button class="btn w" style="min-height:48px" data-a="go" data-v="cxSync">לסנכרון כספית</button></div>`+(Y.tab==='rec'?recH():''):
+  `<div class="card"><div class="kg">${k('הכנסה נטו (אחרי הנחות והחזרות)',A.net,'pos','net',1)}${k('פדיון מכירות',A.gross,'','gross',1)}${k('החזרות',A.ret,A.ret?'neg':'','ret',1)}${k('הנחות',A.disc,'','disc',1)}${k('עסקאות',A.ntx,'','ntx')}${k('לא בטוח',A.un,A.un?'neg':'','un')}</div><p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את הפירוט לפי יום, ומשם את העסקאות.${A.sp?' מתוך הפדיון, קודים מיוחדים (למשל פריט כללי): <bdi dir="ltr">'+ils(A.sp)+'</bdi>.':''}</p></div>
+ <div class="chips scroll-x nw" role="tablist" style="margin:8px 0">${tabs.map(([id,l])=>`<button class="chip${Y.tab===id?' on':''}" role="tab" aria-selected="${Y.tab===id}" data-a="cxYTab" data-k="${id}" style="min-height:44px">${l}</button>`).join('')}</div>${body}`)+setH()}};
+ACT.cxYPer=el=>{Y.per=el.dataset.k;Y.D=null;Y.err='';Y.n=PG;rerender()};
+ACT.cxYRe=()=>{Y.D=null;Y.err='';rerender()};
+FRM.cxYRange=f=>{const x=fd(f);if(!C.dateOf(x.from)||!C.dateOf(x.to)||x.from>x.to)return toast('טווח תאריכים לא תקין');if((Date.parse(x.to)-Date.parse(x.from))/864e5>400)return toast('טווח של עד 400 ימים');Y.from=x.from;Y.to=x.to;Y.D=null;Y.err='';rerender()};
+ACT.cxYTab=el=>{Y.tab=el.dataset.k;Y.n=PG;rerender()};
+
+/* ---- מוצרים: "כמה נמכר מכל מוצר" ---- */
+function prodL(){let L=Y.T.items;if(Y.cat!=null)L=L.filter(i=>(i.cat||'')===Y.cat);return C.itemList(L,Y.sort,Y.s)}
+const prodRow=i=>btn('cxYProd',`data-k="${esc(i.c)}"`,`<div class="m"><b>${esc(i.n||'(בלי שם)')}${i.u?' <span class="tag t1">לא בטוח</span>':''}${i.sp?' <span class="tag">קוד מיוחד</span>':''}</b><small>קוד ${esc(i.c)} · נמכרו <b>${nf(i.q)}</b>${i.r?' · הוחזרו <b>'+nf(i.r)+'</b>':''}</small></div><b dir="ltr" style="flex:none">${ils(i.a)}</b>`);
+function prodListH(){const L=prodL(),S=L.slice(0,Y.n);return (S.map(prodRow).join('')||'<div class="empty">לא נמצאו מוצרים</div>')+(L.length>S.length?`<button class="btn g w" style="min-height:44px" data-a="cxYMore">הצג עוד (${nf(L.length-S.length)})</button>`:'')}
+function prodH(){return `${Y.cat!=null?`<div class="row" style="margin-bottom:6px;align-items:center"><span class="tag t2">קטגוריה: ${esc(catN(Y.cat))}</span><button class="btn g s" style="min-height:44px" data-a="cxYCatX">הצג את כל המוצרים</button></div>`:''}
+ <label class="f"><span>חיפוש מוצר (שם או קוד)</span><input data-i="cxYQ" value="${esc(Y.s)}" autocomplete="off" style="min-height:44px"></label>
+ <div class="chips" role="group" style="margin-bottom:8px"><button class="chip${Y.sort==='q'?' on':''}" data-a="cxYSort" data-k="q" aria-pressed="${Y.sort==='q'}" style="min-height:44px">הכי נמכר</button><button class="chip${Y.sort==='a'?' on':''}" data-a="cxYSort" data-k="a" aria-pressed="${Y.sort==='a'}" style="min-height:44px">הכי הרבה פדיון</button></div>
+ <div id="cxypl">${prodListH()}</div>`}
+INP.cxYQ=el=>{Y.s=el.value;Y.n=PG;const e=document.getElementById('cxypl');if(e)e.innerHTML=prodListH()};
+ACT.cxYSort=el=>{Y.sort=el.dataset.k==='a'?'a':'q';Y.n=PG;rerender()};
+ACT.cxYMore=()=>{Y.n+=PG;const e=document.getElementById('cxypl');if(e)e.innerHTML=prodListH()};
+ACT.cxYCatX=()=>{Y.cat=null;Y.n=PG;rerender()};
+ACT.cxYProd=el=>{const i=Y.T.items.find(x=>x.c===el.dataset.k);if(!i)return;const ds=Object.keys(i.days).sort().reverse();
+ dlg(`<h3>${esc(i.n||i.c)}</h3><p class="note" style="margin-top:0">קוד ${esc(i.c)} · ${esc(catN(i.cat))}</p><div class="kg"><div class="k"><small>נמכרו</small><b>${nf(i.q)}</b></div><div class="k"><small>הוחזרו</small><b>${nf(i.r)}</b></div><div class="k"><small>פדיון נטו</small><b dir="ltr">${ils(i.a)}</b></div>${i.u?`<div class="k neg"><small>שורות לא בטוחות</small><b>${nf(i.u)}</b></div>`:''}</div>
+ <p class="note">לפי יום – לחיצה מציגה את העסקאות:</p><div style="max-height:45vh;overflow:auto">${ds.map(d=>{const v=i.days[d];return btn('cxYPL',`data-k="${esc(i.c)}" data-d="${d}"`,`<div class="m"><b>${esc(df(d))}</b><small>נמכרו ${nf(v.q)}${v.r?' · הוחזרו '+nf(v.r):''}${v.u?' · <span class="tag t1">לא בטוח</span>':''}</small></div><b dir="ltr" style="flex:none">${ils(v.a)}</b>`)}).join('')}</div>
+ ${ds.length>1?`<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="cxYPL" data-k="${esc(i.c)}" data-d="">כל העסקאות בתקופה</button>`:''}<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
+/* שורות (עסקאות) מהשרת: לפי מוצר+ימים או לפי יום+סניף */
+const txH=(L,title,back)=>`<h3>${esc(title)}</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>`<div class="card" style="margin:6px 0;padding:10px"><b>עסקה ${esc(x.tx)}</b> <small class="note">${esc(df(x.d))} · ${esc(x.bn||x.bk)}</small>${x.lines.map(l=>`<div class="row" style="justify-content:space-between;gap:8px;margin-top:6px;align-items:flex-start"><span style="min-width:0;overflow-wrap:anywhere">${esc(l.n||l.c)} <small class="note">קוד ${esc(l.c)}${typeof l.q==='number'?' · כמות '+nf(l.q):''}${l.ds?' · הנחה '+ils(l.ds):''}</small><br>${qsTag(l.qs,l.why)}</span><b dir="ltr" style="flex:none">${ils(l.a)}</b></div>`).join('')}</div>`).join('')||'<p class="note">לא נמצאו שורות</p>'}</div>${back||''}<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`;
+async function txLoad(q,title){dlg(`<h3>${esc(title)}</h3><p class="note">טוען…</p>`);try{const r=await fnCall('cxLines',q);dlg(txH(r.tx,title))}catch(e){dlg(`<h3>${esc(title)}</h3><p class="note">${esc(e.message||'הטעינה נכשלה')}</p><button class="btn g w" style="min-height:44px" data-a="closeDlg">סגור</button>`)}}
+ACT.cxYPL=el=>{const i=Y.T.items.find(x=>x.c===el.dataset.k);if(!i)return;const days=el.dataset.d?[el.dataset.d]:Object.keys(i.days);txLoad({c:i.c,days},(i.n||i.c)+(el.dataset.d?' · '+df(el.dataset.d):''))};
+
+/* ---- משבצות הסיכום → פירוט לפי יום → עסקאות היום ---- */
+const YDL={net:['הכנסה נטו',d=>d.net,1],gross:['פדיון מכירות',d=>d.gross,1],ret:['החזרות',d=>d.ret,1],disc:['הנחות',d=>d.disc,1],ntx:['עסקאות',d=>d.ntx,0]};
+ACT.cxYDl=el=>{const k=el.dataset.k;if(k==='un'){Y.tab='un';rerender();return}const m=YDL[k];if(!m)return;
+ dlg(`<h3>${m[0]} לפי יום</h3><div style="max-height:60vh;overflow:auto">${Y.T.days.map(d=>btn('cxYDay',`data-d="${d.d}"`,`<div class="m"><b>${esc(df(d.d))}</b><small>${nf(d.ntx)} עסקאות</small></div><b ${m[2]?'dir="ltr"':''} style="flex:none">${m[2]?ils(m[1](d)):nf(m[1](d))}</b>`)).join('')||'<p class="note">אין</p>'}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
+async function dayTx(d,bks,title){dlg(`<h3>${esc(title)}</h3><p class="note">טוען…</p>`);
+ try{let L=[];for(const bk of bks){const r=await fnCall('cxLines',{bd:C.dayId(bk,d)});L=L.concat(r.tx)}dlg(txH(L,title+' · '+nf(L.length)+' עסקאות'))}catch(e){dlg(`<h3>${esc(title)}</h3><p class="note">${esc(e.message||'הטעינה נכשלה')}</p><button class="btn g w" style="min-height:44px" data-a="closeDlg">סגור</button>`)}}
+ACT.cxYDay=el=>{const d=el.dataset.d,bk=el.dataset.b;const bks=bk?[bk]:[...new Set(Y.D.days.filter(x=>x.d===d).map(x=>x.bk))];dayTx(d,bks,'עסקאות '+df(d)+(bk?' · '+((Y.T.br[bk]||{}).bn||bk):''))};
+
+/* ---- קופות (סניפים בכספית) ---- */
+function regH(){const B=Object.values(Y.T.br).sort((a,b)=>b.net-a.net);return B.map(b=>btn('cxYReg',`data-k="${esc(b.bk)}"`,`<div class="m"><b>${esc(b.bn)}</b><small>${nf(b.ntx)} עסקאות · פדיון <bdi dir="ltr">${ils(b.gross)}</bdi>${b.ret?' · החזרות <bdi dir="ltr">'+ils(b.ret)+'</bdi>':''}${b.disc?' · הנחות <bdi dir="ltr">'+ils(b.disc)+'</bdi>':''}</small></div><b dir="ltr" style="flex:none">${ils(b.net)}</b>`)).join('')||'<div class="empty">אין</div>'}
+ACT.cxYReg=el=>{const bk=el.dataset.k,L=Y.D.days.filter(x=>x.bk===bk).sort((a,b)=>a.d<b.d?1:-1);
+ dlg(`<h3>${bkN(bk)} לפי יום</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>btn('cxYDay',`data-d="${x.d}" data-b="${esc(bk)}"`,`<div class="m"><b>${esc(df(x.d))}</b><small>${nf(x.ntx)} עסקאות</small></div><b dir="ltr" style="flex:none">${ils((x.gross||0)-(x.ret||0)-(x.disc||0))}</b>`)).join('')}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
+
+/* ---- קטגוריות ---- */
+function catH(){const L=Object.values(Y.T.cats).sort((a,b)=>b.a-a.a);return L.map(c=>btn('cxYCat',`data-k="${esc(c.cat)}"`,`<div class="m"><b>${esc(catN(c.cat))}</b><small>${nf(c.n)} מוצרים · ${nf(c.q)} יחידות נטו</small></div><b dir="ltr" style="flex:none">${ils(c.a)}</b>`)).join('')||'<div class="empty">אין</div>'}
+ACT.cxYCat=el=>{Y.cat=el.dataset.k;Y.tab='prod';Y.n=PG;rerender()};
+
+/* ---- לא בטוח: אישור / תיקון כמות ---- */
+async function unLoad(){try{const r=await fnCall('cxLines',{un:true});Y.U=r.tx}catch(e){Y.U={err:e.message||'הטעינה נכשלה'}}if(cur().v==='cxSales'&&Y.tab==='un')rerender()}
+function unH(){if(!Y.U){unLoad();return '<p class="note">טוען…</p>'}if(Y.U.err)return `<div class="card"><p>${esc(Y.U.err)}</p><button class="btn w" style="min-height:48px" data-a="cxYUnRe">נסה שוב</button></div>`;
+ const L=Y.U.flatMap(x=>x.lines.map(l=>Object.assign({id:x.id,d:x.d,tx:x.tx,bn:x.bn},l)));
+ return `<p class="note">שורות שבהן הכמות חושבה ולא יצאה מספר שלם (מכל התקופות). הכמות המוצעת כבר ירדה מהמלאי. "אישור" = הכמות נכונה. שינוי הכמות מעדכן את המלאי בהפרש.</p>`+(L.map(l=>`<form class="li" data-f="cxYFix" data-id="${esc(l.id)}" data-k="${esc(l.k)}" style="cursor:default;flex-wrap:wrap"><div class="m" style="flex:1 1 100%;min-width:0"><b>${esc(l.n||l.c)}</b><small>קוד ${esc(l.c)} · ${esc(df(l.d))} · עסקה ${esc(l.tx)} · ${esc(l.bn||'')}</small><small>פדיון <bdi dir="ltr">${ils(l.a)}</bdi>${l.P?' · מחיר <bdi dir="ltr">'+ils(l.P)+'</bdi>':''} · ${esc(C.UNSURE_WHY[l.why]||'')}</small></div><div class="row" style="flex:1 1 100%;gap:8px;align-items:flex-end"><label class="f grow" style="margin:0"><span>כמות</span><input name="q" inputmode="decimal" dir="ltr" value="${esc(String(l.q))}" required style="min-height:44px"></label><button class="btn" style="min-height:48px">אישור</button></div></form>`).join('')||'<div class="empty">✓ אין שורות לבדיקה</div>')}
+ACT.cxYUnRe=()=>{Y.U=null;rerender()};
+FRM.cxYFix=async f=>{const v=C.num(fd(f).q);if(Number.isNaN(v)||Math.abs(v)>100000)return toast('כמות לא תקינה');const b=f.querySelector('button');b.disabled=true;
+ try{const r=await fnCall('cxFix',{id:f.dataset.id,k:f.dataset.k,q:v});toast(r.delta?'✓ הכמות תוקנה והמלאי עודכן':'✓ אושר');Y.U=null;Y.D=null;Y.tab='un';rerender();if(r.delta&&typeof window.__oxReload==='function')window.__oxReload()}catch(e){b.disabled=false;err(e)}};
+
+/* ---- התאמה מול סגירת קופה ---- */
+/* סגירות הקופה במכשיר: סכום ההכנסות שנכנסו מכל סגירה (S.tx של הסגירה, כולל כל אמצעי התשלום) */
+function zcList(f,t){if(typeof S==='undefined'||!S||!Array.isArray(S.zc))return[];const by=new Map((S.tx||[]).map(x=>[x.id,x]));
+ return S.zc.filter(z=>z&&z.d&&z.d>=f&&z.d<=t).map(z=>{const T=(z.tx||[]).map(id=>by.get(id)).filter(x=>x&&!x.x);return{id:z.id,reg:z.reg,d:z.d,od:z.od||'',tm:z.tm||'',otm:z.otm||'',no:z.no||'',by:z.by||'',amt:Math.round(T.reduce((s,x)=>s+(+x.amt||0),0)*100)/100,T}})}
+const regNm=r=>(typeof ZREG!=='undefined'&&ZREG[r]&&ZREG[r].n)||r;
+function regMap(){return(Y.D&&Y.D.cfg&&Y.D.cfg.reg)||{}}
+function mapH(){if(!zcOn())return '';const reg=regMap(),bks=new Map();for(const x of(Y.D?Y.D.days:[]))bks.set(x.bk,x.bn||x.bk);for(const k of Object.keys(reg))if(!bks.has(k))bks.set(k,k);
+ if(!bks.size)return '';const sug=bn=>{const h=Object.keys(ZREG).filter(k=>ZREG[k].k.test(String(bn||'')));return h.length===1?h[0]:''};const all=[...bks].every(([bk])=>reg[bk]);
+ return `<details class="card"${all?'':' open'}><summary style="min-height:44px;display:flex;align-items:center"><b>חיבור קופות כספית לקופות בסגירת הקופה</b>${all?'':' <span class="tag t1" style="margin-inline-start:6px">צריך לחבר</span>'}</summary><form data-f="cxRegF"><p class="note" style="margin-top:0">פעם אחת: איזו קופה בכספית היא איזו קופה בסגירת הקופה באפליקציה.</p>${[...bks].map(([bk,bn])=>`<label class="f"><span>${esc(bn)}${bk!==bn?' ('+esc(bk)+')':''}</span><select name="r_${esc(bk)}" style="min-height:44px"><option value="">לא מחובר</option>${Object.keys(ZREG).map(k=>`<option value="${k}"${(reg[bk]||(!reg[bk]&&!all?sug(bn):''))===k?' selected':''}>${esc(ZREG[k].n)}</option>`).join('')}</select></label>`).join('')}<button class="btn w" style="min-height:48px">שמירה</button></form></details>`}
+FRM.cxRegF=async f=>{const x=fd(f),reg={};for(const [k,v] of Object.entries(x))if(k.startsWith('r_'))reg[k.slice(2)]=v||'';const b=f.querySelector('button');b.disabled=true;
+ try{const r=await fnCall('cxSetCfg',{reg});if(Y.D)Y.D.cfg.reg=r.reg||{};toast('נשמר');rerender()}catch(e){b.disabled=false;err(e)}};
+const RCLS={ok:'t3',gap:'t1',over:'t4',noz:'',nocx:'',span:'',part:'',none:''};
+const rTag=(st,gap)=>`<span class="tag ${RCLS[st]||''}">${st==='ok'?'✓ תואם':st==='gap'||st==='over'?'פער <bdi dir="ltr">'+ils(gap)+'</bdi>'+(st==='over'?' – מעל הסף':''):esc(C.RST[st]||st)}</span>`;
+function recH(){if(!zcOn())return '<div class="card"><p class="note" style="margin:0">סגירת קופה לא פעילה בעסק – אין מול מה להשוות.</p></div>';
+ const D=Y.D,reg=regMap();if(!Object.keys(reg).length)return mapH()+'<div class="card"><p class="note" style="margin:0">כדי להשוות, מחברים קודם את קופות כספית לקופות של סגירת הקופה (למעלה).</p></div>';
+ const zc=zcList(D.f,D.t),th=typeof zcThr==='function'?zcThr():0,R=C.recon(D.days,reg,zc,th,Object.keys(ZREG));Y.R=R;Y.ZC=zc;
+ const money=(a,key,v)=>`<button type="button" class="btn g s" data-a="${a}" data-k="${key}" style="min-height:44px;min-width:0"><bdi dir="ltr">${ils(v)}</bdi></button>`;
+ return mapH()+`<p class="note">לכל יום ולכל קופה: ההכנסה בכספית (פדיון פחות הנחות והחזרות) מול ההכנסות שנכנסו מסגירת הקופה.${th?' סף הפער: '+ils(th)+'.':' לא הוגדר סף פער (בהגדרות).'} לחיצה על סכום מציגה את השורות.</p>`+(R.map(x=>`<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><b>${esc(df(x.d))}</b>${rTag(x.tot.st,x.tot.gap)}</div>
+ ${x.regs.filter(c=>c.st!=='none').map(c=>`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><b>${esc(regNm(c.reg))}</b>${rTag(c.st,c.gap)}</div>
+ <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px"><span class="note" style="margin:0">כספית</span>${c.hasCx?money('cxYRc',x.d+'|'+c.reg,c.cx):'<span>—</span>'}<span class="note" style="margin:0">סגירה</span>${c.zs.length?money('cxYRz',x.d+'|'+c.reg,c.z):'<span>—</span>'}</div>${c.sp?`<p class="note" style="margin:4px 0 0">מתוך הסכום בכספית, קודים מיוחדים (שוברים, תשלום חוב, פריט כללי): <bdi dir="ltr">${ils(c.sp)}</bdi></p>`:''}</div>`).join('')}
+ ${x.regs.filter(c=>c.st!=='none').length>1?`<div class="row" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px;gap:8px;flex-wrap:wrap"><b>סך היום</b><span class="note" style="margin:0">כספית <bdi dir="ltr">${ils(x.tot.cx)}</bdi> · סגירות <bdi dir="ltr">${ils(x.tot.z)}</bdi></span></div>`:''}
+ ${x.un.length?`<p class="note" style="color:var(--warn)">קופה בכספית שלא חוברה: ${x.un.map(u=>esc(u.bn)+' <bdi dir="ltr">'+ils(u.net)+'</bdi>').join(', ')}</p>`:''}</div>`).join('')||'<div class="empty">אין נתונים להשוואה בתקופה</div>')}
+ACT.cxYRc=el=>{const [d,rg]=el.dataset.k.split('|'),reg=regMap(),bks=[...new Set(Y.D.days.filter(x=>x.d===d&&reg[x.bk]===rg).map(x=>x.bk))];dayTx(d,bks,'כספית · '+regNm(rg)+' · '+df(d))};
+ACT.cxYRz=el=>{const [d,rg]=el.dataset.k.split('|'),Z=(Y.ZC||[]).filter(z=>z.d===d&&z.reg===rg);const sn=t=>typeof subName==='function'?subName(t):'';
+ dlg(`<h3>סגירת קופה · ${esc(regNm(rg))} · ${esc(df(d))}</h3><div style="max-height:60vh;overflow:auto">${Z.map(z=>`<div class="card" style="margin:6px 0;padding:10px"><b>דוח Z ${esc(z.no||'—')}</b> <small class="note">${z.tm?esc(z.tm):''}${z.od&&z.od!==z.d?' · נפתחה ב-'+esc(df(z.od))+(z.otm?' '+esc(z.otm):''):''}${z.by?' · '+esc(z.by):''}</small>${z.T.map(t=>`<div class="row" style="justify-content:space-between;gap:8px;margin-top:6px"><span>${esc(sn(t)||t.note||'הכנסה')}</span><b dir="ltr">${ils(t.amt)}</b></div>`).join('')||'<p class="note">ההכנסות של הסגירה לא נמצאו במכשיר</p>'}<div class="row" style="justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px"><b>סה"כ</b><b dir="ltr">${ils(z.amt)}</b></div></div>`).join('')||'<p class="note">אין</p>'}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
+
+/* ---- הגדרות: מקור ההכנסות (מנהל־על בלבד, החלטה 6) ---- */
+function setH(){const D=Y.D;if(!D||!D.sa)return '';const inc=D.cfg&&D.cfg.inc==='cx'?'cx':'zc';
+ return `<details class="card" style="margin-top:12px"><summary style="min-height:44px;display:flex;align-items:center"><b>מקור ההכנסות (מנהל־על)</b></summary><p class="note" style="margin-top:0">תמיד רק מקור אחד פעיל, כדי שאותה הכנסה לא תירשם פעמיים.</p>
+ <div class="chips" role="radiogroup"><button class="chip${inc==='zc'?' on':''}" role="radio" aria-checked="${inc==='zc'}" data-a="cxYInc" data-k="zc" style="min-height:44px">סגירת קופה (פעיל)</button><button class="chip" role="radio" aria-checked="false" disabled style="min-height:44px">דוח מכירות כספית</button></div>
+ <p class="note">"דוח מכירות כספית" כמקור ההכנסות עוד לא זמין: ההכנסות נרשמות היום מסגירת הקופה, והמעבר דורש שינוי בתהליך סגירת הקופה. עד אז הדוח משמש להשוואה ולמלאי בלבד.</p></details>`}
+ACT.cxYInc=async el=>{if(el.dataset.k!=='zc')return;try{await fnCall('cxSetInc',{src:'zc'});toast('מקור ההכנסות: סגירת קופה')}catch(e){err(e)}};
+})();

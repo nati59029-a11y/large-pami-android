@@ -29,7 +29,9 @@ const HDR_NEW = ['קוד פריט', 'ברקוד', 'שם פריט', 'צבע', 'מ
 const HDR_PRICE = ['קוד פריט', 'מחיר לצרכן כולל מעמ', 'מחיר עלות אחרי הנחות לא כולל מעמ', 'מחיר עלות אחרי הנחות כולל מעמ'];
 // עמודות הקטלוג (ייצוא "קטלוג פריטים" מכספית). המחיר = "מחיר לצרכן" (לא "מחיר בחנות" – החלטה 4). עלות = "מחיר עלות" (כולל מע"מ, כמו באפליקציה)
 const CAT = { c: 'קוד פריט', n: 'שם פריט', bc: 'ברקוד', col: 'צבע', sz: 'מידה', sup: 'ספק', c1: 'קטגוריה ראשית', c2: 'קטגוריה משנית', cost: 'מחיר עלות', p: 'מחיר לצרכן', nv: 'פריט ללא מעמ' };
-const SALES = ['מספר עסקה', 'פדיון', 'מספר ברקוד']; // דוח מכירות – זיהוי בלבד בשלב A1 (הקליטה – A2)
+const SALES = ['מספר עסקה', 'פדיון', 'מספר ברקוד']; // דוח מכירות – זיהוי (הקליטה – parseSales, A2)
+// עמודות "דוח מכירות לפריטים" מכספית. "מספר ברקוד" = קוד הפריט בכספית. אין עמודת כמות – הכמות מחושבת (qtyOf)
+const SAL = { d: 'תאריך מכירה', n: 'שם פריט', c: 'מספר ברקוד', tx: 'מספר עסקה', bn: 'שם סניף', bno: 'מספר סניף', w: 'משקל', ds: 'הנחה', a: 'פדיון' };
 const WHY = { skip: 'קוד מיוחד', code: 'קוד פריט לא תקין', noname: 'בלי שם', junk: 'שם קצר ומחיר 0', price: 'מחיר חסר או שלילי' };
 const WARN = { long: 'שם ארוך – קוצר', badbc: 'ברקוד לא תקין – לא נשמר', dupbc: 'ברקוד של קוד אחר – לא נשמר', p0: 'מחיר 0', same: 'שם זהה לקוד אחר (מחיר/צבע/מידה שונים) – לא אוחד, מסומן "שם כפול – לבדוק"', mcost: 'אוחד, אבל העלות שלו שונה מהקוד הראשי – נשמרה העלות של הראשי', sku: 'קוד פריט אחר באפליקציה – לא נדרס' };
 
@@ -40,6 +42,7 @@ function num(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
   let s = str(v).replace(/[₪\s‎‏]/g, '');
   if (!s) return NaN;
+  if (/^-?\d+(\.\d+)?e[-+]?\d{1,3}$/i.test(s)) return +s; // כתיב מדעי מכספית (למשל הנחה 1.7763568394002505e-15 = 0)
   let neg = false;
   if (/^-/.test(s)) { neg = true; s = s.slice(1); } else if (/-$/.test(s)) { neg = true; s = s.slice(0, -1); }
   // פסיק: עשרוני ("12,5") או מפריד אלפים תקין ("1,234" / "1,234.50") בלבד. "1.234,50" / "1,2,3" – לא ברור → NaN (לא מנחשים סכום כסף)
@@ -70,7 +73,11 @@ function detect(rows) {
       for (const [k, v] of Object.entries(CAT)) map[k] = at(v);
       return { kind: 'cat', hi: i, map };
     }
-    if (SALES.every((x) => at(x) >= 0)) return { kind: 'sales', hi: i, map: {} };
+    if (SALES.every((x) => at(x) >= 0)) {
+      const map = {};
+      for (const [k, v] of Object.entries(SAL)) map[k] = at(v);
+      return { kind: 'sales', hi: i, map };
+    }
   }
   return { kind: null };
 }
@@ -223,7 +230,176 @@ function nextCode(from, taken) {
 }
 const parts = (a, n) => { const out = []; for (let i = 0; i < a.length; i += n || PART) out.push(a.slice(i, i + (n || PART))); return out; };
 
-const api = { bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
+
+// ---------- דוח מכירות → מלאי (A2) ----------
+// כללים (תוכנית סעיף 4 + החלטות 4, 9, 12, 13):
+//   כמות = פדיון / מחיר לצרכן (מחיר המוצר באפליקציה, ואם אין – המחיר האחרון מכספית). מספר שלם (סטייה עד 1 אגורה) → "בטוח".
+//   אחרת (פדיון ± הנחה) / מחיר → "בטוח (הנחה)".
+//   בדוח האמיתי (17.11) "פדיון" הוא לפני ההנחה (כל 112 השורות עם הנחה – פדיון = מחיר × כמות). לכן הסכום לתשלום = פדיון − הנחה (net). (לא מאומת מול כספית) אחרת → "לא בטוח": כמות מוצעת (מעוגלת, לפחות 1) שבעל העסק מאשר או מתקן. לא עוצר את שאר השורות.
+//   פדיון שלילי = החזרה: כמות שלילית, המלאי עולה. קודים מיוחדים (skip) וקודים לא מוכרים – לא נוגעים במלאי, אבל נספרים בסיכומי המכירות.
+//   שתי ה"קופות" בכספית (יהודה הנשיא 6265, נחל לכיש) = אותו מלאי (cxcfg.br). לכל שורה נשמר הסניף בכספית (bk) – להתאמה מול סגירת הקופה.
+// מניעת ספירה כפולה (אין מזהה שורה בדוח): עסקה = סניף + תאריך + מספר עסקה. בכל עסקה, מפתח שורה = קוד|פדיון|הנחה|מופע,
+//   כש"מופע" הוא המספר הסידורי בין שורות זהות לגמרי באותה עסקה. כך המפתח לא תלוי בסדר השורות בדוח (= הפרש אוספים עם חזרות),
+//   והעלאה חוזרת או דוח חופף מוסיפים רק שורות שעוד לא נשמרו.
+const SURE_TOL = 0.011; // סטייה מותרת: אגורה (שגיאות עיגול של כספית, למשל 14.700000000000001)
+const p2 = (n) => String(n).padStart(2, '0');
+// תאריך מהדוח: "16/11/2026", "16.11.26", "2026-11-16", מספר סידורי של Excel, או Date → "YYYY-MM-DD" ('' = לא תקין)
+function dateOf(v) {
+  const ok = (y, m, d) => { const t = new Date(Date.UTC(y, m - 1, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d && y >= 2000 && y < 2100 ? `${y}-${p2(m)}-${p2(d)}` : ''; };
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return ok(v.getFullYear(), v.getMonth() + 1, v.getDate());
+  if (typeof v === 'number' && Number.isFinite(v) && v > 30000 && v < 80000) { const t = new Date(Math.round((v - 25569) * 864e5)); return ok(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()); }
+  const s = str(v);
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return ok(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(\s|$)/.exec(s);
+  if (m) return ok(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
+  return '';
+}
+// מפתח סניף בכספית: מספר הסניף (ספרות), ואם אין – השם בלי סימנים. משמש במזהי מסמכים (בלי "/")
+function brKey(bno, bn) {
+  const d = str(bno).replace(/\D/g, '').slice(0, 12);
+  if (d) return d;
+  const n = nameKey(bn).replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  return n || 'x';
+}
+const d8 = (d) => String(d).replace(/-/g, '');
+const dayId = (bk, d) => `${bk}_${d8(d)}`;
+const txKey = (tx) => str(tx).replace(/[^0-9A-Za-z-]/g, '').slice(0, 30);
+const txId = (bk, d, tx) => `${dayId(bk, d)}_${txKey(tx)}`;
+// rows = מ-readTable / parseCsv. → { lines:[{ d, c, n, tx, bk, bn, w, ds, a }], bad:[{ r, why }], rows }
+function parseSales(rows, det) {
+  const dd = det || detect(rows);
+  if (dd.kind !== 'sales') throw new Error('זה לא דוח מכירות של כספית');
+  const m = dd.map, get = (r, k) => (m[k] >= 0 ? r[m[k]] : '');
+  const lines = [], bad = []; let n = 0;
+  for (let i = dd.hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!Array.isArray(r) || r.every((x) => str(x) === '')) continue;
+    n++;
+    const d = dateOf(get(r, 'd')), c = str(get(r, 'c')).slice(0, 40), tx = txKey(get(r, 'tx'));
+    const a = num(get(r, 'a')), ds0 = str(get(r, 'ds')) === '' ? 0 : num(get(r, 'ds')), w0 = str(get(r, 'w')) === '' ? null : num(get(r, 'w'));
+    const why = !d ? 'date' : !tx ? 'tx' : !c ? 'code' : Number.isNaN(a) || Math.abs(a) > 1000000 ? 'amount' : Number.isNaN(ds0) ? 'disc' : '';
+    if (why) { bad.push({ r: i + 1, why }); continue; }
+    const bn = hk(get(r, 'bn')).slice(0, 60), bk = brKey(get(r, 'bno'), bn);
+    lines.push({ d, c, n: hk(get(r, 'n')).slice(0, 80), tx, bk, bn, w: w0 != null && !Number.isNaN(w0) && w0 > 0 ? Math.round(w0 * 1000) / 1000 : null, ds: r2(ds0), a: r2(a) });
+  }
+  return { lines, bad, rows: n };
+}
+const SBAD = { date: 'תאריך לא תקין', tx: 'בלי מספר עסקה', code: 'בלי קוד פריט', amount: 'פדיון לא תקין', disc: 'הנחה לא תקינה' };
+// קיבוץ לעסקאות + מפתח שורה (קוד|פדיון|הנחה|מופע). → [{ id, bk, bn, d, tx, L:[{ ...line, k }] }] (לפי סדר ההופעה)
+function salesGroup(lines) {
+  const by = new Map();
+  for (const l of lines || []) {
+    const id = txId(l.bk, l.d, l.tx);
+    let g = by.get(id);
+    if (!g) { g = { id, bk: l.bk, bn: l.bn, d: l.d, tx: l.tx, L: [], occ: new Map() }; by.set(id, g); }
+    const base = `${l.c}|${r2(l.a)}|${r2(l.ds || 0)}`;
+    const o = g.occ.get(base) || 0; g.occ.set(base, o + 1);
+    g.L.push(Object.assign({}, l, { k: `${base}|${o}` }));
+  }
+  return [...by.values()].map((g) => { delete g.occ; return g; });
+}
+// כמות לשורה. P = מחיר לצרכן; w = משקל (פריט שקיל). → { q, qs:'sure'|'disc'|'unsure', why? }
+function qtyOf(a, ds, P, w) {
+  const sg = a < 0 ? -1 : 1, dsa = Math.abs(ds || 0);
+  const whole = (x) => { const q = Math.round(x / P); return q !== 0 && Math.abs(x - q * P) <= SURE_TOL ? q : null; };
+  if (w != null && w > 0) return { q: sg * w, qs: 'unsure', why: 'weight' };
+  if (!(P > 0)) return { q: sg, qs: 'unsure', why: 'noprice' };
+  if (a !== 0) { const q = whole(a); if (q != null) return { q, qs: 'sure' }; }
+  if (dsa > 0) for (const x of [a + sg * dsa, a - sg * dsa]) { const q = whole(x); if (q != null && Math.sign(q) === sg) return { q, qs: 'disc' }; }
+  const sug = Math.max(1, Math.round(Math.abs(a + (a ? sg * dsa : dsa)) / P));
+  return { q: sg * sug, qs: 'unsure', why: 'frac' };
+}
+const QS = { sure: 'בטוח', disc: 'בטוח (לפי ההנחה)', unsure: 'לא בטוח', skip: 'קוד מיוחד – בלי מלאי', nolink: 'קוד לא מוכר – בלי מלאי', own: 'תוקן ידנית', ok: 'אושר ידנית' };
+const UNSURE_WHY = { weight: 'פריט שקיל', noprice: 'אין מחיר למוצר', frac: 'הפדיון לא מתחלק במחיר' };
+const stockQ = (l) => ['sure', 'disc', 'unsure', 'own', 'ok'].includes(l.qs) && l.pid && typeof l.q === 'number'; // שורה שמשנה מלאי
+
+// ---------- סיכום תקופה (A3) ----------
+// days = מסמכי cxDay: { d, bk, bn, gross, ret, disc, ntx, nl, sp, un, it:{ קוד:{ n, q, r, a, u, cat, sp? } } }
+// opt: { bk?: רק סניף אחד, cat?: רק קטגוריה }. → { gross, ret, net, disc, ntx, nl, sp, un, items:[…], br:{…}, cats:{…}, days:[…] }
+function aggDays(days, opt) {
+  const o = opt || {};
+  const T = { gross: 0, ret: 0, net: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, items: new Map(), br: {}, cats: {}, days: new Map() };
+  for (const x of days || []) {
+    if (!x || (o.bk && x.bk !== o.bk)) continue;
+    const g = +x.gross || 0, rt = +x.ret || 0; // gross = פדיון מכירות, ret = פדיון החזרות (חיובי), disc = הנחות. net = gross − ret − disc
+    T.gross += g; T.ret += rt; T.disc += +x.disc || 0; T.ntx += +x.ntx || 0; T.nl += +x.nl || 0; T.sp += +x.sp || 0; T.un += +x.un || 0;
+    const b = T.br[x.bk] || (T.br[x.bk] = { bk: x.bk, bn: x.bn || x.bk, gross: 0, ret: 0, ntx: 0, disc: 0 });
+    b.gross += g; b.ret += rt; b.ntx += +x.ntx || 0; b.disc += +x.disc || 0; if (x.bn) b.bn = x.bn;
+    const dy = T.days.get(x.d) || { d: x.d, gross: 0, ret: 0, disc: 0, ntx: 0 };
+    dy.gross += g; dy.ret += rt; dy.disc += +x.disc || 0; dy.ntx += +x.ntx || 0; T.days.set(x.d, dy);
+    for (const [c, v] of Object.entries(x.it || {})) {
+      if (!v) continue;
+      const cat = v.cat || '';
+      if (o.cat != null && cat !== o.cat) continue;
+      let it = T.items.get(c);
+      if (!it) { it = { c, n: v.n || '', q: 0, r: 0, a: 0, u: 0, cat, sp: !!v.sp, days: {} }; T.items.set(c, it); }
+      if (v.n) it.n = v.n;
+      if (v.cat) it.cat = v.cat;
+      const na = (+v.a || 0) - (+v.ds || 0); // פדיון המוצר אחרי הנחה (החזרות במינוס)
+      it.q += +v.q || 0; it.r += +v.r || 0; it.a += na; it.u += +v.u || 0;
+      const dd = it.days[x.d] || (it.days[x.d] = { q: 0, r: 0, a: 0, u: 0 });
+      dd.q += +v.q || 0; dd.r += +v.r || 0; dd.a += na; dd.u += +v.u || 0;
+      const k = T.cats[cat] || (T.cats[cat] = { cat, a: 0, q: 0, n: 0 });
+      k.a += na; k.q += (+v.q || 0) - (+v.r || 0);
+    }
+  }
+  const R = (v) => r2(v), Q = (v) => Math.round(v * 1000) / 1000;
+  const items = [...T.items.values()].map((it) => { for (const v of Object.values(it.days)) { v.a = R(v.a); v.q = Q(v.q); v.r = Q(v.r); } return Object.assign(it, { q: Q(it.q), r: Q(it.r), a: R(it.a) }); });
+  for (const k of Object.values(T.cats)) { k.a = R(k.a); k.q = Q(k.q); k.n = items.filter((i) => i.cat === k.cat).length; }
+  for (const b of Object.values(T.br)) { b.gross = R(b.gross); b.ret = R(b.ret); b.net = R(b.gross - b.ret - b.disc); b.disc = R(b.disc); }
+  const dl = [...T.days.values()].map((d) => Object.assign(d, { gross: R(d.gross), ret: R(d.ret), net: R(d.gross - d.ret - d.disc), disc: R(d.disc) })).sort((a, b) => (a.d < b.d ? 1 : -1));
+  return { gross: R(T.gross), ret: R(T.ret), net: R(T.gross - T.ret - T.disc), disc: R(T.disc), ntx: T.ntx, nl: T.nl, sp: R(T.sp), un: T.un, items, br: T.br, cats: T.cats, days: dl };
+}
+// מיון ורשימת מוצרים: by = 'q' (הכי נמכר) | 'a' (הכי הרבה פדיון). s = חיפוש (שם או קוד)
+function itemList(items, by, s) {
+  const k = nameKey(s || '');
+  const L = k ? items.filter((i) => nameKey(i.n).includes(k) || String(i.c).includes(k)) : items.slice();
+  return L.sort((x, y) => (by === 'a' ? y.a - x.a : y.q - x.q) || y.a - x.a || (x.c < y.c ? -1 : 1));
+}
+
+// ---------- התאמה מול סגירת קופה (A3) ----------
+// days = cxDay (הסכום בכספית = פדיון − החזרות − הנחות); reg = { bk: קופה באפליקציה } (מיפוי חד-פעמי בהגדרות); zc = [{ id, reg, d, od, no, amt }] – סגירות קופה מהמכשיר (סכום ההכנסות שנכנסו מכל סגירה).
+// th = סף הפער (0 = ללא סף). לכל יום ולכל קופה: כספית מול סגירה. סגירה שנפתחה בתאריך אחר (od ≠ d) = "לא ניתן להשוות".
+// st: ok (תואם) · gap (פער עד הסף / אין סף) · over (פער מעל הסף) · noz (אין סגירה) · nocx (אין נתוני כספית) · span (לא ניתן להשוות)
+function recon(days, reg, zc, th, regs) {
+  const R = regs && regs.length ? regs.slice() : [...new Set(Object.values(reg || {}).concat((zc || []).map((z) => z.reg)))].filter(Boolean);
+  const by = new Map(), un = new Map();
+  const cell = (d, rg) => { const k = d + '|' + rg; if (!by.has(k)) by.set(k, { d, reg: rg, cx: 0, hasCx: false, bks: [], z: 0, zs: [], span: false }); return by.get(k); };
+  for (const x of days || []) {
+    const net = r2((+x.gross || 0) - (+x.ret || 0) - (+x.disc || 0)), rg = reg && reg[x.bk];
+    if (!rg) { const u = un.get(x.d) || []; u.push({ bk: x.bk, bn: x.bn || x.bk, net }); un.set(x.d, u); continue; }
+    const c = cell(x.d, rg); c.cx = r2(c.cx + net); c.hasCx = true; if (!c.bks.includes(x.bk)) c.bks.push(x.bk);
+    c.sp = r2((c.sp || 0) + (+x.sp || 0));
+  }
+  for (const z of zc || []) {
+    if (!z || !z.d || !z.reg) continue;
+    const c = cell(z.d, z.reg); c.z = r2(c.z + (+z.amt || 0)); c.zs.push(z);
+    if (z.od && z.od !== z.d) c.span = true;
+  }
+  const dset = [...new Set([...by.values()].map((c) => c.d).concat([...un.keys()]))].sort().reverse();
+  const stOf = (c) => {
+    if (c.span) return 'span';
+    if (!c.zs.length) return c.hasCx ? 'noz' : 'none';
+    if (!c.hasCx) return 'nocx';
+    const g = r2(c.cx - c.z);
+    if (Math.abs(g) < 0.01) return 'ok';
+    return th > 0 && Math.abs(g) > th + 1e-9 ? 'over' : 'gap';
+  };
+  return dset.map((d) => {
+    const regsD = R.map((rg) => { const c = by.get(d + '|' + rg) || { d, reg: rg, cx: 0, hasCx: false, bks: [], z: 0, zs: [], span: false }; const st = stOf(c); return Object.assign(c, { st, gap: ['ok', 'gap', 'over'].includes(st) ? r2(c.cx - c.z) : null }); })
+      .concat([...by.values()].filter((c) => c.d === d && !R.includes(c.reg)).map((c) => Object.assign(c, { st: stOf(c), gap: null })));
+    const live = regsD.filter((c) => c.st !== 'none');
+    const tot = { cx: r2(live.reduce((s, c) => s + c.cx, 0)), z: r2(live.reduce((s, c) => s + c.z, 0)) };
+    const bad = live.some((c) => c.st === 'span' || c.st === 'noz' || c.st === 'nocx');
+    tot.st = !live.length ? 'none' : bad ? 'part' : (() => { const g = r2(tot.cx - tot.z); return Math.abs(g) < 0.01 ? 'ok' : th > 0 && Math.abs(g) > th + 1e-9 ? 'over' : 'gap'; })();
+    tot.gap = ['ok', 'gap', 'over'].includes(tot.st) ? r2(tot.cx - tot.z) : null;
+    return { d, regs: regsD, tot, un: un.get(d) || [] };
+  });
+}
+const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
+
+const api = { SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);

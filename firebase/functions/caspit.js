@@ -4,15 +4,16 @@
 // הכללים עצמם (ניקוי, איחוד, החלטת מחיר, CSV) – ב-lib/caspit-core.js, עותק זהה של app-source/www/caspit-core.js.
 //
 //   cxcfg/main         { skip:[קודים מיוחדים], next: הקוד הבא לפריט חדש (900000+), gen: מונה סנכרונים, bak?: { id, n, at }, last?: { run, at } }
-//                      שמור לשלב A2/A3 (לא בשימוש ב-A1): br – סניף המלאי באפליקציה (אחד לשתי הקופות), reg: { <מספר/שם סניף בכספית>: <קופה בסגירת הקופה> }
+//                      A2/A3: br – סניף המלאי באפליקציה (אחד לשתי הקופות), reg: { <מפתח סניף בכספית>: <קופה בסגירת הקופה> }, inc: 'zc' (מקור ההכנסות), lastSales?: { run, at }
 //   cxItem/{code}      { c, pid, st:'link', n, pr:{ fb, ab, pd? }, co:{ fb, ab, pd? }, m?: קוד ראשי (קוד שאוחד), nv?, nw?: פריט חדש מהאפליקציה שטרם נקלט בכספית, run, at }
 //                        pr = מחיר לצרכן, co = עלות כולל מע"מ. fb/ab = הערך בכספית/באפליקציה בסנכרון האחרון, pd = נשלח לכספית וטרם נקלט (caspit-core: decide/after)
 //   cxcfg/seen         { codes:[כל קודי הקטלוג שאושרו, גם מסוננים] } – תפוסים לקוד 900000+ · cxBak/{id} – גיבוי לפני האישור הראשון (נפרד מ-stockBak)
 //   cxRun/{run}        { st:'up'|'pv'|'ap'|'done', parts, by, at, gen, cnt, sel?, res? } + in/{k} { items } (קלט) + pv/{k} { rows } (תצוגה מקדימה) + done/{k}
 //   prod/{id}          + dn: true = "שם כפול – לבדוק" (cxDnOk מסיר), cx: קוד כספית, nc: true ("לא נספר" – יורד בהכנסת מלאי / תיקון כמות), bcx: [ברקודים נוספים], src:'cx'
 //   priceLog/{id}      { prod, k:'p'|'c', old, new, src:'caspit'|'conf', code, run, by, at } (גם src:'app' – orders.js). conf = האפליקציה ניצחה: old = הערך בכספית
-// בסיס לשלבים הבאים (A2/A3): cxItem לפי קוד → pid (מכירות → מלאי), cxcfg.skip לקודים שלא נוגעים במלאי.
+// A2 (דוח מכירות → מלאי) ו-A3 (מסך מכירות, התאמה מול סגירת קופה) – ראו בהמשך הקובץ: cxTx, cxDay, cxSales, cxLines, cxFix, cxSetInc.
 const { HttpsError } = require('firebase-functions/v2/https');
+const { FieldPath } = require('firebase-admin/firestore');
 const { onCall } = require('./lib/region');
 const logger = require('firebase-functions/logger');
 const T = require('./lib/tenant');
@@ -33,7 +34,7 @@ const STALE = 'מאז התצוגה המקדימה נשמר סנכרון או ק�
 
 async function mgrW(request) { const w = await O.who(request); if (w.role !== 'manager') throw O.deny('manager-only', 'הפעולה מותרת למנהל בלבד'); return w; }
 const runOf = (v) => { if (typeof v !== 'string' || !RUN_RE.test(v)) throw bad('bad-run', 'מזהה סנכרון לא תקין'); return v; };
-const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null }; };
+const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null, lastSales: d.lastSales || null, inc: d.inc === 'cx' ? 'cx' : 'zc' }; };
 const numOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const s = (v, n) => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '').slice(0, n);
 // קלט מהטלפון: רק השדות של groupCat, באורך מוגבל
@@ -46,44 +47,84 @@ function cleanIn(x) {
     p: numOrNull(x.p), cost: numOrNull(x.cost) > 0 && x.cost <= 1000000 ? x.cost : null, nv: x.nv === true, c1: s(x.c1, 60), c2: s(x.c2, 60), sup: s(x.sup, 80) };
 }
 
-// cxCfg() → { cfg, items: מספר קודים מקושרים }
+// cxCfg() → { cfg, items: מספר קודים מקושרים, br: סניף המלאי בפועל (null = צריך לבחור), sa: מנהל־על }
 async function cxCfg(request) {
-  await mgrW(request);
+  const w = await mgrW(request);
   const db = T.tdb();
   const [c, n] = await Promise.all([db.doc(CFG).get(), db.collection('cxItem').count().get()]);
-  return { cfg: cfgOf(c), items: n.data().count };
+  const cfg = cfgOf(c);
+  return { cfg, items: n.data().count, br: stockBr(w, cfg), sa: !!w.superadmin };
 }
-// cxSetCfg({ skip:[קודים] }) – רשימת הקודים המיוחדים (לא נקלטים כמוצרים; בשלב A2 – לא משנים מלאי)
+// סניף המלאי של מכירות כספית (החלטה 4: שתי הקופות = סניף אחד): עסק בלי סניפים – NB; ההגדרה (אם עדיין פעיל); סניף פעיל יחיד; אחרת null
+function stockBr(w, cfg) {
+  if (!O.hasBranches(w)) return O.NB;
+  if (cfg.br && w.activeBr.includes(cfg.br)) return cfg.br;
+  return w.activeBr.length === 1 ? w.activeBr[0] : null;
+}
+const BK_RE = /^[\p{L}\p{N}-]{1,30}$/u; // מפתח סניף בכספית (CC.brKey)
+const REG_RE = /^[a-z0-9_]{1,20}$/; // קופה בסגירת הקופה (i_yh, i_nl)
+// cxSetCfg({ skip?:[קודים], br?: סניף המלאי, reg?: { <סניף בכספית>: <קופה> | '' } }) – מנהל
 async function cxSetCfg(request) {
   const w = await mgrW(request);
   const input = inputObject(request);
-  onlyKeys(input, ['skip']);
-  if (!Array.isArray(input.skip) || input.skip.length > 100) throw bad('bad-skip', 'קודים מיוחדים: עד 100');
-  const skip = [...new Set(input.skip.map((x) => s(x, 30).trim()).filter((x) => CC.CODE_RE.test(x)))];
-  await T.tdb().doc(CFG).set({ skip, upd: Date.now(), by: w.uid }, { merge: true });
-  return { ok: true, skip };
+  onlyKeys(input, ['skip', 'br', 'reg']);
+  const up = { upd: Date.now(), by: w.uid };
+  if (input.skip !== undefined) {
+    if (!Array.isArray(input.skip) || input.skip.length > 100) throw bad('bad-skip', 'קודים מיוחדים: עד 100');
+    up.skip = [...new Set(input.skip.map((x) => s(x, 30).trim()).filter((x) => CC.CODE_RE.test(x)))];
+  }
+  if (input.br !== undefined) {
+    if (!O.hasBranches(w)) { if (input.br !== O.NB && input.br !== null) throw bad('bad-br', 'בעסק אין סניפים'); up.br = O.NB; }
+    else if (typeof input.br !== 'string' || !w.activeBr.includes(input.br)) throw bad('bad-br', 'בחרו סניף פעיל');
+    else up.br = input.br;
+  }
+  if (input.reg !== undefined) {
+    const r = input.reg;
+    if (!r || typeof r !== 'object' || Array.isArray(r) || Object.keys(r).length > 20) throw bad('bad-reg', 'מיפוי קופות לא תקין');
+    const reg = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (!BK_RE.test(k) || (v !== '' && (typeof v !== 'string' || !REG_RE.test(v)))) throw bad('bad-reg', 'מיפוי קופות לא תקין');
+      if (v) reg[k] = v;
+    }
+    up.reg = reg;
+  }
+  // mergeFields: כל שדה שנשלח מחליף את הקודם במלואו (מיפוי קופות – בלי שאריות של מפתחות ישנים); שאר ההגדרות לא נוגעות
+  await T.tdb().doc(CFG).set(up, { mergeFields: Object.keys(up) });
+  return { ok: true, skip: up.skip, br: up.br, reg: up.reg };
 }
 
 // cxUpload({ run, part, parts, items }) – חלק מהקטלוג אחרי groupCat בטלפון. ניסיון חוזר של אותו חלק דורס את אותו מסמך.
 async function cxUpload(request) {
   const w = await mgrW(request);
   const input = inputObject(request);
-  onlyKeys(input, ['run', 'part', 'parts', 'items']);
+  onlyKeys(input, ['run', 'part', 'parts', 'items', 'kind', 'lines']);
   const run = runOf(input.run);
+  const kind = input.kind == null ? 'cat' : input.kind;
+  if (!['cat', 'sales'].includes(kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
   const parts = input.parts, part = input.part;
-  if (!Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS || !Number.isInteger(part) || part < 0 || part >= parts) throw bad('bad-part', 'חלק לא תקין');
-  if (!Array.isArray(input.items) || !input.items.length || input.items.length > CC.PART) throw bad('bad-items', `פריטים: 1 עד ${CC.PART} בכל חלק`);
-  const items = input.items.map(cleanIn).filter(Boolean);
+  if (!Number.isInteger(parts) || parts < 1 || parts > (kind === 'sales' ? MAX_SPARTS : MAX_PARTS) || !Number.isInteger(part) || part < 0 || part >= parts) throw bad('bad-part', 'חלק לא תקין');
+  let items = null, lines = null;
+  if (kind === 'cat') {
+    if (input.lines !== undefined) throw bad('bad-field', 'שדה לא מוכר: lines');
+    if (!Array.isArray(input.items) || !input.items.length || input.items.length > CC.PART) throw bad('bad-items', `פריטים: 1 עד ${CC.PART} בכל חלק`);
+    items = input.items.map(cleanIn).filter(Boolean);
+  } else {
+    if (input.items !== undefined) throw bad('bad-field', 'שדה לא מוכר: items');
+    if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > SPART) throw bad('bad-lines', `שורות: 1 עד ${SPART} בכל חלק`);
+    lines = input.lines.map(cleanLine);
+    if (lines.some((x) => !x)) throw bad('bad-lines', 'שורת מכירה לא תקינה');
+  }
   const db = T.tdb();
   const ref = db.doc('cxRun/' + run);
   await db.runTransaction(async (tx) => {
     const r = await tx.get(ref);
     if (r.exists && (r.get('st') !== 'up' || r.get('by') !== w.uid)) throw pre('run-closed', 'הסנכרון הזה כבר נסגר. התחילו מחדש.');
     if (r.exists && r.get('parts') !== parts) throw bad('bad-part', 'מספר החלקים השתנה');
-    if (!r.exists) tx.set(ref, { st: 'up', kind: 'cat', parts, by: w.uid, at: Date.now() });
-    tx.set(ref.collection('in').doc(String(part)), { items, n: items.length });
+    if (r.exists && (r.get('kind') || 'cat') !== kind) throw bad('bad-kind', 'סוג הקובץ השתנה');
+    if (!r.exists) tx.set(ref, { st: 'up', kind, parts, by: w.uid, at: Date.now() });
+    tx.set(ref.collection('in').doc(String(part)), kind === 'cat' ? { items, n: items.length } : { lines, n: lines.length });
   });
-  return { ok: true, n: items.length };
+  return { ok: true, n: (items || lines).length };
 }
 
 // מצב נוכחי: מוצרים (שדות לקישור), עלויות, cxItem, הגדרות
@@ -110,6 +151,7 @@ async function cxPreview(request) {
   if (!['up', 'pv'].includes(r.get('st'))) throw pre('run-closed', 'הסנכרון הזה כבר אושר');
   const ins = await ref.collection('in').get();
   if (ins.size !== r.get('parts')) throw pre('run-partial', 'לא כל חלקי הקובץ הגיעו. שלחו שוב.');
+  if (r.get('kind') === 'sales') return previewSales(db, w, ref, ins);
   const items = ins.docs.sort((a, b) => +a.id - +b.id).flatMap((d) => d.get('items') || []);
   const S = await loadState(db);
   const C = CC.clean(items, { skip: S.cfg.skip });
@@ -164,7 +206,7 @@ async function cxPreview(request) {
 async function cxApply(request) {
   const w = await mgrW(request);
   const input = inputObject(request);
-  onlyKeys(input, ['run', 'take', 'skip']);
+  onlyKeys(input, ['run', 'take', 'skip', 'qty']);
   const run = runOf(input.run);
   const db = T.tdb();
   const t0 = Date.now();
@@ -173,6 +215,8 @@ async function cxApply(request) {
   if (!r.exists || r.get('by') !== w.uid) throw new HttpsError('not-found', 'הסנכרון לא נמצא', { reason: 'no-run' });
   if (r.get('st') === 'done') return { done: true, dup: true, res: r.get('res') || {} };
   if (r.get('st') === 'up') throw pre('no-preview', 'קודם מציגים תצוגה מקדימה');
+  if (r.get('kind') === 'sales') return applySales(db, w, run, ref, r, input, t0);
+  if (input.qty !== undefined) throw bad('bad-field', 'שדה לא מוכר: qty');
   if (r.get('st') === 'void') throw pre('stale', STALE);
   let cfg = cfgOf(await cref.get());
   // תיקון סבב 1 (ליקוי 4): בדיקת "תצוגה מיושנת" בכל קריאה (גם בהמשך אישור), ושוב בתוך כל חלק (applyPart). gen עולה בכל אישור ובכל cxExport
@@ -390,6 +434,307 @@ async function cxHist(request) {
   return { codes: x.docs.map((d) => d.id), log: l.docs.map((d) => ({ k: d.get('k'), old: d.get('old'), new: d.get('new'), src: d.get('src'), at: d.get('at') })) };
 }
 
+// =====================================================================================================
+// A2 (17.11.2026): דוח מכירות לפריטים מכספית → מלאי.
+//   cxTx/{bk}_{yyyymmdd}_{עסקה}  { d, tx, bk, bn, bd: מזהה היום, dc:[d|קוד] (חיפוש שורות של מוצר), sb: סניף המלאי, un: יש שורה "לא בטוח",
+//                                   lines:[{ k, c, n, a, ds, w?, q, qs, why?, pid?, P? }], run, at, upd }
+//       k = קוד|פדיון|הנחה|מופע (CC.salesGroup) – מפתח השורה בתוך העסקה. שורה שהמפתח שלה כבר שמור – לא נספרת שוב (העלאה חוזרת / דוח חופף).
+//       qs: sure / disc / unsure (כמות מוצעת – יורדת מהמלאי ומסומנת לבדיקה) / own (תוקן) / ok (אושר) / skip (קוד מיוחד) / nolink (קוד לא מוכר).
+//   cxDay/{bk}_{yyyymmdd}        { d, bk, bn, gross, ret, disc, ntx, nl, sp, un, it:{ קוד:{ n, cat, q, r, a, ds, u, sp? } } } – סיכום יומי לכל סניף בכספית (A3).
+//   prod/{id}.q.<br> יורד/עולה ב-FieldValue.increment; stockLog { why:'cx', src:'caspit', d, note: עסקה + סניף, run }.
+//   שורת "לא בטוח" לא עוצרת את שאר השורות: הכמות המוצעת יורדת מהמלאי, ובעל העסק מאשר או מתקן (cxFix – ההפרש נרשם בתנועות).
+// =====================================================================================================
+const SPART = 1000; // שורות מכירה בכל חלק שנשלח לשרת
+const MAX_SPARTS = 30; // עד 30,000 שורות בקובץ
+const SPV = 120; // שורות בכל חלק של האישור (= טרנזקציה אחת; עד ~370 כתיבות)
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TXID_RE = /^[\p{L}\p{N}_-]{3,120}$/u;
+const fkey = (c) => (/^__.*__$/.test(c) ? '_' + c : c); // שם שדה במפה (it) – בלי שמות שמורים של Firestore
+const nOr = (v, lo, hi) => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : null);
+// שורת מכירה מהטלפון (אחרי CC.parseSales) – רק השדות הידועים, באורך מוגבל. לא תקין → null
+function cleanLine(x) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const d = typeof x.d === 'string' && DATE_RE.test(x.d) && CC.dateOf(x.d) === x.d ? x.d : '';
+  const c = s(x.c, 40).trim(), tx = CC.txKey(x.tx), bk = s(x.bk, 30);
+  const a = nOr(x.a, -1000000, 1000000), ds = x.ds == null ? 0 : nOr(x.ds, -1000000, 1000000);
+  if (!d || !c || !tx || !BK_RE.test(bk) || a == null || ds == null) return null;
+  const w = x.w == null ? null : nOr(x.w, 0, 100000);
+  return { d, c, n: s(x.n, 80), tx, bk, bn: s(x.bn, 60), w: w > 0 ? w : null, ds: CC.r2(ds), a: CC.r2(a) };
+}
+
+// תצוגה מקדימה של דוח מכירות: לא כותב למלאי. → { kind:'sales', cnt, rows:[[i, d, tx, c, n, a, ds, bk, qs, q, P, why]], bks, gone, br }
+async function previewSales(db, w, ref, ins) {
+  const lines = ins.docs.sort((a, b) => +a.id - +b.id).flatMap((d) => d.get('lines') || []);
+  const G = CC.salesGroup(lines);
+  const [cs, xs, ps] = await Promise.all([db.doc(CFG).get(), db.collection('cxItem').select('pid', 'pr').get(), db.collection('prod').select('price', 'name', 'cat').get()]);
+  const cfg = cfgOf(cs), skip = new Set(cfg.skip.map(String));
+  const X = new Map(xs.docs.map((d) => [d.id, d.data()]));
+  const P = new Map(ps.docs.map((d) => [d.id, d.data()]));
+  const saved = new Map();
+  for (let i = 0; i < G.length; i += 300) {
+    const sn = await db.getAll(...G.slice(i, i + 300).map((g) => db.doc('cxTx/' + g.id)));
+    sn.forEach((x) => { if (x.exists) saved.set(x.id, new Set((x.get('lines') || []).map((l) => l.k))); });
+  }
+  const rows = [], groups = [], gone = [], bks = {};
+  const cnt = { kind: 'sales', lines: lines.length, tx: G.length, nw: 0, dup: 0, sure: 0, disc: 0, unsure: 0, skip: 0, nolink: 0, ret: 0, gross: 0, retA: 0, discA: 0, gone: 0, days: [] };
+  const days = new Set();
+  let i = 0;
+  for (const g of G) {
+    bks[g.bk] = g.bn || g.bk; days.add(g.d);
+    const sv = saved.get(g.id), fk = new Set(), nl = [];
+    for (const l of g.L) {
+      fk.add(l.k);
+      const idx = i++;
+      if (sv && sv.has(l.k)) { cnt.dup++; rows.push([idx, l.d, l.tx, l.c, l.n, l.a, l.ds, l.bk, 'dup', null, null, '']); continue; }
+      const o = { i: idx, k: l.k, c: l.c, n: l.n, a: l.a, ds: l.ds };
+      if (l.w) o.w = l.w;
+      const x = X.get(l.c), pid = x && x.pid && P.has(x.pid) ? x.pid : null;
+      if (skip.has(l.c)) Object.assign(o, { qs: 'skip', q: null });
+      else if (!pid) Object.assign(o, { qs: 'nolink', q: null });
+      else {
+        const ap = P.get(pid).price, pr = typeof ap === 'number' && ap > 0 ? ap : x.pr && typeof x.pr.fb === 'number' && x.pr.fb > 0 ? x.pr.fb : null;
+        const r = CC.qtyOf(l.a, l.ds, pr, l.w);
+        Object.assign(o, { qs: r.qs, q: r.q, pid, P: pr });
+        if (r.why) o.why = r.why;
+      }
+      cnt[o.qs]++; cnt.nw++;
+      if (l.a < 0) { cnt.ret++; cnt.retA += -l.a; } else cnt.gross += l.a;
+      cnt.discA += l.ds || 0;
+      nl.push(o);
+      rows.push([idx, l.d, l.tx, l.c, l.n, l.a, l.ds, l.bk, o.qs, o.q, o.P == null ? null : o.P, o.why || '']);
+    }
+    if (sv) for (const k of sv) if (!fk.has(k)) { cnt.gone++; if (gone.length < 500) gone.push({ id: g.id, d: g.d, tx: g.tx, k }); }
+    if (nl.length) groups.push({ id: g.id, bk: g.bk, bn: g.bn, d: g.d, tx: g.tx, L: nl });
+  }
+  for (const k of ['gross', 'retA', 'discA']) cnt[k] = CC.r2(cnt[k]);
+  cnt.days = [...days].sort();
+  // חלקים של עד SPV שורות (עסקה גדולה מתפצלת – כל חלק בודק מחדש את המפתחות השמורים, אז אין ספירה כפולה)
+  const pv = []; let cur = [], n = 0;
+  for (const g of groups) {
+    let L = g.L;
+    while (L.length) {
+      const room = SPV - n, take = L.slice(0, room);
+      cur.push(Object.assign({}, g, { L: take })); n += take.length; L = L.slice(room);
+      if (n >= SPV) { pv.push(cur); cur = []; n = 0; }
+    }
+  }
+  if (cur.length) pv.push(cur);
+  const old = await ref.collection('pv').listDocuments();
+  const ops = old.map((d) => (b) => b.delete(d));
+  pv.forEach((g, k) => ops.push((b) => b.set(ref.collection('pv').doc(String(k)), { rows: g })));
+  for (let k = 0; k < ops.length; k += 100) { const b = db.batch(); ops.slice(k, k + 100).forEach((f) => f(b)); await b.commit(); }
+  const br = stockBr(w, cfg);
+  await ref.update({ st: 'pv', pvN: pv.length, cnt, pvAt: Date.now() });
+  return { kind: 'sales', cnt, rows, bks, gone, br, reg: cfg.reg };
+}
+
+// אישור דוח מכירות. qty = { <מספר שורה>: כמות } – תיקון כמות בתצוגה המקדימה (לשורה שמשנה מלאי). → { done, next?, res }
+async function applySales(db, w, run, ref, r, input, t0) {
+  if (input.take !== undefined || input.skip !== undefined) throw bad('bad-field', 'שדה לא מוכר בדוח מכירות');
+  const cfg = cfgOf(await db.doc(CFG).get());
+  const br = stockBr(w, cfg);
+  if (!br) throw pre('no-br', 'בחרו בהגדרות של סנכרון כספית מאיזה סניף יורד המלאי');
+  if (r.get('st') === 'void') throw pre('stale', STALE);
+  if (r.get('st') === 'pv') {
+    const qty = {};
+    if (input.qty != null) {
+      if (typeof input.qty !== 'object' || Array.isArray(input.qty) || Object.keys(input.qty).length > 30000) throw bad('bad-qty', 'כמויות לא תקינות');
+      for (const [k, v] of Object.entries(input.qty)) { if (!/^\d{1,6}$/.test(k) || nOr(v, -100000, 100000) == null) throw bad('bad-qty', 'כמות לא תקינה'); qty[k] = Math.round(v * 1000) / 1000; }
+    }
+    await db.runTransaction(async (tx) => { const x = await tx.get(ref); if (x.get('st') === 'pv') tx.update(ref, { st: 'ap', sel: { qty, br }, apAt: t0, res: {} }); });
+    r = await ref.get();
+  }
+  const sel = r.get('sel') || { qty: {}, br };
+  if (sel.br && sel.br !== br) throw pre('br-changed', 'סניף המלאי השתנה מאז התחלת השמירה. בחרו שוב את הקובץ.');
+  const N = r.get('pvN') || 0;
+  const doneIds = new Set((await ref.collection('done').listDocuments()).map((d) => d.id));
+  for (let k = 0; k < N; k++) {
+    if (doneIds.has(String(k))) continue;
+    if (Date.now() - t0 > BUDGET) return { done: false, next: k, res: (await ref.get()).get('res') || {} };
+    const groups = (await ref.collection('pv').doc(String(k)).get()).get('rows') || [];
+    await applySalesPart(db, w, run, ref, k, groups, sel.qty || {}, br);
+  }
+  await db.runTransaction(async (tx) => {
+    const x = await tx.get(ref);
+    if (x.get('st') === 'done') return;
+    tx.update(ref, { st: 'done', doneAt: Date.now() });
+    tx.set(db.doc(CFG), { lastSales: { run, at: Date.now() } }, { merge: true });
+  });
+  const res = (await ref.get()).get('res') || {};
+  logger.info('cxApply sales', { biz: w.bizId || '', run, res });
+  return { done: true, res };
+}
+
+// חלק אחד בטרנזקציה: קורא את העסקאות השמורות ואת המוצרים, מוסיף רק שורות חדשות, מעדכן מלאי, תנועות וסיכום יומי.
+async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
+  const mark = ref.collection('done').doc(String(k));
+  await db.runTransaction(async (tx) => {
+    if ((await tx.get(mark)).exists) return;
+    const ids = [...new Set(groups.map((g) => g.id))];
+    const tsn = ids.length ? await tx.getAll(...ids.map((id) => db.doc('cxTx/' + id))) : [];
+    const T0 = new Map(tsn.map((x) => [x.id, x]));
+    const pids = [...new Set(groups.flatMap((g) => g.L.map((l) => l.pid).filter(Boolean)))];
+    const psn = pids.length ? await tx.getAll(...pids.map((id) => db.doc('prod/' + id))) : [];
+    const PS = new Map(psn.filter((x) => x.exists).map((x) => [x.id, x.data() || {}]));
+    const now = Date.now();
+    const res = { lines: 0, dup: 0, stock: 0, sold: 0, back: 0, unsure: 0, skip: 0, nolink: 0, tx: 0 };
+    const move = new Map(), day = new Map(), txw = new Map();
+    for (const g of groups) {
+      const s0 = T0.get(g.id);
+      const cur = txw.get(g.id) || { lines: s0 && s0.exists ? (s0.get('lines') || []).slice() : [], fresh: !(s0 && s0.exists), g, logs: new Map() };
+      txw.set(g.id, cur);
+      const have = new Set(cur.lines.map((l) => l.k));
+      const did = dayIdOf(g), D = day.get(did) || { d: g.d, bk: g.bk, bn: g.bn, gross: 0, ret: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, it: {} };
+      day.set(did, D);
+      for (const l0 of g.L) {
+        if (have.has(l0.k)) { res.dup++; continue; }
+        have.add(l0.k);
+        const l = { k: l0.k, c: l0.c, n: l0.n, a: l0.a, ds: l0.ds || 0, q: l0.q, qs: l0.qs };
+        if (l0.w) l.w = l0.w;
+        if (l0.why) l.why = l0.why;
+        if (l0.P != null) l.P = l0.P;
+        if (l0.pid) l.pid = l0.pid;
+        if (l.pid && !PS.has(l.pid)) { l.qs = 'nolink'; l.q = null; delete l.pid; } // המוצר נמחק מאז התצוגה
+        if (l.pid && qty[String(l0.i)] !== undefined) { l.q = qty[String(l0.i)]; l.qs = 'own'; delete l.why; }
+        cur.lines.push(l);
+        res.lines++;
+        if (l.qs === 'skip') res.skip++; else if (l.qs === 'nolink') res.nolink++; else if (l.qs === 'unsure') res.unsure++;
+        const p = l.pid ? PS.get(l.pid) : null;
+        if (CC.stockQ(l) && l.q) {
+          move.set(l.pid, (move.get(l.pid) || 0) + l.q);
+          cur.logs.set(l.pid, (cur.logs.get(l.pid) || 0) + l.q);
+          res.stock++; if (l.q > 0) res.sold += l.q; else res.back += -l.q;
+        }
+        if (l.a >= 0) D.gross += l.a; else D.ret += -l.a;
+        D.disc += l.ds; D.nl++;
+        if (l.qs === 'skip') D.sp += l.a - l.ds;
+        if (l.qs === 'unsure') D.un++;
+        const key = fkey(l.c), it = D.it[key] || (D.it[key] = { n: l.n || (p && p.name) || '', cat: (p && p.cat) || '', q: 0, r: 0, a: 0, ds: 0, u: 0, sp: l.qs === 'skip' });
+        const q = typeof l.q === 'number' ? l.q : 0;
+        if (q > 0) it.q += q; else it.r += -q;
+        it.a += l.a; it.ds += l.ds; if (l.qs === 'unsure') it.u++;
+      }
+    }
+    for (const [id, cur] of txw) {
+      const g = cur.g, L = cur.lines;
+      const dc = [...new Set(L.map((l) => g.d + '|' + l.c))];
+      if (cur.fresh && L.length) { day.get(dayIdOf(g)).ntx++; res.tx++; }
+      if (!L.length) continue;
+      tx.set(db.doc('cxTx/' + id), { d: g.d, tx: g.tx, bk: g.bk, bn: g.bn || '', bd: dayIdOf(g), dc, sb: br, un: L.some((l) => l.qs === 'unsure'), lines: L, run, at: cur.fresh ? now : (T0.get(id).get('at') || now), upd: now });
+      for (const [pid, q] of cur.logs) {
+        const p = PS.get(pid) || {};
+        tx.set(O.stockRef(db), { prod: pid, name: p.name || '', br, delta: O.r3(-q), why: 'cx', src: 'caspit', d: g.d, note: `כספית · עסקה ${g.tx}${g.bn ? ' · ' + g.bn : ''}`.slice(0, 200), run, by: w.uid, at: now });
+      }
+    }
+    for (const [pid, q] of move) if (q) tx.update(db.doc('prod/' + pid), new FieldPath('q', br), FV().increment(O.r3(-q)), 'upd', now);
+    const inc = (v) => FV().increment(CC.r2(v));
+    for (const [id, D] of day) {
+      if (!D.nl && !D.ntx) continue;
+      const it = {};
+      for (const [c, v] of Object.entries(D.it)) it[c] = Object.assign({ n: v.n, cat: v.cat, q: FV().increment(O.r3(v.q)), r: FV().increment(O.r3(v.r)), a: inc(v.a), ds: inc(v.ds), u: FV().increment(v.u) }, v.sp ? { sp: true } : {});
+      tx.set(db.doc('cxDay/' + id), { d: D.d, bk: D.bk, bn: D.bn || '', gross: inc(D.gross), ret: inc(D.ret), disc: inc(D.disc), ntx: FV().increment(D.ntx), nl: FV().increment(D.nl), sp: inc(D.sp), un: FV().increment(D.un), it, upd: now }, { merge: true });
+    }
+    tx.set(mark, { at: now, res });
+    tx.update(ref, Object.fromEntries(Object.entries(res).map(([kk, v]) => ['res.' + kk, FV().increment(v)])));
+  });
+}
+const dayIdOf = (g) => CC.dayId(g.bk, g.d);
+
+// =====================================================================================================
+// A3: מסך "מכירות כספית" (מנהל בלבד, החלטה 5) – סיכומים יומיים, שורות, תיקון כמות "לא בטוח", מקור ההכנסות.
+// =====================================================================================================
+// cxSales({ from, to }) → { days:[cxDay], cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
+async function cxSales(request) {
+  const w = await mgrW(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['from', 'to']);
+  const from = CC.dateOf(input.from), to = CC.dateOf(input.to);
+  if (!from || !to || from !== input.from || to !== input.to || from > to) throw bad('bad-range', 'טווח תאריכים לא תקין');
+  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 400) throw bad('bad-range', 'טווח של עד 400 ימים');
+  const db = T.tdb();
+  const [ds, cs, ct] = await Promise.all([db.collection('cxDay').where('d', '>=', from).where('d', '<=', to).get(), db.doc(CFG).get(), db.collection('cat').select('name').get()]);
+  const cfg = cfgOf(cs);
+  const days = ds.docs.map((d) => { const x = d.data(); delete x.upd; return x; });
+  return { days, cats: Object.fromEntries(ct.docs.map((d) => [d.id, d.get('name') || ''])), cfg: { reg: cfg.reg, inc: cfg.inc, br: stockBr(w, cfg), lastSales: cfg.lastSales }, sa: !!w.superadmin };
+}
+// cxLines({ bd } | { c, days:[d] } | { un:true } | { id }) → { tx:[{ id, d, tx, bk, bn, lines }] } – השורות שמאחורי מספר (החלטה 12)
+async function cxLines(request) {
+  await mgrW(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['bd', 'c', 'days', 'un', 'id']);
+  const db = T.tdb();
+  let docs = [];
+  let c = null;
+  if (input.id !== undefined) {
+    if (typeof input.id !== 'string' || !TXID_RE.test(input.id)) throw bad('bad-id', 'מזהה לא תקין');
+    const x = await db.doc('cxTx/' + input.id).get(); if (x.exists) docs = [x];
+  } else if (input.bd !== undefined) {
+    if (typeof input.bd !== 'string' || !TXID_RE.test(input.bd)) throw bad('bad-id', 'מזהה לא תקין');
+    docs = (await db.collection('cxTx').where('bd', '==', input.bd).limit(3000).get()).docs;
+  } else if (input.c !== undefined) {
+    c = s(input.c, 40).trim();
+    if (!c || !Array.isArray(input.days) || !input.days.length || input.days.length > 400 || input.days.some((d) => typeof d !== 'string' || !DATE_RE.test(d))) throw bad('bad-days', 'ימים לא תקינים');
+    const keys = input.days.map((d) => d + '|' + c);
+    for (let i = 0; i < keys.length; i += 30) docs.push(...(await db.collection('cxTx').where('dc', 'array-contains-any', keys.slice(i, i + 30)).get()).docs);
+  } else if (input.un === true) {
+    docs = (await db.collection('cxTx').where('un', '==', true).limit(500).get()).docs;
+  } else throw bad('bad-query', 'חסר מה להציג');
+  const tx = docs.map((d) => { const x = d.data(); return { id: d.id, d: x.d, tx: x.tx, bk: x.bk, bn: x.bn, lines: (x.lines || []).filter((l) => (!c || l.c === c) && (input.un !== true || l.qs === 'unsure')).map((l) => ({ k: l.k, c: l.c, n: l.n, a: l.a, ds: l.ds, q: l.q, qs: l.qs, why: l.why, P: l.P })) }; })
+    .filter((x) => x.lines.length).sort((a, b) => (a.d === b.d ? (a.tx < b.tx ? 1 : -1) : a.d < b.d ? 1 : -1));
+  return { tx };
+}
+// cxFix({ id, k, q }) – אישור / תיקון כמות של שורה (בעיקר "לא בטוח"). ההפרש יורד/עולה במלאי ונרשם בתנועות; הסיכום היומי מתעדכן.
+async function cxFix(request) {
+  const w = await mgrW(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['id', 'k', 'q']);
+  if (typeof input.id !== 'string' || !TXID_RE.test(input.id) || typeof input.k !== 'string' || input.k.length > 200) throw bad('bad-id', 'שורה לא תקינה');
+  const q1 = nOr(input.q, -100000, 100000);
+  if (q1 == null) throw bad('bad-qty', 'כמות לא תקינה');
+  const nq = Math.round(q1 * 1000) / 1000;
+  const db = T.tdb();
+  const ref = db.doc('cxTx/' + input.id);
+  let out = null;
+  await db.runTransaction(async (tx) => {
+    const x = await tx.get(ref);
+    if (!x.exists) throw new HttpsError('not-found', 'העסקה לא נמצאה', { reason: 'no-tx' });
+    const L = (x.get('lines') || []).slice(), i = L.findIndex((l) => l.k === input.k);
+    if (i < 0) throw new HttpsError('not-found', 'השורה לא נמצאה', { reason: 'no-line' });
+    const l = Object.assign({}, L[i]);
+    if (!CC.stockQ(l)) throw pre('no-stock-line', 'השורה הזו לא משנה מלאי (קוד מיוחד או לא מוכר)');
+    const br = x.get('sb');
+    const p = await tx.get(db.doc('prod/' + l.pid));
+    const old = l.q, wasU = l.qs === 'unsure', d = O.r3(nq - old);
+    if (d && p.exists) {
+      tx.update(p.ref, new FieldPath('q', br), FV().increment(O.r3(-d)), 'upd', Date.now());
+      tx.set(O.stockRef(db), { prod: l.pid, name: p.get('name') || '', br, delta: O.r3(-d), why: 'cx', src: 'caspit', d: x.get('d'), note: `כספית · תיקון כמות · עסקה ${x.get('tx')}`.slice(0, 200), by: w.uid, at: Date.now() });
+    }
+    Object.assign(l, { q: nq, qs: d ? 'own' : wasU ? 'ok' : l.qs === 'own' ? 'own' : 'ok', fixBy: w.uid, fixAt: Date.now() });
+    delete l.why;
+    L[i] = l;
+    tx.update(ref, { lines: L, un: L.some((z) => z.qs === 'unsure'), upd: Date.now() });
+    const sold = (v) => (v > 0 ? v : 0), back = (v) => (v < 0 ? -v : 0);
+    const it = { q: FV().increment(O.r3(sold(nq) - sold(old))), r: FV().increment(O.r3(back(nq) - back(old))) };
+    if (wasU) it.u = FV().increment(-1);
+    tx.set(db.doc('cxDay/' + x.get('bd')), Object.assign({ it: { [fkey(l.c)]: it }, upd: Date.now() }, wasU ? { un: FV().increment(-1) } : {}), { merge: true });
+    out = { ok: true, q: nq, delta: d, qs: l.qs };
+  });
+  return out;
+}
+// cxSetInc({ src:'zc'|'cx' }) – מקור ההכנסות (החלטה 6): מנהל־על בלבד. תמיד מקור אחד פעיל.
+// 'cx' (דוח מכירות כספית כמקור ההכנסות) עוד לא זמין: ההכנסות נרשמות היום מסגירת הקופה במכשיר המנהל, ויצירת הכנסות מהדוח
+// בלי כפילות דורשת שינוי בתהליך סגירת הקופה – פתוח להחלטה. לכן נחסם כאן (ולא רק בטלפון).
+async function cxSetInc(request) {
+  const w = await mgrW(request);
+  if (!w.superadmin) throw O.deny('super-only', 'רק מנהל־על יכול לשנות את מקור ההכנסות');
+  const input = inputObject(request);
+  onlyKeys(input, ['src']);
+  if (!['zc', 'cx'].includes(input.src)) throw bad('bad-src', 'מקור לא תקין');
+  if (input.src === 'cx') throw pre('cx-inc-not-ready', 'הכנסות מדוח המכירות של כספית עוד לא זמינות. ההכנסות ממשיכות להירשם מסגירת הקופה.');
+  await T.tdb().doc(CFG).set({ inc: 'zc', incBy: w.uid, incAt: Date.now() }, { merge: true });
+  return { ok: true, inc: 'zc' };
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -397,7 +742,7 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk };
+const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix, cxSetInc };
 const BIG = ['cxPreview', 'cxApply', 'cxExport']; // ~9,000 מוצרים
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, loadState, applyPart, PV_PART } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, loadState, applyPart, applySalesPart, PV_PART, SPV } });

@@ -4,7 +4,9 @@
    3. "אשר ושמור" (cxApply, בחלקים, עד שמסתיים). לפני הפעם הראשונה השרת שומר גיבוי של המוצרים ("שחזור מלאי מגיבוי").
    4. "קבצים לכספית" (cxExport): פריטים חדשים / עדכון מחיר – CSV בדיוק לפי התבניות של כספית.
    רכיבי העיצוב הקיימים בלבד (.card .btn .chip .li .tag .note .kg .k .empty .f). משתמש ב: V, ACT, CHG, FRM, fnCall, esc, ils, toast, dlg, closeDlg, ask,
-   rerender, readTable, saveFile, fd, SY, CaspitCore. */
+   rerender, readTable, parseCsv, saveFile, fd, SY, CaspitCore.
+   A2 (17.11): קובץ שזוהה כ"דוח מכירות לפריטים" עובר ל-caspit-sales.js (window.cxSalesFile → מסך cxSalesPv). CSV נקרא כבייטים ומפוענח
+   ב-CaspitCore.decode (UTF-8, ואם לא – windows-1255, כמו שכספית מוציאה), גם בקטלוג. */
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||typeof CaspitCore==='undefined')return;
@@ -31,8 +33,9 @@ V.cxSync=()=>{const T='סנכרון כספית';if(!ok())return{t:T,h:'<div clas
  if(X.st==='done')return{t:T,s:'נשמר',h:doneH()};
  if(!X.cfg){cfgLoad();}
  const c=X.cfg&&X.cfg.cfg,last=c&&c.last;
- return{t:T,s:'קטלוג ומחירים מול כספית',h:`<div class="card"><h3 style="margin-top:0">קובץ מכספית</h3><p class="note" style="margin-top:0">מוציאים מכספית את "קטלוג פריטים" (Excel או CSV) ובוחרים אותו כאן. לפני שמשהו נשמר תוצג תצוגה מקדימה לאישור.</p>
+ return{t:T,s:'קטלוג ומחירים מול כספית',h:`<div class="card"><h3 style="margin-top:0">קובץ מכספית</h3><p class="note" style="margin-top:0">מוציאים מכספית את "קטלוג פריטים" או "דוח מכירות לפריטים" (Excel או CSV) ובוחרים אותו כאן. הסוג מזוהה לבד. לפני שמשהו נשמר תוצג תצוגה מקדימה לאישור.</p>
  <label class="btn w" style="display:flex;align-items:center;justify-content:center;min-height:48px">בחירת קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="cxFile" style="position:absolute;opacity:0;width:1px;height:1px"></label>
+ <button class="btn g w" style="min-height:48px;margin-top:8px" data-a="go" data-v="cxSales">מכירות כספית והתאמה לסגירת קופה</button>
  <p class="note">${X.cfg?X.cfg.err?esc(X.cfg.err):last?'סנכרון אחרון: '+esc(new Date(last.at).toLocaleString('he-IL'))+' · '+nf(X.cfg.items)+' קודים מקושרים':'עוד לא היה סנכרון. בסנכרון הראשון כל הקטלוג נקלט כמוצרים, עם כמות 0 ("לא נספר").':'טוען…'}</p></div>
  ${expH(!!last)}
  <details class="card"><summary style="min-height:44px;display:flex;align-items:center"><b>הגדרות</b></summary><form data-f="cxCfgF"><label class="f"><span>קודים מיוחדים שלא נקלטים כמוצרים (מופרדים בפסיק)</span><input name="skip" dir="ltr" value="${esc(((c&&c.skip)||C.SKIP).join(', '))}"></label><p class="note" style="margin-top:0">למשל 1000 פריט כללי, 9999 תשלום חוב. בשלב הבא גם לא ישנו מלאי.</p><button class="btn g w">שמירה</button></form></details>`}};
@@ -42,10 +45,12 @@ const expH=has=>`<div class="card"><h3 style="margin-top:0">קבצים לכספ�
  ${has?'':'<p class="note">"פריטים חדשים" זמין אחרי הסנכרון הראשון של הקטלוג.</p>'}</div>`;
 
 /* ---------- קריאת הקובץ ושליחה ---------- */
+/* CSV: בייטים → UTF-8 או windows-1255 (readTable קורא תמיד כ-UTF-8, וקובץ של כספית ב-windows-1255 היה יוצא ג'יבריש) */
+async function readF(f){if(/\.csv$/i.test(f.name||'')||f.type==='text/csv')return parseCsv(C.decode(await f.arrayBuffer()));return readTable(f)}
 CHG.cxFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f)return;X.st='busy';prog('קורא את הקובץ…');rerender();
- try{const T=await readTable(f);const rows=(T||[]).filter(r=>Array.isArray(r));const d=C.detect(rows);
-  if(d.kind==='sales')throw new Error('זה דוח מכירות. קליטת מכירות תתווסף בשלב הבא – כרגע רק קטלוג פריטים.');
-  if(d.kind!=='cat')throw new Error('הקובץ לא מזוהה כ"קטלוג פריטים" של כספית (חסרות העמודות "קוד פריט" ו"מחיר לצרכן").');
+ try{const T=await readF(f);const rows=(T||[]).filter(r=>Array.isArray(r));const d=C.detect(rows);
+  if(d.kind==='sales'){if(typeof window.cxSalesFile!=='function')throw new Error('קליטת מכירות לא נטענה');await window.cxSalesFile(f,rows,d,prog);X.st='pick';return}
+  if(d.kind!=='cat')throw new Error('הקובץ לא מזוהה כקובץ של כספית ("קטלוג פריטים" או "דוח מכירות לפריטים").');
   const g=C.groupCat(rows,d),P=C.parts(g.items),run=rid();
   for(let k=0;k<P.length;k++){prog(`זוהה קטלוג: ${nf(g.items.length)} קודים. שולח חלק ${k+1} מתוך ${P.length}…`);await fnCall('cxUpload',{run,part:k,parts:P.length,items:P[k]})}
   prog('משווה מול המוצרים באפליקציה…');
