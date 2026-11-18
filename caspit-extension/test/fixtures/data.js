@@ -25,9 +25,12 @@ function win1255(s) {
   }
   return new Uint8Array(out);
 }
-function catalogXlsx(X) {
+// noBc: כמו "יצוא לאקסל" בכספית האמיתית – בלי ברקוד, צבע ומידה
+function catalogXlsx(X, noBc) {
   const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([CAT_HDR].concat(CAT_ROWS)), 'catalog');
+  const drop = noBc ? [2, 3, 4] : [];
+  const cut = (r) => r.filter((_, i) => !drop.includes(i));
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([cut(CAT_HDR)].concat(CAT_ROWS.map(cut))), 'catalog');
   return new Uint8Array(X.write(wb, { bookType: 'xlsx', type: 'array' }));
 }
 module.exports = { CAT_HDR, CAT_ROWS, SAL_HDR, salesRows, salesCsv, win1255, catalogXlsx, csvOf };

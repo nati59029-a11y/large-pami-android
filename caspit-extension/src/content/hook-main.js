@@ -32,7 +32,7 @@
     } catch (e) { return { o: '?', p: '?', q: [] }; }
   };
   const shape = (v, d) => {
-    if (d > 3) return '…';
+    if (d > 5) return '…';
     if (Array.isArray(v)) return v.length ? [shape(v[0], d + 1)] : [];
     if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).slice(0, 40)) o[k.slice(0, 40)] = shape(v[k], d + 1); return o; }
     return v === null ? 'null' : typeof v;
