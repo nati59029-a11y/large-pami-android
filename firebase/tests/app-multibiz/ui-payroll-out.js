@@ -117,6 +117,27 @@ const ms = (y, m, d, h) => Date.UTC(y, m - 1, d, h - 3); // שעון ישראל 
   const dn = await pg.evaluate(async () => { window.Capacitor = undefined; const got = []; const c0 = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { got.push({ d: this.download, b: /^blob:/.test(this.href) }); };
     await PayOut.empReport('poA', '2026-10', 'xlsx'); HTMLAnchorElement.prototype.click = c0; return got; });
   check('6 בדפדפן: הורדה אחת בשם הנכון', dn.length === 1 && dn[0].d === 'Salary_דנה_כהן_2026-10.xlsx' && dn[0].b, dn);
+  // 6ב. מסך "שכר חודשי": כרטיס שיתוף, כל כפתור קורא לפונקציה הנכונה (PayOut מוחלף במדומה)
+  await pg.evaluate(() => { window.__c = []; window.__T = []; window.__PO = window.PayOut; const mk = (n, ok) => (...a) => { window.__c.push([n].concat(a)); return new Promise((r) => setTimeout(() => r({ ok, file: 'x', fmt: a[a.length - 1] }), 250)); };
+    window.PayOut = { empReport: mk('emp', true), accReport: mk('acc', true) }; const t0 = window.toast; window.__t0 = t0; window.toast = (m) => { window.__T.push(m); }; });
+  const openMon = async (id) => { await pg.evaluate((i) => { go('payMon', i); }, id); await sleep(250); };
+  await openMon('poA'); const mA = await pg.evaluate(() => document.querySelector('#main input[data-c=payMonM]').value);
+  check('8 עובד בלי תלוש: 2 כפתורי שיתוף בלבד', await pg.evaluate(() => [...document.querySelectorAll('#main [data-a=payOut]')].map((b) => b.dataset.o + b.dataset.f).join()) === 'emppdf,empxlsx');
+  await pg.click('#main [data-a=payOut][data-o=emp][data-f=pdf]');
+  check('8א בזמן הפקה כפתורים מנוטרלים', await pg.evaluate(() => [...document.querySelectorAll('#main [data-a=payOut]')].every((b) => b.disabled)));
+  await sleep(500);
+  check('8ב empReport(poA, חודש, pdf) + toast הצלחה + כפתורים חוזרים', await pg.evaluate((m) => JSON.stringify(window.__c) === JSON.stringify([['emp', 'poA', m, 'pdf']]) && window.__T.length === 1 && [...document.querySelectorAll('#main [data-a=payOut]')].every((b) => !b.disabled), mA), await pg.evaluate(() => [window.__c, window.__T]));
+  await pg.click('#main [data-a=payOut][data-o=emp][data-f=xlsx]'); await sleep(500);
+  check('8ג empReport(poA, חודש, xlsx)', await pg.evaluate((m) => JSON.stringify(window.__c[1]) === JSON.stringify(['emp', 'poA', m, 'xlsx']), mA), await pg.evaluate(() => window.__c));
+  await openMon('poB');
+  check('8ד עובד בתלוש: 4 כפתורים', await pg.evaluate(() => [...document.querySelectorAll('#main [data-a=payOut]')].map((b) => b.dataset.o + b.dataset.f).join()) === 'emppdf,empxlsx,accpdf,accxlsx');
+  await pg.evaluate(() => { window.__c = []; });
+  await pg.click('#main [data-a=payOut][data-o=acc][data-f=pdf]'); await sleep(500); await pg.click('#main [data-a=payOut][data-o=acc][data-f=xlsx]'); await sleep(500);
+  check('8ה accReport(חודש, pdf/xlsx) בלי מזהה עובד', await pg.evaluate((m) => JSON.stringify(window.__c) === JSON.stringify([['acc', m, 'pdf'], ['acc', m, 'xlsx']]), mA), await pg.evaluate(() => window.__c));
+  await pg.evaluate(() => { window.__T = []; window.PayOut = { empReport: () => Promise.resolve({ ok: false }), accReport: () => Promise.reject(new Error('x')) }; });
+  await pg.click('#main [data-a=payOut][data-o=emp][data-f=pdf]'); await sleep(200); await pg.click('#main [data-a=payOut][data-o=acc][data-f=pdf]'); await sleep(200);
+  check('8ו כשל: toast כשל לשניהם, כפתורים חוזרים', await pg.evaluate(() => window.__T.length === 2 && window.__T.every((m) => /נכשלה/.test(m)) && [...document.querySelectorAll('#main [data-a=payOut]')].every((b) => !b.disabled)), await pg.evaluate(() => window.__T));
+  await pg.evaluate(() => { window.PayOut = window.__PO; window.toast = window.__t0; });
   check('7 אין שגיאות JS', pg.__errors.length === 0, pg.__errors);
   await x.ctx.close(); await browser.close();
   console.log(fail ? `נכשלו ${fail} בדיקות` : 'כל הבדיקות עברו'); process.exit(fail ? 1 : 0);

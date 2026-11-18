@@ -171,7 +171,14 @@ V.payMon=id=>{const T='שכר חודשי';if(!on())return{t:T,h:'<div class="emp
  h+=`<div class="sec"><h3>תשלומים לחודש</h3></div>`;
  h+=L.length?L.map(t=>txRow(t)).join(''):'<p class="note">עוד לא נרשם תשלום לחודש הזה.</p>';
  h+=`<p class="note">תשלום נרשם כ"משכורת" (מזומן או העברה), בהוצאה מקופה או בצילום העברה, לפי חודש המשכורת. כשהסכום הושלם – החודש נסגר.</p>`;
+ /* שיתוף (שלב ד') – payroll-out.js */
+ h+=`<div class="sec"><h3>שיתוף</h3></div><div class="card"><div class="row"><button type="button" class="btn g w" ${big_} data-a="payOut" data-o="emp" data-f="pdf">פירוט לעובד – PDF</button><button type="button" class="btn g w" ${big_} data-a="payOut" data-o="emp" data-f="xlsx">פירוט לעובד – אקסל</button></div>`+(slip?`<div class="row" style="margin-top:8px"><button type="button" class="btn g w" ${big_} data-a="payOut" data-o="acc" data-f="pdf">דוח לרואה החשבון – PDF</button><button type="button" class="btn g w" ${big_} data-a="payOut" data-o="acc" data-f="xlsx">דוח לרואה החשבון – אקסל</button></div>`:'')+`</div>`;
  return{t:T,s:s.name,h}};
+ACT.payOut=el=>{if(!on()||PM.outBusy)return;const s=empOf(PM.sub);if(!s||!s.pay||!monV(PM.mon))return;const o=el.dataset.o,f=el.dataset.f==='xlsx'?'xlsx':'pdf',m=PM.mon;
+ if(!window.PayOut)return toast('ההפקה לא זמינה');if(o==='acc'&&!s.pay.slip)return;
+ const bs=()=>Array.from(document.querySelectorAll('[data-a=payOut]')),dis=v=>bs().forEach(b=>{b.disabled=v});PM.outBusy=true;dis(true);
+ let p;try{p=o==='acc'?PayOut.accReport(m,f):PayOut.empReport(s.id,m,f)}catch(e){p=Promise.reject(e)}
+ Promise.resolve(p).then(r=>{if(r&&r.ok)toast('הקובץ מוכן');else toast('ההפקה נכשלה')}).catch(()=>toast('ההפקה נכשלה')).then(()=>{PM.outBusy=false;dis(false)})};
 const big_='style="min-height:48px"';
 function accL(r){const o=[['חודש',mfmt(r.mon)],['שעות',hmF(r.minutes)],['ימי עבודה',String(r.days)],[r.mode==='mo'?'שכר חודשי':'בסיס לפי שעות',ag(r.base)]];
  r.adds.forEach(a=>o.push(['תוספת: '+(a.n||'—')+(a.k==='day'?' ('+a.cnt+' ימים)':''),ag(a.amt)]));
