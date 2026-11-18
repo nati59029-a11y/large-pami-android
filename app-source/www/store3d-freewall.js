@@ -1,13 +1,12 @@
 /* ניסוי "צילום חופשי של קיר" (אב-טיפוס, בטלפון בלבד): כמה תמונות, סימון לאיזו שורה של הקיר כל תמונה שייכת, וחיבור לתמונה אחת.
-   כלום לא נשלח לשרת ולא נשמר כחזית – הכול בטלפון (התמונות המוקטנות ב-IndexedDB, בלי מערכת). נטען אחרי store3d-setupcap.js ו-store3d-warp.js.
-   זיהוי חפיפה אוטומטי: לכל שתי תמונות שכנות בשורה – הזזה וקנה מידה (0.9–1.1) לפי התאמה מנורמלת (NCC) על תמונה אפורה מסוננת (high-pass),
-   גס ← בינוני ← עדין. בין שורות: התאמה במספר חלונות לאורך הרצועה והתאמת הזזה+קנה מידה לכל השורה. ביטחון נמוך = "לא בטוח" וחלוקה לפי המחוון.
-   הבנייה ברזולוציה גבוהה, באריחים (עד 2048×2048 כל אחד), מיזוג רך באזור החפיפה (עד 15% מרוחב התמונה). אזור שלא צולם מסומן.
-   החלק הראשון (S3FreeWall: wallsOf, estimate, layout) הוא קוד טהור (בלי DOM) ורץ גם בבדיקות Node. החלק השני הוא המסך.
+   כלום לא נשלח לשרת ולא נשמר כחזית – הכול בטלפון (התמונות המוקטנות, מצב המסך והקיר שנבנה ב-IndexedDB, בלי מערכת). נטען אחרי store3d-setupcap.js ו-store3d-warp.js.
+   החיבור: OpenCV (opencv.js מקומי, www/opencv/opencv.js – מועתק בבנייה מ-@techstark/opencv-js, נטען רק כשנכנסים למסך).
+   נקודות מאפיינות (AKAZE) ← התאמות בין זוגות ← פתרון כולל לכל התמונות ← מיזוג רך באריחים. אין מחוון חפיפה – הכול אוטומטי, ותמונה שלא חוברה מסומנת.
+   החלק הראשון (wallsOf, plan, frame, tile, gains) הוא קוד טהור (בלי DOM, opencv מועבר כפרמטר) ורץ גם בבדיקות Node. החלק השני הוא המסך.
    מוסכמות: בקוד הטהור rows[0] = השורה העליונה בקיר. במסך שורה 1 = התחתונה (ליד הרצפה) והמסך הופך את הסדר לפני החיבור. בכל שורה התמונה הראשונה = הכי שמאלית. */
 (function(root){
 'use strict';
-const MAXPH=120,HE=480/* גובה כל תמונה לזיהוי החפיפה */,DEFH=300,OKT=.3/* סף ביטחון (NCC) */,ROWH=900/* גובה שורה בתוצאה (פיקסלים) */,TILE=2048,MAXA=60e6/* שטח תוצאה מרבי */;
+const MAXPH=120,DEFH=300,TILE=1536/* אריח פלט מרבי */,MAXA=60e6/* שטח תוצאה מרבי */;
 const cl=(v,a,b)=>v<a?a:v>b?b:v;
 const tick=()=>new Promise(r=>setTimeout(r,0));
 /* קירות המפה: פריטי k==='w' מקובצים לפי חדר+צלע ומספרים ברצף (n). אורך = סכום אורכי הקטעים (ס"מ), גובה = גובה התקרה של החדר אם קיים.
@@ -22,178 +21,224 @@ function wallsOf(plan,map){
   let st=S.find(a=>!S.some(b=>b!==a&&near(b[2],b[3],a[0],a[1])))||S[0],en=S.find(a=>!S.some(b=>b!==a&&near(b[0],b[1],a[2],a[3])))||S[S.length-1];
   g.x1=st[0];g.y1=st[1];g.x2=en[2];g.y2=en[3]}
  return out}
-/* ---------- זיהוי חפיפה ---------- */
-/* תמונה: {w,h,g:Uint8Array אפור}. פירמידה (חצי גודל) וסינון גבוה (g פחות טשטוש) נשמרים על האובייקט */
-function ds2(im){const w=im.w>>1,h=im.h>>1,d=new Uint8Array(w*h),g=im.g,W=im.w;
- for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=2*y*W+2*x;d[y*w+x]=(g[i]+g[i+1]+g[i+W]+g[i+W+1]+2)>>2}
- return{w,h,g:d}}
-function hpOf(im){const{w,h,g}=im,r=3,t=new Float32Array(w*h),o=new Float32Array(w*h),P=new Float32Array(Math.max(w,h)+1);
- for(let y=0;y<h;y++){const q=y*w;P[0]=0;for(let x=0;x<w;x++)P[x+1]=P[x]+g[q+x];for(let x=0;x<w;x++){const a=Math.max(0,x-r),b=Math.min(w,x+r+1);t[q+x]=(P[b]-P[a])/(b-a)}}
- for(let x=0;x<w;x++){P[0]=0;for(let y=0;y<h;y++)P[y+1]=P[y]+t[y*w+x];for(let y=0;y<h;y++){const a=Math.max(0,y-r),b=Math.min(h,y+r+1);o[y*w+x]=g[y*w+x]-(P[b]-P[a])/(b-a)}}
- return{w,h,d:o}}
-function lv(im,l){if(!im._p){im._p=[im];im._h=[]}while(im._p.length<=l)im._p.push(ds2(im._p[im._p.length-1]));return im._h[l]||(im._h[l]=hpOf(im._p[l]))}
-const free=im=>{if(im){im._p=null;im._h=null}};
-/* נרמול בהירות וניגודיות של תמונה (ממוצע 128, סטיית תקן ~48) – כדי שהבדלי חשיפה בין תמונות לא יפגעו בהשוואה */
-function norm(im){const g=im.g,n=g.length;let s=0,q=0;for(let i=0;i<n;i++){s+=g[i];q+=g[i]*g[i]}const m=s/n,sd=Math.sqrt(Math.max(1,q/n-m*m)),k=48/sd,o=new Uint8Array(n);for(let i=0;i<n;i++)o[i]=cl(128+(g[i]-m)*k,0,255);return{w:im.w,h:im.h,g:o}}
-/* שינוי גודל בילינארי (אפור) */
-function resample(im,t){
- if(Math.abs(t-1)<1e-4)return im;const w=Math.max(8,Math.round(im.w*t)),h=Math.max(8,Math.round(im.h*t)),g=new Uint8Array(w*h),sx=im.w/w,sy=im.h/h,X0=new Int32Array(w),X1=new Int32Array(w),FX=new Float32Array(w);
- for(let x=0;x<w;x++){const f=cl((x+.5)*sx-.5,0,im.w-1),a=Math.floor(f);X0[x]=a;X1[x]=Math.min(im.w-1,a+1);FX[x]=f-a}
- for(let y=0;y<h;y++){const f=cl((y+.5)*sy-.5,0,im.h-1),a=Math.floor(f),b=Math.min(im.h-1,a+1),fy=f-a,ra=a*im.w,rb=b*im.w;
-  for(let x=0;x<w;x++){const fx=FX[x],p=im.g[ra+X0[x]]*(1-fx)+im.g[ra+X1[x]]*fx,q=im.g[rb+X0[x]]*(1-fx)+im.g[rb+X1[x]]*fx;g[y*w+x]=p+(q-p)*fy+.5}}
- return{w,h,g}}
-/* NCC על אזור החפיפה של A ו-B כש-B מוזזת ב-(dx,dy) ביחס ל-A. -2 = אין מספיק חפיפה, 0 = אין מרקם */
-function ncc(A,B,dx,dy,st,minN){
- const x0=Math.max(0,dx),x1=Math.min(A.w,dx+B.w),y0=Math.max(0,dy),y1=Math.min(A.h,dy+B.h);
- if(x1-x0<4||y1-y0<4)return -2;
- let n=0,sa=0,sb=0,saa=0,sbb=0,sab=0;const ad=A.d,bd=B.d;
- for(let y=y0;y<y1;y+=st){const ia=y*A.w,ib=(y-dy)*B.w-dx;for(let x=x0;x<x1;x+=st){const a=ad[ia+x],b=bd[ib+x];n++;sa+=a;sb+=b;saa+=a*a;sbb+=b*b;sab+=a*b}}
- if(n<minN)return -2;
- const va=saa-sa*sa/n,vb=sbb-sb*sb/n;if(va<.3*n||vb<.3*n)return 0;
- return(sab-sa*sb/n)/Math.sqrt(va*vb)}
-/* NCC של חלון (pw×ph) שפינתו (bx,by) ב-B מול אותו גודל שפינתו (ax,ay) ב-A */
-function nccP(A,B,ax,ay,bx,by,pw,ph,st){
- if(ax<0||ay<0||ax+pw>A.w||ay+ph>A.h||bx<0||by<0||bx+pw>B.w||by+ph>B.h)return -2;
- let n=0,sa=0,sb=0,saa=0,sbb=0,sab=0;
- for(let y=0;y<ph;y+=st){const ia=(ay+y)*A.w+ax,ib=(by+y)*B.w+bx;for(let x=0;x<pw;x+=st){const a=A.d[ia+x],b=B.d[ib+x];n++;sa+=a;sb+=b;saa+=a*a;sbb+=b*b;sab+=a*b}}
- const va=saa-sa*sa/n,vb=sbb-sb*sb/n;if(va<.3*n||vb<.3*n)return 0;
- return(sab-sa*sb/n)/Math.sqrt(va*vb)}
-function coarse(a2,b2,r,st){
- const cx0=Math.floor(r.x0/4),cx1=Math.ceil(r.x1/4),cy0=Math.floor(r.y0/4),cy1=Math.ceil(r.y1/4),nx=cx1-cx0+1,ny=cy1-cy0+1,G=new Float32Array(Math.max(1,nx*ny)).fill(-2);let best=-3,bx=cx0,by=cy0;
- for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const v=ncc(a2,b2,cx0+i,cy0+j,st,120);G[j*nx+i]=v;if(v>best){best=v;bx=cx0+i;by=cy0+j}}
- let second=-3;for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){if(Math.abs(cx0+i-bx)<=2&&Math.abs(cy0+j-by)<=2)continue;if(G[j*nx+i]>second)second=G[j*nx+i]}
- return{best,second,bx,by}}
-function around(a,b,cx,cy,R,st,minN){let s=-3,bx=cx,by=cy;for(let dy=cy-R;dy<=cy+R;dy++)for(let dx=cx-R;dx<=cx+R;dx++){const v=ncc(a,b,dx,dy,st,minN);if(v>s){s=v;bx=dx;by=dy}}return{s,x:bx,y:by}}
-/* חיפוש הזזה (dx,dy) וקנה מידה t של B ביחס ל-A (טווח r בפיקסלים בגודל המלא). גס (רבע, לכל קנה מידה) ← בינוני (עם הערכת קנה מידה עדינה) ← עדין */
-function findShift(A,B,r,scales,D,stp){
- scales=scales&&scales.length?scales:[1];D=D||.02;const a2=lv(A,2),st=stp||(a2.w>400?2:1);let top=null;
- for(const t of scales){const Bt=resample(B,t),c=coarse(a2,lv(Bt,2),r,st);if(!top||c.best>top.c.best)top={t,Bt,c}}
- const c=top.c;if(c.best<=-2)return{dx:Math.round((r.x0+r.x1)/2),dy:Math.round((r.y0+r.y1)/2),t:1,score:0,ok:false};
- const a1=lv(A,1);let t=top.t,cx=c.bx*2,cy=c.by*2,s1;
- if(scales.length>1){const Ts=[t-D,t,t+D].map(v=>cl(v,.86,1.14)),R=Ts.map((v,i)=>{const Bt=i===1?top.Bt:resample(B,v);return around(a1,lv(Bt,1),cx,cy,3,1,300)});
-  s1=R[1];cx=R[1].x;cy=R[1].y;
-  const m=R[0].s,z=R[1].s,p=R[2].s,den=m-2*z+p;if(z>=m&&z>=p&&den<-1e-9)t=cl(t+D*.5*(m-p)/den,.86,1.14);else if(m>z&&m>=p)t=Ts[0];else if(p>z)t=Ts[2]}
- else s1=around(a1,lv(top.Bt,1),cx,cy,3,1,300);
- const A0=lv(A,0);let f=around(A0,lv(resample(B,t),0),cx*2,cy*2,3,2,600);
- if(scales.length>1){/* שיפור עדין של קנה המידה (פרבולה על שלוש נקודות, פעמיים) – שגיאה קטנה בקנה מידה מצטברת לאורך שורה ארוכה */
-  for(const d of [.008,.003]){const Ts=[t-d,t,t+d],Rr=Ts.map((v,i)=>i===1?f:around(A0,lv(resample(B,v),0),f.x,f.y,2,1,600));
-   const m=Rr[0].s,z=Rr[1].s,p=Rr[2].s,den=m-2*z+p;let nt=t;if(z>=m&&z>=p&&den<-1e-9)nt=t+d*.5*(m-p)/den;else if(m>z&&m>=p)nt=Ts[0];else if(p>z)nt=Ts[2];
-   t=cl(nt,.86,1.14);f=Rr.reduce((a,b)=>b.s>a.s?b:a)}
-  f=around(A0,lv(resample(B,t),0),f.x,f.y,1,1,600)}
- /* ההתאמה הגסה (רבע גודל) עמידה לסיבוב קל ופרספקטיבה: התאמה גסה חזקה ובולטת מול כל שאר ההזזות נחשבת ביטחון גם כשההתאמה העדינה נמוכה */
- let conf=Math.max(0,f.s,c.best-c.second>=.2&&c.best>=.5?.8*c.best:0);if(c.best-c.second<.04&&c.best<.85)conf*=.75;/* שתי התאמות כמעט שוות (מוצרים חוזרים) = פחות בטוח */
- return{dx:f.x,dy:f.y,t:+t.toFixed(4),score:+conf.toFixed(3),ok:conf>=OKT,cb:+c.best.toFixed(3),c2:+c.second.toFixed(3)}}
-const shiftOf=(p,fb,adj)=>{const a=adj&&adj[p.key];return a?{dx:a.dx,dy:a.dy,t:p.ok?p.t:1,ok:true,manual:true}:p.ok?{dx:p.dx,dy:p.dy,t:p.t||1,ok:true}:{dx:fb.dx,dy:fb.dy,t:1,ok:false}};
-/* מיקום תמונות שורה (יחסית לפינת הרצועה). c = קנה מידה מצטבר של כל תמונה */
-function place(row,G,hs,ov,adj){
- let x=0,y=0,c=1;const P=[],S=[];
- row.forEach((id,j)=>{const g=G.get(id);if(j>0){const a=G.get(row[j-1]),s=shiftOf(hs[j-1],{dx:Math.round(a.w*(1-ov)),dy:0},adj);x+=s.dx*c;y+=s.dy*c;c*=s.t;S.push(s)}P.push({id,x,y,c,w:g.w*c,h:g.h*c})});
- let mx=1e9,my=1e9,W=0,H=0;for(const p of P){mx=Math.min(mx,p.x);my=Math.min(my,p.y)}
- for(const p of P){p.x-=mx;p.y-=my;W=Math.max(W,p.x+p.w);H=Math.max(H,p.y+p.h)}
- return{P,S,W:Math.ceil(W),H:Math.ceil(H)}}
-function strip(pl,G){const d=new Uint8Array(pl.W*pl.H).fill(128);
- for(const p of pl.P){const g=resample(G.get(p.id),p.c),x0=Math.round(p.x),y0=Math.round(p.y),sx=Math.max(0,-x0),dx=Math.max(0,x0),w=Math.min(g.w-sx,pl.W-dx);
-  if(w<=0)continue;for(let y=0;y<g.h;y++){const yy=y0+y;if(yy<0||yy>=pl.H)continue;d.set(g.g.subarray(y*g.w+sx,y*g.w+sx+w),yy*pl.W+dx)}}
- return{w:pl.W,h:pl.H,g:d}}
-/* תיקון מקומי של שורה לפי מה שנמדד בחלונות מול השורה שמעליה (סטייה מהמודל הגלובלי), בהשלמה ליניארית בין חלונות */
-function applyRes(pl,v){
- if(!v||!v.res||!v.res.length)return;const R=v.res,s=v.s||1;
- for(const p of pl.P){const cx=p.x+p.w/2;let a=R[0],b=R[R.length-1],k=0;
-  if(cx<=R[0].x){k=0;b=a}else if(cx>=R[R.length-1].x){a=b}else{let i=0;while(i<R.length-2&&R[i+1].x<cx)i++;a=R[i];b=R[i+1];k=(cx-a.x)/Math.max(1e-6,b.x-a.x)}
-  p.x+=(a.rx+(b.rx-a.rx)*k)/s;p.y+=(a.ry+(b.ry-a.ry)*k)/s}}
-const cropS=(S,w,x0)=>{x0=x0||0;const d=new Uint8Array(w*S.h);for(let y=0;y<S.h;y++)d.set(S.g.subarray(y*S.w+x0,y*S.w+x0+w),y*w);return{w,h:S.h,g:d}};
-function fitAff(P){const n=P.length;let mbx=0,mby=0,max=0,may=0;for(const p of P){mbx+=p.bx;mby+=p.by;max+=p.ax;may+=p.ay}mbx/=n;mby/=n;max/=n;may/=n;
- let num=0,den=0;for(const p of P){const u=p.bx-mbx,v=p.by-mby;num+=u*(p.ax-max)+v*(p.ay-may);den+=u*u+v*v}
- const s=den>1e-6?cl(num/den,.88,1.12):1;return{s,tx:max-s*mbx,ty:may-s*mby}}
-/* שורה מול השורה שמעליה: B (תחתונה) → A (עליונה): p_A = s*p_B + (dx,dy). התחלה מהקצה השמאלי, ואז חלונות לאורך הרצועה (חיזוי ממודל מתעדכן) */
-function matchRows(A,B,aw){
- const mw=Math.min(A.w,B.w),W0=Math.min(mw,Math.round(2.4*aw)),cuts=[...new Set([0,Math.floor((mw-W0)/2),mw-W0])].filter(c=>c>=0);let init=null;
- /* חיפוש ראשוני בכמה קטעים לאורך הרצועה (תחילה, אמצע, סוף) ובחירת הטוב – קטע אחד יכול ליפול על אזור בלי מרקם או עם סיבוב/פרספקטיבה */
- for(const cx of cuts){const q=findShift(cropS(A,W0,cx),cropS(B,W0,cx),{x0:-Math.round(.9*aw),x1:Math.round(.9*aw),y0:Math.round(.3*A.h),y1:Math.round(.95*A.h)},[.9,.95,1,1.05,1.1],.03,2);
-  q.dx=+(q.dx+cx*(1-q.t)).toFixed(2);if(!init||q.score>init.score)init=q;if(q.ok)break}
- if(!init.ok)return{dx:init.dx,dy:init.dy,s:1,score:init.score,ok:false,n:0,nw:0};
- const t0=init.t,Bs=resample(B,t0),A1=lv(A,1),B1=lv(Bs,1),A0=lv(A,0),B0=lv(Bs,0),pw=Math.round(aw*.45)&~1,ph=Math.max(24,Math.round(.15*Bs.h))&~1,step=Math.max(Math.round(aw*.7),Math.ceil(Bs.w/30)),by0=4,pts=[];let nw=0,mdl={s:1,tx:init.dx,ty:init.dy};
- for(let bx=8;bx+pw<=Bs.w-8;bx+=step){nw++;
-  const ax=mdl.s*bx+mdl.tx,ay=mdl.s*by0+mdl.ty,R=8+(pts.length<2?4:0);let best=-3,qx=0,qy=0;
-  for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const v=nccP(A1,B1,Math.round(ax/2)+dx,Math.round(ay/2)+dy,bx>>1,by0>>1,pw>>1,ph>>1,1);if(v>best){best=v;qx=Math.round(ax/2)+dx;qy=Math.round(ay/2)+dy}}
-  if(best<.3)continue;
-  let b2=-3,rx=qx*2,ry=qy*2;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const v=nccP(A0,B0,qx*2+dx,qy*2+dy,bx,by0,pw,ph,1);if(v>b2){b2=v;rx=qx*2+dx;ry=qy*2+dy}}
-  if(b2<.3)continue;
-  pts.push({bx:bx+pw/2,by:by0+ph/2,ax:rx+pw/2,ay:ry+ph/2,sc:b2});
-  if(pts.length>=2)mdl=fitAff(pts)}
- if(pts.length>=3){for(let it=0;it<2;it++){const f=fitAff(pts),keep=pts.filter(p=>Math.hypot(p.ax-(f.s*p.bx+f.tx),p.ay-(f.s*p.by+f.ty))<=6);if(keep.length<3||keep.length===pts.length){break}pts.length=0;pts.push(...keep)}}
- let f=mdl;if(pts.length>=2)f=fitAff(pts);else if(pts.length<1)f={s:1,tx:init.dx,ty:init.dy};
- else f={s:1,tx:pts[0].ax-pts[0].bx,ty:pts[0].ay-pts[0].by};
- const res=pts.map(p=>({x:p.bx/t0,rx:+(p.ax-(f.s*p.bx+f.tx)).toFixed(2),ry:+(p.ay-(f.s*p.by+f.ty)).toFixed(2)}));
- f={s:f.s*t0,tx:f.tx,ty:f.ty};/* p_A = sr*p_Bs+t, p_Bs = t0*p_B */
- const mean=pts.length?pts.reduce((a,p)=>a+p.sc,0)/pts.length:init.score,ok=pts.length>=Math.max(1,Math.ceil(.25*nw))&&mean>=OKT;
- return{dx:+f.tx.toFixed(2),dy:+f.ty.toFixed(2),s:+f.s.toFixed(5),score:+mean.toFixed(3),ok,n:pts.length,nw,res}}
-/* ---------- הצעת סדר: לכל זוג (א משמאל ל-ב) ציון התאמה גס (שמינית גודל), ואז שרשרת בעלת סכום ציונים גבוה (חמדני, בלי מעגלים) ---------- */
-function pairScore(A,B){
- const a=lv(A,3),b=lv(B,3);let best=0,second=0;const G=[];
- const x0=Math.round(.3*a.w),x1=Math.round(.95*a.w),y0=-Math.max(1,Math.round(.1*a.h)),y1=-y0;
- for(let dy=y0;dy<=y1;dy++)for(let dx=x0;dx<=x1;dx++){const v=ncc(a,b,dx,dy,1,30);if(v>best)best=v}
- return Math.max(0,best)}
-async function suggestOrder(ids,G,onP){
- const n=ids.length;if(n<3)return{order:ids.slice(),score:0,cur:0,changed:false};
- const S=Array.from({length:n},()=>new Float32Array(n));let d=0;
- for(let i=0;i<n;i++){for(let j=0;j<n;j++){if(i!==j)S[i][j]=pairScore(G.get(ids[i]),G.get(ids[j]))}d++;if(onP)onP(d,n);await tick()}
- for(const id of ids)free(G.get(id));
- const E=[];for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(i!==j&&S[i][j]>=.3)E.push([S[i][j],i,j]);E.sort((a,b)=>b[0]-a[0]);
- const nxt=new Array(n).fill(-1),prv=new Array(n).fill(-1),root=Array.from({length:n},(_,i)=>i),find=x=>root[x]===x?x:(root[x]=find(root[x]));
- for(const[,i,j]of E){if(nxt[i]>=0||prv[j]>=0||find(i)===find(j))continue;nxt[i]=j;prv[j]=i;root[find(i)]=find(j)}
- const seen=new Set(),order=[];
- for(let i=0;i<n;i++){if(prv[i]>=0||seen.has(i))continue;for(let k=i;k>=0&&!seen.has(k);k=nxt[k]){seen.add(k);order.push(ids[k])}}
- for(let i=0;i<n;i++)if(!seen.has(i))order.push(ids[i]);
- const ix=new Map(ids.map((id,i)=>[id,i])),sum=o=>{let t=0;for(let k=0;k+1<o.length;k++)t+=S[ix.get(o[k])][ix.get(o[k+1])];return t},sc=sum(order),cur=sum(ids);
- return{order,score:+sc.toFixed(2),cur:+cur.toFixed(2),changed:sc>cur*1.15+.2&&order.some((id,i)=>id!==ids[i])}}
-/* rows: [[id,...]] (עליונה ראשונה, כל שורה משמאל לימין); load(id) → {w,h,g} אפור בגובה HE.
-   o: {ov (0–.4, לחיבור לא בטוח), adj:{key:{dx,dy}}, grays:Map, cache:{}, onP(done,total)}. מחזיר {h:[[pair]],v:[pair],grays} */
-async function estimate(rows,load,o){
- o=o||{};const G=o.grays||new Map(),adj=o.adj||{},ov=o.ov==null?.2:o.ov,cache=o.cache||{};rows=rows.filter(r=>r.length);
- const ids=[].concat(...rows).filter(id=>!G.has(id)),total=ids.length+rows.reduce((s,r)=>s+r.length-1,0)+Math.max(0,rows.length-1);let done=0;const prog=()=>o.onP&&o.onP(done,total);
- prog();for(const id of ids){G.set(id,norm(await load(id)));done++;prog();await tick()}
- const hs=[],SC=[.9,.933,.967,1,1.033,1.067,1.1];
- for(const row of rows){const arr=[];
-  for(let j=1;j<row.length;j++){const a=G.get(row[j-1]),b=G.get(row[j]),key='h:'+row[j-1]+':'+row[j];let p=cache['H'+key];
-   if(!p){p=Object.assign(findShift(a,b,{x0:Math.round(.3*a.w),x1:Math.round(.95*a.w),y0:-Math.round(.1*a.h),y1:Math.round(.1*a.h)},SC),{key});cache['H'+key]=p;free(a);await tick()}
-   done++;prog();arr.push(p)}
-  free(G.get(row[row.length-1]));hs.push(arr)}
- const pls=rows.map((row,r)=>place(row,G,hs[r],ov,adj)),v=[];
- for(let r=0;r<rows.length-1;r++){
-  const key='v:'+rows[r][0]+':'+rows[r+1][0],ck='V'+rows[r].join(',')+'/'+rows[r+1].join(',')+'|'+ov+'|'+pls[r].S.concat(pls[r+1].S).map(s=>s.dx+','+s.dy+','+s.t).join(';');let p=cache[ck];
-  if(!p){const A=strip(pls[r],G),B=strip(pls[r+1],G),aw=pls[r].P.concat(pls[r+1].P).reduce((s,q)=>s+q.w,0)/(pls[r].P.length+pls[r+1].P.length);
-   p=matchRows(A,B,aw);cache[ck]=p;await tick()}
-  done++;prog();const vp=Object.assign({},p,{key});v.push(vp);if(vp.ok&&!adj[key])applyRes(pls[r+1],vp)}
- return{h:hs,v,grays:G}}
-/* פריסה סופית: מיקום כל תמונה (יחידות HE), תפרים, מעברים רכים, שוליים לחיתוך ואזורים שלא צולמו */
-function layout(rows,G,est,o){
- o=o||{};rows=rows.filter(r=>r.length);const adj=o.adj||{},ov=o.ov==null?.2:o.ov;
- const pls=rows.map((row,r)=>place(row,G,est.h[r],ov,adj)),seams=[],S=[1],T=[{x:0,y:0}];
- pls.forEach((pl,r)=>{const e=r?est.v[r-1]:null;if(e&&e.ok&&!adj[e.key])applyRes(pl,e)});
- pls.forEach((pl,r)=>pl.S.forEach((s,j)=>seams.push({key:est.h[r][j].key,t:'h',r,j,dx:s.dx,dy:s.dy,sc:s.t,ok:s.ok,manual:!!s.manual,score:est.h[r][j].score,a:rows[r][j],b:rows[r][j+1]})));
- for(let r=1;r<rows.length;r++){const e=est.v[r-1],s=shiftOf(e,{dx:0,dy:Math.round(pls[r-1].H*(1-ov))},adj),sc=s.ok&&e.s?e.s:1;
-  S[r]=S[r-1]*sc;T[r]={x:T[r-1].x+S[r-1]*s.dx,y:T[r-1].y+S[r-1]*s.dy};
-  seams.push({key:e.key,t:'v',r:r-1,dx:s.dx,dy:s.dy,sc,ok:s.ok,manual:!!s.manual,score:e.score,a:rows[r-1][0],b:rows[r][0]})}
- let mx=1e9,my=1e9,W=0,H=0;const R=pls.map((pl,r)=>pl.P.map(p=>({id:p.id,x:S[r]*p.x+T[r].x,y:S[r]*p.y+T[r].y,w:S[r]*p.w,h:S[r]*p.h,c:S[r]*p.c})));
- for(const row of R)for(const p of row){mx=Math.min(mx,p.x);my=Math.min(my,p.y)}
- for(const row of R)for(const p of row){p.x-=mx;p.y-=my;W=Math.max(W,p.x+p.w);H=Math.max(H,p.y+p.h)}
- W=Math.ceil(W);H=Math.ceil(H);
- /* מעבר רך: כל תמונה מצוירת מעל הקודמת (משמאל לימין, משורה עליונה לתחתונה) ונחשפת בהדרגה בקצה השמאלי והעליון שלה, באמצע אזור החפיפה, ברוחב עד 15% */
- R.forEach((row,r)=>row.forEach((p,j)=>{p.l=p.t=null;
-  if(j>0){const q=row[j-1],ovl=q.x+q.w-p.x;if(ovl>0){const rw=Math.min(ovl,.15*p.w);p.l=[(ovl-rw)/2,(ovl+rw)/2]}}
-  if(r>0){let pb=Infinity;for(const q of R[r-1])if(q.x<p.x+p.w&&q.x+q.w>p.x)pb=Math.min(pb,q.y+q.h);const ovt=pb-p.y;if(isFinite(pb)&&ovt>0){const rh=Math.min(ovt,.15*p.h);p.t=[(ovt-rh)/2,(ovt+rh)/2]}}}));
- const rowExt=R.map(row=>({x0:Math.min(...row.map(p=>p.x)),x1:Math.max(...row.map(p=>p.x+p.w)),y0:Math.min(...row.map(p=>p.y)),y1:Math.max(...row.map(p=>p.y+p.h))}));
- const gaps=[];rowExt.forEach(e=>{if(e.x0>Math.max(100,.02*W))gaps.push({x:0,y:e.y0,w:e.x0,h:e.y1-e.y0});if(W-e.x1>Math.max(100,.02*W))gaps.push({x:e.x1,y:e.y0,w:W-e.x1,h:e.y1-e.y0})});
- const cx0=Math.max(...rowExt.map(e=>e.x0)),cx1=Math.min(...rowExt.map(e=>e.x1)),crop=cx1-cx0>.3*W?{x0:cx0,y0:0,x1:cx1,y1:H}:null;
- return{rows:R,pls,seams,W,H,S,T,rowExt,gaps,crop}}
-const API={wallsOf,suggestOrder,estimate,layout,findShift,matchRows,place,strip,resample,MAXPH,HE,DEFH,OKT,ROWH,TILE,MAXA};
+/* ---------- חיבור עם OpenCV (opencv.js) ---------- */
+/* קואורדינטות: לכל תמונה "גודל מלא" = התמונה השמורה (צלע ארוכה עד 1600). המאפיינים מחושבים בגרסה מוקטנת (צלע ארוכה FEAT) ומומרים לגודל המלא.
+   שלבים: מאפיינים (AKAZE, או ORB אם AKAZE לא זמין) ← התאמות בין זוגות (רצועות חפיפה, יחס Lowe, RANSAC של דמיון עם הגבלות כיוון,
+   כמה השערות ובדיקת דמיון תמונה) ← פתרון כולל (ריבועים פחותים על כל ההתאמות, ייחוס לתמונה האמצעית, הסרת חיבורים סותרים)
+   ← פריסה, חיתוך ומיזוג רך באריחים. */
+const FEAT=1200,NKP=6000,RAT=.9,MAXM=2500,WPOW=4,PRIOR=20,SMH=200/* גובה התמונה הקטנה לבדיקת דמיון */;
+const rnd=s=>()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296};
+/* opencv.js מוכן לשימוש. מחזיר {cv} (עטיפה: המודול עצמו "thenable" ו-await עליו נתקע בלולאה) */
+async function cvReady(cv){
+ if(!cv)throw new Error('no-cv');
+ if(cv instanceof Promise)cv=await cv.then(m=>({m})).then(o=>o.m);
+ if(!cv.Mat)await new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error('cv-timeout')),90000),prev=cv.onRuntimeInitialized;cv.onRuntimeInitialized=()=>{clearTimeout(t);if(typeof prev==='function')try{prev()}catch(e){}res()};if(cv.Mat){clearTimeout(t);res()}});
+ return{cv}}
+/* מאפיינים לתמונה אפורה im={w,h,g} (כבר בגודל המוקטן). s = יחס גודל מוקטן/מלא. מחזיר נקודות בגודל המלא */
+function feats(cv,im,s){
+ const m=new cv.Mat(im.h,im.w,cv.CV_8UC1);m.data.set(im.g);const no=new cv.Mat(),kp=new cv.KeyPointVector(),d=new cv.Mat();let det=null;
+ try{
+  if(typeof cv.AKAZE==='function'){det=new cv.AKAZE();try{det.setThreshold(.0005)}catch(e){}}else det=new cv.ORB(NKP);
+  det.detectAndCompute(m,no,kp,d);
+  const n=kp.size(),dl=d.cols||0,L=[];for(let i=0;i<n;i++){const k=kp.get(i);L.push({x:k.pt.x,y:k.pt.y,r:k.response,i})}
+  /* פיזור אחיד: רשת 6×8, בכל תא הנקודות החזקות ביותר, עד NKP */
+  let keep=L;if(n>NKP){const GX=6,GY=8,cells=Array.from({length:GX*GY},()=>[]);for(const p of L)cells[Math.min(GY-1,Math.floor(p.y/im.h*GY))*GX+Math.min(GX-1,Math.floor(p.x/im.w*GX))].push(p);
+   for(const c of cells)c.sort((a,b)=>b.r-a.r);keep=[];const per=Math.ceil(NKP/(GX*GY));for(const c of cells)keep.push(...c.slice(0,per))}
+  keep.sort((a,b)=>b.r-a.r);/* החזקות קודם – בהתאמה לוקחים רק את הראשונות */
+  const P=new Float32Array(2*keep.length),D=new Uint8Array(keep.length*dl);
+  keep.forEach((p,j)=>{P[2*j]=p.x/s;P[2*j+1]=p.y/s;if(dl)D.set(d.data.subarray(p.i*dl,p.i*dl+dl),j*dl)});
+  /* תמונה קטנה לבדיקת דמיון (גובה SMH) */
+  const k2=SMH/im.h,sw=Math.max(8,Math.round(im.w*k2)),sm=new cv.Mat();cv.resize(m,sm,new cv.Size(sw,SMH),0,0,cv.INTER_AREA);const g=sm.data.slice();sm.delete();
+  return{P,D,dl,n:keep.length,sm:{w:sw,h:SMH,g,s:k2*s}}}
+ finally{m.delete();no.delete();kp.delete();d.delete();if(det)det.delete()}}
+function subDesc(cv,F,pred){const idx=[];for(let k=0;k<F.n&&idx.length<MAXM;k++)if(pred(F.P[2*k],F.P[2*k+1]))idx.push(k);const m=new cv.Mat(Math.max(1,idx.length),F.dl,cv.CV_8UC1);idx.forEach((k,r)=>m.data.set(F.D.subarray(k*F.dl,k*F.dl+F.dl),r*F.dl));return{idx,m}}
+/* דמיון (סקאלה+סיבוב+הזזה) B→A: x_A = p*x - q*y + tx, y_A = q*x + p*y + ty */
+const simAp=(T,x,y)=>[T[0]*x-T[1]*y+T[2],T[1]*x+T[0]*y+T[3]];
+function simFit(a,b,ids){let n=0,mbx=0,mby=0,max=0,may=0;for(const k of ids){mbx+=b[2*k];mby+=b[2*k+1];max+=a[2*k];may+=a[2*k+1];n++}
+ mbx/=n;mby/=n;max/=n;may/=n;let sxx=0,sp=0,sq=0;for(const k of ids){const u=b[2*k]-mbx,v=b[2*k+1]-mby,X=a[2*k]-max,Y=a[2*k+1]-may;sxx+=u*u+v*v;sp+=u*X+v*Y;sq+=u*Y-v*X}
+ const p=sxx>1e-9?sp/sxx:1,q=sxx>1e-9?sq/sxx:0;return[p,q,max-(p*mbx-q*mby),may-(q*mbx+p*mby)]}
+/* בדיקת התאמת השערה לכיוון המצופה. wa,ha = גודל A; wb,hb = גודל B (מלא). dir: h = B מימין ל-A, v = B מתחת ל-A, a = כל כיוון */
+function priorOk(T,dir,wa,ha,wb,hb){const s=Math.hypot(T[0],T[1]),r=Math.abs(Math.atan2(T[1],T[0]));if(s<.6||s>1.65||r>.3)return false;
+ const c=simAp(T,wb/2,hb/2),cx=c[0]-wa/2,cy=c[1]-ha/2;
+ if(dir==='h')return cx>.2*wa&&cx<1.05*wa&&Math.abs(cy)<.4*ha;
+ if(dir==='v')return cy>.15*ha&&cy<1.05*ha&&Math.abs(cx)<.75*wa;
+ return Math.abs(cx)<1.1*wa&&Math.abs(cy)<1.1*ha}
+function ransacSim(a,b,dir,wa,ha,wb,hb,thr,excl,seed){const n=a.length/2,R=rnd(seed||7);let best=null;
+ if(n<3)return null;const its=Math.min(4000,40*n);
+ for(let it=0;it<its;it++){const i=Math.floor(R()*n),j=Math.floor(R()*n);if(i===j||excl[i]||excl[j])continue;
+  const bx=b[2*j]-b[2*i],by=b[2*j+1]-b[2*i+1],ax=a[2*j]-a[2*i],ay=a[2*j+1]-a[2*i+1],d=bx*bx+by*by;if(d<900)continue;
+  const p=(ax*bx+ay*by)/d,q=(ay*bx-ax*by)/d,T=[p,q,a[2*i]-(p*b[2*i]-q*b[2*i+1]),a[2*i+1]-(q*b[2*i]+p*b[2*i+1])];
+  if(!priorOk(T,dir,wa,ha,wb,hb))continue;
+  let c=0;for(let k=0;k<n;k++){if(excl[k])continue;const ex=T[0]*b[2*k]-T[1]*b[2*k+1]+T[2]-a[2*k],ey=T[1]*b[2*k]+T[0]*b[2*k+1]+T[3]-a[2*k+1];if(ex*ex+ey*ey<thr*thr)c++}
+  if(!best||c>best.c)best={c,T}}
+ if(!best||best.c<4)return null;
+ /* חידוד: התאמה מחדש על הנקודות המתאימות, פעמיים */
+ let T=best.T,ids=[];for(let r=0;r<2;r++){ids=[];for(let k=0;k<n;k++){if(excl[k])continue;const e=simAp(T,b[2*k],b[2*k+1]);if(Math.hypot(e[0]-a[2*k],e[1]-a[2*k+1])<thr)ids.push(k)}if(ids.length<3)break;T=simFit(a,b,ids)}
+ return{T,ids,c:ids.length}}
+/* דמיון תמונה (NCC) באזור החפיפה, על התמונות הקטנות. T ביחידות מלאות B→A */
+function photo(A,B,T){const sa=A.sm,sb=B.sm,ka=sa.s,kb=sb.s;
+ /* נקודה בקטנה של B → מלא B → מלא A → קטנה A */
+ let n=0,s1=0,s2=0,s11=0,s22=0,s12=0;
+ for(let y=1;y<sb.h-1;y+=2)for(let x=1;x<sb.w-1;x+=2){const P=simAp(T,x/kb,y/kb),X=P[0]*ka,Y=P[1]*ka;if(X<1||Y<1||X>=sa.w-2||Y>=sa.h-2)continue;
+  const xi=X|0,yi=Y|0,fx=X-xi,fy=Y-yi,o=yi*sa.w+xi,va=(sa.g[o]*(1-fx)+sa.g[o+1]*fx)*(1-fy)+(sa.g[o+sa.w]*(1-fx)+sa.g[o+sa.w+1]*fx)*fy,vb=sb.g[y*sb.w+x];
+  n++;s1+=va;s2+=vb;s11+=va*va;s22+=vb*vb;s12+=va*vb}
+ if(n<150)return{ncc:0,n};const v1=s11-s1*s1/n,v2=s22-s2*s2/n;if(v1<1e-6||v2<1e-6)return{ncc:0,n};return{ncc:(s12-s1*s2/n)/Math.sqrt(v1*v2),n}}
+/* התאמת זוג: A ו-B = תוצאות feats (+w,h מלאים). מחזיר קצה {T (B→A), pa, pb (נקודות מתאימות, מלא), inl, ncc, sc} או null */
+function matchPair(cv,bf,A,B,dir){
+ const SW=.55;let fa,fb;
+ if(dir==='h'){fa=x=>x>A.w*(1-SW);fb=x=>x<B.w*SW}else if(dir==='v'){fa=(x,y)=>y>A.h*.25;fb=(x,y)=>y<B.h*.75}else{fa=fb=()=>true}
+ const sa=subDesc(cv,A,fa),sb=subDesc(cv,B,fb);if(sa.idx.length<8||sb.idx.length<8){sa.m.delete();sb.m.delete();return null}
+ const mm=new cv.DMatchVectorVector(),a=[],b=[];
+ try{bf.knnMatch(sb.m,sa.m,mm,2);
+  for(let k=0;k<mm.size();k++){const v=mm.get(k);if(v.size()>=2){const m0=v.get(0),m1=v.get(1);if(m0.distance<RAT*m1.distance){const qb=sb.idx[m0.queryIdx],qa=sa.idx[m0.trainIdx];a.push(A.P[2*qa],A.P[2*qa+1]);b.push(B.P[2*qb],B.P[2*qb+1])}}v.delete()}}
+ finally{mm.delete();sa.m.delete();sb.m.delete()}
+ const thr=.018*Math.max(A.h,A.w),excl=new Uint8Array(a.length/2),hyp=[];
+ for(let h=0;h<3;h++){const r=ransacSim(a,b,dir,A.w,A.h,B.w,B.h,thr,excl,7+h);if(!r||r.c<6)break;const ph=photo(A,B,r.T);hyp.push(Object.assign(r,{ncc:ph.ncc,sc:r.c*Math.max(.05,ph.ncc+.15)}));for(const k of r.ids)excl[k]=1}
+ if(!hyp.length)return null;hyp.sort((x,y)=>y.sc-x.sc);const H=hyp[0];
+ /* נקודות לפתרון הכולל: עד 60, מפוזרות */
+ let ids=H.ids;if(ids.length>60){const st=ids.length/60,o=[];for(let k=0;k<60;k++)o.push(ids[Math.floor(k*st)]);ids=o}
+ const pa=new Float32Array(2*ids.length),pb=new Float32Array(2*ids.length);ids.forEach((k,j)=>{pa[2*j]=a[2*k];pa[2*j+1]=a[2*k+1];pb[2*j]=b[2*k];pb[2*j+1]=b[2*k+1]});
+ const alt=hyp.length>1?hyp[1].sc/H.sc:0;
+ return{T:H.T,pa,pb,inl:H.c,ncc:+H.ncc.toFixed(3),alt:+alt.toFixed(2),sc:+H.sc.toFixed(1),n:a.length/2}}
+/* חיבור חזק = מספיק לבדו; חלש = מתקבל רק אם הוא מסכים עם מה שכבר נקבע (שלב 4) */
+const edgeOk=e=>!!e&&e.ncc>=.12&&(e.inl>=15||e.inl>=10&&e.ncc>=.35);
+const edgeWeak=e=>!!e&&e.inl>=7&&e.ncc>=.05;
+/* פתרון כולל: לכל תמונה העתקה אפינית x' = a x + b y + tx, y' = c x + d y + ty. ריבועים פחותים על כל זוגות הנקודות + עיגון תמונת הייחוס
+   + משיכה חלשה לדמיון (בלי גזירה/מתיחה) כדי שהשרשרת לא תתעוות. מחזיר Map id→[a,b,tx,c,d,ty] */
+function solve(ids,edges,ref,o){
+ o=o||{};const n=ids.length,ix=new Map(ids.map((id,k)=>[id,k])),N=6*n,M=new Float64Array(N*N),V=new Float64Array(N),lam=o.lam==null?.3:o.lam;
+ const add=(row,val,w)=>{/* row: [[index,coef]...] */for(const[i,ci]of row){V[i]+=w*ci*val;for(const[j,cj]of row)M[i*N+j]+=w*ci*cj}};
+ const deg=new Float64Array(n);/* deg = משקל הנקודות של כל תמונה */
+ for(const e of edges){const i=ix.get(e.a),j=ix.get(e.b);if(i==null||j==null)continue;const np=e.pa.length/2,w=(e.w||1)*Math.min(e.inl,60)/np;deg[i]+=w*np/1e3;deg[j]+=w*np/1e3;
+  for(let k=0;k<np;k++){const xa=e.pa[2*k],ya=e.pa[2*k+1],xb=e.pb[2*k],yb=e.pb[2*k+1],I=6*i,J=6*j;
+   add([[I,xa],[I+1,ya],[I+2,1],[J,-xb],[J+1,-yb],[J+2,-1]],0,w);
+   add([[I+3,xa],[I+4,ya],[I+5,1],[J+3,-xb],[J+4,-yb],[J+5,-1]],0,w)}
+  /* גם החלק הליניארי (קנה מידה וסיבוב) של B = של A כפול זה של החיבור – אחרת תמונות רחוקות מהייחוס "מתכווצות" כדי להקטין שגיאה */
+  const p=e.T[0],q=e.T[1],wl=(e.w||1)*Math.min(e.inl,60)*(o.lin==null?4e4:o.lin),I=6*i,J=6*j;
+  add([[J,1],[I,-p],[I+1,-q]],0,wl);add([[J+1,1],[I,q],[I+1,-p]],0,wl);add([[J+3,1],[I+3,-p],[I+4,-q]],0,wl);add([[J+4,1],[I+3,q],[I+4,-p]],0,wl)}
+ for(let k=0;k<n;k++){const I=6*k,r=lam*Math.max(1,deg[k])*1e4/* קנה מידה: מקדמים × פיקסלים בריבוע */;add([[I,1],[I+4,-1]],0,r);add([[I+1,1],[I+3,1]],0,r);const pr=(o.prior==null?PRIOR:o.prior)*Math.max(1,deg[k])*4e4/* כל התמונות צולמו מאותו מרחק: קנה מידה ~1, בלי סיבוב – משיכה רכה */;add([[I,1]],1,pr);add([[I+4,1]],1,pr);add([[I+1,1]],0,pr);add([[I+3,1]],0,pr)}
+ const R=ix.get(ref),BIG=1e12,id6=[1,0,0,0,1,0];for(let c=0;c<6;c++)add([[6*R+c,1]],id6[c],BIG);
+ const X=cholSolve(M,V,N);if(!X)return null;const out=new Map();ids.forEach((id,k)=>out.set(id,Array.from(X.subarray(6*k,6*k+6))));return out}
+function cholSolve(A,b,n){const L=new Float64Array(n*n);
+ for(let j=0;j<n;j++){let s=A[j*n+j];for(let k=0;k<j;k++)s-=L[j*n+k]*L[j*n+k];if(!(s>1e-12))return null;const d=Math.sqrt(s);L[j*n+j]=d;
+  for(let i=j+1;i<n;i++){let t=A[i*n+j];for(let k=0;k<j;k++)t-=L[i*n+k]*L[j*n+k];L[i*n+j]=t/d}}
+ const y=new Float64Array(n);for(let i=0;i<n;i++){let s=b[i];for(let k=0;k<i;k++)s-=L[i*n+k]*y[k];y[i]=s/L[i*n+i]}
+ const x=new Float64Array(n);for(let i=n-1;i>=0;i--){let s=y[i];for(let k=i+1;k<n;k++)s-=L[k*n+i]*x[k];x[i]=s/L[i*n+i]}return x}
+const afAp=(T,x,y)=>[T[0]*x+T[1]*y+T[2],T[3]*x+T[4]*y+T[5]];
+const simAf=T=>[T[0],-T[1],T[2],T[1],T[0],T[3]];
+const afMul=(A,B)=>[A[0]*B[0]+A[1]*B[3],A[0]*B[1]+A[1]*B[4],A[0]*B[2]+A[1]*B[5]+A[2],A[3]*B[0]+A[4]*B[3],A[3]*B[1]+A[4]*B[4],A[3]*B[2]+A[4]*B[5]+A[5]];
+const afInv=A=>{const d=A[0]*A[4]-A[1]*A[3],a=A[4]/d,b=-A[1]/d,c=-A[3]/d,e=A[0]/d;return[a,b,-(a*A[2]+b*A[5]),c,e,-(c*A[2]+e*A[5])]};
+function edgeRes(e,G){const A=G.get(e.a),B=G.get(e.b);if(!A||!B)return Infinity;let s=0;const np=e.pa.length/2;for(let k=0;k<np;k++){const p=afAp(A,e.pa[2*k],e.pa[2*k+1]),q=afAp(B,e.pb[2*k],e.pb[2*k+1]);s+=(p[0]-q[0])**2+(p[1]-q[1])**2}return Math.sqrt(s/np)}
+function comps(ids,edges){const par=new Map(ids.map(i=>[i,i])),f=x=>par.get(x)===x?x:(par.set(x,f(par.get(x))),par.get(x));for(const e of edges)if(par.has(e.a)&&par.has(e.b))par.set(f(e.a),f(e.b));const C=new Map();for(const i of ids){const r=f(i);if(!C.has(r))C.set(r,[]);C.get(r).push(i)}return[...C.values()].sort((a,b)=>b.length-a.length)}
+/* פתרון חוזר: מסירים את החיבור הסותר ביותר (שארית גבוהה) עד שהכול עקבי */
+function solveRobust(ids,edges,pickRef,o){
+ let E=edges.slice(),G=null,ref=null,main=[];const dropped=[];
+ for(let it=0;it<=edges.length;it++){
+  main=comps(ids,E)[0]||[];ref=pickRef(main);const Em=E.filter(e=>main.includes(e.a)&&main.includes(e.b));
+  G=main.length>1?solve(main,Em,ref,o):new Map([[ref,[1,0,0,0,1,0]]]);if(!G)break;
+  const R=Em.map(e=>({e,r:edgeRes(e,G)})),med=R.length?R.map(x=>x.r).sort((a,b)=>a-b)[R.length>>1]:0,lim=Math.max(o.minRes||60,3.5*med);
+  /* חיבור שהוא הקשר היחיד בין שני חלקים (גשר) לא מוסר – אין לו מה לסתור; שארית גבוהה בו = מגבלת המודל, לא טעות */
+  const n0=comps(main,Em).length,bad=R.filter(x=>!x.e.manual&&x.r>lim).sort((a,b)=>b.r-a.r).find(x=>comps(main,Em.filter(e=>e!==x.e)).length===n0);if(!bad)break;
+  E=E.filter(e=>e!==bad.e);dropped.push(Object.assign(bad.e,{res:+bad.r.toFixed(1)}))}
+ if(G)for(const e of E)e.res=+edgeRes(e,G).toFixed(1);
+ return{G,ref,main,E,dropped}}
+/* נקודות מלאכותיות לחיבור ידני: הזזה (dx,dy) של B ביחס ל-A (ביחידות מלאות של A, B בקנה מידה של A) */
+function manualEdge(a,b,A,B,dx,dy){const k=A.h/B.h,pa=[],pb=[];for(const fx of [.1,.5,.9])for(const fy of [.1,.5,.9]){const xb=fx*B.w,yb=fy*B.h;pb.push(xb,yb);pa.push(dx+xb*k,dy+yb*k)}
+ return{a,b,T:[k,0,dx,dy],pa:Float32Array.from(pa),pb:Float32Array.from(pb),inl:60,ncc:1,manual:true,w:3}}
+/* בניית התוכנית: rows = [[id,...]] (rows[0] = עליונה, משמאל לימין). io.gray(id) → {w,h,g,W,H} (אפור בגודל FEAT, ו-W,H מלאים).
+   o.manual = {'a:b':{dx,dy}}; o.onP(שלב, נעשה, סה"כ). מחזיר {G (Map id→affine), edges, dropped, unplaced:[id], ref, tried} */
+async function plan(cv,rows,io,o){
+ o=o||{};const P=o.onP||(()=>{}),tick=o.tick||(()=>Promise.resolve()),F=new Map(),man=o.manual||{};rows=rows.filter(r=>r.length);const all=[].concat(...rows);
+ const bf=new cv.BFMatcher(cv.NORM_HAMMING,false);
+ try{
+  for(let k=0;k<all.length;k++){const id=all[k];P('feat',k,all.length);await tick();const g=await io.gray(id),s=g.w/g.W,f=feats(cv,g,s);f.w=g.W;f.h=g.H;F.set(id,f)}
+  const E=[],W=[],tried=new Set(),key=(a,b)=>a+':'+b;
+  const tryE=(a,b,dir)=>{const k=key(a,b);if(tried.has(k)||a===b)return null;tried.add(k);const m=man[k];if(m){const e=manualEdge(a,b,F.get(a),F.get(b),m.dx,m.dy);E.push(e);return e}
+   const e=matchPair(cv,bf,F.get(a),F.get(b),dir);if(o.dbg)o.dbg.push([a,b,dir,e?e.n:0,e?e.inl:0,e?e.ncc:0,e?e.alt:0,e&&e.T.map(v=>+v.toFixed(2)).join(',')]);if(e){e.a=a;e.b=b;e.dir=dir;e.ok=edgeOk(e);if(e.ok)E.push(e);else if(edgeWeak(e))W.push(e)}return e};
+  /* 1. בתוך כל שורה: שכנים, ושכן-של-שכן (אם תמונה באמצע חלשה) */
+  const hp=[];rows.forEach(r=>{for(let j=0;j+1<r.length;j++)hp.push([r[j],r[j+1]]);for(let j=0;j+2<r.length;j++)hp.push([r[j],r[j+2]])});
+  for(let k=0;k<hp.length;k++){P('match',k,hp.length);await tick();const e=tryE(hp[k][0],hp[k][1],'h');if(!(e&&e.ok))tryE(hp[k][1],hp[k][0],'h')/* אולי הסדר הפוך */}
+  /* 2. בין שורות (rows[r] מעל rows[r+1]): כל הזוגות, מהסבירים לפחות סבירים (לפי מיקום יחסי בשורה); תמונה שכבר יש לה 2 חיבורים בין השורות – מדלגים */
+  for(let r=0;r+1<rows.length;r++){const U=rows[r],D=rows[r+1],pr=[],cnt=new Map(),rel=(L,j)=>(j+.5)/L.length;
+   U.forEach((u,i)=>D.forEach((d,j)=>pr.push([u,d,Math.abs(rel(U,i)-rel(D,j))+(i===0&&j===0?-1:0)])));pr.sort((x,y)=>x[2]-y[2]);
+   const cap=Math.max(150,3*(U.length+D.length));
+   for(let k=0;k<pr.length&&k<cap;k++){const[u,d]=pr[k];if((cnt.get(u)||0)>=2&&(cnt.get(d)||0)>=2)continue;P('rows',k,Math.min(pr.length,cap));await tick();
+    const e=tryE(u,d,'v');if(e&&e.ok){cnt.set(u,(cnt.get(u)||0)+1);cnt.set(d,(cnt.get(d)||0)+1)}}}
+  /* 3. תמונה בלי שום חיבור: חיפוש מול התמונות הקרובות לה בסדר (כל כיוון) – סדר שגוי לא הורס */
+  for(const id of all){if(E.some(e=>e.a===id||e.b===id))continue;const i0=all.indexOf(id),others=all.filter(x=>x!==id).sort((x,y)=>Math.abs(all.indexOf(x)-i0)-Math.abs(all.indexOf(y)-i0)).slice(0,16);
+   for(let k=0;k<others.length;k++){P('rescue',k,others.length);await tick();const x=others[k];const e1=tryE(x,id,'a');if(e1&&e1.ok)break}}
+  /* 4. פתרון כולל: קודם החיבורים החזקים; אחר כך חיבורים חלשים שמסכימים עם הפתרון (או שני חלשים שמסכימים זה עם זה לתמונה שלא מוקמה) */
+  P('solve',0,1);await tick();
+  const big=rows.reduce((a,r)=>r.length>a.length?r:a,rows[0]),pickRef=m=>{const c=big.filter(x=>m.includes(x));return c.length?c[c.length>>1]:m[m.length>>1]};
+  let S=solveRobust(all,E,pickRef,{});
+  if(S.G&&W.length){const add=[],lim=e=>.04*Math.max(F.get(e.a).h,F.get(e.a).w);
+   for(const e of W){if(S.G.has(e.a)&&S.G.has(e.b)&&edgeRes(e,S.G)<lim(e))add.push(e)}
+   /* תמונה שלא מוקמה: מיקום מוצע מכל חיבור חלש לתמונה שכבר מוקמה; מתקבל אם שניים מסכימים, או אחד עם 12+ נקודות */
+   for(const id of all){if(S.G.has(id))continue;const sug=[];
+    for(const e of W){let T=null;if(e.b===id&&S.G.has(e.a))T=afMul(S.G.get(e.a),simAf(e.T));else if(e.a===id&&S.G.has(e.b))T=afMul(S.G.get(e.b),afInv(simAf(e.T)));if(T)sug.push({e,T})}
+    const f=F.get(id),c=[f.w/2,f.h/2],agree=(x,y)=>{const p=afAp(x.T,c[0],c[1]),q=afAp(y.T,c[0],c[1]);return Math.hypot(p[0]-q[0],p[1]-q[1])<.06*Math.max(f.w,f.h)};
+    const ok=sug.filter(x=>sug.some(y=>y!==x&&agree(x,y)));if(ok.length)add.push(...ok.map(x=>x.e));else{const b1=sug.filter(x=>x.e.inl>=12).sort((x,y)=>y.e.inl-x.e.inl)[0];if(b1)add.push(b1.e)}}
+   if(add.length)S=solveRobust(all,E.concat(add),pickRef,{})}
+  const unplaced=all.filter(id=>!S.G||!S.G.has(id));
+  return{G:S.G||new Map(),edges:S.E,dropped:S.dropped,unplaced,ref:S.ref,tried:tried.size,size:new Map(all.map(id=>[id,[F.get(id).w,F.get(id).h]])),sm:new Map(all.map(id=>[id,F.get(id).sm])),rows}}
+ finally{bf.delete()}}
+/* גבולות, כיסוי (בהקטנה), חיתוך ואזורים שלא צולמו. q = רזולוציית מסכת הכיסוי (פיקסלים בצלע הארוכה) */
+function frame(cv,pl,q){
+ q=q||600;const ids=[...pl.G.keys()];let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;const C=new Map();
+ for(const id of ids){const T=pl.G.get(id),[w,h]=pl.size.get(id),c=[[0,0],[w,0],[w,h],[0,h]].map(p=>afAp(T,p[0],p[1]));C.set(id,c);for(const p of c){x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1])}}
+ const W=x1-x0,H=y1-y0,k=q/Math.max(W,H),mw=Math.max(2,Math.ceil(W*k)),mh=Math.max(2,Math.ceil(H*k)),mask=cv.Mat.zeros(mh,mw,cv.CV_8UC1);
+ try{for(const id of ids){const c=C.get(id),pts=cv.matFromArray(4,1,cv.CV_32SC2,[].concat(...c.map(p=>[Math.round((p[0]-x0)*k),Math.round((p[1]-y0)*k)])));cv.fillConvexPoly(mask,pts,new cv.Scalar(255));pts.delete()}
+  const M=mask.data.slice(),cov=M.reduce((s,v)=>s+(v?1:0),0);
+  /* המלבן הגדול ביותר שמכוסה כולו (שיטת ההיסטוגרמה) */
+  const hgt=new Int32Array(mw);let best={a:0};
+  for(let y=0;y<mh;y++){for(let x=0;x<mw;x++)hgt[x]=M[y*mw+x]?hgt[x]+1:0;const st=[];for(let x=0;x<=mw;x++){const hh=x<mw?hgt[x]:0;let s=x;while(st.length&&st[st.length-1][1]>=hh){const[sx,sh]=st.pop();const a=sh*(x-sx);if(a>best.a)best={a,x0:sx,x1:x,y0:y-sh+1,y1:y+1};s=sx}st.push([s,hh])}}
+  /* חיתוך: אם המלבן המלא מכיל רוב הקיר – אותו; אחרת קיצוץ שוליים כמעט ריקים בלבד */
+  let cr;if(best.a>=.8*cov)cr=best;else{let a=0,b=mw,c=0,d=mh;const colF=x=>{let s=0;for(let y=c;y<d;y++)s+=M[y*mw+x]?1:0;return s/(d-c)},rowF=y=>{let s=0;for(let x=a;x<b;x++)s+=M[y*mw+x]?1:0;return s/(b-a)};
+   for(let ch=1;ch;){ch=0;if(b-a>4&&colF(a)<.35){a++;ch=1}if(b-a>4&&colF(b-1)<.35){b--;ch=1}if(d-c>4&&rowF(c)<.35){c++;ch=1}if(d-c>4&&rowF(d-1)<.35){d--;ch=1}}cr={x0:a,x1:b,y0:c,y1:d}}
+  const crop={x0:x0+cr.x0/k,y0:y0+cr.y0/k,x1:x0+cr.x1/k,y1:y0+cr.y1/k};
+  /* אזורים שלא צולמו בתוך החיתוך: רכיבים קשירים של "לא מכוסה" */
+  const gaps=[],seen=new Uint8Array(mw*mh);
+  for(let y=cr.y0;y<cr.y1;y++)for(let x=cr.x0;x<cr.x1;x++){const i=y*mw+x;if(M[i]||seen[i])continue;let n=0,sx=0,sy=0;const st=[i];seen[i]=1;
+   while(st.length){const j=st.pop(),jx=j%mw,jy=(j/mw)|0;n++;sx+=jx;sy+=jy;for(const[ddx,ddy]of[[1,0],[-1,0],[0,1],[0,-1]]){const X=jx+ddx,Y=jy+ddy;if(X<cr.x0||X>=cr.x1||Y<cr.y0||Y>=cr.y1)continue;const t=Y*mw+X;if(!M[t]&&!seen[t]){seen[t]=1;st.push(t)}}}
+   if(n>=Math.max(30,.004*mw*mh))gaps.push({x:x0+(sx/n+.5)/k,y:y0+(sy/n+.5)/k,n})}
+  return{x0,y0,x1,y1,W,H,corners:C,crop,gaps,cover:cov/(mw*mh)}}
+ finally{mask.delete()}}
+/* משקל מיזוג לפי גודל תמונה (מטמון): מרחק מהשוליים, בהקטנה פי 4, בחזקה 2 – מעבר רך אבל צר יחסית (פחות "רוחות" מפרלקסה) */
+const WCACHE=new Map();
+function weightOf(cv,w,h){const k=w+'x'+h;if(WCACHE.has(k))return WCACHE.get(k);const sw=Math.max(4,Math.round(w/4)),sh=Math.max(4,Math.round(h/4)),m=cv.Mat.zeros(sh,sw,cv.CV_8UC1),d=new cv.Mat();
+ try{m.roi(new cv.Rect(1,1,sw-2,sh-2)).setTo(new cv.Scalar(255));cv.distanceTransform(m,d,cv.DIST_L2,3);let mx=0;const D=d.data32F;for(let i=0;i<D.length;i++)if(D[i]>mx)mx=D[i];const f=new Float32Array(D.length);for(let i=0;i<D.length;i++){const v=D[i]/mx;f[i]=v>0?Math.max(Math.pow(v,WPOW),1e-4*v):0}/* מינימום קטן: גם שולי תמונה שאין עליה אחרת מכוסים */
+  const o={w:sw,h:sh,f};if(WCACHE.size>6)WCACHE.clear();WCACHE.set(k,o);return o}finally{m.delete();d.delete()}}
+/* אריח אחד: X,Y,tw,th בקואורדינטות הפלט; k = קנה מידה פלט/פסיפס; V = פינת החיתוך. io.color(id) → {w,h,data:RGBA} בגודל מלא.
+   מחזיר {rgba:Uint8ClampedArray, cov: שבר המכוסה} – לא מכוסה = פסים אפורים */
+async function tile(cv,pl,fr,io,V,k,X,Y,tw,th){
+ const acc=new Float32Array(tw*th*3),ws=new Float32Array(tw*th);
+ for(const[id,T]of pl.G){const c=fr.corners.get(id);let bx0=1e9,by0=1e9,bx1=-1e9,by1=-1e9;for(const p of c){const u=(p[0]-V.x0)*k-X,v=(p[1]-V.y0)*k-Y;bx0=Math.min(bx0,u);bx1=Math.max(bx1,u);by0=Math.min(by0,v);by1=Math.max(by1,v)}
+  const ix0=Math.max(0,Math.floor(bx0)),iy0=Math.max(0,Math.floor(by0)),ix1=Math.min(tw,Math.ceil(bx1)),iy1=Math.min(th,Math.ceil(by1));if(ix1-ix0<2||iy1-iy0<2)continue;
+  const bw=ix1-ix0,bh=iy1-iy0,im=await io.color(id),src=new cv.Mat(im.h,im.w,cv.CV_8UC4);src.data.set(im.data);
+  /* מיפוי מקור (מלא) → בתוך התיבה: k*(T p - V) - (X+ix0, Y+iy0) */
+  const A=[k*T[0],k*T[1],k*(T[2]-V.x0)-X-ix0,k*T[3],k*T[4],k*(T[5]-V.y0)-Y-iy0],Wt=weightOf(cv,im.w,im.h),sx=im.w/Wt.w,sy=im.h/Wt.h;
+  const MA=cv.matFromArray(2,3,cv.CV_64F,A),MW=cv.matFromArray(2,3,cv.CV_64F,[A[0]*sx,A[1]*sy,A[2]+A[0]*(sx-1)/2+A[1]*(sy-1)/2,A[3]*sx,A[4]*sy,A[5]+A[3]*(sx-1)/2+A[4]*(sy-1)/2]),
+   dst=new cv.Mat(),wsrc=cv.matFromArray(Wt.h,Wt.w,cv.CV_32F,Wt.f),wdst=new cv.Mat(),sz=new cv.Size(bw,bh);
+  try{cv.warpAffine(src,dst,MA,sz,cv.INTER_LINEAR,cv.BORDER_CONSTANT,new cv.Scalar(0,0,0,0));cv.warpAffine(wsrc,wdst,MW,sz,cv.INTER_LINEAR,cv.BORDER_CONSTANT,new cv.Scalar(0));
+   const D=dst.data,Wd=wdst.data32F,g=io.gain?io.gain(id):1;
+   for(let y=0;y<bh;y++){const ro=(iy0+y)*tw+ix0;for(let x=0;x<bw;x++){const i=y*bw+x,w=Wd[i];if(w<=1e-9||D[4*i+3]<128)continue;const o=ro+x;ws[o]+=w;acc[3*o]+=w*D[4*i]*g;acc[3*o+1]+=w*D[4*i+1]*g;acc[3*o+2]+=w*D[4*i+2]*g}}}
+  finally{src.delete();MA.delete();MW.delete();dst.delete();wsrc.delete();wdst.delete()}}
+ const out=new Uint8ClampedArray(tw*th*4);let cov=0;
+ for(let y=0;y<th;y++)for(let x=0;x<tw;x++){const o=y*tw+x,w=ws[o];if(w>1e-9){out[4*o]=acc[3*o]/w;out[4*o+1]=acc[3*o+1]/w;out[4*o+2]=acc[3*o+2]/w;cov++}else{const s=((X+x+Y+y)%24)<3;out[4*o]=s?59:42;out[4*o+1]=s?59:42;out[4*o+2]=s?68:48}out[4*o+3]=255}
+ return{rgba:out,cov:cov/(tw*th)}}
+/* פיצוי חשיפה פשוט: לכל תמונה מקדם בהירות לפי ממוצעי הנקודות המשותפות בתמונות הקטנות (ממוצע גיאומטרי סביב 1) */
+function gains(pl,smalls){const ids=[...pl.G.keys()],ix=new Map(ids.map((id,k)=>[id,k])),n=ids.length,M=new Float64Array(n*n),V=new Float64Array(n);
+ for(const e of pl.edges){const i=ix.get(e.a),j=ix.get(e.b),A=smalls.get(e.a),B=smalls.get(e.b);if(i==null||j==null||!A||!B)continue;let la=0,lb=0,c=0;const np=e.pa.length/2;
+  for(let k=0;k<np;k++){const xa=Math.round(e.pa[2*k]*A.s),ya=Math.round(e.pa[2*k+1]*A.s),xb=Math.round(e.pb[2*k]*B.s),yb=Math.round(e.pb[2*k+1]*B.s);if(xa<0||ya<0||xa>=A.w||ya>=A.h||xb<0||yb<0||xb>=B.w||yb>=B.h)continue;la+=Math.log(4+A.g[ya*A.w+xa]);lb+=Math.log(4+B.g[yb*B.w+xb]);c++}
+  if(c<5)continue;const d=(la-lb)/c,w=c;/* log g_i - log g_j = -(d) */M[i*n+i]+=w;M[j*n+j]+=w;M[i*n+j]-=w;M[j*n+i]-=w;V[i]-=w*d;V[j]+=w*d}
+ for(let k=0;k<n;k++)M[k*n+k]+=.5;const x=cholSolve(M,V,n);const out=new Map();ids.forEach((id,k)=>out.set(id,x?Math.min(1.4,Math.max(.7,Math.exp(x[k]))):1));return out}
+const API={wallsOf,cvReady,feats,matchPair,solve,plan,frame,tile,gains,MAXPH,DEFH,TILE,MAXA,FEAT};
 if(typeof module!=='undefined'&&module.exports)module.exports=API;else root.S3FreeWall=API;
 if(typeof window==='undefined'||!window.S3UI||typeof ACT==='undefined'||!window.S3UI.K3)return;
 
 /* ---------- המסך ---------- */
 const U=window.S3UI,esc=U.esc2,K=U.K3,GOLD='#d4a017',CYAN='#4cc9f0';
-const F={photos:[],seq:0,wall:'',rows:2,cur:0,ov:20,assign:[],view:'edit',res:null,busy:'',prog:null,msg:'',zoom:1,gray:new Map(),cache:{},adj:{},est:null,lay:null,as:null,crop:false,all:false,sugg:null};
+const F={photos:[],seq:0,wall:'',rows:2,cur:0,assign:[],view:'edit',res:null,busy:'',prog:null,msg:'',zoom:1,adj:{},pl:null,as:null,crop:true,all:false,cvs:''};
 let host=null;
 const fmt=cm=>(cm/100).toFixed(2).replace(/\.00$/,'');
 const walls=()=>wallsOf(K.plan,K.map);
@@ -202,15 +247,33 @@ const wallH=w=>w&&w.h?w.h:DEFH;
 /* שורות לפי המשתמש: assign[0] = שורה 1 = התחתונה. rowsOf מחזיר לפי סדר המשתמש */
 const rowsOf=()=>{const R=[];for(let i=0;i<F.rows;i++)R.push((F.assign[i]||[]).filter(id=>F.photos.some(p=>p.id===id)));return R};
 const topFirst=()=>rowsOf().map((r,i)=>({r,i})).filter(x=>x.r.length).reverse();/* עליונה ראשונה; i = מספר שורה אצל המשתמש */
-/* ---- אחסון התמונות המוקטנות (צלע ארוכה ~1600) ב-IndexedDB, כ-Blob; בלי IndexedDB – בזיכרון ---- */
+/* ---- אחסון ב-IndexedDB (מאגר s3fw, טבלה p): תמונה מוקטנת (מפתח = מספר), תמונה ממוזערת ('t'+מספר), מצב המסך ('meta') ותוצאת הבנייה ('res').
+   כך שום דבר לא הולך לאיבוד כשאנדרואיד טוען את האפליקציה מחדש (למשל בזמן שחלון אחר פתוח). בלי IndexedDB – בזיכרון ---- */
 let dbp=null;const mem=new Map();
 const idb=()=>dbp||(dbp=new Promise((res,rej)=>{try{const q=indexedDB.open('s3fw',1);q.onupgradeneeded=()=>q.result.createObjectStore('p');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)}catch(e){rej(e)}}));
 async function bPut(id,b){try{const d=await idb();await new Promise((res,rej)=>{const t=d.transaction('p','readwrite');t.objectStore('p').put(b,id);t.oncomplete=()=>res();t.onerror=t.onabort=()=>rej(t.error)})}catch(e){mem.set(id,b)}}
-async function bGet(id){if(mem.has(id))return mem.get(id);const d=await idb();return new Promise((res,rej)=>{const r=d.transaction('p').objectStore('p').get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function bGet(id){if(mem.has(id))return mem.get(id);try{const d=await idb();return await new Promise((res,rej)=>{const r=d.transaction('p').objectStore('p').get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}catch(e){return undefined}}
 async function bDel(id){mem.delete(id);try{const d=await idb();d.transaction('p','readwrite').objectStore('p').delete(id)}catch(e){}}
 async function bClear(){mem.clear();try{const d=await idb();await new Promise(res=>{const t=d.transaction('p','readwrite');t.objectStore('p').clear();t.oncomplete=t.onerror=t.onabort=()=>res()})}catch(e){}}
+let metaT=0;
+const metaNow=()=>({v:2,photos:F.photos.map(p=>({id:p.id,w:p.w,h:p.h,t:p.t})),seq:F.seq,wall:F.wall,rows:F.rows,cur:F.cur,assign:F.assign,adj:F.adj,crop:F.crop,view:F.view==='res'&&F.res?'res':'edit'});
+function saveMeta(){if(!F.ready)return;clearTimeout(metaT);metaT=setTimeout(()=>{bPut('meta',metaNow())},300)}/* לא לפני שהשחזור הסתיים – שלא ידרוס מצב שמור במצב ריק */
+const flushMeta=()=>{clearTimeout(metaT);return F.ready?bPut('meta',metaNow()):Promise.resolve()};
+/* תוצאת הבנייה: האריחים כ-JPEG + מה שצריך כדי להציג אותה שוב */
+function saveRes(){const R=F.res;if(!R)return bDel('res');return bPut('res',{w:R.w,h:R.h,k:R.k,wall:R.wall&&R.wall.key,tiles:R.tiles.map(t=>({blob:t.blob,x:t.x,y:t.y,w:t.w,h:t.h})),info:R.info})}
+async function restore(){
+ const m=await bGet('meta');if(!m||!Array.isArray(m.photos))return false;
+ F.busy='משחזר את העבודה הקודמת…';draw();const ph=[];
+ for(const p of m.photos){const th=await bGet('t'+p.id);if(!th&&!(await bGet(p.id)))continue;ph.push({id:p.id,w:p.w,h:p.h,t:p.t||0,url:th?URL.createObjectURL(th):''})}
+ Object.assign(F,{photos:ph,seq:Math.max(m.seq|0,...ph.map(p=>p.id),0),wall:m.wall||'',rows:cl(m.rows|0||2,1,6),cur:cl(m.cur|0,0,5),assign:Array.isArray(m.assign)?m.assign:[],adj:m.adj&&typeof m.adj==='object'?m.adj:{},crop:m.crop!==false});
+ const r=m.view==='res'?await bGet('res'):null;
+ if(r&&Array.isArray(r.tiles)&&r.tiles.length&&r.tiles.every(t=>t.blob&&t.blob.size)){F.res={w:r.w,h:r.h,k:r.k,info:r.info||{},wall:walls().find(w=>w.key===r.wall)||wallNow(),tiles:r.tiles.map(t=>Object.assign({},t,{url:URL.createObjectURL(t.blob)}))};F.view='res';F.msg='הקיר שנבנה שוחזר.'}
+ F.busy='';return true}
 function relRes(){if(F.res){for(const t of F.res.tiles){try{URL.revokeObjectURL(t.url)}catch(e){}}}F.res=null}
-function closeAll(){relRes();for(const p of F.photos){try{URL.revokeObjectURL(p.url)}catch(e){}}F.photos=[];F.assign=[];F.gray=new Map();F.cache={};F.adj={};F.est=F.lay=F.as=null;F.view='edit';F.busy='';F.msg='';bClear();if(host){host.remove();host=null}document.body.style.overflow=''}
+/* "חזרה": סוגר את המסך אבל שומר הכול (התמונות, הסימון והקיר שנבנה) – בכניסה הבאה הכול חוזר */
+function closeAll(){if(host)flushMeta();F.ready=false;relRes();for(const p of F.photos){try{URL.revokeObjectURL(p.url)}catch(e){}}F.photos=[];F.assign=[];F.adj={};F.pl=F.as=null;F.view='edit';F.busy='';F.msg='';if(host){host.remove();host=null}document.body.style.overflow=''}
+/* "התחלה מחדש": מוחק את התמונות ואת התוצאה מהטלפון */
+async function wipe(){relRes();for(const p of F.photos){try{URL.revokeObjectURL(p.url)}catch(e){}}Object.assign(F,{photos:[],assign:[],adj:{},pl:null,as:null,view:'edit',msg:'',seq:0});await bClear();await flushMeta();draw()}
 const tag=id=>{for(let i=0;i<F.rows;i++){const k=(F.assign[i]||[]).indexOf(id);if(k>=0)return`ש${i+1}·${k+1}`}return''};
 const numOf=id=>F.photos.findIndex(p=>p.id===id)+1;
 
@@ -241,99 +304,99 @@ async function addFiles(files){
    const k=Math.min(1,1600/Math.max(d.w,d.h)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(d.w*k));c.height=Math.max(1,Math.round(d.h*k));const g=c.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(d.src,0,0,c.width,c.height);
    const big=await U.blobOf(c,.88),k2=Math.min(1,200/Math.max(c.width,c.height)),t=document.createElement('canvas');t.width=Math.max(1,Math.round(c.width*k2));t.height=Math.max(1,Math.round(c.height*k2));t.getContext('2d').drawImage(c,0,0,t.width,t.height);
    const th=await U.blobOf(t,.7),w=c.width,h=c.height;c.width=c.height=t.width=t.height=1;if(!big||!th)throw new Error('x');
-   const id=++F.seq;await bPut(id,big);F.photos.push({id,w,h,t:f._t||0,url:URL.createObjectURL(th)})}
+   const id=++F.seq;await bPut(id,big);await bPut('t'+id,th);F.photos.push({id,w,h,t:f._t||0,url:URL.createObjectURL(th)})}
   catch(e){skipped++}
   finally{if(d)d.close()}}
  if(skipped)F.msg=(F.msg?F.msg+' ':'')+(skipped===1?'תמונה אחת לא נפתחה ודולגה.':skipped+' תמונות לא נפתחו ודולגו.');
  F.busy='';draw()}
-/* תמונה אפורה בגובה HE (כל התמונות מנורמלות לאותו גובה); מפוענחת אחת בכל פעם */
+/* ---- OpenCV: נטען רק כשנכנסים למסך (קובץ מקומי באפליקציה, בלי אינטרנט) ---- */
+let cvP=null;
+function loadCV(){
+ if(cvP)return cvP;
+ F.cvs='טוען את מנוע החיבור (OpenCV)…';
+ cvP=(async()=>{
+  if(!window.cv||!window.cv.Mat&&!window.cv.onRuntimeInitialized&&!(window.cv instanceof Promise)){await new Promise((res,rej)=>{const s=document.createElement('script');s.src='opencv/opencv.js';s.async=true;s.onload=res;s.onerror=()=>rej(new Error('cv-load'));document.head.appendChild(s)})}
+  const r=await cvReady(window.cv);F.cvs='';draw();return r})();
+ cvP.catch(()=>{cvP=null;F.cvs='מנוע החיבור לא נטען. סגרו את המסך ונסו שוב.';draw()});
+ return cvP}
+/* תמונה אפורה בגודל FEAT (לחיפוש המאפיינים) ובגודל המלא השמור */
 async function loadGray(id){
  const d=await U.decode(await bGet(id));
- try{const h=HE,w=cl(Math.round(d.w*HE/d.h),64,1100),c=document.createElement('canvas');c.width=w;c.height=h;
+ try{const k=Math.min(1,FEAT/Math.max(d.w,d.h)),w=Math.max(8,Math.round(d.w*k)),h=Math.max(8,Math.round(d.h*k)),c=document.createElement('canvas');c.width=w;c.height=h;
   const g=c.getContext('2d',{willReadFrequently:true});g.imageSmoothingQuality='high';g.drawImage(d.src,0,0,w,h);const px=g.getImageData(0,0,w,h).data,o=new Uint8Array(w*h);
-  for(let i=0;i<o.length;i++)o[i]=(px[4*i]*77+px[4*i+1]*150+px[4*i+2]*29)>>8;c.width=c.height=1;return{w,h,g:o}}
+  for(let i=0;i<o.length;i++)o[i]=(px[4*i]*77+px[4*i+1]*150+px[4*i+2]*29)>>8;c.width=c.height=1;return{w,h,g:o,W:d.w,H:d.h}}
  finally{d.close()}}
 const lru=[];
 async function loadColor(id){
- const i=lru.findIndex(x=>x.id===id);if(i>=0){const x=lru.splice(i,1)[0];lru.push(x);return x.c}
+ const i=lru.findIndex(x=>x.id===id);if(i>=0){const x=lru.splice(i,1)[0];lru.push(x);return x.im}
  const d=await U.decode(await bGet(id));
- try{const c=document.createElement('canvas');c.width=d.w;c.height=d.h;c.getContext('2d').drawImage(d.src,0,0);lru.push({id,c});while(lru.length>3){const o=lru.shift();o.c.width=o.c.height=1}return c}
+ try{const c=document.createElement('canvas');c.width=d.w;c.height=d.h;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(d.src,0,0);const im={w:d.w,h:d.h,data:g.getImageData(0,0,d.w,d.h).data};c.width=c.height=1;
+  lru.push({id,im});while(lru.length>3)lru.shift();return im}
  finally{d.close()}}
-const optOf=()=>({ov:F.ov/100,adj:F.adj,grays:F.gray,cache:F.cache});
-const patt=()=>{const c=document.createElement('canvas');c.width=c.height=24;const g=c.getContext('2d');g.fillStyle='#2a2a30';g.fillRect(0,0,24,24);g.strokeStyle='#3b3b44';g.lineWidth=2;g.beginPath();g.moveTo(0,24);g.lineTo(24,0);g.stroke();return c};
-/* בנייה באריחים (כל אריח canvas נפרד ≤ TILE×TILE), תמונה מפוענחת אחת בכל פעם; כל אריח הופך מיד ל-JPEG ומשוחרר */
-async function render(){
- const L=F.lay,V=F.crop&&L.crop?L.crop:{x0:0,y0:0,x1:L.W,y1:L.H},vw=V.x1-V.x0,vh=V.y1-V.y0,nr=L.rows.length;
- let k=ROWH/HE;if(vw*vh*k*k>MAXA)k=Math.sqrt(MAXA/(vw*vh));
- const OW=Math.max(8,Math.round(vw*k)),OH=Math.max(8,Math.round(vh*k)),nx=Math.ceil(OW/TILE),ny=Math.ceil(OH/TILE),tiles=[],pat=patt(),photos=[].concat(...L.rows);let n=0;
+/* בנייה באריחים (כל אריח ≤ TILE×TILE): לכל אריח מיזוג רך של התמונות שנופלות בו (OpenCV), ואז JPEG מיד; "לא צולם" על אזורים ריקים */
+async function render(cv){
+ const pl=F.pl,fr=pl.fr,V=F.crop?fr.crop:{x0:fr.x0,y0:fr.y0,x1:fr.x1,y1:fr.y1},vw=V.x1-V.x0,vh=V.y1-V.y0;
+ const k=Math.min(1,Math.sqrt(MAXA/(vw*vh))),OW=Math.max(8,Math.round(vw*k)),OH=Math.max(8,Math.round(vh*k)),nx=Math.ceil(OW/TILE),ny=Math.ceil(OH/TILE),tiles=[];let n=0;
+ const io={color:loadColor,gain:id=>pl.gain.get(id)||1};
  for(let ty=0;ty<ny;ty++)for(let tx=0;tx<nx;tx++){
   const X=tx*TILE,Y=ty*TILE,tw=Math.min(TILE,OW-X),th=Math.min(TILE,OH-Y);
   F.busy='בונה את הקיר – אריח '+(++n)+' מתוך '+nx*ny+'…';F.prog=[n-1,nx*ny];draw();await tick();
-  const cv=document.createElement('canvas');cv.width=tw;cv.height=th;const g=cv.getContext('2d');
-  g.fillStyle=g.createPattern(pat,'repeat');g.fillRect(0,0,tw,th);
+  const t=await tile(cv,pl,fr,io,V,k,X,Y,tw,th),cvs=document.createElement('canvas');cvs.width=tw;cvs.height=th;const g=cvs.getContext('2d');g.putImageData(new ImageData(t.rgba,tw,th),0,0);
   g.fillStyle='#8a8a95';g.font='bold 28px sans-serif';g.textAlign='center';g.textBaseline='middle';g.direction='rtl';
-  for(const q of L.gaps){const cx=((q.x+q.w/2)-V.x0)*k-X,cy=((q.y+q.h/2)-V.y0)*k-Y;if(cx>-100&&cx<tw+100&&cy>-20&&cy<th+20)g.fillText('לא צולם',cx,cy)}
-  for(const p of photos){
-   const px=(p.x-V.x0)*k,py=(p.y-V.y0)*k,pw=p.w*k,ph=p.h*k,ix0=Math.max(px,X),iy0=Math.max(py,Y),ix1=Math.min(px+pw,X+tw),iy1=Math.min(py+ph,Y+th);
-   if(ix1-ix0<1||iy1-iy0<1)continue;
-   const a0=Math.floor(ix0),b0=Math.floor(iy0),w2=Math.max(1,Math.ceil(ix1)-a0),h2=Math.max(1,Math.ceil(iy1)-b0),src=await loadColor(p.id);
-   const t=document.createElement('canvas');t.width=w2;t.height=h2;const tg=t.getContext('2d');tg.imageSmoothingQuality='high';
-   tg.drawImage(src,(a0-px)/pw*src.width,(b0-py)/ph*src.height,w2/pw*src.width,h2/ph*src.height,0,0,w2,h2);
-   const ramp=(r,horiz)=>{if(!r)return;const o=horiz?px-a0:py-b0,s=o+r[0]*k,e=Math.max(s+1,o+r[1]*k),gr=horiz?tg.createLinearGradient(s,0,e,0):tg.createLinearGradient(0,s,0,e);
-    gr.addColorStop(0,'rgba(0,0,0,0)');gr.addColorStop(1,'#000');tg.globalCompositeOperation='destination-in';tg.fillStyle=gr;tg.fillRect(0,0,w2,h2);tg.globalCompositeOperation='source-over'};
-   ramp(p.l,true);ramp(p.t,false);g.drawImage(t,a0-X,b0-Y);t.width=t.height=1}
-  const blob=await U.blobOf(cv,.9);cv.width=cv.height=1;if(!blob||!blob.size)throw new Error('empty');
+  for(const q of fr.gaps){const cx=(q.x-V.x0)*k-X,cy=(q.y-V.y0)*k-Y;if(cx>-100&&cx<tw+100&&cy>-20&&cy<th+20)g.fillText('לא צולם',cx,cy)}
+  const blob=await U.blobOf(cvs,.9);cvs.width=cvs.height=1;if(!blob||!blob.size)throw new Error('empty');
   tiles.push({blob,url:URL.createObjectURL(blob),x:X,y:Y,w:tw,h:th})}
+ lru.length=0;
  return{tiles,w:OW,h:OH,k}}
+const STG={feat:'מאתר נקודות מאפיינות בתמונות',match:'מחפש חיבורים בתוך השורות',rows:'מחבר בין השורות',rescue:'מחפש מקום לתמונות שלא חוברו',solve:'מחשב את המיקום של כל תמונה'};
 async function doBuild(){
  const w=wallNow(),R=topFirst();if(!w||!R.length||F.busy)return;
- relRes();F.view='edit';F.msg='';F.sugg=null;F.busy='מחפש חפיפה בין התמונות…';F.prog=[0,1];draw();
+ relRes();bDel('res');F.view='edit';F.msg='';F.busy=F.cvs||'טוען את מנוע החיבור…';F.prog=null;draw();
  try{
-  await tick();
-  const rows=R.map(x=>x.r),o=optOf();o.onP=(d,n)=>{F.prog=[d,n];F.busy='מחפש חפיפה… '+d+' מתוך '+n;draw()};
-  F.est=await estimate(rows,loadGray,o);
-  F.lay=layout(rows,F.gray,F.est,o);F.lay.map=R.map(x=>x.i);
-  await makeSugg(R);
-  F.res=Object.assign(await render(),{wall:w});F.view='res';F.zoom=1;F.busy='';F.prog=null;draw()}
- catch(e){F.busy='';F.prog=null;F.msg='החיבור נכשל (ייתכן שהזיכרון בטלפון אזל). נסו פחות תמונות או סגרו אפליקציות אחרות.';draw()}}
-/* שורות שבהן יש חיבור לא בטוח: בדיקה אם יש סדר אחר של אותן תמונות עם ציוני חיבור גבוהים יותר (הצעה בלבד – החלה בלחיצה) */
-async function makeSugg(R){
- F.sugg=[];
- for(let r=0;r<R.length;r++){if(!F.lay.seams.some(s=>s.t==='h'&&s.r===r&&!s.ok))continue;
-  F.busy='בודק אם יש סדר מתאים יותר בשורה '+(R[r].i+1)+'…';F.prog=[0,1];draw();
-  const q=await suggestOrder(R[r].r,F.gray,(d,n)=>{F.prog=[d,n];draw()});if(q.changed)F.sugg.push({ui:R[r].i,order:q.order,score:q.score,cur:q.cur})}}
-/* בנייה מחדש אחרי תיקון ידני / שינוי חיתוך – הזוגות שכבר חושבו נשמרים */
-async function rebuild(){
- if(F.busy)return;relRes();F.view='edit';F.busy='מרכיב מחדש…';F.prog=[0,1];draw();
- try{const R=topFirst(),rows=R.map(x=>x.r),o=optOf();F.est=await estimate(rows,loadGray,o);F.lay=layout(rows,F.gray,F.est,o);F.lay.map=R.map(x=>x.i);
-  F.res=Object.assign(await render(),{wall:wallNow()});F.view='res';F.busy='';F.prog=null;draw()}
- catch(e){F.busy='';F.prog=null;F.msg='הבנייה מחדש נכשלה.';draw()}}
-/* ---- שמירה ושיתוף: JPEG תקין (FF D8 FF, גודל > 0, ניתן לפענוח), שם עם .jpg, ≤4096 בצלע ארוכה ו-≤16M פיקסלים ---- */
+  const cv=(await loadCV()).cv;
+  const rows=R.map(x=>x.r);
+  const pl=await plan(cv,rows,{gray:loadGray},{manual:F.adj,tick,onP:(s,d,n)=>{F.prog=[d,n||1];F.busy=(STG[s]||'מעבד')+'… '+(n>1?(d+1)+' מתוך '+n:'');draw()}});
+  if(!pl.G.size)throw new Error('none');
+  pl.fr=frame(cv,pl,600);pl.gain=gains(pl,pl.sm);pl.sm=null;pl.map=R.map(x=>x.i);F.pl=pl;
+  const r=await render(cv);
+  F.res=Object.assign(r,{wall:w,info:infoOf(pl)});F.view='res';F.zoom=1;F.busy='';F.prog=null;await saveRes();await flushMeta();draw()}
+ catch(e){F.busy='';F.prog=null;F.msg=e&&e.message==='cv-load'?'מנוע החיבור לא נטען.':'החיבור נכשל (ייתכן שהזיכרון בטלפון אזל). נסו פחות תמונות או סגרו אפליקציות אחרות.';draw()}}
+/* סיכום לתצוגה (נשמר עם התוצאה): כמה חיבורים, אילו תמונות לא חוברו, ואילו זוגות שכנים בשורה לא חוברו ישירות */
+function infoOf(pl){
+ const has=(a,b)=>pl.edges.some(e=>e.a===a&&e.b===b||e.a===b&&e.b===a),pairs=[];
+ pl.rows.forEach((r,ri)=>{for(let j=0;j+1<r.length;j++)pairs.push({a:r[j],b:r[j+1],row:pl.map[ri],ok:has(r[j],r[j+1]),manual:!!F.adj[r[j]+':'+r[j+1]]})});
+ return{unplaced:pl.unplaced.slice(),edges:pl.edges.length,pairs,rows:pl.rows.map(r=>r.slice()),map:pl.map.slice()}}
+/* ---- שמירה ושיתוף: JPEG תקין (FF D8 FF, גודל > 0, ניתן לפענוח), שם עם .jpg, ≤16M פיקסלים ---- */
 const isJpeg=u=>u&&u.length>3&&u[0]===0xFF&&u[1]===0xD8&&u[2]===0xFF;
 async function bytesOk(blob){if(!blob||!blob.size)return null;const u=new Uint8Array(await blob.arrayBuffer());return isJpeg(u)?u:null}
 async function finalBlob(){
  const R=F.res;if(!R)return null;
- const sc=Math.min(1,4096/Math.max(R.w,R.h),Math.sqrt(16e6/(R.w*R.h)));let blob;
- if(sc>=1&&R.tiles.length===1)blob=R.tiles[0].blob;
+ const sc=Math.min(1,Math.sqrt(16e6/(R.w*R.h)),12000/Math.max(R.w,R.h)),one=sc>=1&&R.tiles.length===1;let blob;R.down=null;
+ if(one)blob=R.tiles[0].blob;
  else{const w=Math.max(8,Math.round(R.w*sc)),h=Math.max(8,Math.round(R.h*sc)),c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.imageSmoothingQuality='high';g.fillStyle='#2a2a30';g.fillRect(0,0,w,h);
   for(const t of R.tiles){const b=await createImageBitmap(t.blob);g.drawImage(b,Math.floor(t.x*sc),Math.floor(t.y*sc),Math.ceil(t.w*sc)+1,Math.ceil(t.h*sc)+1);b.close()}
-  blob=await U.blobOf(c,.9);c.width=c.height=1;R.down=[w,h]}
+  blob=await U.blobOf(c,.9);c.width=c.height=1;if(sc<1)R.down=[w,h]}
  const u=await bytesOk(blob);if(!u)throw new Error('bad-jpeg');
  try{const b=await createImageBitmap(blob);const ok=b.width>0&&b.height>0;b.close();if(!ok)throw 0}catch(e){throw new Error('bad-jpeg')}
- return{blob,u8:u,w:sc>=1&&R.tiles.length===1?R.w:Math.round(R.w*sc),h:sc>=1&&R.tiles.length===1?R.h:Math.round(R.h*sc)}}
-async function outFile(blob,u8,name,mode){
- if(typeof outSave==='function')return outSave({name,data:u8,mime:'image/jpeg'},mode);
- const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.append(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},1500)}
+ return{blob,u8:u,w:one?R.w:Math.round(R.w*sc),h:one?R.h:Math.round(R.h*sc)}}
+const b64=u=>{let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(s)};
+const isNat=()=>{const C=window.Capacitor;return!!(C&&C.isNativePlatform&&C.isNativePlatform())};
+/* שמירה לגלריה: בטלפון – ישר לגלריה (Pictures/LargePami) בלי חלון "שמירה בשם", כך שהאפליקציה לא יוצאת לרקע.
+   אם זה לא אפשרי (אנדרואיד ישן מ-10 או גרסה ישנה של האפליקציה) – חלון השיתוף, שבו אפשר לבחור "שמירה". במחשב – הורדה. */
+async function toGallery(f,name){
+ const C=window.Capacitor;
+ if(isNat()&&C.Plugins&&C.Plugins.SaveFile){try{await C.Plugins.SaveFile.saveImage({filename:name,mime:'image/jpeg',data:b64(f.u8)});return 'gallery'}catch(e){const m=String(e&&(e.message||e));if(!/unsupported|not implemented|unimplemented/i.test(m))throw e}}
+ if(isNat()){await share(f,name);return 'share'}
+ const a=document.createElement('a');a.href=URL.createObjectURL(f.blob);a.download=name;document.body.append(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},1500);return 'download'}
+async function share(f,name){
+ if(typeof saveFile==='function')return saveFile(name,f.u8,'image/jpeg');/* index.html: Filesystem (CACHE) + Share */
+ const a=document.createElement('a');a.href=URL.createObjectURL(f.blob);a.download=name;document.body.append(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},1500)}
 async function save(mode){
- if(!F.res||F.saving)return;F.saving=1;
- try{const f=await finalBlob();F.msg=F.res.down?`התמונה הוקטנה לשמירה ל-${f.w}×${f.h} (מגבלת המכשיר). לשמירה ברזולוציה מלאה: "שמרו את כל האריחים".`:'';
-  await outFile(f.blob,f.u8,'LargePami_wall_'+Date.now()+'.jpg',mode)}
- catch(e){F.msg='השמירה נכשלה (הקובץ לא נוצר תקין). נסו "שמרו את כל האריחים".'}
- finally{F.saving=0;draw()}}
-async function saveTiles(){
- if(!F.res||F.saving)return;F.saving=1;
- try{const R=F.res,st=Date.now();let i=0;for(const t of R.tiles){const u=await bytesOk(t.blob);if(!u)throw new Error('bad');i++;await outFile(t.blob,u,`LargePami_wall_${st}_${Math.floor(t.y/TILE)+1}-${Math.floor(t.x/TILE)+1}.jpg`,'dl')}}
- catch(e){F.msg='שמירת האריחים נכשלה.'}
+ if(!F.res||F.saving)return;F.saving=1;F.msg='מכין את הקובץ…';draw();
+ try{await saveRes();await flushMeta();const f=await finalBlob(),name='LargePami_wall_'+Date.now()+'.jpg',dn=F.res.down?` (הוקטן ל-${f.w}×${f.h} – עד 16 מיליון פיקסלים)`:'';
+  if(mode==='share'){await share(f,name);F.msg=''}
+  else{const how=await toGallery(f,name);F.msg=how==='gallery'?'✓ נשמר בגלריה, בתיקייה Pictures/LargePami'+dn:how==='share'?'בחרו בחלון השיתוף איפה לשמור'+dn:'הקובץ הורד'+dn}}
+ catch(e){F.msg='השמירה נכשלה'+(e&&e.message&&e.message!=='bad-jpeg'?': '+String(e.message).slice(0,80):' (הקובץ לא נוצר תקין)')+'. נסו "שתפו".'}
  finally{F.saving=0;draw()}}
 
 const CSS=document.createElement('style');
@@ -354,7 +417,8 @@ CSS.textContent=`.s3fw{position:fixed;inset:0;z-index:300;background:var(--bg);c
 .s3fw .chips{display:flex;flex-wrap:wrap;gap:6px}.s3fw .busy{padding:8px;border-radius:10px;background:var(--card);margin:8px 0}.s3fw progress{width:100%;height:10px}
 .s3fw .view{overflow:auto;border:1px solid var(--line);border-radius:10px;margin:8px 0;max-height:70vh;touch-action:pan-x pan-y pinch-zoom}.s3fw .view .cv{position:relative}.s3fw .view img{position:absolute;display:block}
 .s3fw svg.wm{display:block;width:100%;height:230px;background:var(--bg);border:1px solid var(--line);border-radius:10px;margin:8px 0}.s3fw svg.wm [data-fw]{cursor:pointer}
-.s3fw canvas.adj{display:block;width:100%;background:#111;border-radius:10px;touch-action:none}.s3fw input[type=range]{width:100%;min-height:44px}`;
+.s3fw .miss{display:flex;align-items:center;gap:8px;border:2px solid #d33;border-radius:10px;padding:6px;margin:6px 0}.s3fw .miss img{width:56px;height:56px;object-fit:cover;border-radius:8px}.s3fw .miss span{flex:1}
+.s3fw canvas.adj{display:block;width:100%;background:#111;border-radius:10px;touch-action:none}`;
 document.head.appendChild(CSS);
 
 /* מפת הקירות: כל קיר ממוספר (תווית בצבע בולט באמצעו), הנבחר בזהב; עיגול ירוק + "התחלה" = הצד השמאלי כשעומדים מול הקיר */
@@ -375,39 +439,43 @@ function wallMap(WL){
   h+=`<circle cx="${sel.x1}" cy="${sel.y1}" r="${u*6}" fill="#3ccf6e" stroke="#101014" stroke-width="${u}"/><text x="${sel.x1-ux*u*10}" y="${sel.y1-uy*u*10}" text-anchor="middle" dominant-baseline="central" font-size="${u*8}" font-weight="700" fill="#3ccf6e">התחלה</text>`}
  return h+'</svg>'}
 const wName=w=>`קיר ${w.n}${w.name?' · '+w.name:''}`;
-const seamName=s=>s.t==='h'?`שורה ${F.lay.map[s.r]+1}: תמונה ${numOf(s.a)} ו־${numOf(s.b)}`:`בין שורה ${F.lay.map[s.r+1]+1} לשורה ${F.lay.map[s.r]+1}`;
+/* תיקון ידני: B שקופה למחצה מעל A (שתיהן בגובה ADJH), גרירה → הזזה. נשמר ביחידות התמונה המלאה של A */
+const ADJH=480;
+async function adjImg(id){const d=await U.decode(await bGet(id));try{const k=ADJH/d.h,c=document.createElement('canvas');c.width=Math.max(8,Math.round(d.w*k));c.height=ADJH;c.getContext('2d').drawImage(d.src,0,0,c.width,c.height);return{c,W:d.w,H:d.h}}finally{d.close()}}
+async function openAdj(a,b){
+ if(F.busy)return;F.busy='פותח את התיקון הידני…';draw();
+ try{const A=await adjImg(a),B=await adjImg(b),m=F.adj[a+':'+b],ka=ADJH/A.H;F.as={a,b,A,B,dx:m?Math.round(m.dx*ka):Math.round(A.c.width*.7),dy:m?Math.round(m.dy*ka):0,px:1};F.view='adj'}
+ catch(e){F.msg='לא הצלחתי לפתוח את התמונות.'}
+ F.busy='';draw()}
 function drawAdj(){
- const cv=host&&host.querySelector('#fwadj');if(!cv||!F.as)return;const a=F.as,A=a.A,B=a.B,bw=B.w*a.sc,bh=B.h*a.sc;
- const x0=Math.min(0,a.dx),y0=Math.min(0,a.dy),x1=Math.max(A.w,a.dx+bw),y1=Math.max(A.h,a.dy+bh),sc=Math.min(1.5,(cv.parentNode.clientWidth||320)/(x1-x0)),W=Math.max(1,Math.round((x1-x0)*sc)),H=Math.max(1,Math.round((y1-y0)*sc));
+ const cv=host&&host.querySelector('#fwadj');if(!cv||!F.as)return;const a=F.as,A=a.A.c,B=a.B.c;
+ const x0=Math.min(0,a.dx),y0=Math.min(0,a.dy),x1=Math.max(A.width,a.dx+B.width),y1=Math.max(A.height,a.dy+B.height),sc=Math.min(1.5,(cv.parentNode.clientWidth||320)/(x1-x0)),W=Math.max(1,Math.round((x1-x0)*sc)),H=Math.max(1,Math.round((y1-y0)*sc));
  cv.width=W;cv.height=H;a.px=sc;const g=cv.getContext('2d');g.fillStyle='#111';g.fillRect(0,0,W,H);
- const put=(im,x,y,al,s)=>{if(!im.cv){const c=document.createElement('canvas');c.width=im.w;c.height=im.h;const t=c.getContext('2d'),d=t.createImageData(im.w,im.h);for(let i=0;i<im.g.length;i++){d.data[4*i]=d.data[4*i+1]=d.data[4*i+2]=im.g[i];d.data[4*i+3]=255}t.putImageData(d,0,0);im.cv=c}
-  g.globalAlpha=al;g.drawImage(im.cv,(x-x0)*sc,(y-y0)*sc,im.w*s*sc,im.h*s*sc)};
- put(A,0,0,1,1);put(B,a.dx,a.dy,.5,a.sc);g.globalAlpha=1}
+ g.drawImage(A,(0-x0)*sc,(0-y0)*sc,A.width*sc,A.height*sc);g.globalAlpha=.5;g.drawImage(B,(a.dx-x0)*sc,(a.dy-y0)*sc,B.width*sc,B.height*sc);g.globalAlpha=1}
 function draw(){
- if(!host)return;const w=wallNow(),WL=walls(),R=rowsOf();
+ if(!host)return;const w=wallNow(),WL=walls(),R=rowsOf();saveMeta();
  const bz=F.busy?`<div class="busy" role="status">${esc(F.busy)}${F.prog?`<progress max="${F.prog[1]||1}" value="${F.prog[0]||0}"></progress>`:''}</div>`:'';
  if(F.view==='adj'&&F.as){const a=F.as;
-  host.querySelector('#fwd').innerHTML=`<h3>תיקון חיבור ידני</h3><p class="tips">${esc(seamName(a.seam))}. התמונה השנייה שקופה למחצה מעל הראשונה. גררו באצבע (או לחצו על החצים) עד שהחפיפה מתיישרת.</p>
-  <div class="rw">${[a.seam.a,a.seam.b].map(id=>{const p=F.photos.find(x=>x.id===id);return p?`<figure style="margin:0;flex:1"><img src="${p.url}" alt="" style="width:100%;border-radius:8px"><figcaption class="tips">תמונה ${numOf(id)}</figcaption></figure>`:''}).join('')}</div><p class="tips">ציון ההתאמה: ${(a.seam.score||0).toFixed(2)}${a.seam.ok?'':' – נמוך. בדקו למעלה אם שתי התמונות באמת שכנות, ואם לא – חזרו לסימון ותקנו את הסדר.'}</p>
+  host.querySelector('#fwd').innerHTML=`<h3>חיבור ידני</h3><p class="tips">תמונה ${numOf(a.b)} (שקופה למחצה) מעל תמונה ${numOf(a.a)}. גררו באצבע (או לחצו על החצים) עד שהחלק המשותף מתיישר.</p>
   <canvas class="adj" id="fwadj" aria-label="יישור ידני"></canvas>
-  <div class="rw"><button class="b" data-fw="ar" data-x="-2" data-y="0" aria-label="שמאלה">◀</button><button class="b" data-fw="ar" data-x="2" data-y="0" aria-label="ימינה">▶</button><button class="b" data-fw="ar" data-x="0" data-y="-2" aria-label="למעלה">▲</button><button class="b" data-fw="ar" data-x="0" data-y="2" aria-label="למטה">▼</button></div>
-  <div class="rw"><button class="b g" data-fw="aok">שמרו ובנו מחדש</button><button class="b" data-fw="aauto">חזרה לזיהוי אוטומטי</button><button class="b" data-fw="acx">ביטול</button></div>`;drawAdj();return}
- if(F.view==='res'&&F.res&&F.lay){
-  const r=F.res,W=r.wall,Z=Math.round(F.zoom*100),unsure=F.lay.seams.filter(s=>!s.ok),shown=F.all?F.lay.seams:unsure.concat(F.lay.seams.filter(s=>s.manual&&s.ok));
+  <div class="rw"><button class="b" data-fw="ar" data-x="-4" data-y="0" aria-label="שמאלה">◀</button><button class="b" data-fw="ar" data-x="4" data-y="0" aria-label="ימינה">▶</button><button class="b" data-fw="ar" data-x="0" data-y="-4" aria-label="למעלה">▲</button><button class="b" data-fw="ar" data-x="0" data-y="4" aria-label="למטה">▼</button></div>
+  <div class="rw"><button class="b g" data-fw="aok">שמרו ובנו מחדש</button>${F.adj[a.a+':'+a.b]?'<button class="b" data-fw="aauto">חזרה לחיבור אוטומטי</button>':''}<button class="b" data-fw="acx">ביטול</button></div>`;drawAdj();return}
+ if(F.view==='res'&&F.res){
+  const r=F.res,W=r.wall||w,I=r.info||{},Z=Math.round(F.zoom*100),miss=(I.unplaced||[]).filter(id=>F.photos.some(p=>p.id===id)),bp=(I.pairs||[]).filter(p=>!p.ok),shown=F.all?(I.pairs||[]):bp;
+  const nb=id=>{for(const row of I.rows||[]){const j=row.indexOf(id);if(j>=0)return j>0?[row[j-1],id]:row[j+1]!=null?[id,row[j+1]]:null}return null};
   host.querySelector('#fwd').innerHTML=`<h3>הקיר הבנוי</h3>
   <div class="exp">ניסיון – לא נשמר במערכת. התמונה נשארת רק בטלפון, עד שתשמרו אותה בעצמכם.</div>
-  <p class="tips">${esc(wName(W))} · אורך ${fmt(W.len)} מ' · גובה ${fmt(wallH(W))} מ'${W.h?'':' (גובה משוער)'} · תוצאה ${r.w}×${r.h} פיקסלים${r.tiles.length>1?' ב-'+r.tiles.length+' אריחים':''}</p>
+  <p class="tips">${W?esc(wName(W))+` · אורך ${fmt(W.len)} מ' · גובה ${fmt(wallH(W))} מ'${W.h?'':' (גובה משוער)'} · `:''}תוצאה ${r.w}×${r.h} פיקסלים${r.tiles.length>1?' ב-'+r.tiles.length+' אריחים':''}</p>
   ${bz}${F.msg?`<div class="busy" role="status">${esc(F.msg)}</div>`:''}
+  ${miss.map(id=>{const p=F.photos.find(x=>x.id===id),q=nb(id);return`<div class="miss" role="alert">${p&&p.url?`<img src="${p.url}" alt="">`:''}<span>תמונה ${numOf(id)} לא נמצא לה חיבור, והיא לא בקיר.</span>${q?`<button class="b" data-fw="man" data-a="${q[0]}" data-b="${q[1]}">חברו ידנית</button>`:''}</div>`}).join('')}
   <div class="rw"><button class="b" data-fw="zo" aria-label="הקטנה">−</button><button class="b" data-fw="zi" aria-label="הגדלה">+</button><button class="b" data-fw="z1">התאמה למסך</button></div>
   <div class="view" id="fwv"><div class="cv" style="width:${Z}%;aspect-ratio:${r.w}/${r.h}">${r.tiles.map(t=>`<img src="${t.url}" alt="" style="left:${(100*t.x/r.w).toFixed(4)}%;top:${(100*t.y/r.h).toFixed(4)}%;width:${(100*t.w/r.w).toFixed(4)}%;height:${(100*t.h/r.h).toFixed(4)}%">`).join('')}</div></div>
   <p class="tips">אפשר לגלול, לצבוט להגדלה או ללחוץ + ו־−. אזור מסומן "לא צולם" = לא היו שם תמונות.</p>
-  ${(F.sugg||[]).map((q,i)=>`<div class="exp">המערכת מצאה סדר אחר בשורה ${q.ui+1} (ציון חיבורים ${q.score} במקום ${q.cur}). להחיל? <div class="rw"><button class="b g" data-fw="sapp" data-i="${i}">החילו את הסדר החדש</button><button class="b" data-fw="sno" data-i="${i}">התעלמו</button></div></div>`).join('')}
-  ${F.lay.crop?`<div class="rw"><button class="b${F.crop?' g':''}" data-fw="crop" aria-pressed="${F.crop}">חתכו שוליים ריקים</button></div>`:''}
-  <h3>חיבורים${unsure.length?` – ${unsure.length} לא בטוחים`:''}</h3><p class="tips">לחיצה על חיבור מאפשרת לתקן אותו ידנית. באדום = המערכת לא בטוחה (נעשתה חלוקה לפי מחוון החפיפה).</p>
-  <div class="chips">${shown.map(s=>`<button class="b${s.ok?'':' bad'}" data-fw="seam" data-i="${F.lay.seams.indexOf(s)}">${esc(seamName(s))} · ${s.manual?'ידני':(s.ok?'בטוח':'לא בטוח')+' ('+(s.score||0).toFixed(2)+')'}</button>`).join('')||'<span class="tips">כל החיבורים בטוחים.</span>'}</div>
-  <div class="rw"><button class="b" data-fw="all">${F.all?'הסתר חיבורים בטוחים':'הצג את כל החיבורים ('+F.lay.seams.length+')'}</button></div>
-  <div class="rw"><button class="b g" data-fw="dl">שמרו לגלריה / הורידו</button><button class="b g" data-fw="sh">שתפו (וואטסאפ וכו')</button></div>
-  ${r.tiles.length>1?`<div class="rw"><button class="b" data-fw="tiles">שמרו את כל האריחים (ברזולוציה מלאה)</button></div>`:''}
+  <div class="rw"><button class="b${F.crop?' g':''}" data-fw="crop" aria-pressed="${F.crop}">חיתוך שוליים ריקים: ${F.crop?'פעיל':'כבוי'}</button></div>
+  <h3>חיבורים${bp.length?` – ${bp.length} זוגות שכנים בלי חיבור ישיר`:''}</h3><p class="tips">החיבור אוטומטי. זוג שכנים בלי חיבור ישיר יכול עדיין להיות במקום הנכון דרך תמונות אחרות. אם משהו נראה לא נכון – לחצו על הזוג וחברו ידנית.</p>
+  <div class="chips">${shown.map(p=>`<button class="b${p.ok?'':' bad'}" data-fw="man" data-a="${p.a}" data-b="${p.b}">שורה ${p.row+1}: ${numOf(p.a)} ו־${numOf(p.b)} · ${p.manual?'ידני':p.ok?'מחובר':'לא חובר'}</button>`).join('')||'<span class="tips">כל השכנים חוברו.</span>'}</div>
+  <div class="rw"><button class="b" data-fw="all">${F.all?'הסתר זוגות מחוברים':'הצג את כל הזוגות ('+(I.pairs||[]).length+')'}</button></div>
+  <div class="rw"><button class="b g" data-fw="dl" ${F.saving?'disabled':''}>שמרו לגלריה</button><button class="b g" data-fw="sh" ${F.saving?'disabled':''}>שתפו (וואטסאפ וכו')</button></div>
   <div class="rw"><button class="b" data-fw="back">חזרה לסימון</button></div>`;return}
  const nUsed=new Set(R.flat()).size;
  const h=`<h3>1. התמונות</h3>
@@ -424,26 +492,25 @@ function draw(){
  <p class="tips">שורה 1 = למטה (ליד הרצפה), שורה 2 מעליה וכן הלאה. התמונה הראשונה בשורה = הכי שמאלית. לחצו על שורה, ואז געו בתמונות לפי הסדר משמאל לימין. נגיעה חוזרת מסירה תמונה מהשורה.</p>
  <div class="chips" role="group" aria-label="בחירת שורה">${Array.from({length:F.rows},(_,i)=>`<button class="b${i===F.cur?' g':''}" data-fw="row" data-n="${i}" aria-pressed="${i===F.cur}">שורה ${i+1} (${R[i].length})</button>`).join('')}</div>
  <h3>4. בנייה</h3>
- <p class="tips">המערכת מחפשת את החלק המשותף בין כל שתי תמונות ומחברת שם.</p>
- <label class="tips" for="fwov">חפיפה משוערת (בשימוש רק כשהמערכת לא בטוחה בחיבור): <b id="fwovv">${F.ov}%</b></label>
- <input type="range" id="fwov" min="0" max="40" step="1" value="${F.ov}">
+ <p class="tips">המערכת מוצאת לבד את החלק המשותף בין התמונות (גם בין השורות) ומחברת. תמונה שלא נמצא לה חיבור תסומן, ואפשר לחבר אותה ידנית.</p>
+ ${F.cvs?`<div class="busy" role="status">${esc(F.cvs)}</div>`:''}
  <div class="rw"><button class="b g" data-fw="build" ${!w||!nUsed||F.busy?'disabled':''}>בנו את הקיר</button></div>
- ${!w?'<p class="tips">בחרו קיר כדי להמשיך.</p>':!nUsed?'<p class="tips">סמנו לפחות תמונה אחת לשורה.</p>':''}`;
+ ${!w?'<p class="tips">בחרו קיר כדי להמשיך.</p>':!nUsed?'<p class="tips">סמנו לפחות תמונה אחת לשורה.</p>':''}
+ ${F.photos.length?`<div class="rw"><button class="b bad" data-fw="wipe" ${F.busy?'disabled':''}>התחלה מחדש (מחיקת התמונות מהמסך הזה)</button></div>`:''}`;
  host.querySelector('#fwd').innerHTML=h}
 
-function open(){
- if(host)return;bClear();
+async function open(){
+ if(host)return;
  host=document.createElement('div');host.className='s3fw';host.setAttribute('role','dialog');host.setAttribute('aria-label','צילום חופשי של קיר');
  host.innerHTML=`<div class="rw" style="margin-top:0"><button class="b" data-fw="close">חזרה</button></div>
  <h2>צילום חופשי של קיר (ניסיון)</h2>
- <div class="exp">ניסיון – לא נשמר במערכת ולא נשלח לשרת. הכול נשאר בטלפון.</div>
+ <div class="exp">ניסיון – לא נשמר במערכת ולא נשלח לשרת. הכול נשאר בטלפון, גם אם יוצאים מהמסך.</div>
  <ol><li>צלמו או בחרו מהגלריה את תמונות הקיר.</li><li>בחרו קיר (במפה) ומספר שורות.</li><li>לכל שורה סמנו את התמונות משמאל לימין (שורה 1 = למטה).</li><li>לחצו "בנו את הקיר".</li></ol>
- <p class="tips">טיפים: עמדו תמיד באותו מרחק, ישר מול הקיר, ובכל תמונה השאירו חפיפה של כשליש עם התמונה השכנה. תמונות לאורך ולרוחב מתאימות.</p>
+ <p class="tips"><b>איך מצלמים:</b> עמדו תמיד באותו מרחק מהקיר, החזיקו את הטלפון ישר (לא מוטה למטה או למעלה), וזוזו הצידה בין תמונה לתמונה כך שכשליש מכל תמונה יופיע גם בתמונה הבאה. בין השורות – גם חפיפה של כשליש.</p>
  <div id="fwd"></div>
  <input type="file" accept="image/*" capture="environment" id="fwcam" hidden><input type="file" accept="image/*" multiple id="fwgal" hidden>`;
  document.body.append(host);document.body.style.overflow='hidden';
- host.addEventListener('change',e=>{const i=e.target;if(i&&(i.id==='fwcam'||i.id==='fwgal')){const L=[...i.files];i.value='';addFiles(L)}else if(i&&i.id==='fwwall'){F.wall=i.value;F.est=F.lay=null;draw()}});
- host.addEventListener('input',e=>{const i=e.target;if(i&&i.id==='fwov'){F.ov=cl(+i.value|0,0,40);const v=host.querySelector('#fwovv');if(v)v.textContent=F.ov+'%'}});
+ host.addEventListener('change',e=>{const i=e.target;if(i&&(i.id==='fwcam'||i.id==='fwgal')){const L=[...i.files];i.value='';addFiles(L)}else if(i&&i.id==='fwwall'){F.wall=i.value;draw()}});
  let drag=null;
  host.addEventListener('pointerdown',e=>{if(e.target.id==='fwadj'&&F.as){drag={x:e.clientX,y:e.clientY,dx:F.as.dx,dy:F.as.dy};try{e.target.setPointerCapture(e.pointerId)}catch(_){}}});
  host.addEventListener('pointermove',e=>{if(drag&&F.as){F.as.dx=Math.round(drag.dx+(e.clientX-drag.x)/F.as.px);F.as.dy=Math.round(drag.dy+(e.clientY-drag.y)/F.as.px);drawAdj()}});
@@ -452,29 +519,28 @@ function open(){
   if(a==='close')return closeAll();
   if(a==='cam')return host.querySelector('#fwcam').click();
   if(a==='gal')return host.querySelector('#fwgal').click();
-  if(a==='wall'){F.wall=b.dataset.key;F.est=F.lay=null}
-  else if(a==='del'){const p=F.photos.find(x=>x.id===id);if(p){try{URL.revokeObjectURL(p.url)}catch(e){}}F.photos=F.photos.filter(x=>x.id!==id);F.assign=F.assign.map(r=>(r||[]).filter(x=>x!==id));F.gray.delete(id);bDel(id)}
+  if(a==='wall'){F.wall=b.dataset.key}
+  else if(a==='del'){const p=F.photos.find(x=>x.id===id);if(p){try{URL.revokeObjectURL(p.url)}catch(e){}}F.photos=F.photos.filter(x=>x.id!==id);F.assign=F.assign.map(r=>(r||[]).filter(x=>x!==id));bDel(id);bDel('t'+id)}
   else if(a==='mv'){const i=F.photos.findIndex(x=>x.id===id),j=i+(+b.dataset.d);if(i>=0&&j>=0&&j<F.photos.length){const t=F.photos[i];F.photos[i]=F.photos[j];F.photos[j]=t}}
   else if(a==='rows'){F.rows=cl(+b.dataset.n|0,1,6);F.cur=Math.min(F.cur,F.rows-1);F.assign.length=Math.min(F.assign.length,F.rows)}
   else if(a==='row')F.cur=cl(+b.dataset.n|0,0,F.rows-1);
   else if(a==='pick'){const r=F.assign[F.cur]||(F.assign[F.cur]=[]),k=r.indexOf(id);if(k>=0)r.splice(k,1);else{for(let i=0;i<F.assign.length;i++){const q=(F.assign[i]||[]).indexOf(id);if(q>=0)F.assign[i].splice(q,1)}r.push(id)}}
   else if(a==='build')return doBuild();
-  else if(a==='back'){relRes();F.view='edit';F.msg=''}
+  else if(a==='wipe'){if(confirm('למחוק את כל התמונות ואת הקיר שנבנה מהמסך הזה? (התמונות בגלריה של הטלפון לא נמחקות)'))wipe();return}
+  else if(a==='back'){F.view='edit';F.msg=''}
   else if(a==='zi')F.zoom=Math.min(12,F.zoom*1.5);else if(a==='zo')F.zoom=Math.max(1,F.zoom/1.5);else if(a==='z1')F.zoom=1;
-  else if(a==='dl')return save('dl');else if(a==='sh')return save('share');else if(a==='tiles')return saveTiles();
+  else if(a==='dl')return save('dl');else if(a==='sh')return save('share');
   else if(a==='tsort'){F.msg=sortByTime()?'התמונות סודרו לפי זמן הצילום (המספור התעדכן). אם כבר סימנתם שורות – בדקו שהסימון עדיין נכון.':'אין בתמונות מידע על זמן הצילום.'}
-  else if(a==='sapp'){const q=(F.sugg||[])[+b.dataset.i];if(q){F.assign[q.ui]=q.order.slice();F.sugg=null;return rebuild()}}
-  else if(a==='sno'){(F.sugg||[]).splice(+b.dataset.i,1)}
-  else if(a==='crop'){F.crop=!F.crop;return rebuild()}else if(a==='all')F.all=!F.all;
-  else if(a==='seam'){const s=F.lay.seams[+b.dataset.i];if(!s)return;let A,B;
-   if(s.t==='h'){A=F.gray.get(s.a);B=F.gray.get(s.b)}else{A=strip(F.lay.pls[s.r],F.gray);B=strip(F.lay.pls[s.r+1],F.gray)}
-   F.as={seam:s,A,B,dx:s.dx,dy:s.dy,sc:s.sc||1,px:1};F.view='adj'}
+  else if(a==='crop'){F.crop=!F.crop;return doBuild()}else if(a==='all')F.all=!F.all;
+  else if(a==='man')return openAdj(+b.dataset.a,+b.dataset.b);
   else if(a==='ar'&&F.as){F.as.dx+=+b.dataset.x;F.as.dy+=+b.dataset.y}
-  else if(a==='aok'&&F.as){F.adj[F.as.seam.key]={dx:F.as.dx,dy:F.as.dy};F.as=null;return rebuild()}
-  else if(a==='aauto'&&F.as){delete F.adj[F.as.seam.key];F.as=null;return rebuild()}
-  else if(a==='acx'){F.as=null;F.view='res'}
+  else if(a==='aok'&&F.as){const s=F.as,k=s.A.H/ADJH;F.adj[s.a+':'+s.b]={dx:Math.round(s.dx*k),dy:Math.round(s.dy*k)};F.as=null;F.view='edit';return doBuild()}
+  else if(a==='aauto'&&F.as){delete F.adj[F.as.a+':'+F.as.b];F.as=null;F.view='edit';return doBuild()}
+  else if(a==='acx'){F.as=null;F.view=F.res?'res':'edit'}
   draw()});
- draw()}
+ F.ready=false;draw();loadCV().catch(()=>{});
+ try{await restore()}catch(e){F.busy=''}
+ F.ready=true;draw()}
 ACT.s3ffOpen=()=>open();
 API.finalBlob=finalBlob;API.state=()=>F;
 })(typeof window!=='undefined'?window:this);

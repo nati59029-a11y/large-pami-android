@@ -31,6 +31,8 @@ if(!/[\\/]app-source$/.test(process.cwd()))fs.rmSync('www/store3d-dev',{recursiv
   for(const f of walk('www').filter(f=>/\.(html|js|json|css)$/.test(f))){const m=fs.readFileSync(f,'utf8').match(/AIzaSyAoYfIJUwFeFDyvJha0GYw0sOtiTrlf2fo|largpeami\.appspot\.com|largpeami\.firebaseapp\.com|largpeami\.firebasestorage\.app|['"`]largpeami['"`]/g);
    if(m)throw new Error('SITE_BACKEND=test: '+f+' still points at largpeami: '+m.join(','))}
   console.log('SITE_BACKEND=test: app + tab ->',T.projectId)}}
+// צילום חופשי של קיר: OpenCV (opencv.js, גרסה קבועה ב-package.json) -> www/opencv/opencv.js. נטען רק כשנכנסים למסך הניסוי, בלי אינטרנט.
+{const src='node_modules/@techstark/opencv-js/dist/opencv.js';if(!fs.existsSync(src)||fs.statSync(src).size<5e6)throw new Error('opencv.js missing or too small: '+src);fs.mkdirSync('www/opencv',{recursive:true});fs.copyFileSync(src,'www/opencv/opencv.js');console.log('opencv.js',fs.statSync('www/opencv/opencv.js').size)}
 // barcode decoder (ZXing)
 try{const zd='node_modules/@zxing/library/umd';const zf=fs.existsSync(zd+'/index.min.js')?'index.min.js':fs.readdirSync(zd).find(f=>/\.min\.js$/.test(f));fs.copyFileSync(zd+'/'+zf,'www/zxing.min.js');console.log('zxing ok',zf)}catch(e){console.log('zxing missing, continuing',e.message)}
 // OCR engine (Tesseract) -> www/tess
