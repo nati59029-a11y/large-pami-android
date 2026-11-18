@@ -725,7 +725,7 @@ function mini(el,map,sum,o){
   return api}
 
 /* שלב 18ה: אותה טעינה (מטמון משותף, בדיקת נתיב okPath, עד 4 הורדות) גם לסיור 360 */
-const blob=p=>getBlob(p,defLoad,()=>true);
+const blob=(p,fresh)=>{if(fresh)NEG.delete(p);return getBlob(p,defLoad,()=>true)};/* fresh: בלי "נכשל לאחרונה" – לניסיון חוזר מפורש */
 window.Store3D={version:THREE_VER,supported,preload,open,mini,STAT,badge,clearCache,blob};
 window.S3View=window.Store3D;
 })();
