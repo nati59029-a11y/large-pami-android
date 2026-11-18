@@ -9,10 +9,10 @@ let fail = 0; const res = [];
 const check = (n, ok, info) => { if (!ok) fail++; res.push({ n, ok: !!ok, info }); console.log((ok ? 'עבר  ' : 'נכשל ') + n + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const W0 = { incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false };
-const CFG = { ok: true, type: 'disposables', cfg: { vatRate: 18, discMax: { cashier: 5, lead: 15 }, retDays: 14, beginner: true, payOn: ['cash', 'card'] }, src: {},
-  defs: { vatRate: { n: 'שיעור מע"מ (%)', t: 'num', who: 'sa' }, discMax: { n: 'הנחה מרבית', t: 'obj', who: 'mgr', f: { cashier: { n: 'קופאי', t: 'num' }, lead: { n: 'אחראי', t: 'num' } } },
-    retDays: { n: 'ימים להחזרה', t: 'int', who: 'mgr' }, beginner: { n: 'מצב מתחיל', t: 'bool', who: 'mgr' }, payOn: { n: 'אמצעי תשלום', t: 'arr', opts: ['cash', 'card', 'check'], who: 'mgr' } },
-  types: [{ id: 'general', n: 'כללי' }, { id: 'disposables', n: 'חד-פעמי ומוצרי אפייה' }], who: 'mgr' };
+// POS:M4 (ש4): posCfg מחזיר את ההגדרות בפועל לפי pos-cfg-schema.js (313 מפתחות), עם התפקיד והנעילות
+const SC = require('../../functions/lib/pos-cfg-schema');
+const E0 = SC.eff({ sa: { on: true, st: 'trial', type: 'bakeryDisposable' } });
+const CFG = { ok: true, role: 'mgr', ver: 1, cfg: E0.cfg, src: E0.src, off: E0.off, mods: E0.mods, on: true, st: 'trial', type: 'bakeryDisposable', upd: null, sa: { lock: [], who: {}, opened: true } };
 
 async function open(browser, www, cfg, email, perms) {
   const log = [];
@@ -21,7 +21,7 @@ async function open(browser, www, cfg, email, perms) {
   await page.setViewportSize({ width: 360, height: 760 });
   const calls = [];
   await ctx.route('**/pos*', (route) => { const u = new URL(route.request().url()); if (u.port === '5001') { let b = {}; try { b = JSON.parse(route.request().postData()).data || {}; } catch (e) { /* */ } calls.push({ fn: u.pathname.split('/').pop(), b });
-    const r = /posCfgSet$/.test(u.pathname) ? { ok: true, type: CFG.type, cfg: Object.assign({}, CFG.cfg, b.set), src: {} } : /posCfg$/.test(u.pathname) ? CFG : { ok: true, dev: 'K1' };
+    const r = /posCfgSet$/.test(u.pathname) ? { ok: true, ver: 2, cfg: Object.assign({}, CFG.cfg, b.set), src: {}, off: {}, changes: Object.keys(b.set || {}) } : /posCfg$/.test(u.pathname) ? CFG : { ok: true, dev: 'K1' };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) }); } return route.fallback(); });
   await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-p\/posdev$/.test(u.pathname), (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })); // אוסף ריק
   const uid = email.split('@')[0];
@@ -67,13 +67,17 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
   check('3 מתג דלוק, מנהל: "קופה" ו"ניהול קופה" במסך "הוספה"', /data-v="pos"/.test(s.a) && /data-v="posAdm"/.test(s.a) && /קופה/.test(s.tile), s.tile);
   await A.page.evaluate(() => go('posAdm')); await sleep(1500);
   let t = await A.page.evaluate(() => ({ v: cur().v, h: document.getElementById('main').innerText.replace(/\s+/g, ' ') }));
-  check('3א ניהול קופה: רשימת קופות, הוספת קופה והגדרות לפי posCfg (סוג העסק לקריאה בלבד למנהל)', t.v === 'posAdm' && /אין קופות עדיין/.test(t.h) && /הוספת קופה/.test(t.h) && /ימים להחזרה/.test(t.h) && /סוג העסק: חד-פעמי ומוצרי אפייה/.test(t.h), t.h.slice(0, 300));
-  const dis = await A.page.evaluate(() => ({ vat: document.querySelector('[name=pc_vatRate]').disabled, ret: document.querySelector('[name=pc_retDays]').disabled }));
-  check('3ב הגדרה של מנהל־על (מע"מ) – אפורה למנהל; הגדרת מנהל – פתוחה', dis.vat && !dis.ret, dis);
-  await A.page.fill('[name=pc_retDays]', '30');
-  await A.page.click('[data-f=posCfgF] button'); await sleep(800);
+  check('3א ניהול קופה (ש4): קופות, הוספת קופה, חיפוש ומדורי ההגדרות לפי הסכמה, בלי טופס ההגדרות הישן', t.v === 'posAdm' && /אין קופות עדיין/.test(t.h) && /הוספת קופה/.test(t.h) && /חיפוש בהגדרות/.test(t.h) && /החזרות/.test(t.h) && /מס ומסמכים/.test(t.h) && !/pc_vatRate/.test(await A.page.content()), t.h.slice(0, 300));
+  await A.page.evaluate(() => go('posCfgSec', 'tax')); await sleep(400);
+  let dis = await A.page.evaluate(() => ({ vat: document.querySelector('[name=pa_vatRate]').disabled, lock: /רק בעל העסק/.test(document.getElementById('main').innerText) }));
+  check('3ב מדור מס: מע"מ (בעל העסק) – נעול למנהל עם "רק בעל העסק"', dis.vat && dis.lock, dis);
+  await A.page.evaluate(() => go('posCfgSec', 'ret')); await sleep(400);
+  dis = await A.page.evaluate(() => ({ ret: document.querySelector('[name=pa_retDays]').disabled }));
+  await A.page.fill('[name=pa_retDays]', '30');
+  await A.page.click('[data-f=posCfgSecF] button'); await sleep(800);
   const set = A.calls.filter((c) => c.fn === 'posCfgSet');
-  check('3ג שמירה שולחת רק את מה שהשתנה (posCfgSet, set.retDays=30), בלי סוג עסק', set.length === 1 && JSON.stringify(set[0].b) === JSON.stringify({ set: { retDays: 30 } }), set);
+  check('3ג מדור החזרות: retDays פתוח למנהל, ושמירה שולחת רק את מה שהשתנה (posCfgSet, set.retDays=30)', !dis.ret && set.length === 1 && JSON.stringify(set[0].b) === JSON.stringify({ set: { retDays: 30 } }), set);
+  await A.page.evaluate(() => go('posAdm')); await sleep(600);
   await A.page.fill('[data-f=posDevAdd] [name=name]', 'קופה 1');
   await A.page.click('[data-f=posDevAdd] button'); await sleep(800);
   const add = A.calls.filter((c) => c.fn === 'posDev');

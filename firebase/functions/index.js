@@ -330,6 +330,10 @@ Object.assign(exports, require('./daily-rep'));
 // קופה (POS) שלב 0 (17.11.2026): posCfg, posCfgSet (מנהל / מנהל־על), posDev (קופות: הוספה, רישום מכשיר, פרישה, השבתה), posSale (שלד מכירה עם reqId).
 // pos.js + lib/pos-calc.js (חישוב באגורות) + lib/pos-cfg.js (הגדרות לכל עסק) + lib/pos-core.js (מזהים ומספור). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./pos'));
+// POS:M4 – קופה ש4 (17.11.2026): הגדרות לכל עסק לפי הסכמה המלאה (lib/pos-cfg-schema.js, 313 מפתחות), מנהל־על ודיווח בעיה.
+// posCfg, posCfgSet (מחליפים את השלד של שלב 0 – לכן אחרי require('./pos')), posCfgUndo, posSa (מנהל־על), posBug. pos-cfg.js. לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pos-cfg'));
+// /POS:M4
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
 // מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js
