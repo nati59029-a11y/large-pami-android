@@ -17,6 +17,9 @@ const MSG = {
   'needs-login': 'צריך להתחבר לכספית בדפדפן הזה. אחרי ההתחברות הסנכרון ימשיך לבד תוך רבע שעה.',
   'selector-miss': 'מסך בכספית השתנה ולא נמצא כפתור או שדה. נשלחה הודעה למנהל.',
   'endpoint-changed': 'הקובץ שהתקבל מכספית לא נראה כמו שציפינו. נשלחה הודעה למנהל.',
+  'import-errors': 'כספית טענה את הקובץ עם שגיאות (או שהטעינה נכשלה). הפרטים נשלחו למנהל.',
+  'import-timeout': 'כספית לא סיימה את הטעינה בזמן. נשלחה הודעה למנהל – כדאי לבדוק ב"טעינות קודמות".',
+  'import-queue-not-empty': 'במסך הייבוא של כספית כבר ממתינים קבצים אחרים – התוסף לא העלה כלום ולא נגע בהם. נשלחה הודעה למנהל.',
   'wrong-page': 'התוסף הגיע לדף שאינו המשרד האחורי של כספית ועצר בלי לגעת בו. נשלחה הודעה למנהל.',
   'first-manual': 'את הסנכרון הראשון של הקטלוג עושים באפליקציה. המכירות ממשיכות להיקלט.',
   limit: 'יותר מדי שינויים בבת אחת – הסנכרון נעצר לבדיקה של המנהל.',
@@ -64,7 +67,7 @@ function advance(run, now, info) {
   for (;;) {
     const s = STEPS[i];
     if (s === 'sales' && !r.days.length) { i++; continue; }
-    if ((s === 'exportNew' || s === 'exportPrice') && r.flags.noCat) { i++; continue; }
+    if ((s === 'exportNew' || s === 'exportPrice') && (r.flags.noCat || r.flags.noImp)) { i++; continue; } // noImp: העלאה לכספית כבויה (selectors.json importEnabled:false)
     break;
   }
   if (i >= STEPS.length) { r.st = 'ok'; r.step = 'done'; return r; }

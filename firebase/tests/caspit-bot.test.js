@@ -214,6 +214,12 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     assert.deepEqual((await okb(TOK, { op: 'hello', mode: 'sync' })).days, []);
     await okb(TOK, { op: 'importResult', run: h.runId, kind: 'price', n: 2, ok: true, text: 'נטענו 2 פריטים', hash: 'a'.repeat(64) });
     assert.equal((await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).get('imp.price.n'), 2);
+    // תוסף 0.1.4: השורה ב"טעינות קודמות" של כספית – נשמרת בריצה ובכרטיס (li)
+    await okb(TOK, { op: 'importResult', run: h.runId, kind: 'new', n: 1, ok: false, text: 'מזהה 25522', hash: 'b'.repeat(64), id: 25522, status: 'בוצע', errors: 1, loaded: 0 });
+    const im = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).get('imp.new');
+    assert.deepEqual([im.id, im.status, im.errors, im.loaded], [25522, 'בוצע', 1, 0]);
+    assert.equal((await dev()).li.id, 25522);
+    assert.equal((await bot(TOK, { op: 'importResult', run: h.runId, kind: 'new', n: 1, ok: true, id: 'x', ver: '0.1.0' })).body.reason, 'bad-import');
     const i = await ok('cxBotTok', MGR, { op: 'info' });
     assert.ok(i.runs.length >= 2); assert.equal(i.sd, yday);
     // info גדול: נשמרים רק ימים תקינים; דיווח פגום – המנעול משתחרר בכל זאת
@@ -373,6 +379,11 @@ describe('רובוט כספית – cxBotWatch', () => {
     r = await BOT.runWatch({ now: t11 + 3600e3, send });
     assert.deepEqual(r[A], [], 'פעם ביום');
     assert.equal(r[B], undefined, 'עסק בלי מחשב מחובר – לא נבדק');
+    // טעינה לכספית עם שגויים – התראה
+    await adm().doc(`b/${A}/private/cxbot`).set({ lr: { id: 'r4', at: t11 + 2 * 3600e3, st: 'fail', code: 'import-errors', msg: '', step: 'exportNew' } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual((await BOT.runWatch({ now: t11 + 2.5 * 3600e3, send }))[A], ['import-errors']);
+    assert.match(PUSH[0].body, /שורות שגויות/);
     // התוסף עצר בדף שאינו המשרד האחורי (wrong-page) – התראה, פעם ביום
     await adm().doc(`b/${A}/private/cxbot`).set({ lr: { id: 'r3', at: t11 + 2 * 3600e3, st: 'fail', code: 'wrong-page', msg: '', step: 'exportNew' } }, { merge: true });
     PUSH.length = 0;
