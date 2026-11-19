@@ -2,7 +2,7 @@
 // תמחור מחשבונית ספק, שלב 7 (12.11.2026): נקודות כניסה למסך התמחור + מתג prc בלארג' פעמי (החלטה 8).
 // בודק (360px): מדף בלבד – משבצת במדף בלבד; הזמנות בלבד – כפתור בהזמנות בלבד; שניהם – בשניהם; "לטיפול" של מנהל – סעיף עם מונה
 // ו"בטיפול של X"; עובד עם prc – גם בבית העובד; עובד בלי prc – אין כניסה ואין שאילתה; חשבונית שהסתיימה יוצאת מהמונה;
-// מטמון קצר (לא שאילתה בכל ציור); בלי גלישה. לארג' פעמי: מסך עובדים עם מתג אחד → setStaffPrc({uid,on}).
+// מטמון קצר (לא שאילתה בכל ציור); בלי גלישה. מסך "הרשאות עובדים: תמחור ושלוחות" (legacy ו-b) → setStaffPrc({uid,on,key}).
 // הרשת המדומה – כמו ui-pi-ed.js. שימוש: node ui-pi-entry.js <www-dir> [out.json] [shot.png]
 const fs = require('fs'); const path = require('path'); const H = require('./harness');
 let fail = 0; const res = []; const check = (n, ok, info) => { if (!ok) fail++; res.push({ n, ok: !!ok, info }); console.log((ok ? 'עבר  ' : 'נכשל ') + n + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 600) : '')); };
@@ -26,15 +26,15 @@ async function server(ctx) {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(docs.length ? docs : [{ readTime: '2026-11-03T09:00:00Z' }]) });
   });
   // רשימת העובדים (לארג' פעמי, בשורש) ו-setStaffPrc
-  await ctx.route((u) => u.port === '8080' && /\/documents\/staff$/.test(u.pathname), (route) => {
-    const base = 'projects/demo-largpeami/databases/(default)/documents/staff/';
+  await ctx.route((u) => u.port === '8080' && /\/documents\/(b\/[^/]+\/)?staff$/.test(u.pathname), (route) => {
+    const base = 'projects/demo-largpeami/databases/(default)/documents/' + ((/\/documents\/(b\/[^/]+\/)staff$/.exec(new URL(route.request().url()).pathname) || [])[1] || '') + 'staff/';
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ documents: S.staff.map((s) => ({ name: base + s.uid, fields: Object.fromEntries(Object.entries(s).filter(([k]) => k !== 'uid').map(([k, v]) => [k, fv(v)])) })) }) });
   });
   await ctx.route('**/setStaffPrc', async (route) => {
     let b = {}; try { b = JSON.parse(route.request().postData()).data || {}; } catch (e) { /* */ }
     S.calls.push({ fn: 'setStaffPrc', b });
     if (S.prcFail) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'PERMISSION_DENIED', message: 'הפעולה מותרת למנהל העסק בלבד', details: { reason: 'manager-only' } } }) });
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: { ok: true, uid: b.uid, prc: b.on } }) });
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: { ok: true, uid: b.uid, [b.key || 'prc']: b.on } }) });
   });
 }
 async function open(browser, www, cfg, email, perms) {
@@ -109,6 +109,8 @@ async function show(page, v) { await page.evaluate((v) => { if (v === 'wk') { WS
   const W = await open(browser, www, cA, 'w@x.co', { prc: true, ord: true });
   await show(W.page, 'wk'); e = await entry(W.page); o = await noOverflow(W.page);
   check('4 עובד עם prc: בבית העובד – "חשבוניות לתמחור" עם מונה 3, בלי גלישה', e && e.n === '3' && o.sw <= o.W && !o.bad.length, { e, o, v: await W.page.evaluate(() => cur().v) });
+  const wYl = await W.page.evaluate(() => !!document.querySelector('#main [data-v="yl"]'));
+  check('4ד עובד בלי המתג "שלוחות הקו" (yl): אין משבצת "שלוחות הקו" בבית העובד (19.11.2026)', !wYl, wYl);
   await show(W.page, 'shelf'); const wS = await entry(W.page);
   await show(W.page, 'ox'); const wO = await entry(W.page);
   check('4א עובד עם prc: גם במדף ובהזמנות', !!wS && !!wO, { wS, wO });
@@ -119,14 +121,15 @@ async function show(page, v) { await page.evaluate((v) => { if (v === 'wk') { WS
 
   // ---- 5. עובד בלי prc: שום כניסה, ושום שאילתה ----
   const l5 = lists();
-  const W0 = await open(browser, www, cA, 'w0@x.co', { ord: true, expW: true });
+  const W0 = await open(browser, www, cA, 'w0@x.co', { ord: true, expW: true, yl: true });
   const seen = [];
-  for (const v of ['wk', 'shelf', 'ox']) { await show(W0.page, v); seen.push([v, await entry(W0.page)]); }
+  for (const v of ['wk', 'shelf', 'ox']) { await show(W0.page, v); seen.push([v, await entry(W0.page)]); if (v === 'wk') seen.yl = await W0.page.evaluate(() => !!document.querySelector('#main [data-v="yl"]')); }
+  check('5ב עובד עם המתג "שלוחות הקו" (yl): המשבצת מוצגת בבית העובד', seen.yl === true, seen.yl);
   check('5 עובד בלי prc: אין כניסה בבית, במדף ובהזמנות, ואין שאילתת pinv', seen.every(([, x]) => !x) && lists() === l5, { seen, q: lists() - l5 });
   check('5א אין שגיאות JavaScript (עובד בלי prc)', !W0.page.__errors.length, W0.page.__errors);
   await W0.ctx.close();
 
-  // ---- 6. לארג' פעמי (legacy): מסך עובדים עם מתג אחד לכל עובד ----
+  // ---- 6. לארג' פעמי (legacy): מסך "הרשאות עובדים: תמחור ושלוחות" – מתג prc ומתג yl לכל עובד (19.11.2026) ----
   S.staff = [{ uid: 'm', name: 'המנהל', role: 'manager', active: true }, { uid: 'w', name: 'דני הארוך מאוד שם עובד ארוך', email: 'dani.long.email@example.co.il', role: 'employee', active: true },
     { uid: 'w2', name: 'רותי', email: 'r@x.co', role: 'employee', active: true, perms: { incW: true, expR: true, expW: true, sup: true, ord: true, prc: true } }, { uid: 'w3', name: 'יוסי', role: 'employee', active: false }];
   const cL = { mode: 'new', biz: { largpeami: { dataRoot: 'legacy', features: ALL } }, admins: { '|m': 1 }, staff: { '|w': 1 } };
@@ -134,29 +137,41 @@ async function show(page, v) { await page.evaluate((v) => { if (v === 'wk') { WS
   await L.page.evaluate(() => go('sync')); await sleep(400);
   const menu = await L.page.evaluate(() => !!document.querySelector('#main [data-a="go"][data-v="piStf"]'));
   await L.page.click('#main [data-v="piStf"]'); await sleep(600);
-  const st = await L.page.evaluate(() => [...document.querySelectorAll('#main input[data-c="piPrc"]')].map((c) => ({ uid: c.dataset.uid, on: c.checked })));
+  const st = await L.page.evaluate(() => [...document.querySelectorAll('#main input[data-c="piPrc"][data-k="prc"]')].map((c) => ({ uid: c.dataset.uid, on: c.checked })));
   o = await noOverflow(L.page);
   check('6 לארג\' פעמי: כניסה במסך "עובדים ופרסום קטגוריות"; מתג לכל עובד (בלי המנהל); רותי דולק, דני ויוסי כבויים; בלי גלישה', menu && JSON.stringify(st) === JSON.stringify([{ uid: 'w', on: false }, { uid: 'w3', on: false }, { uid: 'w2', on: true }]) && o.sw <= o.W && !o.bad.length, { menu, st, o });
-  await L.page.click('#main input[data-c="piPrc"][data-uid="w"]'); await sleep(400);
+  const yl0 = await L.page.evaluate(() => [...document.querySelectorAll('#main input[data-c="piPrc"][data-k="yl"]')].map((c) => c.checked));
+  check('6 שני מתגים לכל עובד (כל התוספות פעילות): "שלוחות הקו" כבוי לכולם', JSON.stringify(yl0) === '[false,false,false]', yl0);
+  await L.page.click('#main input[data-c="piPrc"][data-k="prc"][data-uid="w"]'); await sleep(400);
   const c6 = S.calls.filter((c) => c.fn === 'setStaffPrc');
-  check('6א הדלקה → setStaffPrc({uid:"w", on:true}) בלבד (בלי שאר ההרשאות)', c6.length === 1 && JSON.stringify(c6[0].b) === JSON.stringify({ uid: 'w', on: true }), c6);
+  check('6א הדלקה → setStaffPrc({uid:"w", on:true, key:"prc"}) בלבד (בלי שאר ההרשאות)', c6.length === 1 && JSON.stringify(c6[0].b) === JSON.stringify({ uid: 'w', on: true, key: 'prc' }), c6);
   S.prcFail = 1;
-  await L.page.click('#main input[data-c="piPrc"][data-uid="w2"]'); await sleep(400);
-  const back = await L.page.evaluate(() => document.querySelector('#main input[data-c="piPrc"][data-uid="w2"]').checked);
+  await L.page.click('#main input[data-c="piPrc"][data-k="prc"][data-uid="w2"]'); await sleep(400);
+  const back = await L.page.evaluate(() => document.querySelector('#main input[data-c="piPrc"][data-k="prc"][data-uid="w2"]').checked);
   check('6ב השרת דחה → המתג חוזר למצב הקודם', back === true, back);
+  S.prcFail = 0;
+  await L.page.click('#main input[data-c="piPrc"][data-k="yl"][data-uid="w3"]'); await sleep(400);
+  const c6y = S.calls.filter((c) => c.fn === 'setStaffPrc').pop();
+  check('6ב2 "שלוחות הקו" → setStaffPrc({uid:"w3", on:true, key:"yl"})', JSON.stringify(c6y.b) === JSON.stringify({ uid: 'w3', on: true, key: 'yl' }), c6y);
   check('6ג אין שגיאות JavaScript (לארג\' פעמי)', !L.page.__errors.length, L.page.__errors);
   await L.ctx.close();
-  // עסק במבנה b: המסך הרגיל (בלי המתג החדש)
+  // עסק במבנה b (19.11.2026): גם מנהל העסק מקבל את המסך – כניסה בראש מסך "עובדים", לא במסך של לארג' פעמי (V.sync)
+  S.staff = [{ uid: 'm', name: 'המנהל', role: 'manager', active: true }, { uid: 'w', name: 'דני', role: 'employee', active: true, perms: { ord: true, yl: true } }];
   const B = await open(browser, www, cA, 'm@x.co');
   await B.page.evaluate(() => go('staff')); await sleep(400);
-  const b6 = await B.page.evaluate(() => !!document.querySelector('#main input[data-c="piPrc"]'));
+  const b6 = await B.page.evaluate(() => !!document.querySelector('#main [data-a="go"][data-v="piStf"]'));
   await B.page.evaluate(() => go('sync')); await sleep(300);
   const b6s = await B.page.evaluate(() => !!document.querySelector('#main [data-v="piStf"]'));
-  await B.page.evaluate(() => go('piStf')); await sleep(300);
-  const b6f = await B.page.evaluate(() => ({ t: document.getElementById('main').innerText.slice(0, 60), c: !!document.querySelector('#main input[data-c="piPrc"]') }));
-  check('6ד עסק במבנה b: מסך העובדים הרגיל ובלי כניסה למתג של לארג\' פעמי; גם בכוח – לא מוצג', !b6 && !b6s && !b6f.c, { b6, b6s, b6f });
+  await B.page.evaluate(() => go('piStf')); await sleep(600);
+  const b6f = await B.page.evaluate(() => [...document.querySelectorAll('#main input[data-c="piPrc"]')].map((c) => c.dataset.k + ':' + c.dataset.uid + ':' + c.checked));
+  o = await noOverflow(B.page);
+  check('6ד עסק במבנה b: כניסה במסך "עובדים" (לא ב-sync); שני מתגים לעובד, "שלוחות הקו" דולק לדני; בלי גלישה', b6 && !b6s && JSON.stringify(b6f) === JSON.stringify(['prc:w:false', 'yl:w:true']) && o.sw <= o.W && !o.bad.length, { b6, b6s, b6f, o });
+  await B.page.click('#main input[data-c="piPrc"][data-k="yl"][data-uid="w"]'); await sleep(400);
+  const c6b = S.calls.filter((c) => c.fn === 'setStaffPrc').pop();
+  check('6ד2 עסק b: כיבוי "שלוחות הקו" → setStaffPrc({uid:"w", on:false, key:"yl"})', JSON.stringify(c6b.b) === JSON.stringify({ uid: 'w', on: false, key: 'yl' }), c6b);
   const pm = await B.page.evaluate(() => PMK.map((x) => x[0]));
-  check('6ה PMK כולל את prc ("עדכון מחירים ומלאי") – שמירת הרשאות מהמסך לא מכבה אותו', pm.includes('prc') && (await B.page.evaluate(() => PMK.find((x) => x[0] === 'prc')[1])) === 'עדכון מחירים ומלאי', pm);
+  check('6ה PMK כולל את prc ("עדכון מחירים ומלאי") ואת yl ("שלוחות הקו") – שמירת הרשאות מהמסך לא מכבה אותם', pm.includes('prc') && pm.includes('yl') && (await B.page.evaluate(() => PMK.find((x) => x[0] === 'prc')[1])) === 'עדכון מחירים ומלאי' && (await B.page.evaluate(() => PMK.find((x) => x[0] === 'yl')[1])) === 'שלוחות הקו', pm);
+  check('6ו אין שגיאות JavaScript (עסק b)', !B.page.__errors.length, B.page.__errors);
   await B.ctx.close();
 
   await browser.close();

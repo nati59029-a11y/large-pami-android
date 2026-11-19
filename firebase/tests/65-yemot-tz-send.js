@@ -64,7 +64,7 @@ describe('ימות 2026-11-18: שליחת צינתוקים מהקו (sendLineTzi
     await M.stop();
     for (const t of SEEN) assert.ok(!t.includes(SECRET), 'המפתח דלף: ' + t.slice(0, 200));
   });
-  beforeEach(async () => { await H.seed(env); M.reset(); });
+  beforeEach(async () => { await H.seed(env); await H.grantLine(env); M.reset(); });
 
   it('index.js מייצא את sendLineTzintuk, ולא את _core', () => {
     const ex = require('../functions/index.js');
