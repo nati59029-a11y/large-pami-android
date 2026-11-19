@@ -859,6 +859,11 @@ async function phone(k, request) {
   const w = VIEW_FNS.includes(k) ? await viewW(request) : await mgrW(request);
   const input = k === 'cxCfg' ? {} : inputObject(request);
   if (k === 'cxSee') T.requireFeature(w.biz, 'cxSales');
+  // דוח מכירות שהועלה לפני שהתוספת כובתה – לא מוצג ולא נשמר מהטלפון (הרובוט לא עובר כאן)
+  if ((k === 'cxPreview' || k === 'cxApply') && typeof input.run === 'string' && RUN_RE.test(input.run) && !(w.biz && w.biz.features && w.biz.features.cxSales === true)) {
+    const r = await T.tdb().doc('cxRun/' + input.run).get();
+    if (r.exists && r.get('kind') === 'sales') T.requireFeature(w.biz, 'cxSales');
+  }
   // 19.11.2026: "מכירות כספית" – תוספת נפרדת (cxSales), כבויה כברירת מחדל; רק מנהל־על מפעיל. הרובוט (caspit-bot.js) לא עובר כאן ולא מושפע.
   if (SALES_FNS.includes(k) || (k === 'cxUpload' && input.kind === 'sales')) T.requireFeature(w.biz, 'cxSales');
   if (!LOCKED.includes(k) || !w.bizId) return FNS[k](w, input);

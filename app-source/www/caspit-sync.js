@@ -52,7 +52,7 @@ async function readF(f){if(/\.csv$/i.test(f.name||'')||f.type==='text/csv')retur
 CHG.cxFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f)return;X.st='busy';prog('קורא את הקובץ…');rerender();
  try{const T=await readF(f);const rows=(T||[]).filter(r=>Array.isArray(r));const d=C.detect(rows);
   if(d.kind==='sales'){if(typeof window.cxSalesOk!=='function'||!window.cxSalesOk())throw new Error('קליטת דוח מכירות כבויה בעסק הזה (תוספת “מכירות כספית”). פנו למנהל־העל.');if(typeof window.cxSalesFile!=='function')throw new Error('קליטת מכירות לא נטענה');await window.cxSalesFile(f,rows,d,prog);X.st='pick';return}
-  if(d.kind!=='cat')throw new Error('הקובץ לא מזוהה כקובץ של כספית ("קטלוג פריטים" או "דוח מכירות לפריטים").');
+  if(d.kind!=='cat')throw new Error('הקובץ לא מזוהה כקובץ של כספית ("קטלוג פריטים"'+(typeof window.cxSalesOk==='function'&&window.cxSalesOk()?' או "דוח מכירות לפריטים"':'')+').');
   const g=C.groupCat(rows,d),P=C.parts(g.items),run=rid();
   for(let k=0;k<P.length;k++){prog(`זוהה קטלוג: ${nf(g.items.length)} קודים. שולח חלק ${k+1} מתוך ${P.length}…`);await fnCall('cxUpload',{run,part:k,parts:P.length,items:P[k]})}
   prog('משווה מול המוצרים באפליקציה…');

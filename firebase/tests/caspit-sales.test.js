@@ -338,12 +338,14 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
   });
   it('תוספת "מכירות כספית" כבויה: המסך, התיקון וקליטת דוח מכירות נדחים (feature-off); קטלוג ממשיך לעבוד', async () => {
     const ref = adm().doc('b/' + B);
+    const pend = run(); await ok('cxUpload', MB, { run: pend, kind: 'sales', part: 0, parts: 1, lines: CC.parseSales(FILE1).lines });
     await ref.update({ 'features.cxSales': false });
     try {
       for (const [fn, d] of [['cxSales', { from: '2026-11-16', to: '2026-11-17' }], ['cxLines', { un: true }], ['cxFix', {}], ['cxUpload', { run: run(), kind: 'sales', part: 0, parts: 1, lines: CC.parseSales(FILE1).lines }]]) {
         const r = await call(fn, MB, d);
         assert.equal(r.reason, 'feature-off', fn + ': ' + r.text);
       }
+      for (const fn of ['cxPreview', 'cxApply']) assert.equal((await call(fn, MB, { run: pend })).reason, 'feature-off', fn + ' – דוח מכירות שהועלה לפני הכיבוי');
       const r = await call('cxUpload', MB, { run: run(), part: 0, parts: 1, items: [] });
       assert.notEqual(r.reason, 'feature-off');
       await ref.update({ 'features.cxSales': FieldDel() });
