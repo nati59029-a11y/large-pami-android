@@ -78,7 +78,7 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     runExpiry = require('../functions/yemot.js').runExpiry;
   });
   after(async () => { await M.stop(); });
-  beforeEach(async () => { await H.seed(env); M.reset(); });
+  beforeEach(async () => { await H.seed(env); await H.grantLine(env); M.reset(); });
 
   // ---------------- 0. ייצוא ----------------
   it('index.js מייצא את שתי פונקציות ימות (sendPromoToLine ו-expirePromosOnLine)', () => {
@@ -290,10 +290,10 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
   it('מספור: ממשיך מהמספר הגבוה בשלוחה (כל סוג קובץ); בלי 000 בשלוחה – מתחיל ב-001', async () => {
     M.reset({ '000.tts': 'פתיח', '004.wav': 'x', '010.tts': 'y', 'M0000.tts': 'z' });
     assert.equal((await call('u_mgr', promo({ withTzintuk: false }))).result.file, '011.tts');
-    await H.seed(env); M.reset({});
+    await H.seed(env); await H.grantLine(env); M.reset({});
     assert.equal((await call('u_mgr', promo({ withTzintuk: false }))).result.file, '001.tts');
     // שלוחה מלאה עד 999: בוחר את הפנוי הקטן ביותר
-    await H.seed(env); M.reset({ '000.tts': 'פ', '001.tts': 'a', '002.tts': 'b', '999.tts': 'c' });
+    await H.seed(env); await H.grantLine(env); M.reset({ '000.tts': 'פ', '001.tts': 'a', '002.tts': 'b', '999.tts': 'c' });
     assert.equal((await call('u_mgr', promo({ withTzintuk: false }))).result.file, '003.tts');
     assert.equal((await call('u_mgr', promo({ withTzintuk: false }))).result.file, '004.tts');
     assert.equal(M.state.files.get('000.tts'), 'פ');

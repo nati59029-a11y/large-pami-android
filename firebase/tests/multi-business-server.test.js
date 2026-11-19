@@ -201,9 +201,13 @@ describe('שלב 5 – תוספת כבויה: הפונקציה נדחית; סר�
     for (const fn of YFN) assert.equal((await call(fn, U[A].mgr, {})).reason, 'feature-off', fn);
     for (const fn of YFN) assert.equal((await call(fn, U[B].mgr, {})).reason, 'yemot-not-connected', fn);
     assert.equal(YM.state.requests.length, 0);
-    // לארג' פעמי – כמו היום (statusOnly בלי פנייה לימות)
+    // לארג' פעמי: עובד בלי המתג "שלוחות הקו" (yl, 19.11.2026) – נחסם; מנהל העסק מדליק לו – כמו היום (statusOnly בלי פנייה לימות)
+    assert.equal((await call('sendPromoToLine', R.emp, { statusOnly: true })).reason, 'no-line-perm');
+    assert.equal((await call('sendPromoToLine', R.mgr, { statusOnly: true })).status, 'OK');
+    assert.equal((await call('setStaffPrc', R.mgr, { uid: R.emp, on: true, key: 'yl' })).status, 'OK');
     const r = await call('sendPromoToLine', R.emp, { statusOnly: true });
     assert.equal(r.status, 'OK', r.text);
+    assert.equal(YM.state.requests.length, 0);
   });
   it('עסק מושהה: מנהל ועובד נחסמים (biz-suspended), מנהל־על לא', async () => {
     await setBiz(A, { status: 'suspended' });
