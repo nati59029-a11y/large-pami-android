@@ -174,7 +174,7 @@ V.payMon=id=>{const T='שכר חודשי';if(!on())return{t:T,h:'<div class="emp
  /* בונוס */
  const B=bonOf(s.id,m);
  h+=`<div class="sec"><h3>בונוס חודשי</h3></div>`;
- h+=B.length?B.map(b=>`<button class="li" data-a="payBonEd" data-id="${esc(b.id)}"><div class="m"><b>${ag(PayCore.toAg(b.a))}</b><small>${esc(b.n||'')}${b.src==='auto'?' · אושר מרכיב שכר':''}</small></div>${typeof ico==='function'?ico('chev','chev'):''}</button>`).join(''):'<p class="note">אין בונוס בחודש הזה.</p>';
+ h+=B.length?B.map(b=>`<button class="li" data-a="payBonEd" data-id="${esc(b.id)}"><div class="m"><b>${ag(PayCore.toAg(b.a))}</b><small>${esc(b.n||'')}${b.src==='auto'?(b.del?' · <span data-bdel>בוטל – הרכיב לא יחושב שוב לחודש הזה (לשחזור: עריכת הסכום)</span>':' · אושר מרכיב שכר'):''}</small></div>${typeof ico==='function'?ico('chev','chev'):''}</button>`).join(''):'<p class="note">אין בונוס בחודש הזה.</p>';
  h+=`<button type="button" class="btn g w" ${big_} data-a="payBonEd">＋ בונוס</button>`;
  if(slip)h+=`<p class="note">עובד בתלוש: הבונוס לא נכנס לחישוב, ועובר לרואה החשבון. הסכום הסופי – לפי התלוש.</p>`;
  /* לרואה החשבון */
@@ -233,16 +233,19 @@ ACT.payWhDel=el=>{if(!on())return;const id=el.dataset.id;ask('למחוק את ש
 /* בונוס חודשי */
 ACT.payBonEd=el=>{if(!on())return;const s=empOf(PM.sub);if(!s||!s.pay)return;const id=el.dataset.id||'',b=id?AR('bon').find(x=>x&&x.id===id&&x.sub===s.id):null;if(id&&!b)return toast('הבונוס לא נמצא');
  dlg(`<h3>${b?'עריכת בונוס':'בונוס ל'+esc(mfmt(PM.mon))}</h3><form data-f="payBonF" novalidate><input type="hidden" name="id" value="${esc(id)}">${fld('סכום (₪)','a',b?str(b.a):'','text','inputmode="decimal" autocomplete="off"')}${fld('על מה','n',b?str(b.n):'','text',`maxlength="${MAXT}" autocomplete="off" placeholder="למשל עמידה ביעד מכירות"`)}
-<div class="row"><button type="submit" class="btn grow" ${big_}>שמירה</button>${b?`<button type="button" class="btn r grow" ${big_} data-a="payBonDel" data-id="${esc(id)}">מחיקה</button>`:''}<button type="button" class="btn g grow" ${big_} data-a="closeDlg">ביטול</button></div></form>`)};
+<div class="row"><button type="submit" class="btn grow" ${big_}>שמירה</button>${b?`<button type="button" class="btn r grow" ${big_} data-a="payBonDel" data-id="${esc(id)}">${b.src==='auto'&&b.cid?'בטל בונוס':'מחיקה'}</button>`:''}<button type="button" class="btn g grow" ${big_} data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.payBonF=f=>{if(!on())return;const s=empOf(PM.sub);if(!s||!s.pay)return toast('הכרטיס לא נמצא');const g=n=>s_((f.elements[n]||{}).value||'');
  const id=g('id'),b0=id?AR('bon').find(x=>x&&x.id===id&&x.sub===s.id):null,z=b0&&b0.src==='auto'&&/^0+([.,]0*)?$/.test(g('a'));/* בונוס שאושר אוטומטית יכול להישאר 0 */
  const a=z?0:posN(g('a')),n=g('n').slice(0,MAXT);if(a==null)return toast('סכום הבונוס: מספר חיובי');if(!n)return toast('חסר פירוט – על מה הבונוס');
- if(id){const b=b0;if(!b)return toast('הבונוס לא נמצא');Object.assign(b,{a,n})}
+ if(id){const b=b0;if(!b)return toast('הבונוס לא נמצא');Object.assign(b,{a,n});if(b.del&&a>0)delete b.del}
  else{if(!monV(PM.mon))return toast('חודש לא תקין');AR('bon').push({id:uid(),sub:s.id,mon:PM.mon,a,n})}
  save();closeDlg();toast('הבונוס נשמר');rerender()};
-ACT.payBonDel=el=>{if(!on())return;const id=el.dataset.id;ask('למחוק את הבונוס?',()=>{const L=AR('bon'),i=L.findIndex(x=>x&&x.id===id&&x.sub===PM.sub);if(i>=0){L.splice(i,1);save();toast('הבונוס נמחק')}rerender()},'מחיקה')};
+/* בונוס שאושר מרכיב שכר (src:'auto' עם cid) לא נמחק: מתאפס (a:0, del:1) כדי שהרכיב יישאר "טופל" לחודש ולא יחזור כצפוי (apprMap). a:0 מסונן מהדוחות ומהעובד */
+ACT.payBonDel=el=>{if(!on())return;const id=el.dataset.id,b0=AR('bon').find(x=>x&&x.id===id&&x.sub===PM.sub),au=!!b0&&b0.src==='auto'&&typeof b0.cid==='string'&&!!b0.cid;
+ ask(au?'לבטל את הבונוס? הרכיב לא יחושב שוב לחודש הזה ולא יוצג לעובד. לשחזור – עריכת הסכום.':'למחוק את הבונוס?',()=>{const L=AR('bon'),i=L.findIndex(x=>x&&x.id===id&&x.sub===PM.sub);
+  if(i>=0){if(au){Object.assign(L[i],{a:0,del:1});save();toast('הבונוס בוטל')}else{L.splice(i,1);save();toast('הבונוס נמחק')}}rerender()},au?'ביטול הבונוס':'מחיקה')};
 /* 19.11 (בעל העסק): הוצאה מקופה לעובד עם הגדרות שכר – החודש הפתוח הוותיק ביותר מבין 3 החודשים שלפני חודש התשלום (status 'open' ו-left>0), אחרת ''. index.html קורא בבדיקת typeof (בלי הקובץ – חודש התשלום, כמו קודם) */
 /* גשר ל-payroll-comp.js (רכיבי שכר) */
-window.PayUI={on,empOf,PD,PM,pull,re,monSum,curMon,ag,AR,saveCfg};
+window.PayUI={on,empOf,PD,PM,pull,re,monSum,curMon,ag,AR,saveCfg,draftC};
 window.payOpenMon=(id,mon)=>{try{const s=empOf(id);if(!s||!s.pay||!PC()||!monV(mon))return'';let y=+mon.slice(0,4),m=+mon.slice(5,7);const L=[],fr=monV(s.pay.from)?s.pay.from:'';for(let i=0;i<3;i++){m--;if(!m){m=12;y--}L.unshift(y+'-'+z2(m))}for(const k of L){if(fr&&k<fr)continue;const r=monSum(s,k);if(r&&r.status==='open'&&r.left>0)return k}return''}catch(e){return''}};
 })();

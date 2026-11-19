@@ -141,9 +141,13 @@ const COMP3 = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', t: 
     await pg.evaluate(() => closeDlg()); await pg.evaluate(() => { PayUI.PD.sub = ''; PayUI.PD.p = null; goBack(); }); await sleep(200);
     check('12א יציאה בלי שמירה – כלום לא נשמר', JSON.stringify(await pay(pg, 'pcA')) === before);
     await pg.click('#main [data-a=payOpen]'); await sleep(300);
+    await pg.fill('#main input[name=tz]', '123456789'); // שינוי אחר בטופס, לא שמור – לא אמור להישמר באישור הכלל
     await pg.fill('textarea[name=aiT]', '2% מכל המכירות'); await pg.click('#main [data-a=payAi]'); await until(pg, () => /הבנתי כך/.test(document.getElementById('dlg').open ? document.getElementById('dlg').innerText : '')); await sleep(300);
-    await pg.click('#dlg [data-a=payAiOk]'); await sleep(300);
+    await clearT(pg); await pg.click('#dlg [data-a=payAiOk]'); await sleep(300);
     p = await pay(pg, 'pcA');
+    check('13ב אישור הכלל שומר רק את מה שהוצג בחלון: ת״ז שהוקלדה ולא נשמרה – לא נשמרה, נשארת בטופס, והודעה על שינויים שלא נשמרו',
+      !p.tz && await pg.evaluate(() => document.querySelector('#main input[name=tz]').value === '123456789') && /שינויים אחרים בטופס עוד לא נשמרו/.test(await toasts(pg)), { tz: p.tz, t: await toasts(pg) });
+    await pg.fill('#main input[name=tz]', ''); await pg.evaluate(() => PayUI.pull());
     check('13 אישור: נשמר רכיב ה-AI (src, ai:1) והבסיס (rate 42); נשארים במסך', p.comp.length === 4 && p.comp[3].id === 'ai_x1' && p.comp[3].ai === 1 && p.comp[3].src === '2% מכל המכירות' && p.rate === 42 && await pg.evaluate(() => cur().v === 'payCfg' && document.querySelectorAll('#main [data-comp]').length === 4), p);
     AI.mode = 'unparsed'; await pg.fill('textarea[name=aiT]', 'שלום מה נשמע'); await pg.click('#main [data-a=payAi]'); await until(pg, () => /לא הצלחתי/.test(document.getElementById('dlg').open ? document.getElementById('dlg').innerText : ''));
     dt = await dlgTxt(pg);
@@ -199,7 +203,23 @@ const COMP3 = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', t: 
     await pg.click(`#main [data-a=payBonEd][data-id="${bk1}"]`); await sleep(200); await pg.fill('#dlg input[name=n]', 'משימות – נבדק'); await pg.click('#dlg form[data-f=payBonF] button[type=submit]'); await sleep(250);
     check('21א בונוס מאושר בסכום 0 – אפשר לשמור עריכה', await pg.evaluate(() => S.bon.find((b) => b.cid === 'k1').n === 'משימות – נבדק'));
     await pg.evaluate((id) => { ACT.payBonDel({ dataset: { id } }); }, bk1); await sleep(150); await pg.click('#dlg [data-a=yes]'); await sleep(250);
-    check('21ב מחיקת בונוס מאושר – הרכיב חוזר לחישוב חי ("ממתין לאישור")', await pg.evaluate(() => S.bon.length === 2 && /ממתין לאישור/.test(document.querySelector('#main [data-a=payCompBrk][data-cid=k1]').innerText)));
+    const bk3 = await pg.evaluate(() => S.bon.find((b) => b.cid === 'k3').id);
+    await pg.click(`#main [data-a=payBonEd][data-id="${bk3}"]`); await sleep(200);
+    check('21ב בעריכת בונוס מרכיב – הכפתור "בטל בונוס"', /בטל בונוס/.test(await dlgTxt(pg)));
+    await pg.click('#dlg [data-a=payBonDel]'); await sleep(150);
+    check('21ג ביטול מבקש אישור ומסביר שהרכיב לא יחושב שוב', /לבטל את הבונוס\? הרכיב לא יחושב שוב/.test(await dlgTxt(pg)), await dlgTxt(pg));
+    await pg.click('#dlg [data-a=yes]'); await sleep(250);
+    const m3 = await pg.evaluate(() => { const b = S.bon.find((x) => x.cid === 'k3'); return { n: S.bon.length, a: b && b.a, del: b && b.del, tag: document.querySelector('#main [data-a=payCompBrk][data-cid=k3]').innerText, appr: !!document.querySelector('#main [data-a=payAppr]'), exp: document.querySelector('#main [data-exp]').innerText, left: document.querySelector('#main [data-a=payBrk][data-k=left] b').innerText, lst: !!document.querySelector('#main [data-bdel]'),
+      again: PayCore.autoBon(S.subs.find((x) => x.id === 'pcA'), '2026-10', { wh: S.wh, bon: S.bon, tasks: [], salesByDay: {} }).length }; });
+    check('21ד ביטול בונוס מאושר: הרשומה נשארת (a:0, del:1), הרכיב "בוטל" ולא "ממתין לאישור", אין כפתור אישור, צפוי 0, "נשאר להעביר" ירד ב-350, autoBon לא מציע שוב',
+      m3.n === 3 && m3.a === 0 && m3.del === 1 && /בוטל/.test(m3.tag) && !/ממתין לאישור/.test(m3.tag) && !m3.appr && m3.exp === await I(0) && m3.left === await I(160 + 250) && m3.lst && m3.again === 0, m3);
+    await pg.click(`#main [data-a=payBonEd][data-id="${bk3}"]`); await sleep(200); await pg.fill('#dlg input[name=a]', '350'); await pg.click('#dlg form[data-f=payBonF] button[type=submit]'); await sleep(250);
+    check('21ה שחזור: עריכת הסכום מחזירה את הבונוס (del נמחק) והרכיב "אושר"', await pg.evaluate(() => { const b = S.bon.find((x) => x.cid === 'k3'); return b.a === 350 && !('del' in b) && /אושר/.test(document.querySelector('#main [data-a=payCompBrk][data-cid=k3]').innerText); }));
+    await pg.evaluate((id) => { ACT.payBonDel({ dataset: { id } }); }, bk1); await sleep(150); await pg.click('#dlg [data-a=yes]'); await sleep(250);
+    check('21ו ביטול בונוס מאושר בסכום 0 – נשאר "טופל" (לא חוזר לחישוב חי)', await pg.evaluate(() => S.bon.length === 3 && !/ממתין לאישור/.test(document.querySelector('#main [data-a=payCompBrk][data-cid=k1]').innerText)));
+    const mb = await pg.evaluate(() => { const L = S.bon; L.push({ id: 'bm1', sub: 'pcA', mon: '2026-10', a: 40, n: 'ידני' }); save(); ACT.payBonDel({ dataset: { id: 'bm1' } }); return document.getElementById('dlg').innerText; });
+    await pg.click('#dlg [data-a=yes]'); await sleep(200);
+    check('21ז בונוס ידני – נמחק כמו קודם', /למחוק את הבונוס/.test(mb) && await pg.evaluate(() => !S.bon.some((b) => b.id === 'bm1') && S.bon.length === 3));
 
     // --- עובד בלי comp – כמו היום ---
     await pg.evaluate(() => { PayUI.PM.sub = 'pcB'; PayUI.PM.mon = '2026-11'; go('payMon', 'pcB'); }); await sleep(300);
@@ -209,7 +229,10 @@ const COMP3 = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', t: 
     // --- אישור אוטומטי מה-3 בחודש ---
     await pg.evaluate(() => { const emp = S.cats.find((c) => c.kind === 'exp' && !c.hid && c.beh === 'emp');
       S.subs.push({ id: 'pcC', cat: emp.id, name: 'אוטומטי', pay: { mode: 'hr', rate: 30, m: 'מזומן', slip: false, uid: 'dana', from: '2026-09', rules: [], add: [], comp: [{ id: 'q1', k: 'pc', p: 5, ss: 'hrs' }, { id: 'q2', k: 'man', n: 'חג' }] } });
-      S.wh.push({ id: 'w5', sub: 'pcC', d: '2026-10-10', in: '11:00', out: '13:00', brk: 0, src: 'man' }); save(); });
+      S.wh.push({ id: 'w5', sub: 'pcC', d: '2026-10-10', in: '11:00', out: '13:00', brk: 0, src: 'man' });
+      // pcD: יום עבודה 11.10 בלי נתוני מכירות מכספית – אסור לאשר אוטומטית
+      S.subs.push({ id: 'pcD', cat: emp.id, name: 'חסר', pay: { mode: 'hr', rate: 30, m: 'מזומן', slip: false, uid: 'dana', from: '2026-09', rules: [], add: [], comp: [{ id: 'd1', k: 'pc', p: 5, ss: 'day' }] } });
+      S.wh.push({ id: 'w6', sub: 'pcD', d: '2026-10-10', in: '11:00', out: '13:00', brk: 0, src: 'man' }, { id: 'w7', sub: 'pcD', d: '2026-10-11', in: '11:00', out: '13:00', brk: 0, src: 'man' }); save(); });
     await pg.clock.setFixedTime(new Date(Date.UTC(2026, 10, 2, 9)));
     const early = await pg.evaluate(async () => { PayComp._reset(); const n = await payAutoAppr(); return { n, bon: S.bon.filter((b) => b.sub === 'pcC').length }; });
     check('23 לפני ה-3 בחודש – אין אישור אוטומטי', early.n === 0 && early.bon === 0, early);
@@ -218,10 +241,22 @@ const COMP3 = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', t: 
     await until(pg, () => typeof S !== 'undefined' && S.bon.some((b) => b.sub === 'pcC'), null, 15000);
     const C1 = await pg.evaluate(() => ({ L: S.bon.filter((b) => b.sub === 'pcC').map((b) => [b.cid, b.a, b.mon, b.src]), ab: S.subs.find((s) => s.id === 'pcC').pay.ab, a: S.bon.filter((b) => b.sub === 'pcA').length }));
     // 11:00–13:00 בשעות 11, 12: רק 12 = 3,000 × 5% = 150; man לא נרשם
-    check('24 פתיחת מכשיר המנהל ב-3 בחודש: bon אוטומטי לחודש הקודם (מכירות בשעות 11–13 = 3,000 × 5% = 150), ab=2026-10; לעובד שכבר אושר – בלי שינוי', JSON.stringify(C1.L) === JSON.stringify([['q1', 150, '2026-10', 'auto']]) && C1.ab === '2026-10' && C1.a === 2, C1);
+    check('24 פתיחת מכשיר המנהל ב-3 בחודש: bon אוטומטי לחודש הקודם (מכירות בשעות 11–13 = 3,000 × 5% = 150), ab=2026-10; לעובד שכבר אושר – בלי שינוי', JSON.stringify(C1.L) === JSON.stringify([['q1', 150, '2026-10', 'auto']]) && C1.ab === '2026-10' && C1.a === 3, C1);
+    const D1 = await pg.evaluate(() => ({ n: S.bon.filter((b) => b.sub === 'pcD').length, ab: S.subs.find((s) => s.id === 'pcD').pay.ab }));
+    check('24ב עובד עם יום עבודה בלי נתוני מכירות – לא אושר אוטומטית (אין bon, ab לא התקדם)', D1.n === 0 && D1.ab === undefined, D1);
     await pg.reload(); await pg.waitForLoadState('load'); await sleep(8000);
     const C2 = await pg.evaluate(() => S.bon.filter((b) => b.sub === 'pcC').length);
     check('24א פתיחה נוספת – בלי כפילות', C2 === 1, C2);
+    await pg.evaluate(() => { const d = document.getElementById('dlg'); if (d && d.open) closeDlg(); PayUI.PM.sub = 'pcD'; PayUI.PM.mon = '2026-10'; go('payMon', 'pcD'); }); await sleep(300);
+    await until(pg, () => !!document.querySelector('#main [data-gaps]'));
+    const gT = await pg.evaluate(() => ({ g: (document.querySelector('#main [data-gaps]') || {}).innerText || '', p: /ממתין לאישור/.test((document.querySelector('#main [data-a=payCompBrk][data-cid=d1]') || {}).innerText || '') }));
+    check('24ג במסך המנהל: "ממתין לאישור" + "לא אושר אוטומטית – חסרים נתונים" עם הסיבה (ימי עבודה בלי מכירות)', gT.p && /לא אושר אוטומטית/.test(gT.g) && /חסרים נתוני מכירות ל-1 ימי עבודה/.test(gT.g), gT);
+    await shot(pg, 'comp-3-חסרים-נתונים');
+    await pg.click('#main [data-a=payAppr]'); await sleep(200);
+    const gA = await dlgTxt(pg);
+    check('24ד אישור ידני עם אזהרה ברורה על הנתונים החסרים', /שימו לב – חסרים נתונים/.test(gA) && /לאשר 1 בונוסים/.test(gA), gA);
+    await pg.click('#dlg [data-a=yes]'); await sleep(250);
+    check('24ה אחרי אישור ידני – נרשם bon (4,000 × 5% = 200) ו-ab', await pg.evaluate(() => { const L = S.bon.filter((b) => b.sub === 'pcD'); return L.length === 1 && L[0].a === 200 && S.subs.find((s) => s.id === 'pcD').pay.ab === '2026-10'; }));
     check('25 אין שגיאות JS (מנהל)', pg.__errors.length === 0, pg.__errors);
     await x.ctx.close(); }
 

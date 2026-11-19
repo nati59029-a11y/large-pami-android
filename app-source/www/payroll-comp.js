@@ -5,7 +5,8 @@
      show:true – "העובד רואה את השכר שלו" (רק עם pay.uid; התצוגה לעובד – pay-me.js, מראה wv/pay_<חודש>_<uid>).
      ab:'YYYY-MM' – החודש האחרון שהבונוסים שלו אושרו (ידנית או אוטומטית). בהוספת רכיבים לראשונה = החודש הקודם (לא מאשרים בדיעבד חודשים שלפני הרכיבים).
    בונוס שאושר = רשומת S.bon {id,sub,mon,a,n,src:'auto',cid,calc,det[,est]} (PayCore.autoBon). אחרי אישור החישוב החי של הרכיב נעצר (monthSum);
-   הבונוס נערך/נמחק כמו בונוס רגיל. אישור אוטומטי: payAutoAppr() מ-enterApp במכשיר המנהל, מה-3 בחודש, לחודש הקודם, פעם אחת (ab).
+   הבונוס נערך כמו בונוס רגיל; "ביטול" לא מוחק אותו אלא מאפס (a:0, del:1 – payroll.js), כדי שהרכיב לא יחזור כצפוי. אישור אוטומטי: payAutoAppr() מ-enterApp במכשיר המנהל,
+   מה-3 בחודש, לחודש הקודם, פעם אחת (ab) – ורק לעובד שאין לו נתונים חסרים לרכיבים (gaps: אין מכירות מכספית / ימי עבודה בלי מכירות / משימות לא נטענו). אחרת נשאר "ממתין לאישור" עם הסיבה.
    נתונים לחישוב (רק כשיש רכיבים פעילים, ורק מה שצריך): משימות החודש (שאילתת tasks לפי cr בחודש, מסוננות לעובד: ow = uid, או בלי ow ו-to כולל uid),
    מכירות מ-CxHours (כל הסניפים; לפי יום ולפי שעה). נטען בכניסה למסך שכר חודשי, נשמר 10 דקות בזיכרון בלבד.
    "כלל בכתב חופשי": payRuleAi (שרת) ← "הבנתי כך:" ← אישור (שמירה) / תיקון (לעורך, בלי שמירה) / ביטול. שום דבר לא נשמר בלי אישור.
@@ -41,7 +42,7 @@ function monRange(m){const y=+m.slice(0,4),k=+m.slice(5,7)-1;
  if(typeof tkIL!=='undefined'&&tkIL&&tkIL.at)return{from:tkIL.at(y,k,1),to:tkIL.at(k===11?y+1:y,(k+1)%12,1)};
  return{from:new Date(y,k,1).getTime(),to:new Date(y,k+1,1).getTime()}}
 function loadTasks(m){const c=TC[m];if(c&&(c.L||c.p)&&Date.now()-c.at<TTL)return c.L?Promise.resolve(c.L):c.p;
- if(typeof fsx!=='function'||typeof tkOf!=='function')return Promise.resolve([]);
+ if(typeof fsx!=='function'||typeof tkOf!=='function')return Promise.resolve(null);/* null = לא נטען (gaps) */
  const r=monRange(m),iv=v=>({integerValue:String(Math.round(v))});
  const sq={from:[{collectionId:'tasks'}],select:{fields:['cr','due','st','sub','late','dl','to','ow','txt'].map(f=>({fieldPath:f}))},limit:10000,
   where:{compositeFilter:{op:'AND',filters:[{fieldFilter:{field:{fieldPath:'cr'},op:'GREATER_THAN_OR_EQUAL',value:iv(r.from)}},{fieldFilter:{field:{fieldPath:'cr'},op:'LESS_THAN',value:iv(r.to)}}]}}};
@@ -66,12 +67,19 @@ function ctxOf(s,m,peek){const L=act(s),n=need(L),u0=s.pay&&s.pay.uid||'',k=s.id
  const u=s.pay&&s.pay.uid||'';const o={st:'load',at:Date.now()};ST[k]=o;
  o.p=Promise.all([n.tk&&u?loadTasks(m):Promise.resolve([]),n.sl?loadSales(m):Promise.resolve(null)]).then(([T,X])=>{
   o.ctx={tasks:ownT(T,u),now:Date.now()};if(X&&X.day){o.ctx.salesByDay=X.day;o.ctx.salesByHour=X.hours||{}}
-  o.noUid=n.tk&&!u;o.noCx=n.sl&&(!X||X.na);o.st='ok';o.at=Date.now();return o}).catch(e=>{o.st='err';o.err=e&&e.message||'הטעינה נכשלה';o.at=Date.now();return o});
+  o.noUid=n.tk&&!u;o.noTk=n.tk&&!!u&&!Array.isArray(T);o.noCx=n.sl&&(!X||X.na);o.st='ok';o.at=Date.now();return o}).catch(e=>{o.st='err';o.err=e&&e.message||'הטעינה נכשלה';o.at=Date.now();return o});
  o.p.then(()=>{try{if(cur().v==='payMon')U.re()}catch(e){}});
  return o}
 /* payroll.js: נתוני החישוב לעובד/חודש (או null כשעוד לא נטענו – אז החישוב בלי רכיבים) */
 function ctxReady(s,m){if(!s||!s.pay||!Array.isArray(s.pay.comp))return null;const x=ctxOf(s,m,true);return x&&x.st==='ok'?x.ctx:null}/* בלי טעינה – רק מה שכבר נטען */
 const ensure=(s,m)=>{const x=ctxOf(s,m);return x.st==='load'?x.p:Promise.resolve(x)};
+/* נתונים חסרים לחישוב הרכיבים (x = ctxOf במצב ok). מחזיר רשימת סיבות; ריקה = אפשר לאשר אוטומטית */
+function gaps(s,m,x){if(!x||x.st!=='ok')return['הנתונים עוד לא נטענו'];const g=[];
+ if(x.noUid)g.push('העובד לא מקושר למשתמש באפליקציה – אין משימות לחישוב');
+ if(x.noTk)g.push('המשימות לא נטענו');
+ if(x.noCx)g.push('אין נתוני מכירות מכספית לחודש');
+ else if(need(act(s)).sl){const w=PC.compSum(s,m,Object.assign({wh:U.AR('wh')},x.ctx)).warnings;w.filter(t=>/חסרים נתוני מכירות|אין נתוני מכירות/.test(t)).forEach(t=>g.push(t))}
+ return[...new Set(g)]}
 
 /* ---- מסך הגדרות שכר: רשימת רכיבים, כלל חופשי, מתג תצוגה ---- */
 function draftX(s,p){const q=s.pay&&typeof s.pay==='object'?s.pay:{};p.comp=Array.isArray(q.comp)?clone(q.comp).filter(c=>c&&typeof c==='object'):[];p.comp0=Array.isArray(q.comp);p.show=!!q.show;p.show0=q.show!==undefined;p.ab0=typeof q.ab==='string'?q.ab:'';p.aiT=''}
@@ -160,7 +168,7 @@ function aiDlg(){const r=AI.r,s=U.empOf(U.PD.sub);if(!r||!s)return;
  if(str(r.unsure).trim())h+=`<div class="card"><span class="tag t1">לא ברור</span><div class="note" style="margin:4px 0 0">${esc(str(r.unsure))}</div></div>`;
  if(r.dropped)h+=`<p class="note">${+r.dropped} חלקים לא הובנו ולא ייכנסו${Array.isArray(r.errs)&&r.errs.length?': '+esc(r.errs.slice(0,5).join(' · ')):''}.</p>`;
  h+=exampleH(s,comp);
- h+=`<div class="row" style="margin-top:10px"><button type="button" class="btn grow" ${big} data-a="payAiOk"${comp.length||bt.length?'':' disabled'}>אישור</button><button type="button" class="btn g grow" ${big} data-a="payAiFix"${comp.length||bt.length?'':' disabled'}>תיקון</button><button type="button" class="btn g grow" ${big} data-a="payAiNo">ביטול</button></div><p class="note">אישור שומר את הרכיבים בהגדרות השכר. תיקון מעביר לעורך בלי לשמור.</p>`;
+ h+=`<div class="row" style="margin-top:10px"><button type="button" class="btn grow" ${big} data-a="payAiOk"${comp.length||bt.length?'':' disabled'}>אישור</button><button type="button" class="btn g grow" ${big} data-a="payAiFix"${comp.length||bt.length?'':' disabled'}>תיקון</button><button type="button" class="btn g grow" ${big} data-a="payAiNo">ביטול</button></div><p class="note">אישור שומר בהגדרות השכר רק את מה שמוצג כאן. תיקון מעביר לעורך בלי לשמור.</p>`;
  dlg(h);
  const x=ctxOf(Object.assign({},s,{pay:Object.assign({},s.pay||{},{comp})}),U.curMon());if(x.st==='load')x.p.then(()=>{if(AI.r===r&&document.querySelector('#dlg[open] [data-aiex=load]'))aiDlg()})}
 function failDlg(msg){AI.r=null;dlg(`<h3>לא הצלחתי לפענח את הכלל</h3><p>${esc(msg)}</p><div style="display:grid;gap:8px;margin-top:10px"><button type="button" class="btn g w" ${big} data-a="payAiRe">לנסח מחדש</button><button type="button" class="btn g w" ${big} data-a="payAiMan">לבחור סוג ידנית</button><button type="button" class="btn g w" ${big} data-a="payAiAsMan">לשמור כבונוס ידני</button><button type="button" class="btn g w" ${big} data-a="payAiNo">ביטול</button></div>`)}
@@ -183,8 +191,12 @@ function aiApply(r){const P=U.PD.p;const comp=(Array.isArray(r.comp)?r.comp:[]).
   (Array.isArray(b.add)?b.add:[]).forEach(a=>{if(a&&P.add.length<20)P.add.push({id:uid(),n:str(a.n),k:a.k==='day'?'day':'mo',a:str(a.a)})});
   (Array.isArray(b.rules)?b.rules:[]).forEach(x=>{if(x&&P.rules.length<20)P.rules.push({id:uid(),d:Array.isArray(x.d)?x.d.map(Number).filter(k=>Number.isInteger(k)&&k>=0&&k<=6):[],s:str(x.s),e:str(x.e),r:str(x.r)})})}
  return true}
-ACT.payAiOk=()=>{if(!on()||!AI.r||!U.PD.p)return;const snap=clone(U.PD.p);if(!aiApply(AI.r))return;AI.r=null;U.PD.p.aiT='';closeDlg();
- const ok=U.saveCfg(true);if(!ok){Object.assign(U.PD.p,snap,{aiT:''});rerender()}};
+/* אישור שומר רק את מה שהוצג בחלון: טיוטה נקייה מההגדרות השמורות + הפענוח. שינויים אחרים בטופס (שלא נשמרו) נשארים בטופס, לא שמורים */
+ACT.payAiOk=()=>{if(!on()||!AI.r||!U.PD.p)return;const s=U.empOf(U.PD.sub);if(!s||typeof U.draftC!=='function')return;U.pull();const r=AI.r,pend=clone(U.PD.p),d0=U.draftC(s);
+ const nid=L=>(Array.isArray(L)?L:[]).map(x=>Object.assign({},x,{id:''})),key=o=>JSON.stringify(Object.assign({},o,{aiT:'',rules:nid(o.rules),add:nid(o.add)}))/* בלי id של כלל/תוספת – draft מייצר id חדש לרשומה ישנה בלי id */,dirty=key(pend)!==key(d0);
+ U.PD.p=d0;if(!aiApply(r)){U.PD.p=pend;return}AI.r=null;closeDlg();
+ if(!U.saveCfg(true)){U.PD.p=Object.assign(pend,{aiT:''});rerender();return}
+ if(dirty){U.PD.p=Object.assign(pend,{aiT:''});if(aiApply(r)){rerender();toast('הכלל נשמר. שינויים אחרים בטופס עוד לא נשמרו – לשמירה לחצו "שמירה"')}else{U.PD.p=U.draftC(U.empOf(s.id)||s);rerender()}}};
 ACT.payAiFix=()=>{if(!on()||!AI.r||!U.PD.p)return;const r=AI.r;if(!aiApply(r))return;AI.r=null;closeDlg();rerender();toast('הערכים הועברו לעורך – בדקו ולחצו "שמירה"');
  const P=U.PD.p,n=(Array.isArray(r.comp)?r.comp:[]).filter(c=>PC.validComp(c).ok).length;if(n)edOpen(P.comp.length-n,P.comp[P.comp.length-n])};
 ACT.payAiNo=()=>{AI.r=null;closeDlg()};
@@ -201,23 +213,26 @@ function monH(s,m,r){if(!s.pay||!Array.isArray(s.pay.comp)||!s.pay.comp.length)r
  if(x.st==='err')return h+`<div class="card" data-comp-st="err"><span class="tag t1">לא נטען</span><div class="note">${esc(x.err||'')} – הרכיבים לא חושבו. נסו שוב בעוד רגע.</div><button type="button" class="btn g w" ${big} data-a="payCompRe">ניסיון נוסף</button></div>`;
  const L=Array.isArray(r.comp)?r.comp:[];
  if(!L.length)return h+'<p class="note">אין רכיבים פעילים.</p>';
+ const DL=new Set(U.AR('bon').filter(b=>b&&b.sub===s.id&&b.mon===m&&b.src==='auto'&&b.del).map(b=>b.cid));
  const fut=m>cm,past=m<cm;
- h+=`<div class="card" data-comp-tbl>`+LN('<b>רכיב</b>','<b>'+(past?'סכום':'צפוי')+'</b>')+L.map(it=>{const st=it.appr?'<span class="tag t3">אושר</span>':it.man?'<span class="tag">ידני</span>':past?'<span class="tag t1">ממתין לאישור</span>':'<span class="tag">צפוי</span>';
+ h+=`<div class="card" data-comp-tbl>`+LN('<b>רכיב</b>','<b>'+(past?'סכום':'צפוי')+'</b>')+L.map(it=>{const st=it.appr&&!it.bonA&&DL.has(it.id)?'<span class="tag" data-cdel>בוטל</span>':it.appr?'<span class="tag t3">אושר</span>':it.man?'<span class="tag">ידני</span>':past?'<span class="tag t1">ממתין לאישור</span>':'<span class="tag">צפוי</span>';
   const v=it.appr?U.ag(it.bonA):it.man?'—':U.ag(it.amt);
   return `<button type="button" class="li" data-a="payCompBrk" data-cid="${esc(it.id)}" style="width:100%;font:inherit;color:inherit;text-align:inherit;cursor:pointer"><div class="m"><b>${esc(it.n)}</b><small>${st}${it.byDay?' · <span data-byday>לפי יום (אין שעות)</span>':''}${it.est?' · הערכה':''}</small></div><div class="a" style="white-space:nowrap">${v}</div></button>`}).join('');
  h+=LN('בונוס צפוי (לא נכלל ב"נשאר להעביר")','<span data-exp>'+U.ag(r.exp||0)+'</span>')+`</div>`;
  if(x.noUid)h+='<p class="note">העובד לא מקושר למשתמש באפליקציה – אין משימות לחישוב.</p>';
  if(x.noCx)h+='<p class="note">אין נתוני מכירות מכספית – רכיבי המכירות נספרים 0.</p>';
+ const pend0=L.some(it=>!it.appr&&!it.man),G=past&&pend0?gaps(s,m,x):[];
+ if(G.length)h+=`<div class="card" data-gaps><span class="tag t1">לא אושר אוטומטית – חסרים נתונים</span>${G.map(t=>`<div class="note" style="margin:4px 0 0">• ${esc(t)}</div>`).join('')}<div class="note" style="margin:4px 0 0">אפשר להשלים את הנתונים (למשל ייבוא מכספית) ולחזור, או לאשר ידנית לפי החישוב הנוכחי.</div></div>`;
  if(Array.isArray(r.hints)&&r.hints.length)h+=`<div class="card" data-hints><b>מה אפשר לשפר</b>${r.hints.slice(0,8).map(t=>`<div class="note" style="margin:4px 0 0">• ${esc(t.t)}</div>`).join('')}</div>`;
  const pend=L.filter(it=>!it.appr&&!it.man);
- if(past&&pend.length)h+=`<button type="button" class="btn w" ${big} data-a="payAppr">אשר בונוסים ל${esc(typeof mfmt==='function'?mfmt(m):m)}</button><p class="note">הבונוסים יירשמו בבונוס החודשי. אחר כך אפשר לערוך או למחוק כל אחד, והחישוב החי שלהם נעצר.</p>`;
+ if(past&&pend.length)h+=`<button type="button" class="btn w" ${big} data-a="payAppr">אשר בונוסים ל${esc(typeof mfmt==='function'?mfmt(m):m)}</button><p class="note">הבונוסים יירשמו בבונוס החודשי. אחר כך אפשר לערוך או לבטל כל אחד, והחישוב החי שלהם נעצר.</p>`;
  else if(!past&&!fut&&pend.length)h+=`<p class="note">בסוף החודש (מה-3 בחודש הבא) הבונוסים יאושרו אוטומטית, ואפשר גם לאשר ידנית.</p>`;
  return h}
 ACT.payCompRe=()=>{const s=U.empOf(U.PM.sub);if(!s)return;const k0=s.id+'|'+U.PM.mon+'|';Object.keys(ST).forEach(k=>{if(k.startsWith(k0))delete ST[k]});U.re()};
 ACT.payCompBrk=el=>{if(!on())return;const s=U.empOf(U.PM.sub);if(!s)return;const r=U.monSum(s,U.PM.mon);if(!r||!Array.isArray(r.comp))return;const it=r.comp.find(x=>x.id===el.dataset.cid);if(!it)return;
  const c=(s.pay.comp||[]).find(x=>x&&x.id===it.id);
  let b=`<p class="note">${esc(c?descr(c):'')}</p>`+it.det.map(t=>`<div class="note" style="margin:4px 0">${esc(t)}</div>`).join('');
- if(it.appr)b+=LN('אושר כבונוס',U.ag(it.bonA))+'<p class="note">אחרי האישור הסכום לא מחושב מחדש. עריכה או מחיקה – ברשימת הבונוסים.</p>';
+ if(it.appr)b+=LN('אושר כבונוס',U.ag(it.bonA))+'<p class="note">אחרי האישור הסכום לא מחושב מחדש. עריכה או ביטול – ברשימת הבונוסים.</p>';
  else if(!it.man)b+=LN('לפי החישוב עכשיו',U.ag(it.amt));
  if(!it.appr&&it.hints.length)b+='<div class="sec"><h3>מה אפשר לשפר</h3></div>'+it.hints.map(h=>`<div class="note" style="margin:4px 0">• ${esc(h.t)}</div>`).join('');
  dlg(`<h3>${esc(it.n)}</h3>${b}<button type="button" class="btn g w" style="margin-top:12px" data-a="closeDlg">סגירה</button>`)};
@@ -227,7 +242,8 @@ function approve(s,m,ctx){const L=PC.autoBon(s,m,Object.assign({wh:U.AR('wh'),bo
  if(!(typeof s.pay.ab==='string'&&s.pay.ab>=m))s.pay.ab=m;return L.length}
 ACT.payAppr=()=>{if(!on())return;const s=U.empOf(U.PM.sub),m=U.PM.mon;if(!s||!s.pay||!(m<U.curMon()))return;const x=ctxOf(s,m);if(x.st!=='ok')return toast('הנתונים עוד לא נטענו');
  const n=PC.autoBon(s,m,Object.assign({wh:U.AR('wh'),bon:U.AR('bon')},x.ctx)).length;if(!n)return toast('אין בונוסים לאישור');
- ask('לאשר '+n+' בונוסים לחודש '+(typeof mfmt==='function'?mfmt(m):m)+'? אחרי האישור הסכום לא מחושב מחדש, ואפשר לערוך או למחוק.',()=>{const x2=ctxOf(s,m);if(x2.st!=='ok'){closeDlg();return toast('הנתונים לא זמינים')}
+ const G=gaps(s,m,x);
+ ask((G.length?'שימו לב – חסרים נתונים: '+G.join(' · ')+'. הבונוסים יאושרו לפי החישוב הנוכחי (ייתכן שנמוך מהנכון). ':'')+'לאשר '+n+' בונוסים לחודש '+(typeof mfmt==='function'?mfmt(m):m)+'? אחרי האישור הסכום לא מחושב מחדש, ואפשר לערוך או לבטל.',()=>{const x2=ctxOf(s,m);if(x2.st!=='ok'){closeDlg();return toast('הנתונים לא זמינים')}
   const k=approve(s,m,x2.ctx);save();closeDlg();toast(k?'אושרו '+k+' בונוסים':'אין בונוסים לאישור');rerender()},'אישור')};
 /* אישור אוטומטי: מכשיר המנהל, מה-3 בחודש, לחודש הקודם, פעם אחת לכל עובד (pay.ab) */
 let autoRan=false;
@@ -236,10 +252,10 @@ window.payAutoAppr=async()=>{try{if(autoRan||!on()||typeof S==='undefined'||!S||
  for(const s of S.subs.slice()){const e=s&&U.empOf(s.id);if(!e||!e.pay||!Array.isArray(e.pay.comp))continue;
   if(typeof e.pay.ab==='string'&&e.pay.ab>=tgt)continue;if(typeof e.pay.from==='string'&&/^\d{4}-\d{2}$/.test(e.pay.from)&&e.pay.from>tgt)continue;
   if(!need(act(e)).any){continue}
-  const x=await ensure(e,tgt);if(!x||x.st!=='ok')continue;
+  const x=await ensure(e,tgt);if(!x||x.st!=='ok')continue;if(gaps(e,tgt,x).length)continue;/* חסרים נתונים – נשאר "ממתין לאישור" עם הסיבה במסך */
   const k=approve(e,tgt,x.ctx);n+=k;if(k)emp++;ch=true}
  if(ch)save();if(emp){toast('אושרו אוטומטית בונוסים ל'+(typeof mfmt==='function'?mfmt(tgt):tgt)+': '+emp+' עובדים');try{rerender()}catch(e){}}
  return n}catch(e){return 0}};
 
-window.PayComp={draftX,pullX,buildX,cfgH,monH,ctxReady,ensure,descr,_reset:()=>{Object.keys(ST).forEach(k=>delete ST[k]);Object.keys(TC).forEach(k=>delete TC[k]);Object.keys(SC).forEach(k=>delete SC[k]);autoRan=false}};
+window.PayComp={draftX,pullX,buildX,cfgH,monH,ctxReady,ensure,gaps,descr,_reset:()=>{Object.keys(ST).forEach(k=>delete ST[k]);Object.keys(TC).forEach(k=>delete TC[k]);Object.keys(SC).forEach(k=>delete SC[k]);autoRan=false}};
 })();

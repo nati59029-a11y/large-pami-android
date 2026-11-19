@@ -54,7 +54,9 @@ function build(s,m,ctx){const p=s.pay,U=window.PayUI;
  const items=Array.isArray(r.comp)?r.comp:[],ids=new Set(items.map(i=>i.id));
  U.AR('bon').forEach(b=>{if(!b||b.sub!==s.id||b.mon!==m)return;const au=b.src==='auto';if(au&&typeof b.cid==='string'&&ids.has(b.cid))return;
   const v=PC.num(b.a);if(v===null||(au&&v===0))return;
-  R.push({n:au?String(b.n||'בונוס').slice(0,60):'בונוס',a:PC.toAg(v),s:isSlip?'acc':'ok',det:[isSlip?'בונוס שנרשם – עובר לרואה החשבון ונכלל בתלוש':'בונוס שנרשם'],h:[]})});
+  /* בונוס auto שהרכיב שלו הושבת/נמחק: שם הרכיב מההגדרות (גם כבוי), אחרת "בונוס" – לא b.n, שהמנהל יכול לערוך */
+  const cn=au?(s.pay.comp||[]).find(c=>c&&c.id===b.cid):null;
+  R.push({n:cn&&typeof cn.n==='string'&&cn.n.trim()?cn.n.slice(0,60):'בונוס',a:PC.toAg(v),s:isSlip?'acc':'ok',det:[isSlip?'בונוס שנרשם – עובר לרואה החשבון ונכלל בתלוש':'בונוס שנרשם'],h:[]})});
  items.forEach(it=>{if(it.appr&&!it.bonA)return;const c=compOf(s,it.id),sec=(it.k==='sl'||it.k==='pc')&&!(c&&c.amt);
   const o={n:String(it.n||'').slice(0,80),a:it.appr?it.bonA:it.man?null:Math.round(it.amt||0),s:it.appr?(isSlip?'acc':'ok'):it.man?'man':'exp'};
   if(sec){const x=salesSafe(it,c);o.det=x.det;o.h=it.appr?[]:x.h}else{o.det=(it.det||[]).map(String);o.h=it.appr?[]:(it.hints||[]).map(x=>String(x.t))}

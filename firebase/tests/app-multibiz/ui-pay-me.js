@@ -89,6 +89,14 @@ const COMP = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', n: '
     check('4 אוקטובר: בונוס אוטומטי 0 שאושר – לא מוצג; בונוס ידני – "בונוס" בלי הפירוט של המנהל', O.rows && !row(O, 'מדרגות מכירות') && row(O, 'בונוס') && row(O, 'בונוס').a === 5000, O.rows && O.rows.map((r) => [r.n, r.a, r.s]));
     const bz = await pg.evaluate(() => { const s = S.subs.find((q) => q.id === 'pmA'); const m = PayOut._model(s, '2026-10'); return m && m.ms.bons.map((b) => b.id); });
     check('4א דוחות PayOut (גם לרואה החשבון): בונוס אוטומטי 0 לא ברשימת הבונוסים; הידני כן', JSON.stringify(bz) === '["b1"]', bz);
+    // בונוס אוטומטי שבוטל (a:0, del:1) – הרכיב לא חוזר כ"צפוי"; בונוס auto של רכיב שנמחק – "בונוס" בלי "על מה" שהמנהל ערך
+    const bx = await pg.evaluate(() => { const s = PayUI.empOf('pmA'), ctx = PayComp.ctxReady(s, '2026-10'), b = PayMe.build(s, '2026-10', ctx), n0 = S.bon.length;
+      S.bon.push({ id: 'bx1', sub: 'pmA', mon: '2026-10', a: 0, del: 1, n: 'אחוז', src: 'auto', cid: 'k3', calc: 350, det: 'x' }, { id: 'bx2', sub: 'pmA', mon: '2026-10', a: 20, n: 'עריכה-של-המנהל', src: 'auto', cid: 'kGone', calc: 20, det: 'y' });
+      const a = PayMe.build(s, '2026-10', ctx); S.bon.splice(n0, 2);
+      const R = (d) => d.rows.map((r) => [r.n, r.a, r.s]); return { ctx: !!ctx, bExp: b.exp, aExp: a.exp, bEst: b.est, aEst: a.est, b: R(b), a: R(a) }; });
+    check('4ב בונוס auto שבוטל: הרכיב לא "צפוי" ולא בשכר המשוער; בונוס של רכיב שנמחק מוצג "בונוס" בלי הטקסט שהמנהל ערך',
+      bx.ctx && bx.b.some((r) => r[0] === 'אחוז' && r[2] === 'exp' && r[1] === 35000) && !bx.a.some((r) => r[0] === 'אחוז') && bx.aExp === bx.bExp - 35000 && bx.aEst === bx.bEst - 35000 + 2000
+      && bx.a.some((r) => r[0] === 'בונוס' && r[1] === 2000 && r[2] === 'ok') && !JSON.stringify(bx.a).includes('עריכה-של-המנהל'), bx);
     // כתיבה רק כשהתוכן השתנה
     W.length = 0; await pg.evaluate(() => pmSync());
     check('5 הרצה חוזרת בלי שינוי – אין כתיבה ואין מחיקה', W.length === 0, W);
