@@ -74,6 +74,11 @@ body.grc .bar,body.grc .wbar{display:none!important}body.grc main{padding-bottom
 .gr-emo{display:flex;justify-content:space-between;gap:4px;margin-bottom:12px}
 .gr-emo button{flex:1;min-height:48px;font-size:1.5rem;border-radius:12px;background:var(--card);border:1px solid var(--line);cursor:pointer;padding:0}
 .gr-emo button.on{border:2px solid var(--acc);background:var(--acc2)}
+.gr-srbar{display:flex;gap:8px;align-items:center;position:sticky;top:calc(64px + env(safe-area-inset-top));z-index:5;background:var(--bg);padding:4px 0}.gr-srbar input{flex:1;min-height:44px;border-radius:22px;padding:8px 14px}
+.gr-sr .t{flex:1;min-width:0}.gr-sr .t b{display:block}.gr-sr .t span{display:block;font-size:.84rem;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gr-sr .m{display:flex;flex-direction:column;align-items:flex-end;font-size:.74rem;color:var(--mut);flex:none}
+.gr-sr mark{background:var(--acc2);color:var(--ink);border-radius:3px}
+.gr-sth{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;display:inline-flex;align-items:center;justify-content:center;background:var(--line);font-size:1.2rem}
+.gr-circ.rec{background:var(--neg,#c0392b);color:#fff;border:0;animation:grpls 1.2s infinite}@keyframes grpls{50%{opacity:.6}}
 .gr-rebar{display:flex;align-items:center;gap:8px;margin-bottom:6px}.gr-rebar .gr-q{flex:1;margin:0;cursor:default}
 `;document.head.appendChild(st);
 
@@ -136,14 +141,17 @@ function grPinPaint(){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)retur
 function compH(c){const g=c.g;
  if(!fbAdmin()&&g.ao)return '<div class="gr-lock">🔒 רק המנהל יכול לשלוח הודעות בקבוצה הזו</div>';
  const dis=c.sending?' disabled':'',re=c.re?`<div class="gr-rebar"><div class="gr-q"><b>↩ תשובה ל${esc(c.re.byN||'')}</b><span>${esc(c.re.k==='img'?'📷 '+(c.re.txt||'תמונה'):c.re.k==='vid'?'🎬 '+(c.re.txt||'סרטון'):c.re.txt)}</span></div><button class="gr-circ" data-a="grReX" aria-label="בטל תשובה" style="width:36px;height:36px">✕</button></div>`:'';
- return `${re}<div class="gr-comp">${g.md?`<label class="gr-circ" aria-label="צרף תמונה או סרטון" style="${c.sending?'opacity:.5':''}">📎<input type="file" accept="image/*,video/*" data-c="grFile" hidden${dis}></label>`:''}<textarea id="grtx" data-i="grDraft" rows="1" maxlength="2000" placeholder="כתוב הודעה…" aria-label="הודעה"${dis}>${esc(c.draft)}</textarea><button class="gr-circ go" data-a="grSend" aria-label="שלח"${dis}>➤</button></div>${c.sending?`<p class="note" style="margin:6px 0 0">${esc(c.sending)}</p>`:''}`}
+ return `${re}<div class="gr-comp">${g.md?`<label class="gr-circ" aria-label="צרף תמונה או סרטון" style="${c.sending?'opacity:.5':''}">📎<input type="file" accept="image/*,video/*" data-c="grFile" hidden${dis}></label>`:''}<textarea id="grtx" data-i="grDraft" rows="1" maxlength="2000" placeholder="${DT.on?'מדברים… המילים נכתבות כאן':'כתוב הודעה…'}" aria-label="הודעה"${dis}${DT.on?' readonly':''}>${esc(c.draft)}</textarea>${isNat()?`<button class="gr-circ${DT.on?' rec':''}" data-a="grMic" aria-label="${DT.on?'עצור הקלטה':'הקלט והקלד'}"${dis}>${DT.on?'⏹':'🎤'}</button>`:''}<button class="gr-circ go" data-a="grSend" aria-label="שלח"${dis}>➤</button></div>${c.sending?`<p class="note" style="margin:6px 0 0">${esc(c.sending)}</p>`:DT.on?'<p class="note" style="margin:6px 0 0">🎤 מקליט – המילים נכתבות בתיבה. לחצו ⏹ לסיום, ואז אפשר לערוך ולשלוח.</p>':''}`}
 function topH(c){const g=c.g;
- if(fbAdmin())return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span class="note" style="margin:0">${g.mem.length} חברים${g.ao?' · רק המנהל שולח':''}</span><button class="chip" data-a="grSet" data-id="${esc(g.id)}">⚙ הגדרות</button></div>`;
- if(g.ao)return '';
- return `<label class="opt" style="min-height:48px;margin-bottom:8px"><span>השתק התראות</span><input type="checkbox" data-c="grMute"${g.mu?' checked':''}></label>`}
+ const sb='<button class="chip" data-a="grSr" aria-label="חיפוש בקבוצה">🔍 חיפוש</button>';
+ if(fbAdmin())return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px"><span class="note" style="margin:0">${g.mem.length} חברים${g.ao?' · רק המנהל שולח':''}</span><span style="display:flex;gap:6px">${sb}<button class="chip" data-a="grSet" data-id="${esc(g.id)}">⚙ הגדרות</button></span></div>`;
+ const sr=`<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${sb}</div>`;
+ if(g.ao)return sr;
+ return sr+`<label class="opt" style="min-height:48px;margin-bottom:8px"><span>השתק התראות</span><input type="checkbox" data-c="grMute"${g.mu?' checked':''}></label>`}
 V.grc=gid=>{
  const c=GR.c;if(!on()||!c||c.gid!==gid)return{t:'קבוצה',s:'',h:'<div class="card"><p class="note">הקבוצה לא זמינה.</p></div>'};
  if(!c.started){c.started=1;grEnter(c)}
+ if(c.sr)return{t:c.g.name,s:'חיפוש',h:srH(c)};
  return{t:c.g.name,s:'קבוצה',h:`<div id="grtop">${topH(c)}</div><div id="grpin">${pinH(c)}</div><div id="grmsgs">${msgsH(c)}</div><div id="grcomp">${compH(c)}</div>`}};
 const atBottom=()=>window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-160;
 function grPaint(opt){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)return;const m=$('#grmsgs');if(!m)return;
@@ -188,7 +196,7 @@ const imgBusy={};
 async function grImgGet(gid,mid){const k=gid+'/'+mid;if(GR.img[k]||imgBusy[k]||!idOk(mid))return;imgBusy[k]=1;
  try{const d=await fsx('/grp/'+gid+'/m/'+mid+'/p/1'),du=gv(d,'img');if(!imgOk(du))throw 0;GR.img[k]=du;delete GR.img['x'+k]}catch(e){GR.img['x'+k]=1}
  finally{delete imgBusy[k]}
- if(GR.c&&GR.c.gid===gid)grPaint()}
+ if(GR.c&&GR.c.gid===gid){grPaint();srPaint()}}
 ACT.grImg=el=>{const c=GR.c;if(!c)return;const k=c.gid+'/'+el.dataset.id;if(GR.img[k])return viewImg(null,'LargePami_group',GR.img[k]);delete GR.img['x'+k];grImgGet(c.gid,el.dataset.id)};
 /* סרטון: Storage דורש כותרת הרשאה, ולכן מורידים ל-blob ומנגנים ב-<video> (עד 30MB, רק בלחיצה) */
 ACT.grVid=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||!m.vp)return;
@@ -214,11 +222,11 @@ async function grPost(c,k,txt,x){
 const sendDone=c=>{c.sending='';c.re=null;grComp();grPaint('bottom');grMark()};
 const reX=c=>c.re?{re:c.re}:null;
 const sendErr=(c,e)=>{c.sending='';grComp();toast(tkErr(e))};
-ACT.grSend=async()=>{const c=GR.c;if(!c||c.sending||!c.ready)return;const tx=$('#grtx'),txt=String((tx?tx.value:c.draft)||'').trim().slice(0,2000);if(!txt)return;
+ACT.grSend=async()=>{const c=GR.c;if(!c||c.sending||!c.ready)return;dtFlush();const tx=$('#grtx'),txt=String((tx?tx.value:c.draft)||'').trim().slice(0,2000);if(!txt)return;
  if(!fbAdmin()&&c.g.ao)return toast('רק המנהל יכול לשלוח הודעות בקבוצה הזו');
  c.sending='שולח…';grComp();
  try{await grPost(c,'t',txt,reX(c));c.draft='';sendDone(c)}catch(e){c.draft=txt;sendErr(c,e)}};
-CHG.grFile=async el=>{const f=el.files&&el.files[0];el.value='';const c=GR.c;if(!f||!c||c.sending||!c.g.md)return;
+CHG.grFile=async el=>{const f=el.files&&el.files[0];el.value='';const c=GR.c;if(!f||!c||c.sending||!c.g.md)return;dtFlush();
  const tx=$('#grtx');if(tx)c.draft=tx.value;
  if(/^video\//.test(f.type||'')||/\.(mp4|webm|3gp|mov)$/i.test(f.name||''))return grVideo(c,f);
  if(f.type&&!/^image\//.test(f.type))return toast('אפשר לשלוח תמונה או סרטון בלבד');
@@ -369,6 +377,67 @@ ACT.grFwdGo=async el=>{const c=GR.c;if(!c||c.fwd)return;const m=c.msgs.find(x=>x
   GR.at=0;toast('הועבר לקבוצה '+g.name)}
  catch(e){if(m.gone)grPaint();toast(e&&e.code===403?'אין הרשאה להעביר לקבוצה הזו (ייתכן שהשרת עוד לא עודכן)':e&&e.code?tkErr(e):(e&&e.message)||'ההעברה נכשלה')}
  finally{c.fwd=0}};
+
+/* ---- הכתבה קולית (19.11): זיהוי הדיבור של הטלפון (תוסף LpSpeech, כמו במזכירה – בלי שרת ובלי עלות).
+   המילים נכתבות בתיבה תוך כדי דיבור; בזמן ההקלטה התיבה לקריאה בלבד. אחרי "עצור" עורכים ושולחים בלחיצה (לא נשלח לבד).
+   לא נשמרת הקלטה – רק הטקסט. עד 3 דקות להקלטה אחת. ---- */
+const DT={on:0,P:null,hs:[],base:'',fin:'',par:'',tm:0,st:0,t0:0,gid:'',stp:0};
+const DTE={perm:'אין הרשאה למיקרופון. אפשרו לאפליקציה גישה למיקרופון בהגדרות הטלפון ונסו שוב.',net:'זיהוי הדיבור צריך חיבור לאינטרנט. בדקו את החיבור ונסו שוב, או הקלידו.',lang:'זיהוי דיבור בעברית לא זמין בטלפון הזה. אפשר להקליד.',audio:'המיקרופון תפוס או לא זמין.',silence:'לא שמעתי דיבור. נסו שוב.',fail:'זיהוי הדיבור נעצר. אפשר להמשיך להקליד או להקליט שוב.'};
+async function spP(){const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.LpSpeech;if(!P||!isNat()||(C.isPluginAvailable&&!C.isPluginAvailable('LpSpeech')))return null;
+ try{const r=await P.available();return r&&r.ok?P:null}catch(e){return null}}
+const dtTxt=()=>[DT.base,DT.fin,DT.par].map(x=>String(x||'').trim()).filter(Boolean).join(' ').slice(0,2000);
+function dtShow(){const c=GR.c;if(!DT.on||!c||c.gid!==DT.gid)return;const v=dtTxt();c.draft=v;const t=$('#grtx');if(t){t.readOnly=true;if(t.value!==v)t.value=v;try{t.scrollTop=t.scrollHeight}catch(e){}}}
+function dtOff(){clearInterval(DT.tm);clearTimeout(DT.st);const hs=DT.hs||[];DT.hs=[];hs.forEach(h=>{try{h&&h.remove&&h.remove()}catch(e){}});Object.assign(DT,{on:0,P:null,stp:0})}
+function dtEnd(code){if(!DT.on)return;const v=dtTxt(),got=v.trim()!==String(DT.base||'').trim(),gid=DT.gid;dtOff();const c=GR.c;
+ if(c&&c.gid===gid){c.draft=v;grComp();const t=$('#grtx');if(t){t.focus();try{t.setSelectionRange(v.length,v.length)}catch(e){}}}
+ if(code&&code!=='pause'&&(code!=='silence'||!got))toast(DTE[code]||DTE.fail);else if(got)toast('אפשר לערוך את הטקסט ואז לשלוח')}
+function dtStop(){if(!DT.on||DT.stp)return;DT.stp=1;const P=DT.P;try{P.stop().catch(()=>dtEnd(''))}catch(e){dtEnd('')}DT.st=setTimeout(()=>dtEnd(''),4000)}
+/* שליחה או יציאה באמצע הקלטה: עוצרים מיד ושומרים את מה שנכתב */
+function dtFlush(){if(!DT.on)return;const v=dtTxt(),gid=DT.gid;try{DT.P&&DT.P.cancel().catch(()=>{})}catch(e){}dtOff();const c=GR.c;if(c&&c.gid===gid){c.draft=v;const t=$('#grtx');if(t){t.readOnly=false;t.value=v}}}
+ACT.grMic=async()=>{const c=GR.c;if(!c||c.sending)return;if(DT.on)return dtStop();
+ const P=await spP();if(!P)return toast('הקלטה עם הקלדה אוטומטית זמינה בטלפון עם הגרסה המעודכנת של האפליקציה. אפשר להקליד.');
+ if(GR.c!==c||DT.on)return;const t=$('#grtx');
+ Object.assign(DT,{on:1,P,base:t?t.value:c.draft,fin:'',par:'',stp:0,gid:c.gid,t0:Date.now()});
+ const on=(n,fn)=>P.addListener(n,e=>{if(DT.on&&DT.P===P)fn(e||{})});
+ try{DT.hs=await Promise.all([on('partial',e=>{DT.par=String(e.text||'');dtShow()}),on('final',e=>{const x=String(e.text||'').trim();if(x)DT.fin=(DT.fin?DT.fin+' ':'')+x;DT.par='';dtShow()}),on('end',e=>dtEnd(String(e.code||'')))]);
+  grComp();dtShow();await P.start({lang:'he-IL'})}
+ catch(e){const code=e&&e.code;dtOff();grComp();return toast(code==='perm'?DTE.perm:code==='na'?'אין זיהוי דיבור בטלפון הזה. אפשר להקליד.':DTE.fail)}
+ DT.tm=setInterval(()=>{if(!DT.on)return;if(!GR.c||GR.c.gid!==DT.gid||cur().v!=='grc'||GR.c.sr){dtFlush();return}if(!DT.stp&&Date.now()-DT.t0>180000){toast('ההקלטה נעצרה אחרי 3 דקות');dtStop()}},500)};
+
+/* ---- חיפוש בקבוצה (19.11): מילים, לפי שולח, לפי סוג (טקסט / תמונות / סרטונים). החיפוש רץ על ההודעות שנטענו במכשיר
+   (בלי עלות שרת); "חפש גם בהודעות ישנות" טוען עוד עמודים (עד 250 בכל לחיצה). ---- */
+const nrm=s=>String(s||'').toLowerCase().replace(/[֑-ׇ]/g,'');
+function srRes(c){const s=c.sr,q=nrm(s.q).trim();
+ return c.msgs.filter(m=>(!s.by||m.by===s.by)&&(!s.k||m.k===s.k)&&(!q||nrm(m.txt).includes(q))).slice().reverse()}
+function hlTx(t,q){t=String(t||'');q=String(q||'').trim();const n=nrm(t),k=nrm(q);
+ /* nrm שומר על האורך רק כשאין ניקוד; עם ניקוד – בלי הדגשה, רק קטע מההתחלה */
+ if(!k||n.length!==t.length){return esc(t.slice(0,140))}
+ const i=n.indexOf(k);if(i<0)return esc(t.slice(0,140));const a=Math.max(0,i-40);
+ return (a?'…':'')+esc(t.slice(a,i))+'<mark>'+esc(t.slice(i,i+k.length))+'</mark>'+esc(t.slice(i+k.length,i+k.length+80))}
+function srRowH(m,c){const s=c.sr,du=m.k==='img'?GR.img[c.gid+'/'+m.id]:'';
+ const ic=m.k==='img'?(du?`<img src="${esc(du)}" alt="" class="gr-sth">`:`<span class="gr-sth" data-simg="${esc(m.id)}">📷</span>`):m.k==='vid'?'<span class="gr-sth">🎬</span>':'';
+ const tx=m.txt?hlTx(m.txt,s.q):(m.k==='img'?'תמונה':m.k==='vid'?'סרטון ('+dur(m.vs)+')':'');
+ return `<button class="li gr-sr" data-a="grSrGo" data-id="${esc(m.id)}">${ic}<div class="t"><b>${mineId(m)?'אני':esc(m.byN||'')}</b><span>${tx}</span></div><div class="m"><span>${esc(dLbl(m.t))}</span><span>${hm(m.t)}</span></div></button>`}
+function srListH(c){const L=srRes(c),s=c.sr,any=s.q.trim()||s.by||s.k;
+ const more=c.more?`<button class="btn g w" data-a="grSrMore" style="margin-top:8px"${c.loading?' disabled':''}>${c.loading?'טוען…':'חפש גם בהודעות ישנות יותר'}</button>`:'';
+ if(!any)return `<p class="note">כתבו מילה לחיפוש, או בחרו שולח או סוג.</p>`;
+ return `<p class="note" style="margin:0 0 6px">${L.length?L.length+' תוצאות':'לא נמצאו הודעות'}${c.more?' (בהודעות שנטענו)':''}</p>${L.slice(0,200).map(m=>srRowH(m,c)).join('')}${L.length>200?'<p class="note">מוצגות 200 התוצאות החדשות. אפשר לצמצם את החיפוש.</p>':''}${more}`}
+function srH(c){const s=c.sr,who=new Map();c.msgs.forEach(m=>{if(!who.has(m.by))who.set(m.by,mineId(m)?'אני':(m.byN||'ללא שם'))});
+ const ws=[...who.entries()].sort((a,b)=>a[1].localeCompare(b[1],'he')),K=[['','הכול'],['t','טקסט'],['img','📷 תמונות'],['vid','🎬 סרטונים']];
+ return `<div class="gr-srbar"><input id="grsq" data-i="grSq" type="search" maxlength="60" placeholder="חיפוש בקבוצה…" aria-label="חיפוש" value="${esc(s.q)}" autocomplete="off" enterkeyhint="search"><button class="chip" data-a="grSrX">סגור</button></div>
+ <label class="f" style="margin:8px 0"><span>שולח</span><select data-c="grSby"><option value="">כל השולחים</option>${ws.map(([u,n])=>`<option value="${esc(u)}"${u===s.by?' selected':''}>${esc(n)}</option>`).join('')}</select></label>
+ <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${K.map(([k,l])=>`<button class="chip${s.k===k?' on':''}" data-a="grSk" data-k="${k}">${l}</button>`).join('')}</div><div id="grsr">${srListH(c)}</div>`}
+function srPaint(){const c=GR.c;if(!c||!c.sr||cur().v!=='grc')return;const e=$('#grsr');if(e)e.innerHTML=srListH(c);srImgs()}
+function srImgs(){const c=GR.c;if(!c)return;[...document.querySelectorAll('#grsr [data-simg]')].filter(e=>!GR.img['x'+c.gid+'/'+e.dataset.simg]).slice(0,40).forEach(e=>grImgGet(c.gid,e.dataset.simg))}
+ACT.grSr=()=>{const c=GR.c;if(!c||!c.ready)return;dtFlush();c.sr={q:'',by:'',k:''};rerender();window.scrollTo(0,0);const i=$('#grsq');if(i)i.focus()};
+ACT.grSrX=()=>{const c=GR.c;if(!c)return;c.sr=null;rerender();grImgs();window.scrollTo(0,document.documentElement.scrollHeight)};
+INP.grSq=el=>{const c=GR.c;if(!c||!c.sr)return;c.sr.q=el.value;clearTimeout(c.sr.tm);c.sr.tm=setTimeout(srPaint,200)};
+CHG.grSby=el=>{const c=GR.c;if(!c||!c.sr)return;c.sr.by=el.value;srPaint()};
+ACT.grSk=el=>{const c=GR.c;if(!c||!c.sr)return;c.sr.k=el.dataset.k||'';document.querySelectorAll('[data-a="grSk"]').forEach(b=>b.classList.toggle('on',b===el));srPaint()};
+ACT.grSrMore=async()=>{const c=GR.c;if(!c||!c.sr||c.loading)return;let n=0;
+ while(c.more&&n<5&&GR.c===c&&c.sr){n++;await ACT.grMore()}
+ srPaint()};
+ACT.grSrGo=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id;c.sr=null;rerender();grImgs();grJump(id,'ההודעה לא נמצאה')};
 
 /* ---- הגדרות קבוצה (מנהל) ---- */
 async function grStaff(){if(GR.staff)return;try{const j=await fsx('/staff?pageSize=300');GR.staff=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d}),id=idOf(d);return{uid:id,name:String(f.name||'').trim()||String(f.email||'').split('@')[0]||id,active:f.active===true}}).filter(x=>x.active&&idOk(x.uid)).sort((a,b)=>a.name.localeCompare(b.name,'he'))}catch(e){GR.staff=null;GR.s.err=tkErr(e)}
