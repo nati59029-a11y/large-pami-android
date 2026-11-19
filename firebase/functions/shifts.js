@@ -406,6 +406,28 @@ async function attOpen(db, biz, uid, start, end, srcs) {
   }
   return r;
 }
+// "סיכום יום" (daily-rep.js remindBiz, 19.11.2026): נוכחות העובד במשמרת [start, end) לפי posclock – רשומות שחופפות כמו ב-attHit
+//   (in < end, in >= start - ATT_PRE), גם רשומות סגורות. null = המקור לא חל בעסק / שגיאה (= לא ידוע); { open: true } = כניסה פתוחה;
+//   { out } = היציאה האחרונה (0 = אין רשומה סגורה). כספית – עוד אין מקור (null).
+async function attLast(db, biz, uid, start, end) {
+  const src = ATT_SRC.find((x) => x.id === 'posclock');
+  if (!src || !src.on(biz)) return null;
+  const days = [...new Set([start - SC.ATT_PRE, start, end - 1].map((t) => SC.todayOf(t).replace(/-/g, '')))];
+  try {
+    const s = await db.collection('posclock').where('who', '==', uid).where('day', 'in', days).limit(50).get();
+    let open = false, out = 0;
+    for (const d of s.docs) {
+      const r = d.data() || {};
+      if (!Number.isFinite(r.in) || r.in >= end || r.in < start - SC.ATT_PRE) continue;
+      if (r.out === null || r.out === undefined) open = true;
+      else if (Number.isFinite(r.out) && r.out > out) out = r.out;
+    }
+    return open ? { open: true } : { out };
+  } catch (e) {
+    logger.warn('attLast failed', { name: e && e.name, code: e && e.code });
+    return null;
+  }
+}
 
 const DN = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 // "היום" / "מחר" / "ביום שבת" – לפי שעון ישראל
@@ -497,4 +519,4 @@ exports.shTick = onSchedule({ region: LEGACY_REGION, schedule: 'every 10 minutes
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, ATT_SRC, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, attLast, loadDefs, ATT_SRC, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });

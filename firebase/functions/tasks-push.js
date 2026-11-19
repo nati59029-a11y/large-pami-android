@@ -8,6 +8,9 @@
 //   כל המנהלים – משימה שעובד יצר (גם פרטית), ממתינה לאישור, בוצעה על ידי עובד, תגובה של עובד.
 // בלי התראה: משימה קבועה (rc), משימה ישנה בלי to שלא נתפסה, תפיסה/העברה, "נקרא", סימון רשימה, אישור מנהל (wait → done),
 //   משימה מהמייל של המזכירה (ml / owner ריק), ויצירה של משימה שאינה פתוחה או שנוצרה (cr) לפני יותר מ-10 דקות (העתקה / migrate.js).
+// "שליחת משימות" (19.11.2026): משימה שעובד מורשה שלח (dg == '1', owner = השולח) – ממתינה לאישור / בוצעה / תגובה של עובד
+//   הולכות רק לשולח (plus) – לא למנהלים (19.11.2026), רק אם הוא עובד פעיל שהמתג perms.tkS דולק אצלו עכשיו. תגובה של השולח עצמו – כמו תגובת מנהל: למטפל.
+//   על עצם השליחה המנהלים לא מקבלים התראה (כמו היום: role 'a' = רק לנמענים).
 // מנהל־על (superadmins/{uid}) נחשב מנהל כשקובעים מי עשה את הפעולה, ולעולם לא מקבל התראה כעובד.
 // לעולם לא למי שעשה את הפעולה; עובד – רק פעיל (staff/{uid}.active == true); מנהלים – מ-admins.
 // תנאים לעסק: עסק קיים ופעיל, תוספת tasks מופעלת (b/). בשורש – רק כשלארג' פעמי במצב legacy.
@@ -52,8 +55,17 @@ function handlerOf(a) {
 }
 
 // הליבה הטהורה. b/a = המשימה לפני/אחרי (null = לא קיימת). actor = מי שכתב (authId של משתמש באפליקציה, '' = שרת/לא ידוע).
-// adm = Set של מזהי המנהלים (כולל מנהלי־על). מחזיר { k, to: [uid] | 'adm', actor } או null
+// adm = Set של מזהי המנהלים (כולל מנהלי־על). מחזיר { k, to: [uid] | 'adm', actor, plus? } או null
+// plus = נמענים נוספים מעבר למנהלים (השולח של משימת dg). deliver בודק שהוא עובד פעיל עם tkS.
 function evOf(b, a, actor, adm) {
+  const ev = evOf0(b, a, actor, adm);
+  if (!ev || a.dg !== '1' || !isId(a.owner) || (adm && adm.has(a.owner))) return ev;
+  if (ev.k === 'cm' && !ev.mgr && a.cBy === a.owner) return { k: 'cm', to: handlerOf(a), actor: a.cBy, mgr: true, snd: true };
+  // החלטת בעל העסק (19.11.2026): על משימת dg המנהלים לא מקבלים התראות – רק השולח (הם רואים הכול באפליקציה)
+  if (ev.to === 'adm') return ['wait', 'done', 'cm'].includes(ev.k) && ev.actor !== a.owner ? Object.assign({}, ev, { to: [], plus: [a.owner] }) : null;
+  return ev;
+}
+function evOf0(b, a, actor, adm) {
   if (!trig(b, a)) return null;
   const A = adm || new Set();
   const who = isId(actor) ? actor : '';
@@ -82,6 +94,7 @@ function msgOf(ev, a, name) {
     case 'new': return { title: 'משימה חדשה', body: txt };
     case 'back': return { title: 'המשימה הוחזרה אליך', body: cut(clean(a.note) || clean(a.cT) || clean(a.txt), BODY) };
     case 'cm':
+      if (ev.snd) return { title: 'תגובה חדשה מ' + nm, body: cut(clean(a.cT), BODY) || txt };
       if (ev.mgr) { const cT = clean(a.cT), cN = clean(a.cN) || clean(name); return { title: 'תגובה חדשה מהמנהל', body: cT ? cut((cN ? cut(cN, 40) + ': ' : '') + cT, BODY) : txt }; }
       return { title: 'תגובה חדשה מ' + nm, body: cut(clean(a.cT), BODY) || txt };
     case 'newW': return { title: 'משימה חדשה מ' + nm, body: txt };
@@ -125,14 +138,17 @@ async function deliver(bizId, id, kind, mk, opts) {
     const pt = (d) => (d.exists && Array.isArray(d.get('pushTokens')) ? d.get('pushTokens').filter((t) => typeof t === 'string') : []);
     const tokensOf = async (u) => { const [s, p] = await Promise.all([snap(u), db.doc('push_tokens/' + u).get()]); return [...new Set(pt(s).concat(pt(p)))]; }; // כמו RM.tokensOf
     let name = '';
-    if ((ev.to === 'adm' || ev.mgr) && isId(ev.actor)) { const s = await staffOf(ev.actor); name = clean((s && s.name) || x.name); }
+    if ((ev.to === 'adm' || ev.mgr || (ev.plus && ev.plus.length)) && isId(ev.actor)) { const s = await staffOf(ev.actor); name = clean((s && s.name) || x.name); }
     const msg = msgOf(ev, a, name);
-    const list = ev.to === 'adm' ? [...adm] : ev.to.slice(0, MAX_TO);
+    const plus = ids(ev.plus).filter((u) => !adm.has(u) && !sup.has(u));
+    const list = (ev.to === 'adm' ? [...adm] : ev.to.slice(0, MAX_TO)).concat(plus);
     const to = [];
     for (const u of [...new Set(list)]) {
       if (u === ev.actor) continue;
       if (ev.to !== 'adm' && sup.has(u)) continue; // מנהל־על לא מקבל התראה כעובד
       if (!adm.has(u)) { const s = await staffOf(u); if (!s || s.active !== true) continue; }
+      // השולח (plus) – רק כשהמתג tkS דולק אצלו עכשיו (כבוי = לא רואה את המשימה, ולכן גם לא מקבל עליה התראה)
+      if (plus.includes(u)) { const s = await staffOf(u); const p = s && s.perms; if (!p || typeof p !== 'object' || p.tkS !== true) continue; }
       to.push(u);
     }
     const RM = require('./secretary-remind')._core;

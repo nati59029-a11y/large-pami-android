@@ -1,6 +1,6 @@
 /* משבצת "שלוחות הקו": שליחת תוכן לשלוחות של הקו הטלפוני (ימות), דרך פונקציות השרת.
    קובץ עצמאי. מחבר את עצמו ל-V.yl ול-window.ylTile, ולא משנה מסכים קיימים (חוץ מהוספת המשבצת עצמה).
-   עובד: שלוחות 1 (מתכונים), 2 (מבצעים), 3 (עדכונים). מנהל: גם 4 (שעות וכתובת), הודעת פתיחה, "הגדרות הקו" (מילון הגייה, לקוחות משוב, שלוחה אחת) ו"שליחת צינתוקים".
+   עובד (רק עם המתג yl שמנהל העסק מדליק): שלוחות 1 (מתכונים), 2 (מבצעים), 3 (עדכונים). מנהל: גם 4 (שעות וכתובת), הודעת פתיחה, "הגדרות הקו" (מילון הגייה, לקוחות משוב, שלוחה אחת) ו"שליחת צינתוקים".
    ההרשאות נאכפות בשרת ובכללי המסד. כאן רק נוחות: מה מוצג למי.
    בכל מקום שנשלח טקסט: חלון אישור עם "שמע קודם" (yemot-preview.js). מנעול ריצה: לחיצה כפולה = בקשה אחת.
    טיוטות הטקסט נשמרות בזיכרון ובמכשיר עד שליחה מוצלחת, ורענון אוטומטי לא בונה מחדש מסך שיש בו טקסט.
@@ -13,7 +13,7 @@ const DEF={recipes:2500,updates:800,hours:600,opening:600,promo:400,lex:8000,rec
 const LEX_DENY='רק מנהל יכול לשנות את מילון ההגייה.';
 const MSG={ // הודעות לפי reason מהשרת (גיבוי, אם ההודעה מהשרת לא בעברית)
  'tzintuk-manager-only':'רק מנהל יכול לשלוח צינתוק. אפשר לשלוח לקו בלי צינתוק.','manual-manager-only':'רק מנהל יכול להוסיף מבצע ידני.',
- 'slot-manager-only':'רק מנהל יכול לשנות את השלוחה הזו.','manager-only':'הפעולה הזו מותרת למנהל בלבד.','bad-slot':'השלוחה לא מוכרת.',
+ 'slot-manager-only':'רק מנהל יכול לשנות את השלוחה הזו.','manager-only':'הפעולה הזו מותרת למנהל בלבד.','no-line-perm':'אין לך הרשאה לשלוחות הקו. פנו למנהל.','bad-slot':'השלוחה לא מוכרת.',
  'empty-text':'הנוסח ריק. כתבו מה יוקרא בקו.','text-too-long':'הנוסח ארוך מדי.','bad-audio':'ההקלטה לא בפורמט הנכון. הקליטו שוב.','audio-too-long':'ההקלטה ארוכה מדי.',
  'audio-not-allowed':'אי אפשר לשלוח הקלטה לשלוחה הזו.','date-required':'חובה לבחור תאריך הורדה.','tzintuk-not-with-recording':'אי אפשר לשלוח צינתוק עם הקלטה.','item-not-found':'הפריט לא נמצא (ייתכן שכבר הוסר).','busy':'פעולה אחרת על הקו בטיפול. נסו שוב בעוד רגע.',
  'line-full':'אין מקום לעוד קבצים בשלוחה. פנו למנהל.','yemot-upload-failed':'ההעלאה לקו נכשלה. נסו שוב מאוחר יותר.',
@@ -90,15 +90,21 @@ const opt=(v,t,s)=>`<button class="opt" data-a="ylGo" data-v="${v}" style="min-h
 // ---------- משבצת במסך הבית ----------
 window.ylTile=()=>`<button class="tile" data-a="go" data-v="yl" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>שלוחות הקו</button>`;
 ACT.ylGo=el=>go('yl',el.dataset.v);
+// 19.11.2026 (הכרעת בעל העסק): עובד רואה את "שלוחות הקו" רק כשמנהל העסק הדליק לו את המתג yl (staff/{uid}.perms.yl). מנהל – כמו היום. נאכף בשרת (no-line-perm)
+window.ylOk=()=>{try{return typeof isW==='function'&&isW()?!!(SY.perms&&typeof SY.perms==='object'&&SY.perms.yl===true):true}catch(e){return false}};
 // כניסת מנהל ל"לקוחות משוב בימות" (yemot-fblist.js, window.yfOpen). בלי הקובץ – לא מוצג.
 const fbOpt=()=>`<button class="opt" data-a="ylFb" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">לקוחות משוב בימות<small>רשימת הטלפונים מהמשוב וצינתוק בתשלום</small></span>${ico('chev')}</button>`;
 ACT.ylFb=()=>{if(window.yfOpen)window.yfOpen()};
 // כניסת מנהל ל"שליחת צינתוקים" (yemot-fblist.js, window.ytOpen; משימה 2026-11-18). בלי הקובץ – לא מוצג.
 const tzOpt=()=>`<button class="opt" data-a="ylTz" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">שליחת צינתוקים<small>ללקוחות דפי המשוב או לכל הלקוחות · מנהל</small></span>${ico('chev')}</button>`;
 ACT.ylTz=()=>{if(window.ytOpen)window.ytOpen()};
+// כניסת מנהל ל"מספרים בקו" (yemot-fblist.js, window.ynOpen; משימה 2026-11-19). בלי הקובץ – לא מוצג.
+const numOpt=()=>`<button class="opt" data-a="ylNum" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">מספרים בקו<small>כמה נרשמו, חיפוש מספר, וחסימה בלקוחות משוב</small></span>${ico('chev')}</button>`;
+ACT.ylNum=()=>{if(window.ynOpen)window.ynOpen()};
 // ---------- המסכים ----------
 V.yl=a=>{a=a||'';
  if(Y.rec&&Y.rec.on&&a!==Y.rec.act)recDiscard();
+ if(!ylOk())return{t:'שלוחות הקו',h:'<div class="empty">אין לך הרשאה לשלוחות הקו. פנו למנהל.</div>'};
  if(MG.includes(a)&&!isA())return{t:'שלוחות הקו',h:'<div class="empty">הפעולה הזו מותרת למנהל בלבד.</div>'};
  getD();setTimeout(()=>ylLoad(a),0);Y.ly=lySig();
  return({'':vMain,'1':vRecipes,'2':vPromos,'3':vUpdates,'4':vHours,open:vOpen,lex:vLex,cfg:vCfg}[a]||vMain)()};
@@ -107,9 +113,9 @@ function vMain(){const m=isA(),ly=LY();
  ${opt('1',`שלוחה ${xn('recipes')} · מתכונים`,'כתיבה או סריקה מצילום · החדש מושמע ראשון')}
  ${opt('2',`שלוחה ${xn('promos')} · מבצעים`,'בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
  ${opt('3',`שלוחה ${xn('updates')} · עדכונים`,'הקלדה או הקלטה · החדש מושמע ראשון')}
- ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('cfg','הגדרות הקו','מילון הגייה, לקוחות משוב בימות, כל התוכן בשלוחה אחת')}${window.ytOpen?tzOpt():''}`:''}`}}
+ ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('cfg','הגדרות הקו','מילון הגייה, לקוחות משוב בימות, מספרים בקו, כל התוכן בשלוחה אחת')}${window.ytOpen?tzOpt():''}`:''}`}}
 // "הגדרות הקו" (מנהל, משימה 2026-11-18): שלושת הכרטיסים שהיו במסך הראשי – בלי שינוי בהתנהגות שלהם
-function vCfg(){return{t:'הגדרות הקו',s:'מנהל',h:`${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${Y.st?layoutCard():'<p class="note">טוען…</p>'}`}}
+function vCfg(){return{t:'הגדרות הקו',s:'מנהל',h:`${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${window.ynOpen?numOpt():''}${Y.st?layoutCard():'<p class="note">טוען…</p>'}`}}
 // כרטיס מנהל: "כל התוכן בשלוחה אחת" (setLineLayout). מוצג רק אחרי שהמצב נטען מהשרת, כדי לא להציג מצב שגוי.
 function layoutCard(){const ly=LY();
  return`<div class="card" id="ylLayout" style="margin-top:12px"><b>כל התוכן בשלוחה אחת</b><p class="note" style="margin:4px 0 10px">${ly.single?`מופעל: מבצעים, מתכונים, עדכונים ושעות – כולם עולים לשלוחה ${esc(ly.ext)}.`:'כבוי: כל סוג תוכן עולה לשלוחה משלו (1 עד 4).'} הודעות שכבר בקו נשארות במקומן עד שהן יורדות. ההחלפה לא מוחקת כלום, ואפשר לחזור בכל רגע.</p>

@@ -173,7 +173,7 @@ for (const E of ENVS) {
       const R = (id) => `${E.P}rv/${id}`;
       await assertSucceeds(fs(E.mgr).doc(R('tk2')).get());
       await assertSucceeds(fs(E.e1).doc(R('tk2')).get());
-      await assertFails(fs(E.e1).doc(R('tk3')).get());
+      await assertFails(fs(E.e1).doc(R('tk9')).get());
       await assertFails(fs(E.e1).collection(`${E.P}rv`).get());
       await assertFails(fs(E.mgr).doc(R('tk2')).set({ a: 1 }));
       await assertFails(fs('u_off').doc(R('tk2')).get());

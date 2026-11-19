@@ -52,7 +52,7 @@ async function open(browser, www, cfg, email, perms) {
   await H.settle(page, 600);
   return { ctx, page, log, errs, calls };
 }
-const tile = (page) => page.evaluate(() => (typeof window.posTile === 'function' ? window.posTile() : null));
+const tile = (page) => page.evaluate(() => (typeof window.posHubTiles === 'function' ? window.posHubTiles() : null) /* 19.11.2026: האריחים עצמם – בתוך מסך "קופה" (pos-hub.js) */);
 const text = (page) => page.evaluate(() => document.getElementById('main').innerText.replace(/\s+/g, ' '));
 
 (async () => {

@@ -605,7 +605,7 @@ describe('פונקציות שרת (שלב 3)', () => {
 
   // ---------------- 6. כיסוי ----------------
   it('כיסוי: 4 הפונקציות קיימות בשמות המדויקים, וכל אחת נבדקה מול 5 התפקידים עם התוצאה הצפויה', () => {
-    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['payRuleAi', 'shApi', 'shTick', 'tkPush', 'tkPushB', 'ptkPush', 'ptkPushB', 'grpMsg', 'grpMsgB', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'cxCfg', 'cxSetCfg', 'cxUpload', 'cxPreview', 'cxApply', 'cxExport', 'cxHist', 'cxDnOk', 'cxSales', 'cxLines', 'cxFix', 'cxSee', 'cxBotTok', 'cxBot', 'cxBotDisc', 'cxBotWatch', 'orderPick', 'orderPickOk', 'supOrdSet', 'orderAuth', 'secLearn', 'secMedia', 'secMediaClean', 'sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'listLineFiles', 'previewVoice', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem', 'createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setScanQuota', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'setStaffPrc', 'addStaff', 'setStaffActive', 'setStaffName', 'setBusinessOrg', 'setStaffBranches', 'syncLegacyAdmin', 'syncLegacyStaff', 'cashoutTotal', 'publicBrand', 'sendInviteMail', 'saveProduct', 'stockIn', 'stockSet', 'wipeStock', 'restoreStock', 'wipeCusts', 'restoreCusts', 'createOrder', 'updateOrder', 'setOrderStatus', 'markOrderPaid', 'unpayOrder', 'cancelOrder', 'markOrderCalled', 'getPayLink', 'setBusinessPayLink', 'setOrderCfg', 'saveCat', 'importProducts', 'transferStock', 'getWsPrices', 'getCosts', 'ordProfit', 'saveCust', 'importCusts', 'setCustCfg', 'setCellCfg', 'saveLinePlan', 'checkLines', 'setCard', 'getCard', 'delCard', 'mergeCust', 'findCust', 'setCustPrice', 'delCustPrice', 'setPriceCfg', 'ackPriceAlert', 'delAlias', 'ordParse', 'startImport', 'runImportChunk', 'recurringTasks', 'ensureLinePlans', 'requestBizApk', 'secState', 'secConsent', 'secSetup', 'secAdminGet', 'secAdminSetCfg', 'secAdminReadChat', 'secBackupDaily', 'secChat', 'secChatLoad', 'secMirrorPut', 'secPrefs', 'secFacts', 'secSens', 'secRules', 'secCal', 'secImport', 'secNotes', 'secReports', 'secHistory', 'secRemind', 'secDaily', 'secWaHook', 'secWaWork', 'secInbox', 'secSend', 'secWaCfg', 'secAdminWa', 'secOAuthCb', 'secMailHook', 'secCalSync', 'secGoogle', 'secMail', 'secMailSend', 'secAdminMail', 'secInv', 'secDecide', 'piCreate', 'piClaim', 'piBeat', 'piRelease', 'piDraft', 'piFinish', 'piVoid', 'piImg', 'arFile', 'arOc', 'arPdf', 'arSend', 'setArCfg', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arProof', 'arProofGet', 'arDoc', 'arMonthly', 'setArOff', 'secMailWork', 's3Rounds', 's3Run', 's3Move', 's3Log', 's3View', 's3SaveMap', 's3SetBranch', 's3PutTex', 'shelfCheck', 'mapDraft', 'mapFix', 's3MovePh', 's3Fix', 's3Clean', 's3PutPano', 's3DelPano', 's3CapPut', 's3SetupDone', 's3SetupNote', 'mapQs', 's3SetupAns', 's3CapCheck', 's3CapDec', 's3SetupLim', 'setLineLayout', 'yemotFbList', 'sendLineTzintuk', 'setStaffEmail', 'arStatement', 'setRemCfg', 'arRemind', 'arImp', 'arImpVoid', 'arImpList', 'tkNudge', 'pushAct', 'drSubmit', 'drMgr', 'drSetCfg', 'drSetCap', 'drRemind', 'devClaim', 'posCfg', 'posCfgSet', 'posDev', 'posSale', 'posImpCheck', 'posImport', 'posImpList', 'posImpUndo', 'posProdSave', 'posProdQuick', 'posBcGen', 'posPriceBulk', 'posLbl', 'posAlert', 'posCnt', 'posOcr', 'posCfgUndo', 'posSa', 'posBug', 'posReturn', 'posPark', 'posDebtPay', 'posCouponUse', 'posGift', 'posPromo', 'posDoc', 'posAuth', 'posCash', 'posZ', 'posClock', 'posOps', 'posOpsWatch', 'posBackup', 'posBackupDaily', 'posCardCfg', 'posCardStart', 'posCardStatus', 'posCardCancel', 'posCardList', 'posSaleSend'].includes(n)).sort(); // קבוצות התכתבות (grp*) – ב-44-groups.js; סנכרון כספית (cx*) – ב-caspit.test.js, caspit-sales.test.js ו-caspit-bot.test.js; קופה שלב 0 (pos*) – ב-pos.test.js; בדיקה חכמה בהקמה (s3CapCheck, s3CapDec, s3SetupLim) – ב-store3d-capai.test.js; הערות ושאלות ההקמה (s3SetupNote, mapQs, s3SetupAns) – ב-store3d-setup.test.js; pushAct (כפתורים בהתראה) – ב-push-act.test.js; דיווח יומי (dr*) – ב-daily-rep.test.js; tkNudge (מרכז עבודה סבב 3) – בסוף הקובץ; תיקון טיוטה בכתב (mapFix) – ב-store3d-fix.test.js; סיור 360 (s3PutPano, s3DelPano) – ב-store3d-pano.test.js; ייבוא מתוכנה קודמת (arImp, arImpVoid, arImpList) – ב-ar-import.test.js; כרטסת ותזכורות (arStatement, setRemCfg, arRemind) – ב-ar-remind.test.js; חשבוניות, קבלות וזיכויים (ar*, setArOff) – ב-ar-docs.test.js; arFile – ב-ar-file.test.js; אישור הזמנה (arOc, arPdf, arSend, setArCfg) – ב-ar.test.js; // תמחור חשבונית (pi*) – ב-pricing.test.js; רשימה חופשית וכינויים (delAlias, ordParse) – ב-orders.test.js; לקוח עסקי ומחירים (findCust, setCustPrice, delCustPrice, setPriceCfg, ackPriceAlert) – ב-customers.test.js ו-orders.test.js; recurringTasks (משימות קבועות) – ב-recurring.test.js; ייבוא ברקע – ב-imports.test.js; המזכירה (sec*) – ב-secretary.test.js; פונקציות ימות נבדקות ב-60-yemot.js, ב-61-yemot-line.js וב-62-voice.js; פונקציות הניהול של ריבוי עסקים – ב-multi-business-server.test.js; cashoutTotal – ב-perms-6g.test.js; publicBrand – ב-public-brand.test.js
+    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['payRuleAi', 'shApi', 'shTick', 'tkPush', 'tkPushB', 'ptkPush', 'ptkPushB', 'grpMsg', 'grpMsgB', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'cxCfg', 'cxSetCfg', 'cxUpload', 'cxPreview', 'cxApply', 'cxExport', 'cxHist', 'cxDnOk', 'cxSales', 'cxLines', 'cxFix', 'cxSee', 'cxBotTok', 'cxBot', 'cxBotDisc', 'cxBotWatch', 'orderPick', 'orderPickOk', 'supOrdSet', 'orderAuth', 'secLearn', 'secMedia', 'secMediaClean', 'sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'listLineFiles', 'previewVoice', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem', 'createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setScanQuota', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'setStaffPrc', 'setStaffTkS', 'tkStaffNames', 'addStaff', 'setStaffActive', 'setStaffName', 'setBusinessOrg', 'setStaffBranches', 'syncLegacyAdmin', 'syncLegacyStaff', 'cashoutTotal', 'publicBrand', 'sendInviteMail', 'saveProduct', 'stockIn', 'stockSet', 'wipeStock', 'restoreStock', 'wipeCusts', 'restoreCusts', 'createOrder', 'updateOrder', 'setOrderStatus', 'markOrderPaid', 'unpayOrder', 'cancelOrder', 'markOrderCalled', 'getPayLink', 'setBusinessPayLink', 'setOrderCfg', 'saveCat', 'importProducts', 'transferStock', 'getWsPrices', 'getCosts', 'ordProfit', 'saveCust', 'importCusts', 'setCustCfg', 'setCellCfg', 'saveLinePlan', 'checkLines', 'setCard', 'getCard', 'delCard', 'mergeCust', 'findCust', 'setCustPrice', 'delCustPrice', 'setPriceCfg', 'ackPriceAlert', 'delAlias', 'ordParse', 'startImport', 'runImportChunk', 'recurringTasks', 'ensureLinePlans', 'requestBizApk', 'secState', 'secConsent', 'secSetup', 'secAdminGet', 'secAdminSetCfg', 'secAdminReadChat', 'secBackupDaily', 'secChat', 'secChatLoad', 'secMirrorPut', 'secPrefs', 'secFacts', 'secSens', 'secRules', 'secCal', 'secImport', 'secNotes', 'secReports', 'secHistory', 'secRemind', 'secDaily', 'secWaHook', 'secWaWork', 'secInbox', 'secSend', 'secWaCfg', 'secAdminWa', 'secOAuthCb', 'secMailHook', 'secCalSync', 'secGoogle', 'secMail', 'secMailSend', 'secAdminMail', 'secInv', 'secDecide', 'piCreate', 'piClaim', 'piBeat', 'piRelease', 'piDraft', 'piFinish', 'piVoid', 'piImg', 'arFile', 'arOc', 'arPdf', 'arSend', 'setArCfg', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arProof', 'arProofGet', 'arDoc', 'arMonthly', 'setArOff', 'secMailWork', 's3Rounds', 's3Run', 's3Move', 's3Log', 's3View', 's3SaveMap', 's3SetBranch', 's3PutTex', 'shelfCheck', 'mapDraft', 'mapFix', 's3MovePh', 's3Fix', 's3Clean', 's3PutPano', 's3DelPano', 's3CapPut', 's3SetupDone', 's3SetupNote', 'mapQs', 's3SetupAns', 's3CapCheck', 's3CapDec', 's3SetupLim', 'setLineLayout', 'yemotFbList', 'sendLineTzintuk', 'setStaffEmail', 'arStatement', 'setRemCfg', 'arRemind', 'arImp', 'arImpVoid', 'arImpList', 'tkNudge', 'pushAct', 'drSubmit', 'drMgr', 'drSetCfg', 'drSetCap', 'drRemind', 'devClaim', 'posCfg', 'posCfgSet', 'posDev', 'posSale', 'posImpCheck', 'posImport', 'posImpList', 'posImpUndo', 'posProdSave', 'posProdQuick', 'posBcGen', 'posPriceBulk', 'posLbl', 'posAlert', 'posCnt', 'posOcr', 'posCfgUndo', 'posSa', 'posBug', 'posReturn', 'posPark', 'posDebtPay', 'posCouponUse', 'posGift', 'posPromo', 'posDoc', 'posAuth', 'posCash', 'posZ', 'posClock', 'posOps', 'posOpsWatch', 'posBackup', 'posBackupDaily', 'posCardCfg', 'posCardStart', 'posCardStatus', 'posCardCancel', 'posCardList', 'posSaleSend'].includes(n)).sort(); // קבוצות התכתבות (grp*) – ב-44-groups.js; סנכרון כספית (cx*) – ב-caspit.test.js, caspit-sales.test.js ו-caspit-bot.test.js; קופה שלב 0 (pos*) – ב-pos.test.js; בדיקה חכמה בהקמה (s3CapCheck, s3CapDec, s3SetupLim) – ב-store3d-capai.test.js; הערות ושאלות ההקמה (s3SetupNote, mapQs, s3SetupAns) – ב-store3d-setup.test.js; pushAct (כפתורים בהתראה) – ב-push-act.test.js; דיווח יומי (dr*) – ב-daily-rep.test.js; tkNudge (מרכז עבודה סבב 3) – בסוף הקובץ; תיקון טיוטה בכתב (mapFix) – ב-store3d-fix.test.js; סיור 360 (s3PutPano, s3DelPano) – ב-store3d-pano.test.js; ייבוא מתוכנה קודמת (arImp, arImpVoid, arImpList) – ב-ar-import.test.js; כרטסת ותזכורות (arStatement, setRemCfg, arRemind) – ב-ar-remind.test.js; חשבוניות, קבלות וזיכויים (ar*, setArOff) – ב-ar-docs.test.js; arFile – ב-ar-file.test.js; אישור הזמנה (arOc, arPdf, arSend, setArCfg) – ב-ar.test.js; // תמחור חשבונית (pi*) – ב-pricing.test.js; רשימה חופשית וכינויים (delAlias, ordParse) – ב-orders.test.js; לקוח עסקי ומחירים (findCust, setCustPrice, delCustPrice, setPriceCfg, ackPriceAlert) – ב-customers.test.js ו-orders.test.js; recurringTasks (משימות קבועות) – ב-recurring.test.js; ייבוא ברקע – ב-imports.test.js; המזכירה (sec*) – ב-secretary.test.js; פונקציות ימות נבדקות ב-60-yemot.js, ב-61-yemot-line.js וב-62-voice.js; פונקציות הניהול של ריבוי עסקים – ב-multi-business-server.test.js; cashoutTotal – ב-perms-6g.test.js; publicBrand – ב-public-brand.test.js
     assert.deepEqual(exported, [...FN].sort());
     const missing = [];
     for (const fn of FN) for (const role of H.ROLES) if (!RESULTS.find((r) => r.fn === fn && r.role === role && r.status === ROLE_EXPECT[role])) missing.push(`${fn}/${role}`);
@@ -721,5 +721,102 @@ describe('tkNudge – "הזכר לעובד" (מרכז עבודה סבב 3)', () 
     assert.equal((await call('tkNudge', 'u_mgr', { taskId: 't1' })).status, 'OK');
     assert.equal((await call('tkNudge', 'u_emp', { taskId: 't2' })).status, 'PERMISSION_DENIED');
     assert.equal((await call('tkNudge', null, { taskId: 't2' })).status, 'UNAUTHENTICATED');
+  });
+});
+
+// ---------------- "שליחת משימות" (19.11.2026): setStaffTkS (business.js) ו-tkStaffNames (tasks-send.js) ----------------
+// הליבה נקראת ישירות מול האמולטור (כמו tkNudge למעלה): requireStaff קובע את העסק, ואז הפונקציה. השער גם דרך אמולטור הפונקציות, אם הוא רץ.
+describe('שליחת משימות – setStaffTkS ו-tkStaffNames', () => {
+  let env, B, TS, T, RS;
+  const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
+  const err = async (p) => { try { await p; return 'OK'; } catch (e) { return (e.details && e.details.reason) || e.code || String(e); } };
+  const setTk = (uid, data) => T.runInBiz({}, () => B.setStaffTkS({ auth: { uid }, data: Object.assign({}, data) }));
+  const names = (uid, data) => T.runInBiz({}, async () => TS.staffNames(await RS.requireStaff({ auth: { uid }, data: Object.assign({}, data) }, { feature: 'tasks' })));
+  const audits = async (p) => { let L = []; await prep(async (d) => { L = (await d.collection(p).where('act', '==', 'setStaffTkS').get()).docs.map((x) => x.data()); }); return L; };
+  before(async () => {
+    env = await H.getEnv(); require('../functions/index.js');
+    B = require('../functions/business.js')._core; TS = require('../functions/tasks-send.js')._core;
+    T = require('../functions/lib/tenant.js'); RS = require('../functions/lib/roles.js');
+  });
+  beforeEach(async () => {
+    await H.seed(env);
+    await prep(async (d) => {
+      const b = d.batch();
+      b.update(d.doc('staff/u_emp2'), { perms: { incW: true } });
+      b.set(d.doc('b/biz-x'), { name: 'biz-x', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', bizId: 'biz-x', features: { tasks: true } });
+      b.set(d.doc('b/biz-x/admins/bx_mgr'), { email: 'bx_mgr@example.invalid' });
+      b.set(d.doc('b/biz-x/staff/bx_e1'), { name: 'bx_e1', email: 'bx_e1@example.invalid', role: 'employee', active: true, pushTokens: ['x'.repeat(40)], phone: '0500000000' });
+      b.set(d.doc('b/biz-x/staff/bx_e2'), { name: '', email: 'dana.k@example.invalid', role: 'employee', active: true });
+      for (const [u, role] of [['bx_mgr', 'admin'], ['bx_e1', 'worker'], ['bx_e2', 'worker']]) b.set(d.doc('users/' + u), { bizId: 'biz-x', role, active: true, bizStatus: 'active', email: u + '@example.invalid', createdAt: 1 });
+      await b.commit();
+    });
+  });
+
+  it('setStaffTkS (לארג\' פעמי): עובד בלי perms – ברירות המחדל + tkS; כיבוי – רק tkS; עובד עם perms – רק tkS משתנה; audit', async () => {
+    const DEF = RS.DEFAULT_PERMS;
+    assert.deepEqual(await setTk('u_mgr', { uid: 'u_emp', on: true }), { ok: true, uid: 'u_emp', tkS: true });
+    assert.deepEqual((await docOf(env, 'staff/u_emp')).perms, Object.assign({}, DEF, { tkS: true }));
+    await setTk('u_mgr', { uid: 'u_emp', on: false });
+    assert.deepEqual((await docOf(env, 'staff/u_emp')).perms, Object.assign({}, DEF, { tkS: false }));
+    await setTk('u_mgr', { uid: 'u_emp2', on: true });
+    assert.deepEqual((await docOf(env, 'staff/u_emp2')).perms, { incW: true, tkS: true });
+    await setTk('u_mgr', { uid: 'u_off', on: false }); // כיבוי לעובד בלי perms – אין מה לשנות
+    assert.equal((await docOf(env, 'staff/u_off')).perms, undefined);
+    const a = await audits('b/largpeami/audit');
+    assert.deepEqual(a.map((x) => x.note).sort(), ['u_emp2=true', 'u_emp=false', 'u_emp=true', 'u_off=false']);
+    assert.ok(a.every((x) => x.by === 'u_mgr'));
+  });
+
+  it('setStaffTkS: עובד (גם עם tkS) – manager-only; על מנהל – is-admin; עובד לא קיים / מזהה / ערך לא תקינים – נדחה; כלום לא השתנה', async () => {
+    await prep((d) => d.doc('staff/u_emp2').update({ 'perms.tkS': true }));
+    assert.equal(await err(setTk('u_emp', { uid: 'u_emp', on: true })), 'manager-only');
+    assert.equal(await err(setTk('u_emp2', { uid: 'u_emp', on: true })), 'manager-only');
+    assert.equal(await err(setTk('u_off', { uid: 'u_off', on: true })), 'staff-disabled');
+    assert.equal(await err(setTk('u_mgr', { uid: 'u_mgr', on: true })), 'is-admin');
+    assert.equal(await err(setTk('u_mgr', { uid: 'nobody', on: true })), 'no-staff');
+    assert.equal(await err(setTk('u_mgr', { uid: '../x', on: true })), 'bad-uid');
+    assert.equal(await err(setTk('u_mgr', { uid: 'u_emp', on: 'yes' })), 'bad-on');
+    assert.equal((await docOf(env, 'staff/u_emp')).perms, undefined);
+    assert.equal((await docOf(env, 'staff/u_mgr')).perms, undefined);
+  });
+
+  it('setStaffTkS (עסק b): מנהל העסק מדליק לעובד שלו; לא מגיע לעובד של לארג\' פעמי; מנהל לארג\' פעמי לא מגיע לעובד של biz-x', async () => {
+    await setTk('bx_mgr', { uid: 'bx_e1', on: true });
+    assert.equal((await docOf(env, 'b/biz-x/staff/bx_e1')).perms.tkS, true);
+    assert.equal((await audits('b/biz-x/audit')).length, 1);
+    assert.equal(await err(setTk('bx_mgr', { uid: 'u_emp', on: true })), 'no-staff');
+    assert.equal(await err(setTk('u_mgr', { uid: 'bx_e2', on: true })), 'no-staff');
+    assert.equal(await err(setTk('bx_e1', { uid: 'bx_e2', on: true })), 'manager-only');
+  });
+
+  it('tkStaffNames: מנהל ושולח מורשה – רק uid ושם של עובדים פעילים, בלי עצמם ובלי מנהלים; שם חסר – לפני ה-@', async () => {
+    const r = await names('u_mgr');
+    assert.deepEqual(r.L.map((x) => x.uid).sort(), ['u_emp', 'u_emp2']);
+    assert.ok(r.L.every((x) => Object.keys(x).sort().join() === 'name,uid'), 'רק uid ו-name');
+    await prep((d) => d.doc('staff/u_emp').update({ perms: { tkS: true } }));
+    assert.deepEqual((await names('u_emp')).L, [{ uid: 'u_emp2', name: 'u_emp2' }]);
+    await prep((d) => d.doc('b/biz-x/staff/bx_e1').update({ perms: { tkS: true } }));
+    assert.deepEqual((await names('bx_e1')).L, [{ uid: 'bx_e2', name: 'dana.k' }], 'בתוך העסק שלו בלבד; בלי מייל מלא');
+  });
+
+  it('tkStaffNames: עובד בלי המתג / ישן בלי perms / המתג כובה – no-tkS; מושבת – staff-disabled; תוספת משימות כבויה – נדחה', async () => {
+    assert.equal(await err(names('u_emp')), 'no-tkS');
+    await prep((d) => d.doc('staff/u_emp2').update({ 'perms.tkS': false }));
+    assert.equal(await err(names('u_emp2')), 'no-tkS');
+    await prep((d) => d.doc('staff/u_off').update({ perms: { tkS: true } }));
+    assert.equal(await err(names('u_off')), 'staff-disabled');
+    await prep((d) => d.doc('b/biz-x/staff/bx_e1').update({ perms: { tkS: true } }));
+    await prep((d) => d.doc('b/biz-x').update({ 'features.tasks': false }));
+    assert.notEqual(await err(names('bx_e1')), 'OK');
+    assert.notEqual(await err(names('bx_mgr')), 'OK');
+  });
+
+  it('דרך אמולטור הפונקציות: setStaffTkS ו-tkStaffNames – מנהל OK; עובד בלי המתג / לא מחובר נחסמים', { skip: !process.env.FUNCTIONS_EMULATOR_HOST && 'אמולטור הפונקציות לא רץ' }, async () => {
+    assert.equal((await call('setStaffTkS', 'u_mgr', { uid: 'u_emp', on: true })).status, 'OK');
+    assert.equal((await call('setStaffTkS', 'u_emp', { uid: 'u_emp2', on: true })).status, 'PERMISSION_DENIED');
+    assert.equal((await call('setStaffTkS', null, { uid: 'u_emp', on: true })).status, 'UNAUTHENTICATED');
+    assert.equal((await call('tkStaffNames', 'u_emp', {})).status, 'OK', 'u_emp קיבל את המתג למעלה');
+    assert.equal((await call('tkStaffNames', 'u_emp2', {})).status, 'PERMISSION_DENIED');
+    assert.equal((await call('tkStaffNames', null, {})).status, 'UNAUTHENTICATED');
   });
 });

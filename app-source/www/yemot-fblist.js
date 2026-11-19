@@ -1,7 +1,7 @@
-/* "לקוחות משוב בימות": מסך מנהל. קובץ עצמאי, נטען אחרי yemot-line.js. חושף window.yfOpen() ו-window.ytOpen() ("שליחת צינתוקים", בסוף הקובץ).
+/* "לקוחות משוב בימות": מסך מנהל. קובץ עצמאי, נטען אחרי yemot-line.js. חושף window.yfOpen(), window.ytOpen() ("שליחת צינתוקים") ו-window.ynOpen() ("מספרים בקו", בסוף הקובץ).
    מציג את מצב רשימת הטלפונים של לקוחות המשוב בימות, סנכרון ידני, ומתג צינתוק ללקוחות המשוב.
    ההרשאות נאכפות בשרת (yemotFbList). כאן רק נוחות. כל טקסט מהשרת מוצג ב-textContent בלבד.
-   משתמש ב: window.ylApi (מ-yemot-line.js), V, ACT, go, dlg, closeDlg, esc, ico. */
+   משתמש ב: window.ylApi (מ-yemot-line.js), V, ACT, INP, go, dlg, closeDlg, esc, ico. */
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||!window.ylApi)return;
@@ -111,4 +111,66 @@ ACT.ytOk=()=>{
 ACT.ytCont=()=>{const c=TZ.cont;if(!c||TZ.busy)return;
  dlg(`<h3>להשלים את השליחה?</h3><p class="note" style="margin:0 0 12px">יישלח רק למי שלא קיבל בשליחה הזו. מי שכבר קיבל לא יקבל שוב ולא ייגבה עליו תשלום נוסף.</p><div class="row"><button type="button" class="btn grow" data-a="ytContOk">כן, השלם</button><button type="button" class="btn g grow" data-a="ytNo">ביטול</button></div>`)};
 ACT.ytContOk=()=>{closeDlg();const c=TZ.cont;if(!c||TZ.busy)return;tzSend(c.target,c.id,true)};
+
+/* "מספרים בקו" (מנהל, משימה 2026-11-19): המספרים ברשימה החינמית ובלקוחות משוב, חיפוש לפי מספר, וחסימה/ביטול חסימה בלקוחות משוב.
+   yemotFbList { action:'numbers' } / { action:'block'|'unblock', phone }. ההרשאה נאכפת בשרת. חושף window.ynOpen().
+   החיפוש מקומי: מתעלם ממקפים ורווחים, 972 ← 0, חלקי. מוצגות עד 200 תוצאות. כל טקסט מהשרת – esc/textContent בלבד. */
+const NB={d:null,err:null,loading:false,q:'',busy:false,ask:null,denied:false};
+const NB_MAX=200;
+const NBE={'not-in-list':'המספר לא נמצא ברשימת לקוחות המשוב.','no-list':'רשימת לקוחות המשוב עוד לא נוצרה בימות.','uncertain':'ימות לא ענה בזמן. לא ידוע אם השינוי בוצע – הרשימה רועננה, בדקו שוב.','not-applied':'ימות לא עדכן את המספר. נסו שוב.'};
+const nbErr=e=>{if(e&&e.status==='PERMISSION_DENIED')return'המסך הזה פתוח למנהל בלבד.';return(e&&NBE[e.reason])||A.errMsg(e)};
+const dig=s=>String(s||'').replace(/\D/g,'');
+// מה שהוקלד ← ספרות לחיפוש: +972/972/00972 בהתחלה ← 0
+const nbKey=q=>{let d=dig(q);if(/^00972/.test(d))d='0'+d.slice(5);else if(/^972/.test(d)&&d.length>3)d='0'+d.slice(3);return d};
+const nbFmt=p=>{const d=String(p||'');return /^0[57]\d{8}$/.test(d)?d.slice(0,3)+'-'+d.slice(3):/^0\d{8}$/.test(d)?d.slice(0,2)+'-'+d.slice(2):d};
+function nbRows(){const D=NB.d;if(!D)return[];
+ const fb=(Array.isArray(D.fb)?D.fb:[]).map(x=>({p:String(x&&x.p||''),b:!!(x&&x.b),n:String(x&&x.n||''),fb:true}));
+ const fr=(Array.isArray(D.free)?D.free:[]).map(p=>({p:String(p||''),fb:false}));
+ return fb.concat(fr).filter(r=>r.p).sort((a,b)=>a.p<b.p?-1:a.p>b.p?1:(a.fb?-1:1))}
+const nbFree=()=>new Set((NB.d&&Array.isArray(NB.d.free)?NB.d.free:[]).map(String));
+function nbList(){
+ const fs=nbFree(),k=nbKey(NB.q),all=nbRows(),hit=k?all.filter(r=>dig(r.p).includes(k)):all,show=hit.slice(0,NB_MAX);
+ const head=k?(hit.length?`נמצאו ${hit.length}${hit.length>NB_MAX?` · מוצגים ${NB_MAX} הראשונים – הקלידו עוד ספרות`:''}`:'לא נמצא מספר כזה בשתי הרשימות.')
+  :(all.length>NB_MAX?`${all.length} מספרים · מוצגים ${NB_MAX} הראשונים – הקלידו מספר לחיפוש`:`${all.length} מספרים`);
+ return`<p class="note" role="status" style="margin:0 0 8px">${esc(head)}</p>`+show.map(r=>`<div class="li" style="cursor:default"><div class="m"><b dir="ltr" style="text-align:right">${esc(nbFmt(r.p))}</b><small>${r.fb?`לקוחות משוב · ${r.b?'<span style="color:var(--bad);font-weight:700">חסום</span>':'פעיל'}${r.n?' · '+esc(r.n):''}${fs.has(r.p)?' · <span style="color:var(--warn);font-weight:700">גם ברשימה החינמית</span>':''}`:'רשימה חינמית · מוציאים דרך שלוחת היציאה בקו או באתר ימות'}</small></div>${r.fb?`<button type="button" class="btn${r.b?'':' g'}" style="min-height:44px;padding:0 12px;flex:none" data-a="ynAsk" data-v="${esc(r.p)}"${NB.busy?' disabled':''}>${r.b?'בטל חסימה':'חסום'}</button>`:''}</div>`).join('')}
+function nbHtml(){
+ if(NB.denied)return'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>';
+ const D=NB.d;
+ if(!D)return NB.err?`<p class="note" style="color:var(--bad)">${esc(NB.err)}</p><button class="btn s g" data-a="ynLoad">נסה שוב</button>`:'<p class="note">טוען את המספרים מימות…</p>';
+ const c=D.counts||{};
+ return`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">${num('רשימה חינמית',c.free)}${num('משוב – פעילים',c.fbActive)}${num('משוב – חסומים',c.fbBlocked)}</div>
+ ${D.freeErr?'<p class="note" style="color:var(--bad);margin:8px 0 0">לא הצלחנו לקרוא את הרשימה החינמית מימות.</p>':''}
+ ${D.fbErr?'<p class="note" style="color:var(--bad);margin:8px 0 0">לא הצלחנו לקרוא את רשימת לקוחות המשוב מימות.</p>':''}
+ ${D.listReady===false?'<p class="note" style="margin:8px 0 0">רשימת לקוחות המשוב עוד לא נוצרה בימות.</p>':''}
+ <div class="card" style="margin-top:12px"><p class="note" style="margin:0">חסימה בלקוחות משוב: המספר נשאר ברשימה אבל לא יקבל צינתוקים כלקוח משוב. אפשר לבטל בכל רגע. מספר שרשום גם ברשימה החינמית ימשיך לקבל ממנה צינתוקים. ברשימה החינמית אין חסימה מהאפליקציה – הלקוח יוצא בעצמו דרך שלוחת היציאה בקו, או שמוציאים אותו באתר ימות.</p></div>
+ <input type="tel" inputmode="numeric" autocomplete="off" data-i="ynQ" id="ynQ" placeholder="חפש מספר (למשל 0501234567)" aria-label="חפש מספר" style="width:100%;margin:12px 0 8px" value="${esc(NB.q)}">
+ <div id="ynRes">${nbList()}</div>
+ <button class="btn s g grow" data-a="ynLoad" style="margin-top:8px"${NB.loading||NB.busy?' disabled':''}>רענן מימות</button>`}
+function nbPaint(){const el=document.getElementById('ynBox');if(el)el.innerHTML=nbHtml()}
+function nbPaintList(){const el=document.getElementById('ynRes');if(el)el.innerHTML=nbList();else nbPaint()}
+async function nbLoad(){
+ if(NB.loading)return;NB.loading=true;NB.err=null;
+ try{NB.d=await A.call('yemotFbList',{action:'numbers'},60000);NB.denied=false}
+ catch(e){if(e&&e.status==='PERMISSION_DENIED')NB.denied=true;else NB.err=nbErr(e)}
+ finally{NB.loading=false}nbPaint()}
+V.ymn=()=>{if(!A.isMgr())return{t:'מספרים בקו',h:'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>'};setTimeout(()=>{if(!NB.d)nbLoad();else nbPaint()},0);return{t:'מספרים בקו',s:'מנהל',h:'<div id="ynBox"><p class="note">טוען את המספרים מימות…</p></div>'}};
+window.ynOpen=()=>{if(!A.isMgr()){A.toast('המסך הזה פתוח למנהל בלבד.');return}NB.d=null;NB.err=null;NB.q='';NB.denied=false;go('ymn')};
+ACT.ynLoad=()=>{if(!NB.busy)nbLoad()};
+INP.ynQ=el=>{NB.q=el.value;nbPaintList()};
+ACT.ynAsk=el=>{
+ const p=el&&el.dataset&&el.dataset.v,r=nbRows().find(x=>x.fb&&x.p===p);if(!r||NB.busy)return;
+ NB.ask={p:r.p,on:!r.b};const both=nbFree().has(r.p);
+ dlg(r.b?`<h3>לבטל את החסימה?</h3><p style="margin:0 0 6px" dir="ltr"><b>${esc(nbFmt(r.p))}</b></p><p class="note" style="margin:0 0 12px">המספר יחזור לקבל צינתוקים ללקוחות המשוב (בתשלום).</p><div class="row"><button type="button" class="btn grow" data-a="ynOk">כן, בטל חסימה</button><button type="button" class="btn g grow" data-a="ynNo">ביטול</button></div>`
+  :`<h3>לחסום את המספר?</h3><p style="margin:0 0 6px" dir="ltr"><b>${esc(nbFmt(r.p))}</b></p><p class="note" style="margin:0 0 12px">המספר יישאר ברשימת לקוחות המשוב, אבל לא יקבל צינתוקים כלקוח משוב. אפשר לבטל את החסימה בכל רגע.</p>${both?'<p class="note" style="color:var(--warn);font-weight:700;margin:0 0 12px">שימו לב: המספר רשום גם ברשימה החינמית, ומשם ימשיך לקבל צינתוקים חינמיים עד שיוציאו אותו דרך שלוחת היציאה בקו או באתר ימות.</p>':''}<div class="row"><button type="button" class="btn grow" data-a="ynOk">כן, חסום</button><button type="button" class="btn g grow" data-a="ynNo">ביטול</button></div>`)};
+ACT.ynNo=()=>{closeDlg();NB.ask=null};
+ACT.ynOk=async()=>{
+ const q=NB.ask;closeDlg();NB.ask=null;if(!q||NB.busy)return;
+ NB.busy=true;nbPaintList();let reload=false;
+ try{const r=await A.call('yemotFbList',{action:q.on?'block':'unblock',phone:q.p},60000);
+  const on=!!(r&&r.blocked),D=NB.d;
+  if(D&&Array.isArray(D.fb)){D.fb.forEach(x=>{if(x&&x.p===q.p)x.b=on});D.counts=Object.assign({},D.counts,{fbActive:D.fb.filter(x=>x&&!x.b).length,fbBlocked:D.fb.filter(x=>x&&x.b).length})}
+  A.toast(on?'✓ המספר נחסם':'✓ החסימה בוטלה')}
+ catch(e){if(e&&e.status==='PERMISSION_DENIED')NB.denied=true;A.toast(nbErr(e));reload=!!(e&&['uncertain','not-in-list'].includes(e.reason))}
+ finally{NB.busy=false}
+ if(reload){NB.d=null;nbPaint();nbLoad()}else nbPaint()};
 })();

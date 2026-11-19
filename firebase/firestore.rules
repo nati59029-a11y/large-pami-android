@@ -287,7 +287,45 @@ service cloud.firestore {
       function canRead(d) {
         return isManager()
           || (isStaff() && (d.open == '1' || d.late == '1'))
-          || (isActiveEmployee() && isMyName(d.get('doneBy', '')));
+          || (isActiveEmployee() && isMyName(d.get('doneBy', '')))
+          || isSender(d);
+      }
+      // "שליחת משימות" (19.11.2026): dg == '1' = משימה שעובד מורשה שלח (owner = השולח, by = שמו). בלי dg – כמו היום
+      // (גם משימות משמרת sh-* שהשרת יוצר עם owner של עובד – לא נחשבות "שלחתי").
+      // עובד מורשה = עובד פעיל (לא מנהל) שהמתג perms.tkS דולק אצלו עכשיו. staff נכתב רק בשרת (setStaffTkS / setStaffPerms).
+      // כיבוי המתג או השבתת העובד – מיד אין לו גישה של שולח (גם לא למשימות שכבר שלח).
+      function tkSendOk() {
+        return !isManager() && isActiveEmployee()
+          && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('tkS', false) == true;
+      }
+      function isSender(d) { return d.get('dg', '') == '1' && d.get('owner', '') == request.auth.uid && tkSendOk(); }
+      // משימה חדשה של עובד מורשה: role 'a' עם dg, חובה נמענים (mgrNewOk), לא לעצמו, בלי תמונות מנהל (mi 0) ובלי pr (רק np).
+      // רק בתוך allow create, שכבר דורש isStaff(): לא מנהל ⇒ עובד פעיל. גרסה קצרה של tkSendOk – בגלל מגבלת 1000 הביטויים ביצירה.
+      function dgNewOk() {
+        return !isManager() && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('tkS', false) == true
+          && nw().get('dg', '') == '1' && nw().role == 'a'
+          && nw().keys().hasAll(['to', 'toN', 'ow']) && nw().to is list && !(request.auth.uid in nw().to)
+          && nw().pr == '' && nw().get('mi', 0) == 0;
+      }
+      // השולח מאשר (wait → done, late לפי היעד כמו בלקוח) או מחזיר (wait → open, עם הערה ואופציונלית סימון תגובה), רק משימה ששלח,
+      // רק כשהיא ממתינה לאישור, ולא כשהוא עצמו המטפל או נמען (המנהל העביר אליו) – לא מאשר עבודה של עצמו.
+      function senderUpd() {
+        return isSender(od()) && od().st == 'wait'
+          && od().get('ow', '') != request.auth.uid && !(request.auth.uid in od().get('to', []))
+          && (
+            (nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'ok', 'late', 'note'])
+              && nw().st == 'done' && nw().open == '' && nowOk(nw().ok) && nw().note == ''
+              && (tkDlOf(od()) == 0 ? nw().late == '' : (nw().late == '1') == (od().sub > tkDlOf(od()))))
+            || (nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'note', 'rt', 'wp', 'ok', 'late', 'cAt', 'cBy', 'cT', 'cN'])
+              && nw().st == 'open' && nw().open == '1' && nw().img == '' && nw().sub == 0 && nw().doneBy == ''
+              && (nw().ok == 0 || nw().ok == od().ok) && (nw().late == '' || nw().late == od().late)
+              && nw().note is string && nw().note.size() <= 500
+              && nw().get('rt', '') in ['', '1'] && nw().get('wp', 0) == 0
+              && (!nw().diff(od()).affectedKeys().hasAny(['cAt', 'cBy', 'cT', 'cN'])
+                || (nw().cBy == request.auth.uid && nowOk(nw().cAt)
+                  && nw().get('cT', '') is string && nw().get('cT', '').size() <= 120
+                  && (!nw().diff(od()).affectedKeys().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN))))))
+          );
       }
       // "נקרא": רק rd, רק המפתח של המשתמש עצמו, בזמן אמת.
       function rdMark() {
@@ -312,7 +350,7 @@ service cloud.firestore {
           && nowOk(nw().cAt)
           && (!nw().diff(od()).affectedKeys().hasAny(['cT']) || (nw().cT is string && nw().cT.size() <= 120))
           && (!nw().diff(od()).affectedKeys().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)))
-          && (isManager() || od().open == '1' || od().late == '1');
+          && (isManager() || isSender(od()) || od().open == '1' || od().late == '1');
       }
       // שדות המשימה החדשה (רק מנהל): to 1–30, toN באותו אורך; נמען אחד ← ow == to[0], כמה ← ow ''.
       // np 0–3 (עם np > 0 אין pr), mi 0–5, wp 0.
@@ -333,24 +371,27 @@ service cloud.firestore {
       // סיכום משימות: עובד פעיל קורא גם משימה שהוא עצמו ביצע (doneBy בשמו), כולל כזו שבוצעה בזמן.
       allow read: if isManager()
         || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'))
-        || (isActiveEmployee() && isMyName(resource.data.doneBy));
+        || (isActiveEmployee() && isMyName(resource.data.doneBy))
+        || isSender(resource.data);
       allow create: if lpW() && (isStaff()
         && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late',
-          'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd', 'sa', 'nd'])
-        && (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (isManager() && mgrNewOk()))
+          'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd', 'sa', 'nd', 'dg'])
+        // dg (שליחת משימות): עובד מורשה בלבד – dgNewOk (role 'a', pr '', נמענים) + mgrNewOk. בלי dg – בדיוק כמו קודם.
+        && (!nw().keys().hasAny(['dg'])
+          ? ((!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (isManager() && mgrNewOk()))
+            && (nw().pr == '' || isManager()) && (nw().role == 'w' || isManager()))
+          : (dgNewOk() && mgrNewOk()))
         && nw().owner == request.auth.uid
         && isMyName(nw().by)
         && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
         && nw().sub == 0 && nw().ok == 0 && nw().note == ''
-        && (nw().pr == '' || isManager())
-        && (nw().role == 'w' || isManager())
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000
         && tkXOk(nw()) && nw().get('ckd', []).size() == 0 && nw().get('sa', 0) == 0 && nw().get('nd', 0) == 0);
       allow update: if lpW() && (isManager()
-        || (isStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd() || ckMark() || saMark())));
-      allow delete: if lpW() && (isManager());
+        || (isStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd() || ckMark() || saMark() || senderUpd())));
+      allow delete: if lpW() && (isManager() || isSender(resource.data));
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
       // עובד מגיב רק במשימה פתוחה (st 'open', כולל משימה שהמנהל החזיר), ורק אחרי שהיא סומנה nc == '1' (ncMark) –
@@ -359,7 +400,7 @@ service cloud.firestore {
         function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
         function canReadTask() {
           return exists(/databases/$(database)/documents/tasks/$(id))
-            && (isManager() || (isStaff() && (task().open == '1' || task().late == '1')));
+            && (isManager() || (isStaff() && (task().open == '1' || task().late == '1')) || isSender(task()));
         }
         allow read: if canReadTask();
         allow create: if lpW() && (isStaff() && canReadTask()
@@ -370,7 +411,7 @@ service cloud.firestore {
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
           && nowOk(nw().t)
-          && (isManager() || (task().get('nc', '') == '1' && task().st == 'open')));
+          && (isManager() || isSender(task()) || (task().get('nc', '') == '1' && task().st == 'open')));
         allow update: if false;
         allow delete: if lpW() && (isManager());
       }
@@ -385,7 +426,8 @@ service cloud.firestore {
           return hasTask()
             && (isManager()
               || (isStaff() && (task().open == '1' || task().late == '1'))
-              || (isActiveEmployee() && isMyName(task().get('doneBy', ''))));
+              || (isActiveEmployee() && isMyName(task().get('doneBy', '')))
+              || isSender(task()));
         }
         function imgOk() {
           return nw().keys().hasAll(['img', 't', 'uid'])
@@ -442,8 +484,9 @@ service cloud.firestore {
 
     // גלאי גרסת הכללים (מרכז עבודה, סבב 2): האפליקציה קוראת rv/tk2 (מסמך שלא קיים). כללים חדשים – צוות מקבל 404,
     // כללים ישנים – 403. כך האפליקציה יודעת אם להציג את השדות החדשים. אין כתיבה ואין list.
+    // rv/tk3 (19.11.2026): כללי "שליחת משימות" (dg / tkS) פורסמו – רק אז האפליקציה מציגה לעובד המורשה את טופס השליחה.
     match /rv/{v} {
-      allow get: if isStaff() && v == 'tk2';
+      allow get: if isStaff() && v in ['tk2', 'tk3'];
     }
 
     // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
@@ -691,7 +734,7 @@ service cloud.firestore {
       // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
       // grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
       // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
-      // אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
+      // re? (תשובה) ו-fw? (הועברה) – ראו reOk. אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
       match /m/{mid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
         function hasG() { return exists(/databases/$(database)/documents/grp/$(gid)); }
@@ -701,14 +744,23 @@ service cloud.firestore {
           return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
             : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
         }
+        // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
+        function reOk(d) {
+          return !d.keys().hasAny(['re'])
+            || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
+              && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+              && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
+              && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
+              && d.re.get('k', 't') in ['t', 'img', 'vid']);
+        }
         function msgOk(d) {
           return d.keys().hasAll(['by', 'byN', 't', 'k'])
             && d.by == request.auth.uid
             && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-            && nowOk(d.t)
-            && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, true))
-              || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, false) && g().md == true)
-              || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb'])
+            && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
+            && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
+              || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false) && g().md == true)
+              || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
                 && txtOk(d, false) && g().md == true
                 && d.vp == 'grpv/' + gid + '/' + mid
                 && d.vs is int && d.vs >= 1 && d.vs <= 60
@@ -739,6 +791,28 @@ service cloud.firestore {
           allow update: if false;
           allow delete: if lpW() && (isManager());
         }
+      }
+
+      // סימון (אימוג'י) על הודעה (תוספת 19.11): grp/{gid}/x/{mid}_{uid} = { mid, uid, byN, e, t } – סימון אחד לכל משתמש בכל הודעה.
+      // e אחד מהרשימה הקבועה, או '' = הסימון בוטל (עדכון ולא מחיקה, כדי שהסקירה לפי t תראה גם ביטול).
+      // קריאה וכתיבה: מי שרשאי לקרוא את הקבוצה (גם בקבוצה עם ao – החלטת הבעלים 19.11), רק המסמך שלו, ורק להודעה שקיימת. מחיקה: הבעלים או המנהל.
+      match /x/{xid} {
+        function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
+        function canRead() {
+          return exists(/databases/$(database)/documents/grp/$(gid))
+            && (isManager() || (isActiveEmployee() && request.auth.uid in g().mem));
+        }
+        function xOk(d) {
+          return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
+            && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+            && xid == d.mid + '_' + request.auth.uid
+            && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+            && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t)
+            && exists(/databases/$(database)/documents/grp/$(gid)/m/$(d.mid));
+        }
+        allow read: if (canRead());
+        allow create, update: if lpW() && (canRead() && xOk(nw()));
+        allow delete: if lpW() && (isManager() || (canRead() && resource.data.uid == request.auth.uid));
       }
 
       // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
@@ -1995,7 +2069,36 @@ service cloud.firestore {
         function canRead(d) {
           return bMgr()
             || (bStaff() && (d.open == '1' || d.late == '1'))
-            || (bEmp() && isMyName(d.get('doneBy', '')));
+            || (bEmp() && isMyName(d.get('doneBy', '')))
+            || isSender(d);
+        }
+        // "שליחת משימות" (19.11.2026) – כמו בשורש. עובד מורשה = עובד פעיל (לא מנהל) עם perms.tkS (בלי perms = כבוי).
+        function tkSendOk() { return !bMgr() && bEmp() && myStaff().get('perms', {}).get('tkS', false) == true; }
+        function isSender(d) { return d.get('dg', '') == '1' && d.get('owner', '') == request.auth.uid && tkSendOk(); }
+        // רק בתוך allow create, שכבר דורש bStaff(): לא מנהל העסק ⇒ עובד פעיל (מנהל־על בלי staff – get נכשל = נחסם). גרסה קצרה – מגבלת 1000 הביטויים.
+        function dgNewOk() {
+          return !bIsAdmin() && myStaff().get('perms', {}).get('tkS', false) == true
+            && nw().get('dg', '') == '1' && nw().role == 'a'
+            && nw().keys().hasAll(['to', 'toN', 'ow']) && nw().to is list && !(request.auth.uid in nw().to)
+            && nw().pr == '' && nw().get('mi', 0) == 0;
+        }
+        function senderUpd() {
+          return isSender(od()) && od().st == 'wait'
+            && od().get('ow', '') != request.auth.uid && !(request.auth.uid in od().get('to', []))
+            && (
+              (nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'ok', 'late', 'note'])
+                && nw().st == 'done' && nw().open == '' && nowOk(nw().ok) && nw().note == ''
+                && (tkDlOf(od()) == 0 ? nw().late == '' : (nw().late == '1') == (od().sub > tkDlOf(od()))))
+              || (nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'note', 'rt', 'wp', 'ok', 'late', 'cAt', 'cBy', 'cT', 'cN'])
+                && nw().st == 'open' && nw().open == '1' && nw().img == '' && nw().sub == 0 && nw().doneBy == ''
+                && (nw().ok == 0 || nw().ok == od().ok) && (nw().late == '' || nw().late == od().late)
+                && nw().note is string && nw().note.size() <= 500
+                && nw().get('rt', '') in ['', '1'] && nw().get('wp', 0) == 0
+                && (!nw().diff(od()).affectedKeys().hasAny(['cAt', 'cBy', 'cT', 'cN'])
+                  || (nw().cBy == request.auth.uid && nowOk(nw().cAt)
+                    && nw().get('cT', '') is string && nw().get('cT', '').size() <= 120
+                    && (!nw().diff(od()).affectedKeys().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN))))))
+            );
         }
         function rdMark() {
           return nw().diff(od()).affectedKeys().hasOnly(['rd'])
@@ -2015,7 +2118,7 @@ service cloud.firestore {
             && nowOk(nw().cAt)
             && (!nw().diff(od()).affectedKeys().hasAny(['cT']) || (nw().cT is string && nw().cT.size() <= 120))
             && (!nw().diff(od()).affectedKeys().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)))
-            && (bMgr() || od().open == '1' || od().late == '1');
+            && (bMgr() || isSender(od()) || od().open == '1' || od().late == '1');
         }
         function mgrNewOk() {
           return (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt'])
@@ -2033,30 +2136,33 @@ service cloud.firestore {
         }
         allow read: if feat('tasks') && (bMgr()
           || (bStaff() && (resource.data.open == '1' || resource.data.late == '1'))
-          || (bEmp() && isMyName(resource.data.doneBy)));
+          || (bEmp() && isMyName(resource.data.doneBy))
+          || isSender(resource.data));
         allow create: if feat('tasks') && (bStaff()
           && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late',
-            'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd', 'sa', 'nd'])
-          && (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (bMgr() && mgrNewOk()))
+            'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd', 'sa', 'nd', 'dg'])
+          // dg (שליחת משימות): עובד מורשה בלבד – dgNewOk (role 'a', pr '', נמענים) + mgrNewOk. בלי dg – בדיוק כמו קודם.
+          && (!nw().keys().hasAny(['dg'])
+            ? ((!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (bMgr() && mgrNewOk()))
+              && (nw().pr == '' || bMgr()) && (nw().role == 'w' || bMgr()))
+            : (dgNewOk() && mgrNewOk()))
           && nw().owner == request.auth.uid
           && isMyName(nw().by)
           && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
           && nw().sub == 0 && nw().ok == 0 && nw().note == ''
-          && (nw().pr == '' || bMgr())
-          && (nw().role == 'w' || bMgr())
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
           && nowOk(nw().cr)
           && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000
           && tkXOk(nw()) && nw().get('ckd', []).size() == 0 && nw().get('sa', 0) == 0 && nw().get('nd', 0) == 0);
         allow update: if feat('tasks') && (bMgr()
-          || (bStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd() || ckMark() || saMark())));
-        allow delete: if feat('tasks') && (bMgr());
+          || (bStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd() || ckMark() || saMark() || senderUpd())));
+        allow delete: if feat('tasks') && (bMgr() || isSender(resource.data));
 
         match /c/{cid} {
           function task() { return get(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)).data; }
           function canReadTask() {
             return exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id))
-              && (bMgr() || (bStaff() && (task().open == '1' || task().late == '1')));
+              && (bMgr() || (bStaff() && (task().open == '1' || task().late == '1')) || isSender(task()));
           }
           allow read: if feat('tasks') && (canReadTask());
           allow create: if feat('tasks') && (bStaff() && canReadTask()
@@ -2067,7 +2173,7 @@ service cloud.firestore {
             && isMyName(nw().by)
             && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
             && nowOk(nw().t)
-            && (bMgr() || (task().get('nc', '') == '1' && task().st == 'open')));
+            && (bMgr() || isSender(task()) || (task().get('nc', '') == '1' && task().st == 'open')));
           allow update: if false;
           allow delete: if feat('tasks') && (bMgr());
         }
@@ -2079,7 +2185,8 @@ service cloud.firestore {
             return hasTask()
               && (bMgr()
                 || (bStaff() && (task().open == '1' || task().late == '1'))
-                || (bEmp() && isMyName(task().get('doneBy', ''))));
+                || (bEmp() && isMyName(task().get('doneBy', '')))
+                || isSender(task()));
           }
           function imgOk() {
             return nw().keys().hasAll(['img', 't', 'uid'])
@@ -2135,7 +2242,7 @@ service cloud.firestore {
 
       // גלאי גרסת הכללים (סבב 2) – כמו בשורש, ורק כשהתוספת 'tasks' פעילה בעסק.
       match /rv/{v} {
-        allow get: if feat('tasks') && (bStaff() && v == 'tk2');
+        allow get: if feat('tasks') && (bStaff() && v in ['tk2', 'tk3']);
       }
 
       // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
@@ -2383,7 +2490,7 @@ service cloud.firestore {
         // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
         // b/{bizId}/grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
         // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
-        // אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
+        // re? (תשובה) ו-fw? (הועברה) – ראו reOk. אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
         match /m/{mid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
           function hasG() { return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)); }
@@ -2393,14 +2500,23 @@ service cloud.firestore {
             return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
               : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
           }
+          // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
+          function reOk(d) {
+            return !d.keys().hasAny(['re'])
+              || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
+                && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+                && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
+                && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
+                && d.re.get('k', 't') in ['t', 'img', 'vid']);
+          }
           function msgOk(d) {
             return d.keys().hasAll(['by', 'byN', 't', 'k'])
               && d.by == request.auth.uid
               && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-              && nowOk(d.t)
-              && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, true))
-                || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, false) && g().md == true)
-                || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb'])
+              && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
+              && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
+                || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false) && g().md == true)
+                || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
                   && txtOk(d, false) && g().md == true
                   && d.vp == 'b/' + bizId + '/grpv/' + gid + '/' + mid
                   && d.vs is int && d.vs >= 1 && d.vs <= 60
@@ -2431,6 +2547,28 @@ service cloud.firestore {
             allow update: if false;
             allow delete: if feat('groups') && (bMgr());
           }
+        }
+
+        // סימון (אימוג'י) על הודעה (תוספת 19.11): grp/{gid}/x/{mid}_{uid} = { mid, uid, byN, e, t } – סימון אחד לכל משתמש בכל הודעה.
+        // e אחד מהרשימה הקבועה, או '' = הסימון בוטל (עדכון ולא מחיקה, כדי שהסקירה לפי t תראה גם ביטול).
+        // קריאה וכתיבה: מי שרשאי לקרוא את הקבוצה (גם בקבוצה עם ao – החלטת הבעלים 19.11), רק המסמך שלו, ורק להודעה שקיימת. מחיקה: הבעלים או המנהל.
+        match /x/{xid} {
+          function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
+          function canRead() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid))
+              && (bMgr() || (bEmp() && request.auth.uid in g().mem));
+          }
+          function xOk(d) {
+            return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
+              && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+              && xid == d.mid + '_' + request.auth.uid
+              && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+              && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t)
+              && exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(d.mid));
+          }
+          allow read: if feat('groups') && (canRead());
+          allow create, update: if feat('groups') && (canRead() && xOk(nw()));
+          allow delete: if feat('groups') && (bMgr() || (canRead() && resource.data.uid == request.auth.uid));
         }
 
         // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
