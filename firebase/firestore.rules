@@ -1611,8 +1611,15 @@ service cloud.firestore {
       // 6ו (עדכון חוזה 16): pv(k) = ערך המתג של העובד (בלי perms = dflt). perm(k) = רק true.
       // expR יכול להיות גם 'own' = "רואה רק את ההוצאות שהוא עצמו הזין". expOwn() = true או 'own'.
       function pv(k) { return myStaff().get('perms', null) == null ? dflt(k) : myStaff().perms.get(k, false); }
+      // 18.11.2026 (הכרעת בעל העסק): קופה (pos / posMgr) – רק מנהל־על מחליט, גם למנהלים. מנהל עסק = admins/{uid}.perms (רק השרת כותב,
+      // setStaffPerms, מנהל־על). מנהל־על = הכול, כמו היום. שאר ההרשאות של מנהל לא השתנו. אותה הגדרה כמו hasPerm ב-functions/lib/roles.js.
+      function myAdmin() { return get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data; }
+      function saOnly(k) { return k in ['pos', 'posMgr']; }
+      function posPerm(k) {
+        return bSuper() || (bIsAdmin() ? (bActive() && myAdmin().get('perms', {}).get(k, false) == true) : (bEmp() && pv(k) == true));
+      }
       function perm(k) {
-        return bMgr() || (bEmp() && pv(k) == true);
+        return saOnly(k) ? posPerm(k) : (bMgr() || (bEmp() && pv(k) == true));
       }
       function expOwn() { return bMgr() || (bEmp() && (pv('expR') == true || pv('expR') == 'own')); }
       function feat(k) { return bizDoc().get('features', {}).get(k, false) == true; }
@@ -1665,7 +1672,9 @@ service cloud.firestore {
       // admins: העתק של הכלל בשורש
       match /admins/{userId} {
         allow get: if (isSelf(userId) && bActive() && (bIsAdmin() || bIsActiveStaff())) || bSuper();
-        allow list, create, update, delete: if false;
+        // 18.11.2026: מנהל־על רואה את רשימת המנהלים של העסק (מסך העובדים – מתגי הקופה למנהלים). אחרים – לא
+        allow list: if bSuper();
+        allow create, update, delete: if false;
       }
 
       // cfg: העתק של הכלל בשורש (כולל cfg/zc – סף פער בסגירת קופה, מנהל בלבד; list – מנהל בלבד)
@@ -2410,7 +2419,8 @@ service cloud.firestore {
         allow list, create, update, delete: if false;
       }
       match /prod/{id} {
-        allow read: if ordOk();
+        // קופה (שלב 0, 17.11.2026): גם קופאי / אחראי משמרת (posAny) קורא מוצרים – בלי p/cost ו-p/ws (שם נשאר רק ordOk / מנהל)
+        allow read: if ordOk() || posAny();
         allow create, update, delete: if false;
         // עלות (p/cost) – מנהל ועובד עם ord (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד (עובד דרך getWsPrices)
         match /p/{k} {
@@ -2442,7 +2452,7 @@ service cloud.firestore {
       }
       // fb/ord-catalog: קטגוריות והעברות פנימיות. מחיר סיטונאי (prod/{id}/p/ws) – תחת p/{k}, מנהל בלבד; עובד מקבל דרך getWsPrices.
       match /cat/{id} {
-        allow read: if ordOk();
+        allow read: if ordOk() || posAny();
         allow create, update, delete: if false;
       }
       match /xfer/{id} {
@@ -2722,6 +2732,131 @@ service cloud.firestore {
       match /s3ntf/{id} {
         allow read, create, update, delete: if false;
       }
+
+      // ----- קופה – pos (שלב 0, 17.11.2026). רק בתוך העסק (לא בשורש – החלטה 10). כל כתיבה – רק השרת (pos.js): write: if false לכולם,
+      // גם למנהל ולמנהל־על. התוספת כבויה = אין גישה. posAny = מנהל, או עובד עם pos (קופאי) / posMgr (אחראי משמרת); posLead = מנהל או posMgr.
+      // סניף: posBr כמו brOk (staff.br חסר = כל הסניפים). קופאי – רק מה שרשום עליו (cashier / who). poslog – רק השרת מוסיף, אף אחד לא עורך.
+      // 18.11.2026: posAny / posLead לפי perm() – גם מנהל רק עם המתג (מנהל־על מדליק). posMgrRd = קריאה של מסכי הניהול (כל מנהל, כמו היום).
+      // עגלות מושהות (pospark) הן של הקופה בלבד – מנהל בלי מתג קופה לא קורא אותן.
+      function posAny() { return feat('pos') && (perm('pos') || perm('posMgr')); }
+      function posLead() { return feat('pos') && perm('posMgr'); }
+      function posMgrRd() { return feat('pos') && bMgr(); }
+      function posBr(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
+      match /possale/{id} {
+        allow read: if posMgrRd() || (posLead() && posBr(resource.data.br)) || (posAny() && resource.data.cashier == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /pospay/{id} {
+        allow read: if posLead() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      match /posret/{id} {
+        allow read: if posLead() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      match /posshift/{id} {
+        allow read: if posMgrRd() || (posLead() && posBr(resource.data.br)) || (posAny() && resource.data.cashier == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /posz/{id} {
+        allow read: if posMgrRd() || (posLead() && posBr(resource.data.br));
+        allow create, update, delete: if false;
+      }
+      // מכשירי קופה: כל מי שמוכר קורא (המכשיר מוצא את הקופה שלו). רישום, פרישה והשבתה – רק השרת (posDev)
+      match /posdev/{id} {
+        allow read: if posAny() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      // poscfg/main – ההגדרות (קופה ומסך הניהול). poscfg/ctr (מונה קודי הקופות) – אף אחד מהאפליקציה
+      match /poscfg/{d} {
+        allow get: if d == 'main' && (posAny() || (feat('pos') && bMgr()) || bSuper());
+        allow list, create, update, delete: if false;
+      }
+      match /promo/{id} {
+        allow read: if posAny() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      match /clubcfg/{d} {
+        allow read: if posAny() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      match /clublog/{id} {
+        allow read: if posLead() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      match /poslog/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // POS:M7 – קופה ש7 (17.11.2026): יומן תקלות (poserr), התנגשויות (posconf), אינדקס גיבויים (posbk). קריאה – מנהל בלבד, כתיבה – רק השרת
+      // (pos-ops.js, pos-backup.js). poserr טכני בלבד, בלי פרטי לקוחות (אפיון ד 4).
+      match /poserr/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posconf/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posbk/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // /POS:M7
+      match /posgift/{code} {
+        allow read: if posAny() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      match /posgiftlog/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posclock/{id} {
+        allow read: if (feat('pos') && bMgr()) || (posAny() && resource.data.who == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /posimp/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /pos_income_daily/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // posreq/{dev}_{reqId}: סימון נגד כפילות – אף אחד מהאפליקציה
+      match /posreq/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // POS:M4 – קופה ש4 (17.11.2026, אפיון ה 0.3): המסמכים של ההגדרות. כל כתיבה – רק השרת (pos-cfg.js). קריאה של מסמך שלם בלבד:
+      //   poscfg/saPub ו-poscfg/br_{br} – כמו poscfg/main (מי שמוכר, מנהל, מנהל־על); poscfg/sa (נעילות ומגבלות) – מנהל / בעלים / מנהל־על,
+      //   לא קופאי. poscfglog – בעל העסק (admins/{uid}.own) ומנהל־על בלבד (לא מנהל, לא קופאי, לא רו"ח). poscfg/apprlock – אף אחד.
+      //   postpl / posbug – גלובליים, רק השרת (אין כלל = חסום).
+      function posOwn() { return feat('pos') && bIsAdmin() && bActive() && get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data.get('own', false) == true; }
+      match /poscfg/{d} {
+        allow get: if (d == 'saPub' || d.matches('br_[A-Za-z0-9_-]{1,40}')) && (posAny() || (feat('pos') && bMgr()) || bSuper());
+        allow get: if d == 'sa' && ((feat('pos') && bMgr()) || bSuper());
+      }
+      match /poscfglog/{id} {
+        allow read: if bSuper() || posOwn();
+        allow create, update, delete: if false;
+      }
+      // /POS:M4
+      // POS:M2 – ש2 (17.11.2026): עגלות מושהות (pospark) – אחראי / מנהל, או הקופאי שהשהה. קופונים אישיים (poscpn) – מנהל (הבדיקה בקופה דרך posCouponUse).
+      // כתיבה – רק השרת (pos-sale.js).
+      match /pospark/{id} {
+        allow read: if posLead() || (posAny() && resource.data.cashier == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /poscpn/{code} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // /POS:M2
+      // POS:M5 – pospin/{uid}: קוד PIN מגובב, מונה ניסיונות ונעילה (ש5, pos-auth.js). אף אחד מהאפליקציה – גם לא מנהל
+      match /pospin/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // /POS:M5
 
       // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
       // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid של מסמך האב. x/m (טיוטת המנהל) – מנהל בלבד.

@@ -110,7 +110,7 @@ const OPS = {
   },
   admins: {
     get: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/admins/${uid}`).get() },
-    list: { allow: NONE, run: (db, biz) => db.collection(`${P(biz)}/admins`).get() },
+    list: { allow: ['super'], run: (db, biz) => db.collection(`${P(biz)}/admins`).get() }, // 18.11.2026: מנהל־על רואה את מנהלי העסק (מתגי הקופה למנהלים)
     create: { allow: NONE, run: (db, biz, uid) => db.doc(`${P(biz)}/admins/${uid}`).set({ email: 'x' }) },
     update: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/admins/zz_victim`).set({ email: 'v' })); return db.doc(`${P(biz)}/admins/zz_victim`).set({ email: 'x' }); } },
     delete: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/admins/zz_victim`).set({ email: 'v' })); return db.doc(`${P(biz)}/admins/zz_victim`).delete(); } },
@@ -314,7 +314,7 @@ describe('ריבוי עסקים – טבלת בידוד: אוסף × פעולה 
     const closed = [...PAIRS].filter(([, v]) => v.allow === 0).map(([k]) => k);
     console.log('# טבלת בידוד: ' + JSON.stringify(TALLY));
     console.log('# פעולות שסגורות לכולם (כמו בשורש, או אוספים של השרת בלבד): ' + closed.join(', '));
-    const ok = new Set(['מסמך העסק b/{bizId}|create', 'מסמך העסק b/{bizId}|delete', 'admins|list', 'admins|create', 'admins|update', 'admins|delete',
+    const ok = new Set(['מסמך העסק b/{bizId}|create', 'מסמך העסק b/{bizId}|delete', 'admins|create', 'admins|update', 'admins|delete',
       'staff|create', 'staff|update', 'staff|delete', 'app_backup_status|create', 'app_backup_status|update', 'app_backup_status|delete',
       'chunks|update', 'tasks/c|update', 'appreq/p|update', 'mq/p|update', 'closings/p|update', 'deposits/p|update', 'yemot_lexicon|list', 'yemot_lexicon|delete',
       'yemot_items|get', 'yemot_items|list', 'yemot_items|create', 'yemot_items|update', 'yemot_items|delete',

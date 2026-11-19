@@ -42,7 +42,7 @@ async function requireStaff(request, opts) {
   }
   const s = T.scope();
   if (s) Object.assign(s, { bizId, prefix, biz, uid });
-  return { uid, role, staff, bizId, biz, prefix, superadmin: m.superadmin };
+  return { uid, role, staff, admin, bizId, biz, prefix, superadmin: m.superadmin };
 }
 
 // הקלט של כל פונקציה חייב להיות אובייקט (או ריק).
@@ -53,18 +53,28 @@ function inputObject(request) {
   return d;
 }
 
-// 6ה (עדכון חוזה 15): מתגי הרשאה לעובד. מנהל (ומנהל־על) = הכול. עובד: staff/{uid}.perms, ובלי perms – ההרשאות שהיו עד היום.
+// 6ה (עדכון חוזה 15): מתגי הרשאה לעובד. מנהל (ומנהל־על) = הכול (חוץ מ-pos / posMgr של מנהל – ראו SA_ONLY). עובד: staff/{uid}.perms, ובלי perms – ההרשאות שהיו עד היום.
 // אותה הגדרה בדיוק כמו perm()/dflt() בכללי Firestore של b/{bizId}.
 // prc (12.11.2026, תמחור חשבונית ספק): "עדכון מחירים ומלאי" – כבוי כברירת מחדל, גם לעובד ישן בלי perms (גם בלארג' פעמי).
 // s3m (14.11.2026, store3d): "שרטוט מפה" – עובד ששומר מפה (s3SaveMap) וקורא גרסאות קודמות; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
+// pos / posMgr (קופה, שלב 0, 17.11.2026): קופאי / אחראי משמרת – כבויים כברירת מחדל, גם לעובד ישן בלי perms. pos לבד לא נותן עלות (p/cost).
 // shf (18.11.2026, shifts.js): "משמרות" – עובד שרואה את כל המשמרות, עורך ושולח משימות למשמרת; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
-const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'shf']);
-const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, shf: false });
+const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf']);
+const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false });
+// 18.11.2026 (הכרעת בעל העסק): קופה – רק מנהל־על מחליט מי מקבל, גם מנהלים. pos / posMgr של מנהל עסק = admins/{uid}.perms
+// (רק השרת כותב: setStaffPerms, מנהל־על בלבד). מנהל־על (גם כשהוא מנהל בעסק) = הכול, כמו היום. שאר ההרשאות של מנהל לא השתנו.
+// אותה הגדרה בדיוק כמו perm() בכללי Firestore של b/{bizId}.
+const SA_ONLY = Object.freeze(['pos', 'posMgr']);
 function hasPerm(who, k) {
-  if (!who || who.role === 'manager') return true;
+  if (!who) return true;
+  if (who.role === 'manager') {
+    if (who.superadmin || !SA_ONLY.includes(k)) return true;
+    const ap = who.admin && typeof who.admin.get === 'function' ? who.admin.get('perms') : null;
+    return !!ap && typeof ap === 'object' && !Array.isArray(ap) && ap[k] === true;
+  }
   const p = who.staff && typeof who.staff.get === 'function' ? who.staff.get('perms') : null;
   if (!p || typeof p !== 'object' || Array.isArray(p)) return DEFAULT_PERMS[k] === true;
   return p[k] === true;
 }
 
-module.exports = { requireStaff, inputObject, hasPerm, PERM_KEYS, DEFAULT_PERMS };
+module.exports = { requireStaff, inputObject, hasPerm, PERM_KEYS, DEFAULT_PERMS, SA_ONLY };
