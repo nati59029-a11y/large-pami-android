@@ -204,6 +204,29 @@ async function open(browser, www, o) {
     await ctx.close();
   }
 
+  // ---------- שלב F: הערות עובדים – נשלחות עם השאלה רק כשיש הרשאה למידע רגיש (st.sens), לעולם לא במראה ----------
+  for (const sens of [false, true]) {
+    const { ctx, page, bodies } = await open(browser, www, { w: 360, state: { sens } });
+    await page.evaluate(() => {
+      S.subs.push({ id: 'TEN', cat: 'e_sal', name: 'עובדת הערות' });
+      S.enotes = [{ id: 'en1', sub: 'TEN', t: 'הערה סודית ' + 'ב'.repeat(700), d: today(), at: new Date().toISOString() }, { id: 'en2', sub: 'TEN', t: '   ', d: today(), at: 'x' }, { id: 'en3', sub: 'אין-כרטיס', t: 'יתומה', d: today(), at: 'x' }];
+      for (let i = 0; i < 70; i++) S.enotes.push({ id: 'ex' + i, sub: 'TEN', t: 'ישנה ' + i, d: '2020-01-' + String(1 + (i % 28)).padStart(2, '0'), at: 'x' });
+      S.tx.push({ id: 'zn', t: 'inc', cat: catsOf('inc')[0].id, amt: 12.3, date: today(), note: '', pays: [] }); save(); NAV = [{ v: 'home' }]; go('sec');
+    });
+    await H.settle(page, 600);
+    await page.fill('#secForm textarea', 'מה רשמתי על העובדת?');
+    await page.click('#secForm button[value=n]'); await H.settle(page, 600);
+    const b = bodies.filter((x) => x[0] === 'secChat').pop();
+    const N = b && b[1].fin && b[1].fin.notes;
+    if (!sens) check('הערות: בלי הרשאה למידע רגיש – לא נשלחות עם השאלה', b && b[1].fin && N === undefined && !JSON.stringify(b[1]).includes('הערה סודית'), N && N.length);
+    else check('הערות: עם הרשאה – נשלחות עם השאלה (60 האחרונות, עד 500 תווים, בלי ריקות ובלי כרטיס חסר)', Array.isArray(N) && N.length === 60 && N[0][0] === 'עובדת הערות' && /^הערה סודית/.test(N[0][2]) && N[0][2].length === 500 && N.every((r) => r.length === 3 && r[2].trim() && r[0] !== '') && !JSON.stringify(N).includes('יתומה'), N && [N.length, N[0]]);
+    await H.settle(page, 6500);
+    const mp = bodies.filter((x) => x[0] === 'secMirrorPut');
+    check(`הערות: המראה נשלח בלי הערות (sens=${sens})`, mp.length >= 1 && mp.every((x) => x[1].fin && x[1].fin.notes === undefined && !JSON.stringify(x[1]).includes('הערה סודית')), mp.length);
+    check(`הערות: בלי שגיאות JS (sens=${sens})`, page.__errors.length === 0, page.__errors);
+    await ctx.close();
+  }
+
   // ---------- המראה נשלח אחרי שמירה; מצב חיסכון מוצג ----------
   {
     const { ctx, page, bodies } = await open(browser, www, { w: 360, state: { saving: 'month', pct: 100 } });

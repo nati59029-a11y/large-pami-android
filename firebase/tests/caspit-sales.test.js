@@ -267,4 +267,71 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
     assert.equal(await q(B, 'p1', 'b2'), -2);
     assert.equal(await q(B, 'p1', '_'), 5);
   });
+  it('C1: שעת מכירה – נשמרת בעסקה ובפילוח השעות של הסיכום היומי (בלי שעה → na, חצות → 00); cxSales מחזיר h; קובץ בלי שעות – יום בלי שעות', async () => {
+    const F = [HDR, L('25/11/2026 14:05', 'מוצר א', '300001', '8001', Y, 20), L('25/11/2026 14:50', 'מוצר א', '300001', '8001', Y, 10, 2), L('25/11/2026 09:00', 'מוצר ב', '300002', '8002', Y, -4.5),
+      L('25/11/2026', 'פריט כללי', '1000', '8003', Y, 7), L('26/11/2026 00:00', 'מוצר א', '300001', '8004', Y, 10), L('25/11/2026 23:59', 'מוצר א', '300001', '8101', N2, 10)];
+    const lines = CC.parseSales(F).lines;
+    assert.deepEqual(lines.map((l) => l.t), [845, 890, 540, undefined, 0, 1439]);
+    // שעה לא תקינה מהלקוח – השורה נקלטת בלי שעה (לא נדחית)
+    const up = await ok('cxUpload', MGR, { run: run(), kind: 'sales', part: 0, parts: 1, lines: [Object.assign({}, lines[0], { t: 5000 })] });
+    assert.deepEqual([up.n, up.bad], [1, 0]);
+    const id = await send(MGR, F);
+    await ok('cxPreview', MGR, { run: id });
+    await ok('cxApply', MGR, { run: id });
+    const d = await day('6200_20261125');
+    assert.deepEqual(d.h, { 14: 28, '09': -4.5, na: 7 }); // 20 + (10 − 2 הנחה); החזרה במינוס; בלי שעה → na
+    assert.equal(CC.r2(Object.values(d.h).reduce((a, b) => a + b, 0)), CC.r2(d.gross - d.ret - d.disc));
+    assert.deepEqual((await day('6200_20261126')).h, { '00': 10 });
+    assert.deepEqual((await day('7700_20261125')).h, { 23: 10 });
+    const t = (await adm().doc(`b/${A}/cxTx/6200_20261125_8001`).get()).data();
+    assert.deepEqual(t.lines.map((l) => l.t), [845, 890]);
+    // העלאה חוזרת – לא סופרים שוב גם בשעות
+    const id2 = await send(MGR, F); await ok('cxPreview', MGR, { run: id2 }); await ok('cxApply', MGR, { run: id2 });
+    assert.deepEqual((await day('6200_20261125')).h, { 14: 28, '09': -4.5, na: 7 });
+    const s = await ok('cxSales', MGR, { from: '2026-11-25', to: '2026-11-26' });
+    const H = CC.salesHours(CC.unpackDays(s));
+    assert.deepEqual(H.hours['2026-11-25'], { 14: 28, '09': -4.5, 23: 10, na: 7 });
+    assert.deepEqual(H.day, { '2026-11-25': 40.5, '2026-11-26': 10 });
+    assert.deepEqual(CC.salesHours(CC.unpackDays(s), '7700').hours, { '2026-11-25': { 23: 10 } });
+    // קובץ בלי שעות (FILE1) – הכול ב-na, והיום חוזר בלי שעות (גם יום ישן בלי h בכלל – ראו בדיקת היחידה)
+    assert.deepEqual((await day('6200_20261116')).h, { na: 72.1 });
+    const old = await ok('cxSales', MGR, { from: '2026-11-16', to: '2026-11-16' });
+    assert.deepEqual(CC.salesHours(CC.unpackDays(old)).hours['2026-11-16'], {});
+  });
+  it('C2: סטטיסטיקת שעת המכירה (tm) עוברת בתוך שורה → in → cnt → cxDay.tm; AM/PM; tm פגום/דפוס עם ספרות – מנוקה, השורה לא נדחית; לקוח ישן בלי tm – עובד', async () => {
+    const F = [HDR, L('27/11/2026 2:05 PM', 'מוצר א', '300001', '8201', Y, 10), L('27/11/2026', 'מוצר ב', '300002', '8202', Y, 4.5), L('27/11/2026 9:00 AM', 'מוצר א', '300001', '8203', Y, 10)];
+    const p = CC.parseSales(F);
+    assert.deepEqual(p.tm, { y: 2, n: 1, p: 'dd/dd/dddd', q: 'dd/dd/dddd d:dd aa' });
+    const id = await send(MGR, F);
+    assert.deepEqual((await adm().doc(`b/${A}/cxRun/${id}/in/0`).get()).get('tm'), p.tm);
+    const pv = await ok('cxPreview', MGR, { run: id });
+    assert.deepEqual(pv.cnt.tm, p.tm);
+    await ok('cxApply', MGR, { run: id });
+    const d = await day('6200_20261127');
+    assert.deepEqual(d.tm, p.tm);
+    assert.deepEqual(d.h, { 14: 10, '09': 10, na: 4.5 });
+    const s = await ok('cxSales', MGR, { from: '2026-11-27', to: '2026-11-27' });
+    assert.deepEqual(CC.unpackDays(s)[0].tm, p.tm);
+    const lx = await ok('cxLines', MGR, { bd: '6200_20261127' });
+    assert.deepEqual(lx.tx.flatMap((x) => x.lines.map((l) => l.t)).sort(), [540, 845, undefined].sort());
+    // tm פגום (מערך / דפוס עם ספרות ואותיות) – מנוקה או מתעלמים; השורה נקלטת
+    const L0 = Object.assign({}, p.lines[0]);
+    for (const [tm, want] of [[['x'], undefined], [{ y: 1.5, n: 0 }, undefined], [{ y: 1, n: 2, p: '27/11/2026 14:05 Fri', q: 5 }, { y: 1, n: 2, p: '??/??/???? ??:?? ???', q: '' }]]) {
+      const r = run(); const up = await ok('cxUpload', MGR, { run: r, kind: 'sales', part: 0, parts: 1, lines: [Object.assign({}, L0, { tm })] });
+      assert.equal(up.n, 1);
+      assert.deepEqual((await adm().doc(`b/${A}/cxRun/${r}/in/0`).get()).get('tm'), want);
+    }
+    // לקוח ישן (בלי tm): עובד, ו-cxDay.tm הקודם נשאר
+    const F2 = [HDR, L('27/11/2026', 'מוצר ב', '300002', '8204', Y, 4.5)];
+    const old = CC.parseSales(F2).lines.map(({ tm, ...l }) => l);
+    const r2 = run(); await ok('cxUpload', MGR, { run: r2, kind: 'sales', part: 0, parts: 1, lines: old });
+    const pv2 = await ok('cxPreview', MGR, { run: r2 }); assert.equal(pv2.cnt.tm, undefined);
+    await ok('cxApply', MGR, { run: r2 });
+    const d2 = await day('6200_20261127');
+    assert.deepEqual(d2.tm, p.tm); assert.equal(d2.h.na, 9);
+    // דוח חדש עם tm אחר מחליף את כולו (גם p ריק)
+    const F3 = [HDR, L('27/11/2026 10:00', 'מוצר ב', '300002', '8205', Y, 4.5)];
+    const id3 = await send(MGR, F3); await ok('cxPreview', MGR, { run: id3 }); await ok('cxApply', MGR, { run: id3 });
+    assert.deepEqual((await day('6200_20261127')).tm, { y: 1, n: 0, p: '', q: 'dd/dd/dddd dd:dd' });
+  });
 });

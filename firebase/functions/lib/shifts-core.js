@@ -138,6 +138,21 @@ function remWin(occ, min) {
 }
 const remDue = (occ, now, min) => { if (!occ.u || now >= occ.start || quiet(now)) return false; const [a, b] = remWin(occ, min); return now >= a && now < b; };
 
+// ---------- "שכחת להחתים יציאה" (שלב G, 19.11.2026): ATT_AFTER אחרי סוף המשמרת, ועד ATT_MAX אחרי הסוף (לא על משמרות ישנות, למשל אחרי הפעלה מחדש).
+//   סוף+15 נופל בשבת/חג – החלון מתחיל בסוף חלון השקט (מוצאי שבת 21:00) ונמשך אותו אורך. בתוך חלון השקט – לא שולחים.
+const ATT_AFTER = 15 * 60000;
+const ATT_MAX = 12 * 3600000;
+const ATT_PRE = 12 * 3600000; // כניסה פתוחה "חופפת" למשמרת: התחילה לפני סוף המשמרת, ולא יותר מ-12 שעות לפני תחילתה (כניסה ישנה שנשכחה – לא שייכת)
+function attWin(occ) {
+  const a = occ.end + ATT_AFTER;
+  if (!quiet(a)) return [a, occ.end + ATT_MAX];
+  const we = quietWin(a)[1];
+  return [we, we + ATT_MAX - ATT_AFTER];
+}
+const attDue = (occ, now) => { if (!occ || !occ.u || now < occ.end + ATT_AFTER || quiet(now)) return false; const [a, b] = attWin(occ); return now >= a && now < b; };
+// רשומת נוכחות { in, out } – כניסה פתוחה (out ריק) שחופפת למשמרת [start, end)
+const attHit = (r, start, end) => !!r && (r.out === null || r.out === undefined) && Number.isFinite(r.in) && r.in < end && r.in >= start - ATT_PRE;
+
 // ---------- skip ("רק הפעם"): לא מוחקים תאריכים (היסטוריה והשוואת נוכחות). עד MAX_SKIP תאריכים עתידיים.
 // מעל SKIP_KEEP תאריכים – תאריכים מלפני יותר משנה יוצאים, ו-from עולה לאותו יום (כדי שמופע שבוטל לא יחזור). { skip, from } או { err }
 const SKIP_KEEP = 400;
@@ -200,5 +215,5 @@ function normHrs(v) {
 module.exports = {
   HM_RE, DAY_RE, ID_RE, MAX_SKIP, DEF_LATE, DEF_AT, REM_MIN, HOLES_WIN,
   isHM, hmMin, isDay, addDays, weekdayOf, todayOf, weekStart, hmOf, times, appliesOn, occOn, expand, parseOcc, occById,
-  openRange, holes, holesTxt, remDue, remWin, quiet, quietWin, addSkip, sameWeek, SKIP_KEEP, cfgOf, holesDue, normDef, normHrs,
+  openRange, holes, holesTxt, remDue, remWin, quiet, quietWin, ATT_AFTER, ATT_MAX, ATT_PRE, attWin, attDue, attHit, addSkip, sameWeek, SKIP_KEEP, cfgOf, holesDue, normDef, normHrs,
 };

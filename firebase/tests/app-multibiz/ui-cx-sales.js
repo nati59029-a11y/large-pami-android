@@ -17,12 +17,15 @@ const PV = { kind: 'sales', br: '_', reg: {}, bks: { 6200: 'סניף בדיקה 
   rows: [[0, '2026-11-16', '9001', '400001', 'כוס נייר', 20, 0, '6200', 'sure', 2, 10, ''], [1, '2026-11-16', '9001', '1000', 'פריט כללי', 23.6, 0, '6200', 'skip', null, null, ''], [2, '2026-11-16', '9002', '400002', 'צלחת', 13, 0, '7700', 'unsure', 1, 10, 'frac'], [3, '2026-11-17', '9003', '400001', 'כוס נייר', -10, 0, '6200', 'sure', -1, 10, '']] };
 const it = (n, cat, q, r, a, u, sp) => Object.assign({ n, cat, q, r, a, ds: 0, u }, sp ? { sp: true } : {});
 const DAYS = [
-  { d: '2026-11-16', bk: '6200', bn: 'יהודה הנשיא', gross: 443.6, ret: 0, disc: 0, ntx: 3, nl: 4, sp: 23.6, un: 0, it: { 400001: it('כוס נייר', 'k1', 2, 0, 20, 0), 400003: it('מפית', 'k2', 40, 0, 400, 0), 1000: it('פריט כללי', '', 0, 0, 23.6, 0, 1) } },
+  { d: '2026-11-16', bk: '6200', bn: 'יהודה הנשיא', gross: 443.6, ret: 0, disc: 0, ntx: 3, nl: 4, sp: 23.6, un: 0, h: { '09': 400, 14: 20, na: 23.6 }, tm: { y: 2, n: 1, p: 'dd/dd/dddd', q: 'dd/dd/dddd dd:dd' }, it: { 400001: it('כוס נייר', 'k1', 2, 0, 20, 0), 400003: it('מפית', 'k2', 40, 0, 400, 0), 1000: it('פריט כללי', '', 0, 0, 23.6, 0, 1) } },
   { d: '2026-11-16', bk: '7700', bn: 'נחל לכיש', gross: 13, ret: 0, disc: 0, ntx: 1, nl: 1, sp: 0, un: 1, it: { 400002: it('צלחת', 'k1', 1, 0, 13, 1) } },
   { d: '2026-11-17', bk: '6200', bn: 'יהודה הנשיא', gross: 0, ret: 10, disc: 0, ntx: 1, nl: 1, sp: 0, un: 0, it: { 400001: it('כוס נייר', 'k1', 0, 1, -10, 0) } }];
 const CC = require('../../functions/lib/caspit-core.js');
+// C2: יום בלי שעות בכלל (קובץ שבו השעה לא נקראה) – "0%" והפורמט שהתקבל
+const SALES0 = { ...CC.packDays([{ d: '2026-11-18', bk: '6200', bn: 'יהודה הנשיא', gross: 50, ret: 0, disc: 0, ntx: 2, nl: 2, sp: 0, un: 0, h: { na: 50 }, tm: { y: 0, n: 2, p: 'dd/dd/dddd', q: '' }, it: { 400001: it('כוס נייר', 'k1', 5, 0, 50, 0) } }]), cats: {}, cfg: { reg: {}, br: '_' }, sa: false };
+let salesNow = null;
 const SALES = { ...CC.packDays(DAYS), cats: { k1: 'כלים', k2: 'נייר' }, cfg: { reg: { 6200: 'i_yh', 7700: 'i_nl' }, br: '_', lastSales: { run: 'r', at: Date.UTC(2026, 10, 17, 10) } }, sa: true };
-const TX = { tx: [{ id: '6200_20261116_9001', d: '2026-11-16', tx: '9001', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 'a', c: '400001', n: 'כוס נייר', a: 20, ds: 0, q: 2, qs: 'sure' }, { k: 'b', c: '1000', n: 'פריט כללי', a: 23.6, ds: 0, q: null, qs: 'skip' }] }] };
+const TX = { tx: [{ id: '6200_20261116_9001', d: '2026-11-16', tx: '9001', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 'a', c: '400001', n: 'כוס נייר', a: 20, ds: 0, q: 2, qs: 'sure', t: 14 * 60 + 5 }, { k: 'b', c: '1000', n: 'פריט כללי', a: 23.6, ds: 0, q: null, qs: 'skip' }] }] };
 const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '7700', bn: 'נחל לכיש', lines: [{ k: '400002|13|0|0', c: '400002', n: 'צלחת', a: 13, ds: 0, q: 1, qs: 'unsure', why: 'frac', P: 10 }] }] };
 
 (async () => {
@@ -42,7 +45,7 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
     const R = { cxCfg: { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa: false }, cxUpload: { ok: true }, cxPreview: PV,
-      cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 }, ix: [0, 1, 2, 3] }, cxSales: SALES,
+      cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 }, ix: [0, 1, 2, 3] }, cxSales: salesNow || SALES,
       cxLines: d && d.un ? UN : TX, cxFix: { ok: true, q: 2, delta: 1, qs: 'own' }, cxSetCfg: { ok: true, reg: d && d.reg }, getCosts: { cost: {} } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
@@ -155,6 +158,22 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   check('22ב תפריט "עוד" (מנהל): קיצור "מכירות כספית" שפותח את המסך', /מכירות כספית/.test(mo.text) && fine(mo), { small: mo.small });
   await page.click('[data-a=go][data-v=cxSales]'); await H.settle(page, 500);
   check('22ג הקיצור פותח את מסך המכירות', await page.evaluate(() => cur().v === 'cxSales'));
+  // C2: שעת מכירה – שורה בסיכום ולשונית "לפי שעה" (טווח 16–17.11: 420 מתוך 466.60 עם שעה = 90%)
+  await page.click('[data-a=cxYPer][data-k=custom]'); await H.settle(page, 600);
+  const hs = await q();
+  check('24 שעת מכירה בסיכום: 90% מהפדיון + מספר השורות בדוח האחרון; בלי "הפורמט שהתקבל"', /שעת מכירה: נמצאה ב-90% מהפדיון \(בדוח האחרון: 2 מתוך 3 שורות\)/.test(hs.text) && !/הפורמט שהתקבל/.test(hs.text), hs.text.slice(0, 500));
+  await page.click('[data-a=cxYTab][data-k=hr]'); await H.settle(page, 300);
+  const hh = await q(); await shot('cx-15-hours');
+  check('25 לשונית "לפי שעה": 16.11 – 09:00 (400), 14:00 (20), בלי שעה (36.60, כולל הסניף בלי פילוח); 17.11 ברשימת "ימים בלי שעה"; מגע ≥44, RTL, בלי גלילה לצד', fine(hh) && /09:00–10:00/.test(hh.text) && /400\.00/.test(hh.text) && /14:00–15:00/.test(hh.text) && /בלי שעה/.test(hh.text) && /36\.60/.test(hh.text) && /ימים בלי שעת מכירה: 17\/11\/2026/.test(hh.text), { small: hh.small, sw: hh.sw, t: hh.text.slice(0, 400) });
+  const nl0 = calls.filter((x) => x.n === 'cxLines').length;
+  await page.click('[data-a=cxYHr][data-d="2026-11-16"][data-h="14"]'); await H.settle(page, 500);
+  const hd = await q(); const hl = calls.filter((x) => x.n === 'cxLines').slice(nl0).map((x) => x.d.bd).sort();
+  check('26 לחיצה על שעה → עסקאות היום (שני הסניפים), רק השורות של אותה שעה', JSON.stringify(hl) === '["6200_20261116","7700_20261116"]' && /14:00–15:00/.test(hd.text) && /כוס נייר/.test(hd.text) && !/פריט כללי/.test(hd.text), { hl, t: hd.text.slice(0, 300) });
+  await close();
+  salesNow = SALES0;
+  await page.click('[data-a=cxYPer][data-k=custom]'); await H.settle(page, 600);
+  const h0 = await q(); await shot('cx-16-hours-none');
+  check('27 קובץ בלי שעה: "נמצאה ב-0%" + הפורמט שהתקבל (מוסווה); הלשונית – אין פילוח', /שעת מכירה: נמצאה ב-0% מהפדיון/.test(h0.text) && /הפורמט שהתקבל: dd\/dd\/dddd/.test(h0.text) && /אין פילוח לפי שעה/.test(h0.text) && fine(h0), { small: h0.small, t: h0.text.slice(0, 500) });
   check('23 בלי שגיאות JavaScript', page.__errors.length === 0, page.__errors.slice(0, 3));
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

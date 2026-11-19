@@ -10,6 +10,8 @@
 //   6. (סבב בדיקה 1) העברת משימות שממתינות ב"רק הפעם", "מכאן והלאה" (גם החלפת יום) ושינוי תאריך – בלי איבוד ובלי כפילות;
 //      בידוד מול עסק B פעיל עם תוספת המשימות; משמרת שחוצה חצות ב-shTick; skip ישן לא נמחק; "מכאן והלאה" לתאריך מוקדם – bad-day;
 //      עריכה/מחיקה של מופע שעבר – bad-day; שתי עריכות "רק הפעם" במקביל; תזכורת למשמרת בשבת – נשלחת בשישי לפני החלון.
+//   7. (שלב G, 19.11.2026) "שכחת להחתים יציאה": כניסה פתוחה (posclock) 15 דק' אחרי סוף המשמרת – התראה אחת לעובד ואחת למנהלים, גם אחרי
+//      ריצה שנייה; יציאה שהוחתמה / לפני 15 דק' / בלי posclock / בלי תוספת הקופה – אין; משמרת בשישי שמסתיימת בחלון השקט – במוצאי שבת.
 const { describe, it, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { assertFails } = require('@firebase/rules-unit-testing');
@@ -355,5 +357,70 @@ describe('סבב בדיקה 1 – העברת משימות, בידוד, חצות,
     const t2 = await call(M1, { op: 'task', occ: s2.r.id + '_' + N, txt: 'ערב' });
     await tick(IL(N, '20:05')); await tick(IL(SC.addDays(N, 1), '00:15'));
     assert.equal((await list(P + 'tasks')).filter((x) => x.id === 'sh-' + t2.r.id).length, 1);
+  });
+});
+
+describe('shTick – "שכחת להחתים יציאה" (שלב G)', () => {
+  beforeEach(seed);
+  const pos = () => prep((d) => d.doc('b/' + A).update({ 'features.pos': true }));
+  const clockIn = (u, t, out) => prep((d) => d.doc(`${P}posclock/${u}_${t}`).set({ who: u, name: 'יוסי', in: t, out: out === undefined ? null : out, day: 0, dev: null, br: null, by: u }));
+  const ap = () => PUSH.filter((p) => /^a/.test(String(p.msg.id)));
+  it('כניסה פתוחה אחרי סוף המשמרת: אחת לעובד ואחת למנהלים, פעם אחת; לפני 15 דק\' – אין; עובד בלי posclock – אין', async () => {
+    await pos();
+    const D = workDay();
+    await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: false, u: E2 });
+    await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: false, u: E1 }); // E1 – בלי החתמה בכלל
+    await clockIn(E2, IL(D, '09:58'));
+    await tick(IL(D, '18:10'));
+    assert.equal(ap().length, 0, 'לפני 15 דקות');
+    await tick(IL(D, '18:16'));
+    const a = ap();
+    assert.equal(a.length, 2);
+    const emp = a.find((x) => x.uid === E2), mg = a.find((x) => x.uid === M1);
+    assert.ok(emp && mg);
+    assert.equal(a.filter((x) => x.uid === E1).length, 0, 'בלי posclock – אין');
+    assert.equal(emp.msg.body, 'אם שכחת להחתים אצבע, נא לפנות בהקדם למנהל');
+    assert.equal(emp.msg.k, 'sh');
+    assert.match(mg.msg.body, /יוסי/);
+    assert.match(mg.msg.body, /18:00/);
+    await tick(IL(D, '18:26')); await tick(IL(D, '20:00'));
+    assert.equal(ap().length, 2, 'ריצה שנייה – לא שולח שוב');
+    const sent = await get(P + 'shfsent/' + D);
+    assert.equal(Object.keys(sent.att).length, 1);
+    assert.deepEqual(await get(`${P}posclock/${E2}_${IL(D, '09:58')}`), { who: E2, name: 'יוסי', in: IL(D, '09:58'), out: null, day: 0, dev: null, br: null, by: E2 }, 'רשומת הנוכחות לא משתנה');
+  });
+  it('יציאה שהוחתמה – אין; בלי תוספת הקופה (מקור לא ידוע) – אין', async () => {
+    const D = workDay();
+    await call(M1, { op: 'save', d: D, s: '10:00', e: '18:00', fx: false, u: E2 });
+    await clockIn(E2, IL(D, '09:58'));
+    await tick(IL(D, '18:20'));
+    assert.equal(ap().length, 0, 'בלי features.pos – לא ידוע, לא שולחים');
+    await pos();
+    await prep((d) => d.doc(`${P}posclock/${E2}_${IL(D, '09:58')}`).update({ out: IL(D, '18:05') }));
+    await tick(IL(D, '18:30'));
+    assert.equal(ap().length, 0, 'יציאה הוחתמה');
+  });
+  it('משמרת חוצה חצות (20:00–02:00): ההתראה ב-02:15 של היום הבא', async () => {
+    await pos();
+    const D = workDay(), N = SC.addDays(D, 1);
+    await call(M1, { op: 'save', d: D, s: '20:00', e: '02:00', fx: false, u: E2 });
+    await clockIn(E2, IL(D, '19:55'));
+    await tick(IL(N, '02:10'));
+    assert.equal(ap().length, 0);
+    await tick(IL(N, '02:16'));
+    assert.equal(ap().length, 2);
+    assert.match(ap().find((x) => x.uid === M1).msg.body, /02:00/);
+  });
+  it('שבת: משמרת בשישי שמסתיימת ב-13:50 – לא נשלח בחלון, נשלח פעם אחת במוצאי שבת', async () => {
+    await pos();
+    let F = SC.addDays(workDay(), 1);
+    for (let i = 0; i < 60 && !(SC.weekdayOf(F) === 5 && !SC.quiet(IL(F, '13:00')) && SC.quiet(IL(F, '14:05')) && !SC.quiet(IL(SC.addDays(F, 1), '21:05'))); i++) F = SC.addDays(F, 1);
+    const S = SC.addDays(F, 1);
+    await call(M1, { op: 'save', d: F, s: '08:00', e: '13:50', fx: false, u: E2 });
+    await clockIn(E2, IL(F, '07:55'));
+    await tick(IL(F, '14:06')); await tick(IL(S, '10:00')); await tick(IL(S, '20:55'));
+    assert.equal(ap().length, 0, 'בתוך חלון השקט');
+    await tick(IL(S, '21:05')); await tick(IL(S, '21:15'));
+    assert.equal(ap().length, 2);
   });
 });
