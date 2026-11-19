@@ -41,15 +41,20 @@ function row(slot,x,mgr){
  const meta=[legacy&&x.file?`<span dir="ltr">${esc(x.file)}</span>`:'',x.createdAt?esc(fdt(x.createdAt)):'',x.byRole?(x.byRole==='manager'?'מנהל':'עובד'):'',x.until?'יורד אחרי '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const a=x.actions||{};
  const btns=[x.listen&&x.listen!=='none'?`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`:''];
+ btns.push(txtBtn(slot,x));
  if(mgr){ // הסתרה היא נוחות בלבד; השרת דוחה עובד
   if(a.extend)btns.push(`<button class="btn s g" data-a="ybExtend" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-u="${esc(x.until||'')}">האריך תוקף</button>`);
   if(a.remove)btns.push(`<button class="btn s g" data-a="ybRemove" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-l="${legacy?1:0}">הורד</button>`)}
  return`<div class="li" style="cursor:default" data-k="${esc(k)}"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
+// הנוסח המלא שנשלח (בקשת בעל העסק 19.11): לראות, להעתיק, ובמבצעים – להדביק לשדה "מבצע ידני". השרת שולח text רק כשיש נוסח
+const TX={}; // מפתח → נוסח, כדי לא לשים טקסט ארוך בתוך תכונת HTML
+const txtBtn=(slot,x)=>{if(typeof x.text!=='string'||!x.text.trim())return'';const k=keyOf(x.ref);TX[k]={t:x.text,ttl:x.title||'',slot};return`<button class="btn s g" data-a="ybText" data-k="${esc(k)}">נוסח</button>`};
 function rec(slot,x,mgr){
  const ttl=x.title||'ללא שם',rs=x.restore||{};
  const tags=[tag('',WHY[x.downReason]||'ירדה'),typeTag(slot,x),x.kind==='audio'?tag('t2','הקלטה'):'',x.hasSavedAudio?'':tag('t1','ללא שמע שמור')].join('');
  const meta=[x.downAt?esc(fdt(x.downAt)):'',x.until?'היה עד '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const btns=[`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`];
+ btns.push(txtBtn(slot,x));
  if(mgr&&rs.allowed)btns.push(`<button class="btn s g" data-a="ybRestore" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-nu="${rs.needsUntil?1:0}" data-c="${rs.costNote?1:0}">החזר לקו</button>`);
  return`<div class="li" style="cursor:default"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
 function playerHtml(){if(!P)return'';
@@ -96,6 +101,14 @@ ACT.ybListen=async el=>{
  catch(e){A.toast(errT(e))}
  finally{busy=false}
  if(slot)paint(slot);if(P)P.fresh=false};
+ACT.ybText=el=>{const o=TX[el.dataset.k];if(!o)return;
+ const fill=o.slot==='promos'&&A.isMgr()&&document.getElementById('yl_m');
+ dlg(`<h3>הנוסח שנשלח</h3><textarea id="ybTxt" rows="8" readonly dir="auto" style="width:100%">${esc(o.t)}</textarea>
+ <div class="row" style="margin-top:10px"><button type="button" class="btn grow" data-a="ybCopy">העתק</button>${fill?'<button type="button" class="btn g grow" data-a="ybFill">הדבק במבצע ידני</button>':''}<button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div>`);
+ ACT.ybFill=()=>{const f=document.getElementById('yl_m');if(!f)return;f.value=o.t;f.dispatchEvent(new Event('input',{bubbles:true}));closeDlg();f.scrollIntoView({block:'center'});A.toast('הנוסח הודבק. אפשר לערוך ולשלוח')}};
+ACT.ybCopy=()=>{const e=document.getElementById('ybTxt');if(!e)return;const t=e.value;
+ const manual=()=>{try{e.focus();e.select();e.setSelectionRange(0,t.length)}catch(x){}A.toast('הנוסח מסומן – העתיקו ידנית')};
+ (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>A.toast('✓ הנוסח הועתק'),manual)};
 ACT.ybStop=()=>{stopPlayer();const slot=SLOTS[cur().a||''];if(slot)paint(slot)};
 ACT.ybReload=el=>{const s=el.dataset.s;load(SCR[s],true)};
 // ---------- חלון אישור ----------

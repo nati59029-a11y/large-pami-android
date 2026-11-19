@@ -1219,6 +1219,8 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     const r6 = m.result.recent.find((x) => x.ref.id === d6);
     assert.equal(r6.hasSavedAudio, false); assert.equal(r6.downReason, 'removed'); assert.deepEqual(r6.restore, { allowed: true, needsUntil: false, costNote: false });
     assert.equal(m.result.recent.find((x) => x.ref.id === rep).downReason, 'replaced');
+    // 19.11: הנוסח המלא נשלח לאפליקציה (כפתור "נוסח"); קובץ ותיק – בלי
+    assert.equal(t.text, 'נוסח recipes'); assert.equal(r6.text, 'נוסח recipes'); assert.equal(w.text, undefined); assert.equal(l.text, undefined);
     assert.ok(!m.result.recent.some((x) => x.ref.id === d7));
     assert.deepEqual(M.calls('GetIVR2Dir').map((q) => q.body.path), ['1']);
     // פתיחה: רק M1000.* מהשורש (לא ext.ini, לא BACKUP_*)
