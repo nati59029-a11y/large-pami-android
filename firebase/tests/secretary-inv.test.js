@@ -272,6 +272,31 @@ describe('"נכנס ישר" (34–36), סניף (40), סוגי מסמכים (37,
     const un = await arrive(pdf(1), Object.assign(RAW.inv({ number: 'U1', total_with_vat: 40 }), { confidence: { total_with_vat: 0.4 } }));
     assert.ok(un.why.includes('fields'), 'סכום לא בטוח');
   });
+  it('19.11: רק חשבוניות – מסמך שבטוח אינו חשבונית נדחה אוטומטית (לא ממתין), בספק – ממתין; קובץ לא רלוונטי לא מוצג; ממתינים ישנים שבטוח אינם חשבונית יוצאים מהרשימה', async () => {
+    const no = await arrive(pdf(1), { type: 'unknown', type_confidence: 0.95, fields: { unreadable: false }, confidence: {} });
+    assert.equal(no.st, 'rej'); assert.equal(no.rejBy, 'auto'); assert.equal(no.notInv, 'unknown'); assert.ok(no.purgeAt > Date.now());
+    const dep = await arrive(pdf(1), { type: 'deposit', type_confidence: 0.92, fields: {}, confidence: {} });
+    assert.equal(dep.st, 'rej'); assert.equal(dep.notInv, 'deposit');
+    const rd = await arrive(pdf(1), { type: 'unknown', type_confidence: 0.95, fields: { unreadable: true }, confidence: {} });
+    assert.equal(rd.st, 'new', 'אי אפשר לקרוא – בספק, ממתין'); assert.equal(rd.unr, true);
+    const lo = await arrive(pdf(1), { type: 'unknown', type_confidence: 0.6, fields: { unreadable: false }, confidence: {} });
+    assert.equal(lo.st, 'new', 'ביטחון נמוך – ממתין');
+    const ics = await arrive(Buffer.from('BEGIN:VCALENDAR'), null, { why: 'type', fn: 'invite.ics' });
+    assert.equal(ics.st, 'rej'); assert.equal(ics.k, 'bad'); assert.equal(ics.notInv, 'type');
+    const zip = await arrive(Buffer.from('x'), null, { why: 'zip', fn: 'docs.zip' });
+    assert.equal(zip.st, 'new', 'ארכיון – אולי חשבונית בפנים, ממתין');
+    // רשומות ממתינות מלפני התיקון
+    await put(`b/${A}/sec_inv/x${'1'.repeat(40)}`, { st: 'new', k: 'unk', t0: 'unknown', unsure: [], t: Date.now(), src: [{ ch: 'mail', from: 'a@b.example', t: 1 }], el: false, why: ['type'] });
+    await put(`b/${A}/sec_inv/x${'2'.repeat(40)}`, { st: 'new', k: 'unk', t0: 'unknown', unsure: ['type'], t: Date.now(), src: [{ ch: 'mail', from: 'a@b.example', t: 1 }], el: false, why: ['type'] });
+    await put(`b/${A}/sec_inv/x${'3'.repeat(40)}`, { st: 'new', k: 'bad', why: ['type'], t: Date.now(), src: [{ ch: 'mail', from: 'a@b.example', t: 1 }], el: false, np: 0 });
+    const L = (await call('secInv', M1, { op: 'list' })).r.items.map((i) => i.id);
+    assert.ok(!L.includes(no.id) && !L.includes(ics.id), 'שנדחו אוטומטית – לא ברשימה');
+    assert.ok(L.includes(rd.id) && L.includes(lo.id) && L.includes(zip.id), 'בספק – ברשימה');
+    assert.ok(!L.includes('x' + '1'.repeat(40)) && !L.includes('x' + '3'.repeat(40)), 'ישנים שבטוח אינם חשבונית – יצאו');
+    assert.ok(L.includes('x' + '2'.repeat(40)), 'ישן שהסוג שלו לא בטוח – נשאר');
+    const o1 = await get(`b/${A}/sec_inv/x${'1'.repeat(40)}`);
+    assert.equal(o1.st, 'rej'); assert.equal(o1.rejBy, 'auto'); assert.ok(o1.purgeAt > Date.now());
+  });
   it('"עצור הכל" – החשבונית לא זכאית, ותפיסה אוטומטית של חשבונית שכבר סומנה זכאית נדחית', async () => {
     const x = await arrive(pdf(1), RAW.inv());
     assert.equal(x.el, true);
