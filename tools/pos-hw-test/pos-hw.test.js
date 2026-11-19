@@ -33,7 +33,7 @@ function mk(plugin,doc){return factory({Capacitor:plugin?{Plugins:{LpPos:plugin}
  assert.strictEqual(C({type:'bt',address:'nope'}),null);
  assert.deepStrictEqual(C({type:'usb',deviceName:'/dev/bus/usb/001/004',vendorId:1046,productId:20497}),{type:'usb',width:576,drawerPin:2,name:'',deviceName:'/dev/bus/usb/001/004',vendorId:1046,productId:20497});
  assert.strictEqual(C({type:'usb',deviceName:'../../etc'}),null);
- assert.strictEqual(C({type:'serial'}),null);assert.strictEqual(C(null),null);
+ assert.strictEqual(C({type:'sunmi'}),null);assert.strictEqual(C(null),null);
  assert.throws(()=>N.setPrinter({type:'net',host:''}),/לא תקינה/);
 
  // --- scan detector: fast keys + Enter = scan, human typing = nothing

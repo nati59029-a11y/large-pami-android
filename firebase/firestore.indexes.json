@@ -221,6 +221,15 @@
         { "fieldPath": "on", "order": "ASCENDING" },
         { "fieldPath": "next", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "poscard",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sale", "order": "ASCENDING" },
+        { "fieldPath": "st", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

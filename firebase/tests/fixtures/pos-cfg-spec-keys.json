@@ -1,6 +1,6 @@
 {
-"source": "my-agents: משימות/2026-11-17_תוכנית-קופה-לחנות/תוצרים/06-אפיון-סופי.md – פרק 2 (טבלה) ופרק 2.1. נוצר בסקריפט firebase/scripts/pos-cfg-spec-keys.py",
-"count": 313,
+"source": "my-agents: משימות/2026-11-17_תוכנית-קופה-לחנות/תוצרים/06-אפיון-סופי.md – פרק 2 (טבלה) ופרק 2.1. נוצר בסקריפט firebase/scripts/pos-cfg-spec-keys.py + EXTRA בסקריפט (rcptBizRc – החלטת בעל העסק 19.11.2026)",
+"count": 314,
 "keys": [
 [
 "sa.on",
@@ -764,6 +764,11 @@ false
 ],
 [
 "rcptBizFmt",
+"mgr",
+false
+],
+[
+"rcptBizRc",
 "mgr",
 false
 ],

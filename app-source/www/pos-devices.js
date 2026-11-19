@@ -1,5 +1,6 @@
 /* POS:M7 – pos-devices.js (קופה, ש7: חומרה ומכשירים, 17.11.2026). הממשק שכל מודולי הקופה משתמשים בו לציוד: window.Devices.
-   מעל LpPosHw (pos-hw.js ← התוסף LpPos). בלי תוסף (דפדפן במחשב): הדפסה דרך חלון ההדפסה, בלי מגירה.
+   מעל LpPosHw (pos-hw.js ← התוסף LpPos). במחשב (דפדפן): pos-hw-web.js – מדפסת Windows ('win') או כבל Serial ('serial'), כולל קבלה בשורות ומגירה.
+   בדפדפן בלי מדפסת מוגדרת: תמונת קבלה (job.img) נפתחת בחלון ההדפסה (גיבוי, כמו קודם). 'win' = "נשלח למדפסת" – Windows לא מדווח אם הנייר יצא (via:'win').
      Devices.print(job,o)    -> {ok:true,via} | {ok:false,code,msg,queued}
         job: {id, img:'data:image/png;base64,...'} (תמונת קבלה מ-pos-receipt.js) או {id, receipt:{lines,...}} (LpPosRender.java)
         קודים: PAPER_OUT (נגמר נייר / מכסה פתוח), OFFLINE (המדפסת לא זמינה), NO_PRINTER (לא נבחרה), ERROR.
@@ -50,7 +51,7 @@ function receiptOf(job){
  if(job.receipt&&typeof job.receipt==='object'){const r=Object.assign({},job.receipt);if(r.cut===undefined)r.cut=!!cfg('hwAutoCut');return r}
  if(typeof job.img==='string'&&/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(job.img))return{lines:[{t:'image',data:job.img,w:1}],cut:!!cfg('hwAutoCut'),dither:false};
  return null}
-/* מחשב בלי תוסף: התמונה נפתחת בחלון ההדפסה (בלי חיתוך מובטח, בלי מגירה – אפיון ד "פתוח" 1) */
+/* גיבוי במחשב בלי מדפסת מוגדרת: התמונה נפתחת בחלון ההדפסה (בלי חיתוך מובטח, בלי מגירה – אפיון ד "פתוח" 1) */
 function browserPrint(job){const d=root.document;if(!d||!d.body||typeof job.img!=='string')return false;
  const f=d.createElement('iframe');f.setAttribute('aria-hidden','true');f.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px';d.body.append(f);
  const w=f.contentWindow;if(!w){f.remove();return false}
@@ -63,8 +64,9 @@ function serial(fn){const r=printing.then(fn,fn);printing=r.catch(()=>{});return
 async function rawPrint(job){
  const H=HW();
  if(!H||!(await H.available())){if(browserPrint(job))return{ok:true,via:'browser'};return{ok:false,code:'NO_PRINTER'}}
- if(!H.printer())return{ok:false,code:'NO_PRINTER'};
+ if(!H.printer()){if(H.web&&H.web()&&browserPrint(job))return{ok:true,via:'browser'};return{ok:false,code:'NO_PRINTER'}}
  const rc=receiptOf(job);if(!rc)return{ok:false,code:'ERROR',msg:'קבלה לא תקינה'};
+ /* בדפדפן עם מדפסת 'win': ok = הקבלה נשלחה ל-Windows; אין דרך לדעת שהודפסה בפועל (via:'win') */
  try{const r=await H.print(rc,{});return r&&r.printed===false?{ok:false,code:'NO_PRINTER'}:{ok:true,via:(r&&r.via)||'printer',paperLow:!!(r&&r.paperLow)}}
  catch(e){return{ok:false,code:codeOf(e)}}}
 async function print(job,o){o=o||{};if(!job||typeof job!=='object')throw new Error('job');
@@ -89,7 +91,7 @@ async function openDrawer(reason){const why=['cash','noSale','test'].includes(re
  if(blocked()&&why!=='test')return{ok:false,code:'BLOCKED',msg:msg('BLOCKED')};
  if(cfg('hwDrawer')===false)return{ok:false,code:'NO_DRAWER',msg:msg('NO_DRAWER')};
  const H=HW();if(!H||!(await H.available()))return{ok:false,code:'NO_DRAWER',msg:msg('NO_DRAWER')};
- try{await serial(()=>H.openDrawer());emit('drawer',{reason:why,at:now()});if(cfg('sndDone')!==false)beep('done');return{ok:true}}
+ try{await serial(()=>H.openDrawer({reason:String(reason||'')}));emit('drawer',{reason:why,at:now()});if(cfg('sndDone')!==false)beep('done');return{ok:true}}
  catch(e){const c=codeOf(e);hwChanged({printer:c==='NO_PRINTER'?'none':'off'});return{ok:false,code:c,msg:msg(c)}}}
 
 /* ---------- סורק, צלילים ורטט, מסך לקוח ---------- */
