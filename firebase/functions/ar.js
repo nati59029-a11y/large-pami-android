@@ -286,7 +286,7 @@ async function arSend(request) {
 
 // ---------- setArCfg ----------
 // מנהל: { on?, name?, bn?, addr?, phone?, mail?, foot?, wt?:{oc}, logo?:data URL | '' }
-// סימון ללקוח (עובד עם הזמנות ומנהל): { cust, snd:{ ch, oc, inv?, rc? } | null }
+// סימון ללקוח (עובד עם הזמנות ומנהל): { cust, snd:{ ch, oc, inv?, rc?, a4? } | null } – a4 (קופה גל 3): הדפסת A4 בקופה; ch:'' רק עם a4
 function txtIn(v, n, label) {
   if (v == null) return '';
   if (typeof v !== 'string') throw bad('bad-cfg', label + ': טקסט');
@@ -306,9 +306,11 @@ async function setArCfg(request) {
     if (input.snd != null) {
       const x = input.snd;
       if (typeof x !== 'object' || Array.isArray(x)) throw bad('bad-snd', 'סימון שליחה לא תקין');
-      onlyKeys(x, ['ch', 'oc', 'inv', 'rc'], 'סימון שליחה');
-      if (!CHS.includes(x.ch)) throw bad('bad-snd', 'ערוץ: ווטסאפ, מייל או שניהם');
-      snd = { ch: x.ch, oc: x.oc === true, inv: x.inv === true, rc: x.rc === true };
+      onlyKeys(x, ['ch', 'oc', 'inv', 'rc', 'a4'], 'סימון שליחה');
+      // קופה גל 3 (19.11.2026): a4 = "הדפסת A4 בקופה" ללקוח עסקי. ערוץ ריק ('') מותר רק עם a4 – הדפסה בלי שליחה
+      const noCh = (x.ch === '' || x.ch == null) && x.a4 === true;
+      if (!noCh && !CHS.includes(x.ch)) throw bad('bad-snd', 'ערוץ: ווטסאפ, מייל או שניהם');
+      snd = Object.assign(noCh ? {} : { ch: x.ch }, { oc: x.oc === true, inv: x.inv === true, rc: x.rc === true }, x.a4 === true ? { a4: true } : {});
     }
     const ref = db.doc('cust/' + cid);
     const s = await ref.get();
@@ -375,6 +377,7 @@ const ARD = require('./lib/ar-doc');
 const DT = { inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה', cr: 'חשבונית מס זיכוי', st: 'סיכום חשבוניות' };
 const DT_PATUR = { inv: 'חשבון עסקה', ir: 'חשבון עסקה / קבלה', cr: 'זיכוי' }; // עוסק פטור – לא מוציא חשבונית מס (לא מאומת – לבדיקה עם רואה החשבון)
 const PAYN = { cash: 'מזומן', transfer: 'העברה בנקאית', chq: 'צ׳ק', card: 'אשראי', other: 'אחר' };
+const POSPAYN = { check: 'צ׳ק', bit: 'ביט', paybox: 'פייבוקס', gift: 'כרטיס מתנה', voucher: 'פתק זיכוי', extGift: 'כרטיס מתנה חיצוני', link: 'תשלום בקישור' }; // אמצעים של הקופה
 const titleOf = (doc) => (doc.bt === 'patur' && DT_PATUR[doc.t]) || DT[doc.t] || '';
 const docName = (doc, v) => `${titleOf(doc)} ${doc.no}${v ? ' (מבוטל)' : ''}.pdf`;
 const shDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
@@ -398,7 +401,9 @@ async function docRender(db, w, doc, cfg, isVoid) {
   if (doc.t === 'rc') {
     const p = doc.pay || {};
     const det = [p.chq ? `צ׳ק ${p.chq.no} · ${p.chq.bank} · פירעון ${shDate(p.chq.d)}` : '', p.last4 ? '****' + p.last4 : '', p.conf ? 'אישור ' + p.conf : ''].filter(Boolean).join(' · ');
-    base.table = { head: ['אמצעי תשלום', 'פרטים', 'סכום'], rows: [[PAYN[p.m] || 'אחר', det, ag2(doc.gross)]], num: [2] };
+    // קבלה מהקופה (pos-doc.js): pay = מערך [{ m, amt }] – שורה לכל אמצעי
+    const rows = Array.isArray(doc.pay) ? doc.pay.map((x) => [PAYN[x.m] || POSPAYN[x.m] || 'אחר', '', ag2(x.amt)]) : [[PAYN[p.m] || 'אחר', det, ag2(doc.gross)]];
+    base.table = { head: ['אמצעי תשלום', 'פרטים', 'סכום'], rows: rows.length ? rows : [['אחר', '', ag2(doc.gross)]], num: [2] };
     base.sums = [['סה״כ שולם', doc.gross / 100]];
     const al = await db.collection('aralloc').where('rc', '==', doc.id || '').get().catch(() => null);
     const live = al ? al.docs.map((s) => s.data()).filter((a) => !a.void) : [];
@@ -411,6 +416,9 @@ async function docRender(db, w, doc, cfg, isVoid) {
     if (inv.length) notes.push('עבור חשבוניות: ' + inv.join(', '));
   } else {
     base.lines = (doc.lines || []).map((l) => ({ n: l.n, q: l.q, p: l.p, u: l.u || '' }));
+    // מסמך מהקופה: הנחה בשורה (dsc, אגורות) – שורת "הנחה" אחת, כדי שהסכום יתאים למסמך
+    const dsc = (doc.lines || []).reduce((a, l) => a + (Number.isInteger(l.dsc) ? l.dsc : 0), 0);
+    if (dsc) base.lines.push({ n: 'הנחה', q: 1, p: -dsc / 100, u: '' });
     if (doc.disc) base.disc = doc.disc;
     if (doc.adj) base.adj = doc.adj;
     if (doc.terms) base.terms = doc.terms;
@@ -418,8 +426,11 @@ async function docRender(db, w, doc, cfg, isVoid) {
     // החלטה 29: שורה בולטת עם המספר המודפס של חשבונית החיוב (וסימון טיוטה כשהיא מסדרת הטיוטה)
     if (doc.t === 'cr' && doc.ref) base.refTxt = refTxt(doc.ref, doc.bt);
     if (doc.t === 'cr' && doc.rf) base.rfTxt = rfTxt(doc.rf);
-    if (doc.t === 'ir' && doc.pay) notes.push('שולם: ' + (PAYN[doc.pay.m] || 'אחר') + (doc.pay.last4 ? ' ****' + doc.pay.last4 : ''));
-    const k = PDF.calc(base);
+    if (doc.t === 'ir' && Array.isArray(doc.pay)) notes.push('שולם: ' + doc.pay.map((x) => (PAYN[x.m] || POSPAYN[x.m] || 'אחר') + ' ' + ag2(x.amt)).join(', '));
+    else if (doc.t === 'ir' && doc.pay) notes.push('שולם: ' + (PAYN[doc.pay.m] || 'אחר') + (doc.pay.last4 ? ' ****' + doc.pay.last4 : ''));
+    let k = PDF.calc(base);
+    // מסמך מהקופה (dev): עיגול מזומן / סכום מהמכשיר – הפרש של עד ₪1 מוצג כהתאמת עיגול
+    if (doc.dev && k.gross !== doc.gross && Math.abs(doc.gross - k.gross) <= 100 && !base.adj) { base.adj = doc.gross - k.gross; k = PDF.calc(base); }
     if (k.gross !== doc.gross) throw pre('sum-mismatch', 'סכום המסמך לא תואם. פנו למנהל');
   }
   if (doc.alloc) notes.push('מספר הקצאה: ' + doc.alloc);
@@ -443,7 +454,8 @@ async function docOf(db, id) {
   return Object.assign({ id: s.id }, s.data());
 }
 function docAccess(w, doc) { if (doc.br && doc.br !== NB && w.mine && !w.mine.includes(doc.br)) throw deny('foreign-br', 'אין לך הרשאה למסמך של סניף אחר'); }
-async function sendDoc(db, w, doc, ch, to, auto, buf, cfg, isVoid) {
+// deps (רשות, לבדיקות): { send } – ל-sendWa, { mail } – ל-sendMail (transport מדומה)
+async function sendDoc(db, w, doc, ch, to, auto, buf, cfg, isVoid, deps) {
   const now = Date.now();
   const amt = ag2(doc.gross);
   const nm = (doc.custSnap && doc.custSnap.name) || '';
@@ -453,10 +465,10 @@ async function sendDoc(db, w, doc, ch, to, auto, buf, cfg, isVoid) {
     const tpl = [wt[doc.t], doc.t === 'ir' ? wt.inv : ''].find((x) => TPL_RE.test(String(x || ''))) || '';
     if (!tpl) return { ch: 'wa', to: String(to || '').slice(0, 30), at: now, ok: false, why: 'no-tpl' };
     const lk = await AF.mkLink({ biz: w.bizId, id: ARD.fileOf(doc.id, isVoid), n: docName(doc, isVoid) });
-    return S.sendWa(db, { to, tpl: { name: tpl, lang: 'he', params: [nm, String(doc.no), amt] }, link: lk.url, fileName: docName(doc, isVoid), auto, by: w.uid, token: sv(WA_ACCESS_TOKEN), now });
+    return S.sendWa(db, { to, tpl: { name: tpl, lang: 'he', params: [nm, String(doc.no), amt] }, link: lk.url, fileName: docName(doc, isVoid), auto, by: w.uid, token: sv(WA_ACCESS_TOKEN), now, send: deps && deps.send });
   }
   const text = `שלום ${nm},\nמצורף/ת ${title} מס׳ ${doc.no} על סך ${amt}.${doc.draft ? '\n(טיוטה – לא מסמך רשמי)' : ''}\n${cfg.name || ''}`;
-  return S.sendMail(w.bizId, { to, subject: `${title} ${doc.no}${cfg.name ? ' – ' + cfg.name : ''}`, text, replyTo: cfg.mail, fromName: cfg.name || '', pdf: buf, fileName: docName(doc, isVoid), by: w.uid, now });
+  return S.sendMail(w.bizId, { to, subject: `${title} ${doc.no}${cfg.name ? ' – ' + cfg.name : ''}`, text, replyTo: cfg.mail, fromName: cfg.name || '', pdf: buf, fileName: docName(doc, isVoid), by: w.uid, now }, deps && deps.mail);
 }
 async function docRecord(db, id, recs) {
   if (!recs.length) return;
@@ -467,6 +479,10 @@ async function docRecord(db, id, recs) {
     ARD.docUpd(tx, ref, { sent: (Array.isArray(s.get('sent')) ? s.get('sent') : []).concat(recs).slice(-SENT_MAX), upd: Date.now() });
   });
 }
+// האם הכרטיס ביקש שליחה אוטומטית של מסמך מהסוג הזה (משותף להזמנות ולקופה – pos-doc.js): rc ← snd.rc, ir ← snd.inv או snd.rc, אחר ← snd.inv
+function wantDoc(snd, t) {
+  return !!(snd && typeof snd === 'object' && CHS.includes(snd.ch) && (t === 'rc' ? snd.rc === true : t === 'ir' ? (snd.inv === true || snd.rc === true) : snd.inv === true));
+}
 // אחרי הפקה (גם מ-orders.js): קובץ, ושליחה אוטומטית לפי סימון הלקוח (cust.snd.inv / snd.rc) – גם בתקופת הטיוטה (החלטה 24). "עצור הכל" עוצר.
 async function afterIssue(w, id, opts) {
   const db = T.tdb();
@@ -476,7 +492,7 @@ async function afterIssue(w, id, opts) {
   const recs = [];
   const c = doc.cust ? await custOf(db, { custId: doc.cust }) : null;
   const snd = c && c.snd && typeof c.snd === 'object' ? c.snd : null;
-  const want = snd && CHS.includes(snd.ch) && (doc.t === 'rc' ? snd.rc === true : doc.t === 'ir' ? (snd.inv === true || snd.rc === true) : snd.inv === true);
+  const want = wantDoc(snd, doc.t);
   if (want) {
     for (const [ch, to] of targets(snd, { cust: doc.custSnap || {} }, c)) {
       const r = to ? await sendDoc(db, w, doc, ch, to, true, buf, cfg, !!(opts && opts.isVoid)) : { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
@@ -1189,4 +1205,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff, arStatement, setRemCfg };
 const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly', 'arStatement']; // שולחות: סוד ווטסאפ + סודות המייל
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(SENDS.includes(k) ? { secrets: [WA_ACCESS_TOKEN].concat(S.MAIL_SECRETS), timeoutSeconds: 120, memory: '512MiB' } : { memory: '512MiB' }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, WA_ACCESS_TOKEN } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, docBuf, docOf, docName, sendDoc, docRecord, CHS, wantDoc, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, WA_ACCESS_TOKEN } });

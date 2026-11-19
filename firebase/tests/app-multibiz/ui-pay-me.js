@@ -32,7 +32,7 @@ const COMP = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', n: '
   let DOC = null; // המסמך שהמנהל פרסם – לחלק העובד
 
   // ===== 1. מכשיר המנהל =====
-  { const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b', features: {} } }, admins: { 'b/acme/|ma': 1 } };
+  { const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b', features: { cxSales: true } } }, admins: { 'b/acme/|ma': 1 } };
     const x = await H.newPage(browser, www, cfg, [], 'm-pay'); const pg = x.page;
     const W = []; let deny = false; const net = { tasks: 0, sales: 0 };
     await x.ctx.route((u) => { const q = new URL(u); return q.port === '8080' && /\/documents\/b\/acme\/wv\//.test(decodeURIComponent(q.pathname)); }, (route) => {
@@ -120,7 +120,7 @@ const COMP = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', n: '
     await x.ctx.close(); }
 
   // ===== 2. מכשיר העובד =====
-  { const cfg = { mode: 'new', users: { wa: 'acme' }, biz: { acme: { dataRoot: 'b', features: {} } }, staff: { 'b/acme/|wa': 1 } };
+  { const cfg = { mode: 'new', users: { wa: 'acme' }, biz: { acme: { dataRoot: 'b', features: { cxSales: true } } }, staff: { 'b/acme/|wa': 1 } };
     const x = await H.newPage(browser, www, cfg, [], 'w-pay'); const pg = x.page; await pg.setViewportSize({ width: 360, height: 760 });
     const have = {}; const req = [];
     await x.ctx.route((u) => { const q = new URL(u); return q.port === '8080' && /\/documents\/b\/acme\/wv\/pay_/.test(decodeURIComponent(q.pathname)); }, (route) => {

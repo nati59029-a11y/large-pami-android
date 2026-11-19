@@ -22,11 +22,18 @@
 - התוסף (P1–P9): קודי שגיאה מפורשים בהדפסה, בדיקת נייר לפני ואחרי, אירוע USB עם vid/pid וחיבור מחדש של התור, `intent-filter` למדפסת USB
   (אנדרואיד מציע "תמיד" – ההרשאה נשמרת), `vibrate` (הרשאת `VIBRATE`, בלי שאלה), `showCustomer`, מקום למתאם Sunmi (לא בנוי).
 
+## גל 3 – קופה במחשב Windows (Chrome), 19.11.2026
+- `www/pos-hw-web.js` (`window.LpPosWeb`) – "תוסף" JS לדפדפן עם ממשק LpPos. `pos-hw.js` משתמש בו רק כשאין תוסף מקורי ולא רצים בתוך האפליקציה (באנדרואיד – בלי שינוי).
+  ציור הקבלה ב-canvas (העתק של `LpPosRender`), CODE128 ו-QR בלי ספרייה. סוגי מדפסת: `win` (iframe + `window.print`, ל-Chrome עם `--kiosk-printing`;
+  המגירה – דרך מנהל ההתקן; "ללא מכירה" = פתק "פתיחת מגירה") ו-`serial` (Web Serial: `ESC @`, `GS v 0`, `GS V`, `ESC p` פין 2/5; baud 9600/19200/38400/115200).
+- `win`: אין דיווח אם הנייר יצא – התשובה היא "נשלח" (`via:'win'`). מסך לקוח = חלון שני (`window.open`), במסך השני אם Window Management API מאושר.
+
 ## הרצה
 ```
 cd tools/pos-hw-test && mvn -q test      # Java: LpPosEscPos + LpPosTransport (12 בדיקות, כולל מדפסת רשת מדומה על localhost)
 node tools/pos-hw-test/pos-hw.test.js       # JS: pos-hw.js עם תוסף מדומה
 node tools/pos-hw-test/pos-devices.test.js  # JS: pos-devices.js + pos-help.js
+node tools/pos-hw-test/pos-hw-web.test.js   # JS: pos-hw-web.js (+ ציור ב-Chromium אם Playwright מותקן; WIN_RECEIPT_PNG=<קובץ> שומר תמונה)
 cd firebase && npm run test:pos             # שרת: tests/pos-ops.test.js (כללים, posOps, posOpsWatch, posBackup) מול האמולטור
 ```
 

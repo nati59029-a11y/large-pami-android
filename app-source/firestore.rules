@@ -2773,6 +2773,8 @@ service cloud.firestore {
       // poscfg/main – ההגדרות (קופה ומסך הניהול). poscfg/ctr (מונה קודי הקופות) – אף אחד מהאפליקציה
       match /poscfg/{d} {
         allow get: if d == 'main' && (posAny() || (feat('pos') && bMgr()) || bSuper());
+        // POS:W3 (גל 3): poscfg/card – רק { on, mode } של אשראי במסוף מחובר. פרטי החיבור – ב-private/posCard (אף אחד מהאפליקציה)
+        allow get: if d == 'card' && (posAny() || (feat('pos') && bMgr()) || bSuper());
         allow list, create, update, delete: if false;
       }
       match /promo/{id} {
@@ -2785,6 +2787,12 @@ service cloud.firestore {
       }
       match /clublog/{id} {
         allow read: if posLead() || posMgrRd();
+        allow create, update, delete: if false;
+      }
+      // POS:W3 (גל 3): poscard – עסקאות אשראי במסוף מחובר (סכום, מצב, מספר אישור, 4 ספרות – אף פעם לא מספר כרטיס).
+      // קריאה – מי שבקופה באותו עסק ומנהל; כתיבה – רק השרת (pos-card.js, pos-sale.js)
+      match /poscard/{id} {
+        allow read: if posAny() || posMgrRd();
         allow create, update, delete: if false;
       }
       match /poslog/{id} {

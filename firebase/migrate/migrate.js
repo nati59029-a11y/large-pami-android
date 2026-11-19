@@ -64,7 +64,7 @@ const COPY = [
   // תתי-אוספים (prod/{id}/ph) מועתקים עם ההורה. postpl ו-posbug הם טבלאות שרת משותפות לכל העסקים – ב-SHARED.
   'possale', 'pospay', 'posret', 'posshift', 'posz', 'posdev', 'poscfg', 'promo', 'clubcfg', 'clublog', 'poslog', 'poserr', 'posconf',
   'posbk', 'posgift', 'posgiftlog', 'posclock', 'posimp', 'pos_income_daily', 'posreq', 'poscfglog', 'pospark', 'poscpn', 'pospin',
-  'posalert', 'poslbl', 'poscnt', 'posbc', 'posbr',
+  'posalert', 'poslbl', 'poscnt', 'posbc', 'posbr', 'poscard', // poscard: גל 3 (19.11.2026) – חיובי אשראי במסוף מחובר
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
