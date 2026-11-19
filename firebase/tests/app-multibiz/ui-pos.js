@@ -65,9 +65,14 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
   // ---- 3. מתג דלוק: מנהל ----
   A = await open(browser, www, cB({ tasks: true, orders: true, pos: true }), 'm@x.co');
   s = await sheetHtml(A.page);
-  check('3 מתג דלוק, מנהל: "קופה" ו"ניהול קופה" במסך "הוספה"', /data-v="pos"/.test(s.a) && /data-v="posAdm"/.test(s.a) && /קופה/.test(s.tile), s.tile);
+  let t; v = await A.page.evaluate(() => V.posHub().h);
+  check('3 מתג דלוק, מנהל: במסך "הוספה" אריח אחד "קופה" (posHub); בתוכו "מכירה" ו"ניהול קופה"', /data-v="posHub"/.test(s.a) && !/data-v="posAdm"/.test(s.a) && (s.a.match(/data-v="pos[A-Za-z]*"/g) || []).length === 1 && /קופה/.test(s.tile) && /data-a="go" data-v="pos"/.test(v) && /data-v="posAdm"/.test(v) && /מכירה/.test(v), { tile: s.tile, hub: v });
+  await A.page.evaluate(() => go('posHub')); await sleep(400);
+  t = await A.page.evaluate(() => ({ v: cur().v, sw: document.documentElement.scrollWidth, W: document.documentElement.clientWidth }));
+  check('3-hub מסך "קופה" נפתח, בלי גלישה ב-360px', t.v === 'posHub' && t.sw <= t.W, t);
+  if (process.argv[4]) { fs.mkdirSync(process.argv[4], { recursive: true }); await A.page.screenshot({ path: process.argv[4] + '/pos-hub.png' }); }
   await A.page.evaluate(() => go('posAdm')); await sleep(1500);
-  let t = await A.page.evaluate(() => ({ v: cur().v, h: document.getElementById('main').innerText.replace(/\s+/g, ' ') }));
+  t = await A.page.evaluate(() => ({ v: cur().v, h: document.getElementById('main').innerText.replace(/\s+/g, ' ') }));
   check('3א ניהול קופה (ש4): קופות, הוספת קופה, חיפוש ומדורי ההגדרות לפי הסכמה, בלי טופס ההגדרות הישן', t.v === 'posAdm' && /אין קופות עדיין/.test(t.h) && /הוספת קופה/.test(t.h) && /חיפוש בהגדרות/.test(t.h) && /החזרות/.test(t.h) && /מס ומסמכים/.test(t.h) && !/pc_vatRate/.test(await A.page.content()), t.h.slice(0, 300));
   await A.page.evaluate(() => go('posCfgSec', 'tax')); await sleep(400);
   let dis = await A.page.evaluate(() => ({ vat: document.querySelector('[name=pa_vatRate]').disabled, lock: /רק בעל העסק/.test(document.getElementById('main').innerText) }));
@@ -95,8 +100,8 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
   for (const [nm, adm] of [['בלי perms', 1], ['pos כבוי', { perms: { pos: false, posMgr: false } }]]) {
     A = await open(browser, www, cB({ tasks: true, orders: true, pos: true }, adm), 'm@x.co');
     s = await sheetHtml(A.page);
-    v = await A.page.evaluate(() => ({ pos: V.pos().h, adm: V.posAdm().h, wp: [wp('pos'), wp('posMgr'), wp('sal'), wp('rep')], more: V.more().h }));
-    check('3ח מנהל ' + nm + ': "ניהול קופה" בלי "קופה"; מסך הקופה לא נפתח; שאר ההרשאות – כן', /data-v="posAdm"/.test(s.a) && !/data-v="pos"/.test(s.a) && /לא פעילה/.test(v.pos) && !/לא פעילה/.test(v.adm) && !/data-v="pos"/.test(v.more) && JSON.stringify(v.wp) === '[false,false,true,true]', { tile: s.tile, wp: v.wp });
+    v = await A.page.evaluate(() => ({ hub: V.posHub().h, pos: V.pos().h, adm: V.posAdm().h, wp: [wp('pos'), wp('posMgr'), wp('sal'), wp('rep')], more: V.more().h }));
+    check('3ח מנהל ' + nm + ': "ניהול קופה" בלי "קופה"; מסך הקופה לא נפתח; שאר ההרשאות – כן', /data-v="posHub"/.test(s.a) && /data-v="posAdm"/.test(v.hub) && !/data-v="pos"/.test(v.hub) && !/data-v="pos"/.test(s.a) && /לא פעילה/.test(v.pos) && !/לא פעילה/.test(v.adm) && !/data-v="pos"/.test(v.more) && JSON.stringify(v.wp) === '[false,false,true,true]', { tile: s.tile, wp: v.wp });
     check('3ט מנהל ' + nm + ': אין שגיאות JS', !A.errs.length, A.errs);
     await A.ctx.close();
   }
@@ -105,14 +110,15 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
   A = await open(browser, www, cB({ tasks: true, orders: true, pos: true }), 'w@x.co', Object.assign({}, W0, { pos: true }));
   s = await sheetHtml(A.page);
   let mo = await A.page.evaluate(() => V.more().h);
-  check('4 עובד עם pos: "קופה" בראש מסך "עוד", בלי "ניהול קופה" (גם לא במסך "הוספה")', /data-a="go" data-v="pos"/.test(mo) && !/posAdm/.test(mo) && !/data-v="posAdm"/.test(s.a), { tile: s.tile, mo: mo.slice(0, 200) });
+  let hb = await A.page.evaluate(() => V.posHub().h);
+  check('4 עובד עם pos: "קופה" בראש מסך "עוד" פותח את מסך "קופה" (posHub), ובו "מכירה" בלי "ניהול קופה" (גם לא במסך "הוספה")', /data-a="go" data-v="posHub"/.test(mo) && !/posAdm/.test(mo) && !/data-v="posAdm"/.test(s.a) && /data-v="pos"/.test(hb) && !/posAdm/.test(hb), { tile: s.tile, mo: mo.slice(0, 200), hb });
   v = await A.page.evaluate(() => V.posAdm().h);
   check('4א עובד: ניהול קופה לא נפתח', /לא פעילה/.test(v), v);
   await A.ctx.close();
   A = await open(browser, www, cB({ tasks: true, orders: true, pos: true }), 'wn@x.co', W0);
   s = await sheetHtml(A.page);
   mo = await A.page.evaluate(() => V.more().h);
-  check('4ב עובד בלי pos: אין כניסה לקופה – לא במסך "הוספה" ולא ב"עוד"', s.tile === '' && s.a === s.b && !/data-v="pos"/.test(mo), s.tile);
+  check('4ב עובד בלי pos: אין כניסה לקופה – לא במסך "הוספה" ולא ב"עוד"', s.tile === '' && s.a === s.b && !/data-v="pos"/.test(mo) && !/posHub/.test(mo), s.tile);
   check('4ג אין שגיאות JS', !A.errs.length, A.errs);
   await A.ctx.close();
 

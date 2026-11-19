@@ -259,6 +259,55 @@ for (const E of ENVS) {
       await assertSucceeds(fs(E.mgr).doc(R('grp/g1/r/' + E.e1)).delete());
     });
 
+    // תוספת 19.11: תשובה (re), העברה (fw) וסימונים (x)
+    it('m: re (תשובה) ו-fw (הועברה) – מותרים בכל סוג הודעה; מבנה ואורך נבדקים', async () => {
+      const re = { mid: 'm1', txt: 'שלום', byN: E.e1, k: 't' };
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re })));
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { k: 'img', txt: '', re: { mid: 'mi' } })));
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/m/' + fresh('fw'))).set(msg(E.e1, { fw: true })));
+      const vm = fresh('fv');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/m/' + vm)).set(vid(E.e1, 'g1', vm, { fw: true, re })));
+      await assertSucceeds(fs(E.mgr).doc(R('grp/gao/m/' + fresh('re'))).set(msg(E.mgr, { re, fw: true })));
+      await assertFails(fs(E.e1).doc(R('grp/gao/m/' + fresh('re'))).set(msg(E.e1, { re })), 'ao – תשובה של חבר נחסמת');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { fw: false })), 'fw רק true');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re: 'm1' })), 're לא מפה');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re: { txt: 'x' } })), 'בלי mid');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re: { mid: 'a/b' } })), 'mid לא תקין');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re: { mid: 'm1', txt: 'א'.repeat(121) } })), 'ציטוט ארוך');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re: { mid: 'm1', k: 'doc' } })), 'k לא תקין');
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + fresh('re'))).set(msg(E.e1, { re: { mid: 'm1', x: 1 } })), 'שדה זר ב-re');
+    });
+
+    it('x: סימון – רק המסמך שלי ({mid}_{uid}), רק להודעה קיימת, רק מהרשימה; גם ב-ao; קריאה כמו הקבוצה; מחיקה – הבעלים או המנהל', async () => {
+      await prep((d) => d.doc(R('grp/gao/m/a1')).set(msg(E.mgr)));
+      const x = (uid, mid, o) => Object.assign({ mid, uid, byN: uid, e: '👍', t: Date.now() }, o);
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1')));
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1', { e: '❤️' })), 'החלפה');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1', { e: '' })), 'ביטול');
+      await assertSucceeds(fs(E.e1).doc(R('grp/gao/x/a1_' + E.e1)).set(x(E.e1, 'a1')), 'ao – סימון מותר (החלטת הבעלים)');
+      await assertSucceeds(fs(E.mgr).doc(R('grp/g2/x/m1_' + E.mgr)).set(x(E.mgr, 'm1')));
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/m1_' + E.off)).set(x(E.off, 'm1')), 'בשם אחר');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.off, 'm1')), 'uid לא שלי');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/mi_' + E.e1)).set(x(E.e1, 'm1')), 'מזהה לא תואם');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/nope_' + E.e1)).set(x(E.e1, 'nope')), 'הודעה שלא קיימת');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1', { e: '💩' })), 'אימוג\'י לא מהרשימה');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1', { t: Date.now() - 3600000 })), 'זמן לא אמיתי');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1', { z: 1 })), 'שדה זר');
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).set(x(E.e1, 'm1', { byN: 'מישהו אחר' })), 'שם לא שלי');
+      await assertFails(fs(E.e1).doc(R('grp/g2/x/m1_' + E.e1)).set(x(E.e1, 'm1')), 'לא חבר');
+      await assertFails(fs(E.off).doc(R('grp/g1/x/m1_' + E.off)).set(x(E.off, 'm1')), 'מושבת');
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('grp/g1/x/m1_' + E.foreign)).set(x(E.foreign, 'm1')));
+      await assertSucceeds(fs(E.e1).collection(R('grp/g1/x')).get());
+      await assertSucceeds(fs(E.mgr).collection(R('grp/g1/x')).get());
+      await assertFails(fs(E.e1).collection(R('grp/g2/x')).get(), 'לא חבר – קריאה');
+      if (E.foreign) await assertFails(fs(E.foreign).collection(R('grp/g1/x')).get());
+      await prep((d) => d.doc(R('grp/g1/x/mi_' + E.mgr)).set(x(E.mgr, 'mi')));
+      await assertFails(fs(E.e1).doc(R('grp/g1/x/mi_' + E.mgr)).delete(), 'סימון של אחר');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/x/m1_' + E.e1)).delete());
+      await assertSucceeds(fs(E.mgr).doc(R('grp/g1/x/mi_' + E.mgr)).delete());
+      await assertSucceeds(fs(E.mgr).doc(R('grp/gao/x/a1_' + E.e1)).delete(), 'מנהל מוחק כל סימון');
+    });
+
     if (E.P) {
       it('עסק בלי התוספת groups – הכול נחסם, גם למנהל', async () => {
         await prep((d) => d.doc('b/bt').update({ features: { tasks: true, groups: false } }));

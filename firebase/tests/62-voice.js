@@ -92,7 +92,7 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
   });
   after(async () => { await E.stop(); await M.stop(); });
   beforeEach(async () => {
-    await H.seed(env); M.reset(); E.reset();
+    await H.seed(env); await H.grantLine(env); M.reset(); E.reset();
     await bucket().deleteFiles({ prefix: 'voice_cache/' });
   });
 
@@ -498,7 +498,7 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     assert.equal(pa.status, 'replaced'); assert.equal(pa.audioPath, `line_audio/items/${a}.wav`);
     const [saved] = await bucket().file(pa.audioPath).download(); assert.ok(saved.equals(prevAudio));
     // הורדה נכשלה (404): לא נחסם – הנוסח בלבד
-    await H.seed(env); M.reset(); E.reset();
+    await H.seed(env); await H.grantLine(env); M.reset(); E.reset();
     const b = await oldOpening(riff(300));
     M.setMode('download', '404');
     const t = await core(LINE, 'publishItem', 'u_mgr', item('opening'));

@@ -190,10 +190,20 @@ function readFromZip(zipPath, entryName) {
   throw new Error('הקובץ ' + entryName + ' לא נמצא ב-ZIP');
 }
 const APP_ZIP = path.resolve(ROOT, '..', 'large-pami-android-project.zip');
+// 19.11.2026: "שלוחות הקו" לעובד – רק עם המתג yl (כבוי כברירת מחדל). בדיקות הקו שמניחות עובד שמשתמש בקו מדליקות אותו כאן:
+// perms = ברירות המחדל (כמו עובד ישן בלי perms) + yl, כך ששאר ההרשאות של העובד לא משתנות.
+async function grantLine(env, uids) {
+  const perms = Object.assign({}, require('../functions/lib/roles').DEFAULT_PERMS, { yl: true });
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    for (const uid of uids || ['u_emp', 'u_emp2']) await db.doc('staff/' + uid).update({ perms });
+  });
+}
+
 function appSourceLines() { return readFromZip(APP_ZIP, 'www/index.html').split('\n'); }
 
 module.exports = {
   ROOT, PROJECT_ID, ROLES, UID, OTHER, MANAGER_ONLY_ADMINS,
-  getEnv, ctxFor, seed, clearStorageAndSeed, RESULTS, record,
+  getEnv, ctxFor, seed, grantLine, clearStorageAndSeed, RESULTS, record,
   mockToken, fsx, sv, appSourceLines, APP_ZIP,
 };
