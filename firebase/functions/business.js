@@ -475,6 +475,11 @@ async function setStaffPerms(request) {
   const [s, a] = await Promise.all([sRef.get(), db.doc(T.bizRef(biz, 'admins/' + uid)).get()]);
   if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
   if (a.exists) throw new HttpsError('failed-precondition', 'למנהל העסק יש את כל ההרשאות', { reason: 'is-admin' });
+  // 19.11.2026 (הכרעת בעל העסק): החלת דרגה בלבד (בלי perms) לא נוגעת במתגים שמנהל העסק בוחר לכל עובד (MGR_KEYS) – נשאר מה שיש לעובד
+  if (input.perms === undefined) {
+    const old = s.get('perms');
+    for (const k of MGR_KEYS) perms[k] = !!(old && typeof old === 'object' && !Array.isArray(old) && old[k] === true);
+  }
   const upd = { perms };
   if (input.rank !== undefined) upd.rank = r ? r.id : '';
   const b = db.batch();
@@ -490,6 +495,7 @@ async function setStaffPerms(request) {
 // שאר ההרשאות לא משתנות: עובד שכבר יש לו perms – משתנה רק perms.<key>. עובד ישן בלי perms – נכתבת מפה מלאה של ברירות המחדל
 // (R.DEFAULT_PERMS, בדיוק מה שיש לו היום בשרת ובחוקים: hasPerm / rOrdPerm / dflt) ועליה המתג. כיבוי לעובד בלי perms – אין מה לשנות.
 const STAFF_KEY_FEAT = Object.freeze({ prc: ['shelf', 'orders'], yl: ['yemot'] });
+const MGR_KEYS = Object.freeze(Object.keys(STAFF_KEY_FEAT));
 async function setStaffPrc(request) {
   const who = await requireStaff(request);
   if (who.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל העסק בלבד');
