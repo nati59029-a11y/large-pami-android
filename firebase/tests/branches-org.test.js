@@ -184,7 +184,7 @@ function appCore() {
   const blk = grab(/\/\* ===== סניפים\/בנקים: ליבה ===== \*\/[\s\S]*?\nconst brArr=[^\n]*\n/);
   const ctx = { console, localStorage: { m: {}, getItem(k) { return this.m[k] ?? null; }, setItem(k, v) { this.m[k] = String(v); } } };
   vm.createContext(ctx);
-  vm.runInContext(`var S=null,SY={},ADM={sa:0};const uid=()=>'u'+Math.random().toString(36).slice(2,8);const heKey=s=>String(s||'').replace(/["'׳״\`’]/g,'').trim();
+  vm.runInContext(`var S=null,SY={},ADM={sa:0},BZGEN=false;/* #142: ensure בודקת BZGEN */const uid=()=>'u'+Math.random().toString(36).slice(2,8);const heKey=s=>String(s||'').replace(/["'׳״\`’]/g,'').trim();
     const isW=()=>false,isA=()=>false,cfgLocal=()=>({cats:[]}),subById=()=>null,save=()=>{};
     ${ensureSrc}\n${blk}\nthis.ensure=ensure;this.brList=brList;this.txBr=txBr;this.inBr=inBr;this.brGuess=brGuess;this.bankGuess=bankGuess;this.cardGuess=cardGuess;this.setS=(x)=>{S=x};this.setSY=(x)=>{SY=x};`, ctx);
   return ctx;

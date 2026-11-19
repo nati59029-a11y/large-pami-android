@@ -62,7 +62,8 @@ before(async () => {
   await env.withSecurityRulesDisabled(async (c) => {
     const d = c.firestore(); const b = d.batch();
     const biz = (id, st, f) => b.set(d.doc('b/' + id), { name: 'עסק ' + id, status: st, dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: f, org: { v: 1, branches: [], banks: [], cards: [] } });
-    biz(A, 'active', { orders: true }); biz(B, 'active', { orders: true }); biz(OFF, 'suspended', { orders: true }); biz(NOORD, 'active', { orders: false });
+    biz(A, 'active', { orders: true, cxSales: true }); // cxSales – תוספת נפרדת מ-#140 (כבויה כברירת מחדל); בדיקות מכירות היום קוראות ל-cxSales
+    biz(B, 'active', { orders: true }); biz(OFF, 'suspended', { orders: true }); biz(NOORD, 'active', { orders: false });
     for (const [bz, m] of [[A, MGR], [A, SA], [B, MB]]) {
       b.set(d.doc(`b/${bz}/admins/${m}`), { email: m + '@x.invalid' });
       b.set(d.doc(`b/${bz}/staff/${m}`), { name: m, role: 'manager', active: true });
