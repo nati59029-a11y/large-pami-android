@@ -168,7 +168,7 @@ async function intake(f,mode,sub){
         if(mode==='one')toast(ids.length>1?'בקובץ יש תלושים של כמה עובדים – מפצלים לפי עמוד':'בקובץ כמה עמודים – כל עמוד נבדק בנפרד');
         for(const g of G){const o=await pagesPdf(doc,g.pages.map(i=>i+1)),v=parseSlip(g.text),why=v.warn.slice(),pl=g.pages.length>1?'עמודים '+(g.pages[0]+1)+'–'+(g.pages[g.pages.length-1]+1):'עמוד '+(g.pages[0]+1);
           if(!g.sub)why.unshift(pl+': לא זוהה עובד'+(noTxt?' (אין טקסט בקובץ)':'')+'. בחרו עובד או דלגו.'+(mode==='one'?' ייתכן שזה עמוד של עובד אחר – אל תשייכו אותו בלי לבדוק.':''));
-          else if(mode==='one'&&sub&&g.sub!==sub){const a=empOf(sub),b=empOf(g.sub);why.unshift(pl+': זוהה '+(b?b.name:'—')+' ולא '+(a?a.name:'—')+'. העמוד יישמר רק אצל העובד שנבחר כאן.')}if(g.sub&&!v.found)why.unshift(pl+': לא נמצאו נתונים – הזינו ידנית.');
+          else if(mode==='one'&&sub&&g.sub!==sub){const a=empOf(sub),b=empOf(g.sub);why.unshift(pl+': זוהה '+(b?b.name:'—')+' ולא '+(a?a.name:'—')+'. העמוד יישמר אצל העובד שבשדה "עובד" (כרגע: '+(b?b.name:'—')+') – אפשר לשנות או לדלג.')}if(g.sub&&!v.found)why.unshift(pl+': לא נמצאו נתונים – הזינו ידנית.');
           Q.push({sub:g.sub,mon:g.mon||def,du:o.du,pv:o.pv,pgs:o.pgs,src:'pdfc',v,why,pl,auto:!!g.sub})}}}
     finally{try{doc.destroy()}catch(e){}}}
   PS.q=Q;PS.i=0;PS.batch={};PS.saved=0;showPiece()}
