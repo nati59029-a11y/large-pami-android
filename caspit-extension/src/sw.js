@@ -1,8 +1,8 @@
 // תוסף כספית – service worker: תזמון, ריצת סנכרון (מכונת מצבים שממשיכה אחרי הפסקה), מצב היכרות, והודעות מהחלון הקופץ.
 // כל הבקשות לכספית רצות בתוך לשונית ייעודית של התוסף (מוצמדת, לא פעילה) – לא בלשונית של בעל העסק, ולא מהשרת.
 // התוסף לעולם לא ממלא שם משתמש או סיסמה: אם כספית מבקשת התחברות – מדווחים "צריך התחברות" ומנסים שוב בבדיקה הבאה.
-importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js');
-const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi;
+importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js', 'lib/upd.js');
+const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi, UP = self.CxUpd;
 const VER = chrome.runtime.getManifest().version;
 const CASPIT = 'https://caspit.valu.co.il/';
 const CASPIT_APP = CASPIT + 'bo';
@@ -44,12 +44,35 @@ chrome.runtime.onInstalled.addListener(() => { setupAlarms(); trigger('install')
 chrome.runtime.onStartup.addListener(() => { setupAlarms(); trigger('startup'); });
 if (chrome.idle && chrome.idle.onStateChanged) chrome.idle.onStateChanged.addListener((s) => { if (s === 'active') trigger('idle'); });
 chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === 'tick' || a.name === 'poll') updTick().catch(() => {});
   if (a.name === 'daily') { setupAlarms(); trigger('daily'); }
   else if (a.name === 'tick') tick().catch(() => {});
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
   else if (a.name === 'poll') pollOnce().catch(() => {});
 });
+// ---------- עדכון אוטומטי (0.1.7) ----------
+// הסקריפט במחשב החנות מחליף את קבצי התיקייה וכותב upd.json. כאן – רק קריאה מהדיסק והחלטה (lib/upd.js); אין הורדה מהתוסף.
+async function diskFile(name) {
+  try { const r = await fetch(chrome.runtime.getURL(name), { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+async function updInfo() {
+  const [m, u] = await Promise.all([diskFile('manifest.json'), diskFile('upd.json')]);
+  return { disk: m && typeof m.version === 'string' ? m.version.slice(0, 20) : '', upd: UP.cleanUpd(u) };
+}
+async function updTick() {
+  if (busy) return false;
+  const d = await updInfo();
+  await set({ upd: Object.assign({ cur: VER, chk: Date.now() }, d) });
+  const last = await get('updReload');
+  if (!UP.wantReload({ cur: VER, disk: d.disk, upd: d.upd, busy, last, now: Date.now() })) return false;
+  const run = await get('run');
+  if (run && !P.isTerminal(run) && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return false; // ריצה באמצע (או ממתינה לניסיון חוזר) – אחרי שתסתיים
+  await set({ updReload: { to: d.disk, at: Date.now() } });
+  if (busy) return false;
+  (self.__cxTest.reload || (() => chrome.runtime.reload()))(); // בבדיקות אפשר להחליף (Playwright לא טוען מחדש תוסף מהשורת פקודה)
+  return true;
+}
 // "סנכרן עכשיו" מהטלפון: שואלים את השרת אם יש בקשה (בלי לפתוח את כספית). רק כשמחוברים, יש רשת ואין ריצה.
 // שרת ישן (bad-op) → בדיקה כל 15 דקות, בלי להציג תקלה. החיבור בוטל (auth) → מפסיקים לבדוק עד חיבור מחדש / הפעלה של Chrome.
 async function pollEvery(min) {
@@ -378,6 +401,9 @@ const STEP = {
     // העלאה לכספית (פריטים חדשים / מחירים) כבויה עד שנדע בוודאות איך מסך הייבוא מעלה קובץ – בלי export לשרת (לא מסמנים pd) ובלי ייבוא
     if ((await sel()).importEnabled !== true) run.flags.noImp = true;
     const cl = await api(), body = Object.assign({ mode: run.mode, manual: run.manual }, run.req ? { req: run.req } : {});
+    // מצב העדכון האוטומטי (upd.json) – לשרת: התראה למנהל אם הסקריפט נכשל / הפסיק לרוץ / גרסה שהורדה לא נטענה. שרת ישן מתעלם מהשדה
+    const ui = await updInfo().catch(() => null);
+    if (ui && ui.upd) body.upd = ui.upd;
     let r;
     try { r = await cl.call('hello', body); } catch (e) {
       // ניסיון חוזר אחרי שהבקשה כבר נלקחה (התשובה הקודמת לא הגיעה) – ממשיכים כסנכרון ידני רגיל
@@ -726,7 +752,7 @@ async function handle(m) {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
       run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true };
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }
@@ -753,4 +779,4 @@ async function handle(m) {
   return { ok: false, code: 'bad-msg' };
 }
 // לבדיקות (Playwright): הפעלת טריגר ידנית
-self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, isBusy: () => busy };
+self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, reload: null, isBusy: () => busy };

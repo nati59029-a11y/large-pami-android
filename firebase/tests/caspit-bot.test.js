@@ -513,4 +513,45 @@ describe('רובוט כספית – cxBotWatch', () => {
     await adm().doc(`b/${A}/private/cxbot`).set({ sd: '2026-11-20' }, { merge: true });
     assert.deepEqual((await BOT.runWatch({ now: at('2026-11-22', 11), send }))[A].filter((k) => k.startsWith('nosync')), ['nosync']);
   });
+  it('עדכון אוטומטי (0.1.7): upd ב-hello נשמר מסונן (לא תקין – מתעלמים); התראות: נכשל פעמיים / לא רץ 48 שעות / הורד ולא נטען; בלי upd – אין התראה', async () => {
+    const ref = adm().doc(`b/${A}/private/cxbot`);
+    await ref.set({ upd: null }, { merge: true });
+    await okb(TOK, { op: 'hello', mode: 'connect', upd: 'x' });
+    assert.equal((await ref.get()).get('upd'), null, 'upd לא תקין – מתעלמים, hello עובר');
+    const fut = Date.now() + 864e5;
+    await okb(TOK, { op: 'hello', mode: 'connect', upd: { at: fut, ok: false, ver: '0.1.7', err: 'bad <hash>', fails: 2, z: 1 } });
+    const u = (await ref.get()).get('upd');
+    assert.ok(u.at <= Date.now() && u.rx >= u.at, 'at לא בעתיד');
+    assert.deepEqual({ ok: u.ok, ver: u.ver, err: u.err, fails: u.fails, z: u.z }, { ok: false, ver: '0.1.7', err: 'bad hash', fails: 2, z: undefined });
+    const upd = () => (r) => r[A].filter((x) => x.startsWith('upd'));
+    const day = (dd) => at(dd, 11);
+    // נכשל פעמיים ברצף → updfail (פעם ביום)
+    let t = day('2026-12-01');
+    await ref.set({ sd: '2026-11-30', lr: null, last: t - 3600e3, ver: '0.1.7', upd: { at: t - 7200e3, ok: false, ver: '0.1.7', err: 'bad-hash', fails: 2, rx: t } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updfail']);
+    assert.match(PUSH.find((x) => x.id === 'updfail').body, /נכשל/);
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t + 3600e3, send })), [], 'פעם ביום');
+    // כישלון אחד – עוד לא
+    t = day('2026-12-02');
+    await ref.set({ sd: '2026-12-01', upd: { at: t - 7200e3, ok: false, ver: '0.1.7', err: 'x', fails: 1, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
+    // לא רץ 48 שעות, והמחשב פעיל → updstale; המחשב כבוי (לא נראה 24 שעות) → לא (יש "לא סנכרן")
+    t = day('2026-12-03');
+    await ref.set({ sd: '2026-12-02', last: t - 3600e3, upd: { at: t - 50 * 3600e3, ok: true, ver: '0.1.7', err: '', fails: 0, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updstale']);
+    t = day('2026-12-04');
+    await ref.set({ sd: '2026-12-03', last: t - 30 * 3600e3, pl: null, upd: { at: t - 50 * 3600e3, ok: true, ver: '0.1.7', err: '', fails: 0, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
+    // הורד 0.1.8 אבל נטען 0.1.7 → updlag
+    t = day('2026-12-05');
+    await ref.set({ sd: '2026-12-04', last: t - 3600e3, ver: '0.1.7', upd: { at: t - 5 * 3600e3, ok: true, ver: '0.1.8', err: '', fails: 0, rx: t } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updlag']);
+    assert.match(PUSH.find((x) => x.id === 'updlag').body, /Chrome/);
+    // בלי upd (העדכון האוטומטי לא הותקן) – אין התראת עדכון
+    t = day('2026-12-06');
+    await ref.set({ sd: '2026-12-05', upd: null }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
+  });
 });
