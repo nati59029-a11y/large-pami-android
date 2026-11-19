@@ -65,6 +65,53 @@ describe('store3d-freewall: חיבור עם OpenCV', { skip }, () => {
     const V = fr.crop, k = .25, tw = Math.round((V.x1 - V.x0) * k), th = Math.round((V.y1 - V.y0) * k), t = await FW.tile(cv, pl, fr, io, V, k, 0, 0, tw, th);
     assert.equal(t.rgba.length, tw * th * 4); assert.ok(t.cov > .97, 'כיסוי ' + t.cov);
   });
+  it('תפר חכם: מסכה לכל תמונה, אריח בלי חורים, וקרוב לאמת (פחות רוחות מהממוצע)', async () => {
+    const S = setup(), pl = await FW.plan(cv, S.rows, S.io, {}), fr = FW.frame(cv, pl, 400), g = FW.gains(pl, pl.sm);
+    pl.seam = FW.seams(cv, pl, fr, { gain: id => g.get(id) });
+    assert.ok(pl.seam instanceof Map); assert.equal(pl.seam.size, 6);
+    for (const [, m] of pl.seam) { assert.equal(m.f.length, m.w * m.h); assert.ok(m.f.every(v => v >= 0 && v <= 1)); }
+    const io = { color: async id => { const im = S.imgs.get(id), d = new Uint8Array(im.w * im.h * 4); for (let i = 0; i < im.g.length; i++) { d[4 * i] = d[4 * i + 1] = d[4 * i + 2] = im.g[i]; d[4 * i + 3] = 255; } return { w: im.w, h: im.h, data: d }; }, gain: id => g.get(id) };
+    const V = fr.crop, k = .25, tw = Math.round((V.x1 - V.x0) * k), th = Math.round((V.y1 - V.y0) * k), t = await FW.tile(cv, pl, fr, io, V, k, 0, 0, tw, th);
+    assert.ok(t.cov > .97, 'כיסוי ' + t.cov);
+  });
+});
+
+describe('store3d-freewall: עזרה בזמן הצילום (קוד טהור)', () => {
+  it('פלס: ישר, מוטה למטה/למעלה, נטוי הצידה, לרוחב, ובלי חיישן', () => {
+    let L = FW.levelOf(90, 0, 0); assert.ok(L.ok); assert.ok(Math.abs(L.pitch) < .01 && Math.abs(L.roll) < .01);
+    L = FW.levelOf(80, 0, 0); assert.ok(!L.ok); assert.ok(L.pitch < -9 && L.pitch > -11, 'pitch ' + L.pitch); assert.match(L.msg, /מוטה למטה 10°/);
+    L = FW.levelOf(100, 0, 0); assert.ok(L.pitch > 9); assert.match(L.msg, /מוטה למעלה/);
+    L = FW.levelOf(93, 0, 0); assert.ok(L.ok, 'עד 5° – ישר');
+    // נטייה הצידה של 8° כשהטלפון זקוף מתבטאת ב-gamma=-90 ו-beta=82 (סדר הזוויות של deviceorientation)
+    L = FW.levelOf(82, -90, 0); assert.ok(!L.ok); assert.ok(Math.abs(Math.abs(L.roll) - 8) < .5, 'roll ' + L.roll); assert.match(L.msg, /נטוי הצידה 8°/);
+    // לרוחב (זווית מסך 90): הטלפון שוכב על הצד, gamma≈-90 כשהוא ישר מול הקיר
+    L = FW.levelOf(0, -90, 90); assert.ok(L.ok, JSON.stringify(L));
+    assert.equal(FW.levelOf(null, 0, 0), null); assert.equal(FW.levelOf(NaN, 3, 0), null);
+  });
+  it('שורות: תווית, ואיזו רוח להציג', () => {
+    assert.equal(FW.shotLabel([[]], 0, 3), 'שורה 1 (למטה) – תמונה 1');
+    assert.equal(FW.shotLabel([[1, 2], []], 0, 3), 'שורה 1 (למטה) – תמונה 3');
+    assert.equal(FW.shotLabel([[1], [4]], 2, 3), 'שורה 3 (למעלה) – תמונה 1');
+    assert.equal(FW.ghostOf([[]], 0), null);
+    assert.deepEqual(FW.ghostOf([[1, 2, 3]], 0), { id: 3, dir: 'h' });
+    assert.deepEqual(FW.ghostOf([[1, 2, 3], []], 1), { id: 1, dir: 'v' }, 'שורה חדשה: הראשונה בשורה שמתחת');
+    assert.deepEqual(FW.ghostOf([[1, 2, 3], [7]], 1), { id: 7, dir: 'h' });
+  });
+  it('הערכת חפיפה: הזזה ידועה ימינה ולמעלה, והודעות', () => {
+    const T = wall(400, 200, 11), sm = (x, y) => { const big = crop(T, x, y, 192, 108, 1), g = new Uint8Array(96 * 54); for (let j = 0; j < 54; j++) for (let i = 0; i < 96; i++) g[j * 96 + i] = (big.g[2 * j * 192 + 2 * i] + big.g[2 * j * 192 + 2 * i + 1] + big.g[(2 * j + 1) * 192 + 2 * i] + big.g[(2 * j + 1) * 192 + 2 * i + 1]) >> 2; return { w: 96, h: 54, g }; };
+    const A = sm(20, 40), B = sm(20 + 120, 40 + 6), r = FW.shiftEst(A, B, 'h'); // 120px גדול = 60 קטן, חפיפה 37.5%
+    assert.ok(Math.abs(r.dx - 60) <= 1 && Math.abs(r.dy - 3) <= 1, JSON.stringify(r)); assert.ok(r.ov > .35 && r.ov < .4); assert.ok(r.z > .8);
+    assert.ok(FW.ovMsg(r, 'h').ok); assert.match(FW.ovMsg(r, 'h').t, /חפיפה: 3\d% ✓/);
+    const far = FW.shiftEst(A, sm(20 + 170, 40), 'h'); assert.ok(far.ov < .25, JSON.stringify(far)); assert.match(FW.ovMsg(far, 'h').t, /זוזו פחות/);
+    const near = FW.shiftEst(A, sm(20 + 40, 40), 'h'); assert.ok(near.ov > .55); assert.match(FW.ovMsg(near, 'h').t, /זוזו עוד/);
+    const up = FW.shiftEst(sm(100, 90), sm(104, 90 - 70), 'v'); assert.ok(Math.abs(up.dy + 35) <= 1 && Math.abs(up.dx - 2) <= 1, JSON.stringify(up));
+    assert.equal(FW.ovMsg({ z: .1, ov: .4 }, 'h').ok, false);
+  });
+  it('מסלול בעלות מינימלית: עוקב אחרי "עמק" אלכסוני', () => {
+    const nx = 20, ny = 10, C = new Float32Array(nx * ny).fill(10); for (let y = 0; y < ny; y++) C[y * nx + 5 + y] = 0;
+    const P = FW.minPath(C, nx, ny); for (let y = 0; y < ny; y++) assert.equal(P[y], 5 + y);
+    const Q = FW.minPath(Float32Array.from([5, 0, 5, 5, 0, 5]), 3, 2); assert.deepEqual([...Q], [1, 1]);
+  });
 });
 
 describe('store3d-freewall: קירות המפה', () => {

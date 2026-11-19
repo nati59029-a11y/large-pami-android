@@ -3,7 +3,7 @@
    התמונות לא נכנסות למאגר. דרוש: npm install @techstark/opencv-js@4.10.0-release.1 sharp בתיקייה זמנית, ו-NODE_PATH אליה.
    שימוש: NODE_PATH=/tmp/x/node_modules node scripts/freewall-real-test.js <תיקיית-תמונות> <שורות> <פלט.jpg>
    שורות: עליונה ראשונה, מופרדות ב-'/', טווחי מספרי קבצים: "16-20/1-15" = 16..20 למעלה, 1..15 למטה (כל שורה משמאל לימין).
-   התמונות מוקטנות כמו באפליקציה (צלע ארוכה 1600, לפי כיוון EXIF). CROP=0 = בלי חיתוך שוליים. */
+   התמונות מוקטנות כמו באפליקציה (צלע ארוכה 1600, לפי כיוון EXIF). CROP=0 = בלי חיתוך שוליים. SEAM=0 = מיזוג ממוצע (בלי תפר חכם). */
 const sharp = require('sharp'), cv0 = require('@techstark/opencv-js'), path = require('path'), FW = require('../app-source/www/store3d-freewall.js');
 const [dir, rowsArg, out] = process.argv.slice(2);
 if (!dir || !rowsArg || !out) { console.error('usage: freewall-real-test.js DIR "16-20/1-15" OUT.jpg'); process.exit(2); }
@@ -22,6 +22,7 @@ const rng = s => { const [a, b] = s.split('-').map(Number); const r = []; for (l
   console.log('חיבורים שהתקבלו:', pl.edges.length, '(מתוך', pl.tried, 'זוגות שנבדקו) | שכנים בשורה עם חיבור ישיר:', direct, 'מתוך', pairs.length, '| הוסרו כסותרים:', pl.dropped.map(e => e.a + '-' + e.b).join(',') || 'אין');
   console.log('חיבורים:', pl.edges.map(e => `${e.a}-${e.b}(${e.dir},${e.inl})`).join(' '));
   const fr = FW.frame(cv, pl, 600), g = FW.gains(pl, pl.sm); io.gain = id => g.get(id);
+  if (process.env.SEAM !== '0') { const t1 = Date.now(); pl.seam = FW.seams(cv, pl, fr, { gain: id => g.get(id) }); console.log('תפר חכם:', pl.seam ? 'כן' : 'לא', ((Date.now() - t1) / 1000).toFixed(1), 'שניות'); }
   const V = process.env.CROP === '0' ? { x0: fr.x0, y0: fr.y0, x1: fr.x1, y1: fr.y1 } : fr.crop, vw = V.x1 - V.x0, vh = V.y1 - V.y0, k = Math.min(1, Math.sqrt(FW.MAXA / (vw * vh)));
   const OW = Math.round(vw * k), OH = Math.round(vh * k), comp = [], cache = new Map(), col = io.color;
   io.color = async id => { if (!cache.has(id)) { if (cache.size >= 3) cache.delete(cache.keys().next().value); cache.set(id, await col(id)); } return cache.get(id); };
