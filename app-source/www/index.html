@@ -4824,7 +4824,7 @@ const zcNo=v=>s_(v).replace(/^0+(?=.)/,'');/* מספר דוח להשוואה: ב
 const zcDup=(reg,d,no,id)=>((S&&S.zc)||[]).find(x=>x.reg===reg&&x.d===d&&zcNo(x.no)===zcNo(no)&&x.id!==id);
 /* מה דורש אישור מנהל בסגירה שהגיעה מעובד – מחושב מחדש מהשדות, לא לפי מה שהשולח סימן */
 function zcNeed(it){const c=it.c,f=it.f,m=[];
- if(!zcRegOk(it.reg)||!catReg(it.reg))m.push('הקטגוריה של הקופה לא קיימת במכשיר');
+ if(!zcRegOk(it.reg))m.push('הקטגוריה של הקופה לא קיימת במכשיר');
  if(!f.d||!s_(f.no))m.push('חסרים תאריך או מספר דוח');
  if(!c.rows.length)m.push('אין סכומים להכנסה');
  if(!c.sumOk)m.push('סכום השורות לא שווה ל"סה״כ תקבולים"');
