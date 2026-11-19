@@ -78,11 +78,41 @@ const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי �
     // 3. שיוך חיוב אשראי לעלויות מעביד
     const cc = await pg.evaluate(() => { const c = S.cats.find((k) => k.beh === 'cc'); const h = detHtml(c, null); return { id: c.id, all: h.includes('value="ec:2026-10:*"'), bl: h.includes('value="ec:2026-10:bl"'), inv: h.includes('name="link"') }; });
     check('3 טופס חיוב אשראי חדש: קבוצות עלויות מעביד בבחירת השיוך', cc.all && cc.bl && cc.inv, cc);
-    const big = await pg.evaluate((cid) => { const r = readTx({ amt: '999', date: '2026-11-10', link: 'ec:2026-10:bl', note: '' }, cat(cid), null, null); return r.errs || null; }, cc.id);
-    check('3א חיוב גדול מסכום עלויות המעביד שנבחרו ← נחסם', big && /גדול מסכום/.test(big[0]), big);
+    const big = await pg.evaluate((cid) => { const n = S.tx.length; const r = readTx({ amt: '999', date: '2026-11-10', link: 'ec:2026-10:bl', note: '' }, cat(cid), null, null); return { e: r.errs || null, amt: r.t && r.t.amt, x: r.t && r.t.x, same: S.tx.length === n }; }, cc.id);
+    check('3א חיוב גדול מהעלויות: readTx מחזיר את החלק המשויך (420.75, x) ולא מוסיף כלום לפני שמירה', !big.e && big.amt === 420.75 && big.x === 1 && big.same, big);
     const lk = await pg.evaluate((cid) => { const r = readTx({ amt: '420.75', date: '2026-11-10', link: 'ec:2026-10:bl', note: '' }, cat(cid), null, null); if (r.errs) return r; r.t.id = 'ccL1'; S.tx.push(r.t); save(); return { x: r.t.x, ecl: r.t.ecl }; }, cc.id);
     check('3ב חיוב משויך: x=1 (לא נספר פעמיים) + ecl', lk.x === 1 && Array.isArray(lk.ecl) && lk.ecl.length === 1, lk);
     check('3ג אחרי השיוך הקבוצה לא מוצעת שוב; חיוב רגיל בלי שיוך – לא נגוע', await pg.evaluate((cid) => { const h = detHtml(cat(cid), null); const r = readTx({ amt: '50', date: '2026-11-10', link: '', note: '' }, cat(cid), null, null); return !h.includes('value="ec:2026-10:bl"') && !r.errs && !r.t.x && !r.t.ecl; }, cc.id));
+
+    // 3ד. חיוב 1,000 מול עלויות מעביד 600 – דרך הטופס האמיתי (FRM.addsave): 600 משויך ולא נספר, 400 נספר כהוצאה; מחיקה משחררת הכול
+    await pg.evaluate(() => { const s = S.subs.find((x) => x.id === 'psC'); [['ecQ1', 350], ['ecQ2', 250]].forEach(([id, a]) => S.tx.push({ id, t: 'exp', cat: s.cat, sub: 'psC', date: '2026-08-31', amt: a, plan: '2026-08', pays: [], ec: 1, eck: 'pen', psl: 'pslQ', note: 'עלות מעביד: פנסיה' })); save(); });
+    const expM = () => pg.evaluate(() => Math.round(live().filter((t) => t.t === 'exp' && (t.date || '').slice(0, 7) === '2026-11').reduce((a, t) => a + (+t.amt || 0), 0) * 100) / 100);
+    const expA = () => pg.evaluate(() => Math.round(live().filter((t) => t.t === 'exp' && (t.date || '').slice(0, 7) === '2026-08').reduce((a, t) => a + (+t.amt || 0), 0) * 100) / 100);
+    const e0 = await expM(), a0 = await expA();
+    await pg.evaluate((cid) => { A = { step: 'det', type: 'exp', cat: cid, sub: null }; sheetDraw(); }, cc.id); await sleep(250);
+    const hasOpt = await pg.evaluate(() => !!document.querySelector('#sheet select[name=link] option[value="ec:2026-08:pen"]'));
+    await pg.evaluate(() => { const f = document.querySelector('#sheet form[data-f=addsave]'); f.elements.amt.value = '1000'; f.elements.date.value = '2026-11-10'; f.elements.link.value = 'ec:2026-08:pen'; });
+    await clearT(pg); await pg.click('#sheet form[data-f=addsave] button[type=submit]:not([value=more]), #sheet form[data-f=addsave] button:not([type=button]):not([value=more])'); await sleep(500);
+    if (await pg.evaluate(() => !!document.querySelector('#dlg[open] [data-a=yes]'))) { await pg.click('#dlg [data-a=yes]'); await sleep(400); } // שאלת כפילות, אם הופיעה
+    const sp = await pg.evaluate(() => S.tx.filter((t) => t.ecg).map((t) => ({ id: t.id, amt: t.amt, x: t.x || 0, ecl: t.ecl || null, ecr: t.ecr || 0, ecg: t.ecg, cat: t.cat })));
+    const part = sp.find((t) => t.x === 1), rest = sp.find((t) => t.ecr === 1);
+    check('3ד טופס חיוב: האפשרות מוצעת; נשמרו 2 רשומות – 600 משויך (x, ecl של שתי העלויות) ו-400 יתרה באותה קטגוריה', hasOpt && sp.length === 2 && part && part.amt === 600 && part.ecl.slice().sort().join() === 'ecQ1,ecQ2' && rest && rest.amt === 400 && !rest.x && rest.ecg === part.ecg && rest.cat === cc.id, sp);
+    check('3ה סך ההוצאות בחודש החיוב עלה ב-400 בלבד; עלויות המעביד באוגוסט נשארו 600', Math.round((await expM() - e0) * 100) / 100 === 400 && await expA() === a0, [e0, await expM(), a0, await expA()]);
+    check('3ו הודעה: משויך + נספר', /600[\s\S]*משויך[\s\S]*400[\s\S]*נספר/.test(await toasts(pg)), await toasts(pg));
+    check('3ז העלויות משויכות (נעולות) ולא מוצעות שוב', await pg.evaluate((cid) => !detHtml(cat(cid), null).includes('ec:2026-08:pen') && S.tx.filter((t) => /^ecQ/.test(t.id)).every((t) => S.tx.some((c) => (c.ecl || []).includes(t.id))), cc.id));
+    await pg.evaluate(() => { const s = document.getElementById('sheet'); if (s) s.hidden = true; });
+    await pg.evaluate((id) => ACT.txDel({ dataset: { id } }), rest.id); await sleep(200); await pg.click('#dlg [data-a=yes]'); await sleep(300);
+    check('3ח מחיקת היתרה ← גם החלק המשויך נמחק, העלויות משתחררות, ההוצאות חוזרות למצב הקודם', await pg.evaluate((cid) => !S.tx.some((t) => t.ecg) && detHtml(cat(cid), null).includes('ec:2026-08:pen'), cc.id) && await expM() === e0, await expM());
+    // ושוב דרך הטופס, הפעם מוחקים את החלק המשויך
+    await pg.evaluate((cid) => { A = { step: 'det', type: 'exp', cat: cid, sub: null }; sheetDraw(); }, cc.id); await sleep(250);
+    await pg.evaluate(() => { const f = document.querySelector('#sheet form[data-f=addsave]'); f.elements.amt.value = '1000'; f.elements.date.value = '2026-11-11'; f.elements.link.value = 'ec:2026-08:pen'; });
+    await pg.click('#sheet form[data-f=addsave] button:not([type=button]):not([value=more])'); await sleep(500);
+    if (await pg.evaluate(() => !!document.querySelector('#dlg[open] [data-a=yes]'))) { await pg.click('#dlg [data-a=yes]'); await sleep(400); }
+    await pg.evaluate(() => { const s = document.getElementById('sheet'); if (s) s.hidden = true; });
+    const again = await pg.evaluate(() => { const L = S.tx.filter((t) => t.ecg); return L.length === 2 ? L.find((t) => t.x === 1).id : null; });
+    await pg.evaluate((id) => ACT.txDel({ dataset: { id } }), again); await sleep(150); await pg.click('#dlg [data-a=yes]'); await sleep(300);
+    check('3ט מחיקת החלק המשויך ← לא נשארת יתרה יתומה, העלויות משתחררות', !!again && await pg.evaluate(() => !S.tx.some((t) => t.ecg || t.ecr) && !S.tx.some((c) => (c.ecl || []).some((i) => /^ecQ/.test(i)))));
+    await pg.evaluate(() => { S.tx = S.tx.filter((t) => !/^ecQ/.test(t.id)); save(); go('pslList', 'psA'); }); await sleep(250);
 
     // 4. מחיקה חסומה כשמשויך
     await pg.evaluate(() => rerender()); await sleep(200); await clearT(pg);
@@ -183,6 +213,12 @@ const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי �
     check('9ב ת"ז לא תקינה ← לא נשמרת', /5–9/.test(await toasts(pg)) && await pg.evaluate(() => !S.subs.find((s) => s.id === 'psC').pay.tz));
     await pg.fill('#main form[data-f=pslTzF] input[name=tz]', '123456782'); await pg.click('#main form[data-f=pslTzF] button'); await sleep(150);
     check('9ג ת"ז נשמרת ב-pay.tz בלי לגעת בשאר ההגדרות', await pg.evaluate(() => { const p = S.subs.find((s) => s.id === 'psC').pay; return p.tz === '123456782' && p.rate === 40 && p.slip === true; }));
+    await pg.evaluate(() => { const s = S.subs.find((x) => x.id === 'psC'); ACT.payOpen({ dataset: { id: 'psC' } }); }); await sleep(300);
+    check('9ה טופס הגדרות השכר: שדה ת"ז עם הערך השמור', await pg.evaluate(() => (document.querySelector('#main form[data-f=payCfgF] input[name=tz]') || {}).value) === '123456782');
+    await pg.fill('#main form[data-f=payCfgF] input[name=tz]', '12a'); await clearT(pg); await pg.click('#main form[data-f=payCfgF] button[type=submit]'); await sleep(200);
+    check('9ו ת"ז לא תקינה בטופס ← לא נשמר', /5–9/.test(await toasts(pg)) && await pg.evaluate(() => S.subs.find((s) => s.id === 'psC').pay.tz === '123456782'));
+    await pg.fill('#main form[data-f=payCfgF] input[name=tz]', '0-23456789'); await pg.click('#main form[data-f=payCfgF] button[type=submit]'); await sleep(200);
+    check('9ז ת"ז מהטופס נשמרת (בלי מקפים), שאר ההגדרות נשמרות', await pg.evaluate(() => { const p = S.subs.find((s) => s.id === 'psC').pay; return p.tz === '023456789' && p.rate === 40 && p.slip === true; }));
     const lg = await pg.evaluate(() => window.__log.filter((l) => /7,?412|9,?250|420\.75|601\.28|5,?100|023456789/.test(l)));
     check('9ד אין נתוני תלוש ביומן (console)', lg.length === 0, lg);
     check('10 אין שגיאות JS', pg.__errors.length === 0, pg.__errors);

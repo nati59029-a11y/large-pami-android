@@ -269,13 +269,25 @@ function ecGroups(){const F=ecFree(),M=[...new Set(F.map(t=>t.plan))].sort().rev
     [...new Set(A.map(t=>t.eck))].forEach(k=>{const B=A.filter(t=>t.eck===k);o.push({v:'ec:'+m+':'+k,l:(KN[k]||'עלות מעביד')+' · '+mfmt(m)+' · '+ils(sum(B))+' ('+ne(B)+' עובדים)'})})});return o}
 function ecSel(v){const m=/^ec:(\d{4}-\d{2}):([\w*]+)$/.exec(v||'');if(!m)return[];return ecFree().filter(t=>t.plan===m[1]&&(m[2]==='*'||t.eck===m[2]))}
 if(typeof detHtml==='function'){const o=detHtml;detHtml=function(c,t){let h=o.apply(this,arguments);
-  try{if(c&&c.beh==='cc'&&!t&&on()){const G=ecGroups(),A='</select><div class="hd">אם תבחר חשבונית';if(G.length&&h.includes(A))h=h.replace(A,'<optgroup label="עלויות מעביד מתלושים">'+G.map(g=>`<option value="${esc(g.v)}">${esc(g.l)}</option>`).join('')+'</optgroup>'+A).replace(A,A.replace('אם תבחר חשבונית','עלויות מעביד מתלוש: אם תבחר אותן, החיוב לא ייספר פעמיים (עלויות המעביד כבר נספרות). אם תבחר חשבונית'))}}catch(e){}return h}}
+  try{if(c&&c.beh==='cc'&&!t&&on()){const G=ecGroups(),A='</select><div class="hd">אם תבחר חשבונית';if(G.length&&h.includes(A))h=h.replace(A,'<optgroup label="עלויות מעביד מתלושים">'+G.map(g=>`<option value="${esc(g.v)}">${esc(g.l)}</option>`).join('')+'</optgroup>'+A).replace(A,A.replace('אם תבחר חשבונית','עלויות מעביד מתלוש: אם תבחר אותן, החלק שמשויך לא ייספר פעמיים (עלויות המעביד כבר נספרות), ומה שמעבר להן נרשם כהוצאה רגילה. אם תבחר חשבונית'))}}catch(e){}return h}}
 if(typeof readTx==='function'){const o=readTx;readTx=function(f,c,sub,t0){
   if(!(f&&typeof f.link==='string'&&f.link.startsWith('ec:')&&c&&c.beh==='cc'&&!t0))return o.apply(this,arguments);
   const L=ecSel(f.link),r=o.call(this,Object.assign({},f,{link:''}),c,sub,t0);if(!r||r.errs)return r;
   if(!L.length)return{errs:['לא נמצאו עלויות מעביד פתוחות לשיוך']};const sm=r2(L.reduce((a,t)=>a+(+t.amt||0),0));
-  if(r.t.amt>sm+0.004)return{errs:['החיוב ('+ils(r.t.amt)+') גדול מסכום עלויות המעביד שנבחרו ('+ils(sm)+'). בחרו קבוצה אחרת או רשמו בלי שיוך']};
-  r.t.x=1;r.t.ecl=L.map(t=>t.id);return r}}
+  r.t.x=1;r.t.ecl=L.map(t=>t.id);PEND=null;
+  /* חיוב גדול מהעלויות (ניכויי העובד שמועברים לרשויות): פיצול – החלק המשויך (x, ecl) לא נספר, והיתרה נרשמת כחיוב רגיל באותה קטגוריה ונספרת.
+     שתי הרשומות מקושרות ב-ecg: מחיקת אחת מוחקת את שתיהן. היתרה נוספת רק כשהחיוב באמת נשמר (FRM.addsave), כי readTx רץ שוב אחרי שאלת כפילות */
+  if(r.t.amt>sm+0.004){const g=uid(),tot=r.t.amt,rest=Object.assign({},r.t,{id:uid(),amt:r2(tot-sm),ecg:g,ecr:1,pays:[],note:(r.t.note?r.t.note+' · ':'')+'יתרת חיוב אשראי מעבר לעלויות המעביד'});
+    delete rest.x;delete rest.ecl;r.t.amt=sm;r.t.ecg=g;PEND={id:r.t.id,rest,tot}}
+  return r}}
+/* שמירת היתרה אחרי שהחיוב המשויך נשמר */
+let PEND=null;
+if(FRM&&typeof FRM.addsave==='function'){const o=FRM.addsave;FRM.addsave=function(){const r=o.apply(this,arguments);
+  try{const P=PEND;if(P&&S.tx.some(t=>t&&t.id===P.id)&&!S.tx.some(t=>t&&t.id===P.rest.id)){PEND=null;S.tx.push(P.rest);save();rerender();
+    toast('נשמר חיוב '+ils(P.tot)+': '+ils(P.tot-P.rest.amt)+' משויך לעלויות מעביד, '+ils(P.rest.amt)+' נספר כהוצאה')}}catch(e){}return r}}
+/* מחיקת חיוב מפוצל (החלק המשויך או היתרה) ← מוחקת גם את בן הזוג, כך שהשיוך משתחרר ולא נשארת יתרה יתומה */
+if(typeof ACT.txDel==='function'){const o=ACT.txDel;ACT.txDel=function(el){const t=S.tx.find(x=>x&&x.id===(el&&el.dataset&&el.dataset.id)),r=o.apply(this,arguments);
+  try{const g=t&&t.ecg,f=typeof PENDING!=='undefined'?PENDING:null;if(g&&typeof f==='function')PENDING=function(){f();let n=0;for(let i=S.tx.length-1;i>=0;i--){if(S.tx[i]&&S.tx[i].ecg===g){S.tx.splice(i,1);n++}}if(n){save();rerender()}}}catch(e){}return r}}
 /* פרטיות: רשומות עלות מעביד לא נכנסות למראה לעובדים (wv) */
 if(typeof wvWant==='function'){const o=wvWant;wvWant=function(){const T=S.tx;if(!Array.isArray(T)||!T.some(t=>t&&t.ec))return o.apply(this,arguments);
   S.tx=T.filter(t=>!(t&&t.ec));try{return o.apply(this,arguments)}finally{S.tx=T}}}

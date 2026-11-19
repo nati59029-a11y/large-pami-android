@@ -27,12 +27,12 @@ const str=v=>v==null?'':String(v);
 /* טיוטה של המסך: נשמרת רק ב"שמירה" */
 const PD={sub:'',p:null};
 function draft(s){const p=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};
- return{mode:p.mode==='mo'?'mo':'hr',from:monV(p.from)?p.from:'',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'?p.uid:'',
+ return{mode:p.mode==='mo'?'mo':'hr',from:monV(p.from)?p.from:'',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'?p.uid:'',tz:str(p.tz),tz0:!!p.tz,
   rules:(Array.isArray(p.rules)?p.rules:[]).filter(r=>r&&typeof r==='object').map(r=>({id:typeof r.id==='string'&&r.id?r.id:uid(),d:Array.isArray(r.d)?r.d.map(Number).filter(k=>Number.isInteger(k)&&k>=0&&k<=6):[],s:str(r.s),e:str(r.e),r:str(r.r)})),
   add:(Array.isArray(p.add)?p.add:[]).filter(a=>a&&typeof a==='object').map(a=>({id:typeof a.id==='string'&&a.id?a.id:uid(),n:str(a.n),k:a.k==='day'?'day':'mo',a:str(a.a)}))}}
 /* קורא את הטופס שעל המסך לתוך הטיוטה (לפני ציור מחדש, כדי שמה שהוקלד לא יימחק) */
 function pull(){const f=document.querySelector('#main form[data-f=payCfgF]'),p=PD.p;if(!f||!p)return;const g=n=>{const e=f.elements[n];return e?e.value:undefined};
- const set=(k,n)=>{const v=g(n);if(v!==undefined)p[k]=v};set('rate','rate');set('mo','mo');set('m','m');set('uid','uid');set('from','from');
+ const set=(k,n)=>{const v=g(n);if(v!==undefined)p[k]=v};set('rate','rate');set('mo','mo');set('m','m');set('uid','uid');set('tz','tz');set('from','from');
  if(f.elements.slip)p.slip=f.elements.slip.checked;
  p.rules.forEach((r,i)=>{['s','e','r'].forEach(k=>{const v=g('r'+k+i);if(v!==undefined)r[k]=v})});
  p.add.forEach((a,i)=>{const n=g('an'+i),k=g('ak'+i),v=g('aa'+i);if(n!==undefined)a.n=n;if(k!==undefined)a.k=k==='day'?'day':'mo';if(v!==undefined)a.a=v})}
@@ -65,7 +65,7 @@ V.payCfg=id=>{const T='הגדרות שכר';if(!on())return{t:T,h:'<div class="e
  h+=`<div class="card"><div class="sec" style="margin-top:0"><h3>סוג שכר</h3></div><div class="chips" role="group" aria-label="סוג שכר" style="margin-bottom:10px">${ch('payMode','hr','לפי שעה',hr)}${ch('payMode','mo','חודשי קבוע',!hr)}</div>`;
  h+=hr?fld('תעריף לשעה (₪)','rate',p.rate,'text','inputmode="decimal" autocomplete="off" placeholder="למשל 45"'):fld('סכום חודשי (₪)','mo',p.mo,'text','inputmode="decimal" autocomplete="off" placeholder="למשל 8000"');
  h+=selO('אמצעי תשלום','m',[['','לא נבחר'],...SAL_METHODS],p.m);
- h+=`<label class="cb"><input type="checkbox" name="slip" value="1"${p.slip?' checked':''}> מקבל תלוש</label>`+fld('שכר החל מחודש (רשות)','from',p.from,'month')+`<p class="note" style="margin:0">חודשים קודמים לא יוצעו כ"חודש פתוח". ריק – מהחודש שבו נשמרו ההגדרות לראשונה.</p></div>`;
+ h+=`<label class="cb"><input type="checkbox" name="slip" value="1"${p.slip?' checked':''}> מקבל תלוש</label>`+fld('שכר החל מחודש (רשות)','from',p.from,'month')+`<p class="note" style="margin:0">חודשים קודמים לא יוצעו כ"חודש פתוח". ריק – מהחודש שבו נשמרו ההגדרות לראשונה.</p>`+fld('ת״ז (לזיהוי העובד בתלוש, לא חובה)','tz',p.tz,'text','inputmode="numeric" autocomplete="off" maxlength="11"')+`</div>`;
  /* קישור למשתמש */
  const st=staff(),L=st.L||[],known=!p.uid||L.some(u=>u.uid===p.uid);
  const opts=[['','בלי קישור'],...L.map(u=>[u.uid,uName(u)+(u.active===false?' (מושבת)':'')]),...(known?[]:[[p.uid,'משתמש שמור (לא ברשימה)']])];
@@ -101,7 +101,7 @@ function build(p){const o={mode:p.mode==='mo'?'mo':'hr'};
  if(mo){const v=posN(mo);if(v==null)return 'סכום חודשי: מספר חיובי';o.mo=v}
  if(o.mode==='hr'&&o.rate==null)return 'חסר תעריף לשעה';
  if(o.mode==='mo'&&o.mo==null)return 'חסר סכום חודשי';
- o.m=SAL_METHODS.includes(p.m)?p.m:'';o.slip=!!p.slip;if(monV(s_(p.from)))o.from=s_(p.from);o.uid=typeof p.uid==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(p.uid)?p.uid:'';
+ o.m=SAL_METHODS.includes(p.m)?p.m:'';o.slip=!!p.slip;{const z=s_(p.tz).replace(/[\s-]/g,'');if(z&&!/^\d{5,9}$/.test(z))return 'ת״ז: 5–9 ספרות';if(z||p.tz0)o.tz=z}/* בלי ת״ז – השדה לא נוסף (מבנה pay כמו קודם) */if(monV(s_(p.from)))o.from=s_(p.from);o.uid=typeof p.uid==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(p.uid)?p.uid:'';
  o.rules=[];for(let i=0;i<p.rules.length;i++){const r=p.rules[i],n='כלל תעריף '+(i+1)+': ';
   if(!r.d.length)return n+'בחרו לפחות יום אחד';if(!hmOk(r.s)||!hmOk(r.e))return n+'שעה בפורמט HH:MM';if(r.s===r.e)return n+'שעת ההתחלה והסיום זהות';
   const v=posN(r.r);if(v==null)return n+'תעריף: מספר חיובי';o.rules.push({id:r.id,d:[...new Set(r.d)].sort(),s:r.s,e:r.e,r:v})}
