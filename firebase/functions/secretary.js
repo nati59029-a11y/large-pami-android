@@ -279,9 +279,9 @@ async function settle(db, uid, mt, delta, deep) {
 
 function parseJ(s) { try { return typeof s === 'string' && s.length <= FIN_MAX ? JSON.parse(s) : null; } catch (e) { return null; } }
 function finSize(x) { try { return Buffer.byteLength(JSON.stringify(x), 'utf8'); } catch (e) { return Infinity; } }
-function readFin(x) {
+function readFin(x, o) {
   if (finSize(x) > FIN_MAX) throw bad('fin-too-big', 'נתוני הכספים גדולים מדי');
-  const f = ST.cleanFin(x);
+  const f = ST.cleanFin(x, o); // o.notes – רק בצ'אט עם sensOn; במראה – הערות העובדים נזרקות
   if (!f) throw bad('bad-fin', 'נתוני הכספים לא תקינים');
   if (f.at > Date.now() + 10 * 60000) f.at = Date.now(); // שעון מכשיר שקדים – לא "נכון ל" עתידי
   return f;
@@ -441,9 +441,13 @@ async function secChat(request) {
   const now = Date.now();
   const payOn = cfg.pay[who.uid] === true && !brLimited;
   // נתוני הכספים: קודם מהמכשיר (87 – רק לשיחה הזו, לא נשמרים), אחרת מהמראה (אם המתג פעיל)
-  let fin = null, finFrom = '', mirrorAt = 0, pay = null;
+  let fin = null, finFrom = '', mirrorAt = 0, pay = null, notes = null;
   if (brLimited) { /* מנהל עם הגבלת סניפים: לא נתוני מכשיר, לא מראה */ }
-  else if (input.fin !== undefined && input.fin !== null) { fin = readFin(input.fin); finFrom = 'device'; pay = fin.pay || null; delete fin.pay; }
+  else if (input.fin !== undefined && input.fin !== null) {
+    fin = readFin(input.fin, { notes: sensOn }); finFrom = 'device'; pay = fin.pay || null; delete fin.pay;
+    // 19.11.2026 (שלב F): הערות על עובדים – רק עם הרשאה למידע רגיש (בלי הרשאה cleanFin זורק אותן); נמסרות למודל רק דרך getEmployeeNotes
+    notes = sensOn && Array.isArray(fin.notes) && fin.notes.length ? fin.notes : null; delete fin.notes;
+  }
   else if (cfg.mirror) {
     const ms = await db.doc('sec_mirror/fin').get();
     if (ms.exists) { fin = ST.cleanFin(parseJ(ms.get('data'))); if (fin) { finFrom = 'mirror'; mirrorAt = ms.get('at') || fin.at; } }
@@ -492,8 +496,8 @@ async function secChat(request) {
     if (mt.saving) { reply = mt.saving === 'day' ? ST.TXT.savingDay : ST.TXT.saving; mode = 'saving'; }
   }
   if (reply === null) {
-    offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards };
+    offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn, notes: !!notes });
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes };
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
       const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);
@@ -538,6 +542,7 @@ async function secChat(request) {
           if (c.name === 'refuseOffTopic') { refused = true; break; }
           // שלב 4 (תיקון משלב 3): בתור שבו המודל ראה מידע רגיש (הכלי הופעל, או היסטוריה רגישה) – אין הצעת עובדה. הכרטיס נשמר גלוי, והעובדה נמסרת אחר כך למודל בלי הגנה
           if (c.name === 'proposeFact' && (sensUsed || sensHist)) { denied.push('proposeFact'); logs.push(['toolDenied', 'proposeFact', '', 'sens']); res.push({ name: c.name, data: { error: 'not-available', note: 'אחרי שימוש במידע רגיש אי אפשר להציע לשמור עובדה בשיחה הזו. אפשר לשמור במסך "מידע על העסק".' } }); continue; }
+          if (c.name === 'getEmployeeNotes') sensUsed = true; // שלב F: תור שקרא הערות עובדים – נשמר מוצפן (sens), כמו מידע רגיש
           const data = await ST.runTool(c.name, c.args, ctx);
           const tgt = data._tgt, at0 = data._at; delete data._tgt; delete data._at;
           results.push({ name: c.name, data, src: ST.sourceOf(c.name, c.args, ctx, at0) });
@@ -566,7 +571,7 @@ async function secChat(request) {
     const v = ST.verify(pp.text, pool, text);
     srcs = v.srcs; nums = v.nums; unverified = v.unverified;
     // שלב 3: תשובה מתוך "מידע על העסק", מידע רגיש או יומן – המקור מוצג גם כשאין בה מספרים
-    for (const r of results) if (['getBusinessFacts', 'getSensitiveInfo', 'getCalendar'].includes(r.name) && !r.data.error && !srcs.some((x) => x.k === r.src.k && x.l === r.src.l)) srcs.push(r.src);
+    for (const r of results) if (['getBusinessFacts', 'getSensitiveInfo', 'getCalendar', 'getEmployeeNotes'].includes(r.name) && !r.data.error && !srcs.some((x) => x.k === r.src.k && x.l === r.src.l)) srcs.push(r.src);
     reply = v.text + (pp.notes.length ? '\n\n' + pp.notes.join('\n') : '');
     const usedFin = results.some((r) => ST.FIN_TOOLS.includes(r.name) || r.name === 'getPayroll');
     if (stale && usedFin) reply += '\n\nשימו לב: נתוני הכספים נכונים ל-' + ST.fmtAt(mirrorAt) + ' – לפני יותר מ-3 ימים. כדאי לפתוח את האפליקציה במכשיר שבו נשמרים הנתונים כדי לעדכן.';
@@ -612,7 +617,7 @@ async function secChat(request) {
   return { ok: true, id: aa.id, reply, mode, deep, src: am.src, cards: am.cards || [], nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
 }
 function argNote(a, name) {
-  if (name === 'getSensitiveInfo') return ''; // תיקון סבב 1: בלי שם העובד או טקסט מהמודל ביומן – רק שם הכלי
+  if (name === 'getSensitiveInfo' || name === 'getEmployeeNotes') return ''; // תיקון סבב 1: בלי שם העובד או טקסט מהמודל ביומן – רק שם הכלי
   if (!a || typeof a !== 'object') return '';
   // בלי תוכן רגיש: רק שמות שדות וערכים קצרים (חודש, טווח, שם ספק/עובד)
   return Object.entries(a).slice(0, 4).map(([k, v]) => String(k).slice(0, 16) + '=' + String(v).replace(CTRL, '').slice(0, 30)).join(',');

@@ -184,6 +184,11 @@ function secFin(o){o=o||{};
    /* שכר (beh emp) – רק כשמתג השכר של המנהל פעיל (o.pay), ומסומן [9]=1 כדי שהשרת יסנן גם הוא */const isEmp=t=>(cat(t.cat)||{}).beh==='emp';
    f.rec=L.filter(t=>(t.t==='exp'||t.t==='inc')&&!t.ec&&key(t)>=lo&&(o.pay||!isEmp(t))).sort((x,y)=>key(y)-key(x)).slice(0,80).map(t=>{const P=(t.pays||[]).filter(p=>p&&!p.crof);
     return [Math.round(tsOf(t)),t.date||'',t.t==='inc'?'i':'e',String((cat(t.cat)||{}).name||'').slice(0,40),String(subName(t)).slice(0,60),rnd(num(t.amt)),String(t.inv||'').slice(0,30),[...new Set(P.map(p=>p.m).filter(Boolean))].join(', ').slice(0,40),rnd(sum(P,p=>num(p.a))),isEmp(t)?1:0]})}
+  /* 19.11.2026 (שלב F): o.notes – הערות על עובדים (S.enotes, emp-notes.js), רק לשאלה בצ'אט ורק כשלמנהל יש הרשאה למידע רגיש (X.st.sens); לא למראה.
+     60 האחרונות (לפי תאריך ההערה ואז זמן הרישום), עד 500 תווים להערה: [שם העובד, תאריך, טקסט]. השרת מקבל אותן רק עם ההרשאה, והתור שקורא אותן נשמר מוצפן */
+  if(o.notes&&Array.isArray(S.enotes)){const nm=id=>{const s=typeof subById==='function'?subById(id):null;return s?String(s.name||'').slice(0,60).trim():''};
+   f.notes=S.enotes.filter(n=>n&&typeof n.t==='string'&&n.t.trim()&&nm(n.sub)).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||''))||String(b.at||'').localeCompare(String(a.at||''))).slice(0,60)
+    .map(n=>[nm(n.sub),/^\d{4}-\d{2}-\d{2}$/.test(String(n.d||''))?n.d:'',n.t.trim().slice(0,500)])}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
  finally{BRSEL=sB;P=sP}}
@@ -268,7 +273,7 @@ const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');i
 const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-model':'מודל ה-AI לא נמצא בשירות','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
 async function ask2(q,deep,via){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,via:via==='voice'?'voice':undefined,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';X.vdr=0;rerender();scrollEnd();
- try{const fin=secFin({pay:!!X.st.pay,rec:true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
+ try{const fin=secFin({pay:!!X.st.pay,rec:true,notes:X.st.sens===true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
