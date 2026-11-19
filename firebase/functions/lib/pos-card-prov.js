@@ -52,6 +52,18 @@ const cardcom = Object.freeze({
   async refund() { throw notReady(); },
 });
 
+// סבב 2 (ליקוי 5): מסוף מדומה רק באמולטור, בפרויקט דמה (demo-*, לא ניתן לפרסום) או בפרויקט הבדיקה. בייצור – אסור (חיוב בלי כסף)
+const TEST_PROJECTS = Object.freeze(['largpeami-test-f4691']);
+function projectId() {
+  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
+  try { return JSON.parse(process.env.FIREBASE_CONFIG || '{}').projectId || ''; } catch (e) { return ''; }
+}
+function mockOk() {
+  if (process.env.FUNCTIONS_EMULATOR === 'true') return true;
+  const p = projectId();
+  return TEST_PROJECTS.includes(p) || /^demo-/.test(p);
+}
+
 function prov(mode) {
   if (mode === 'mock') return mock;
   if (mode === 'cardcom') return cardcom;
@@ -73,4 +85,4 @@ function clean(r) {
   return o;
 }
 
-module.exports = { MODES, MOCK, mock, cardcom, prov, clean };
+module.exports = { MODES, MOCK, TEST_PROJECTS, mockOk, mock, cardcom, prov, clean };

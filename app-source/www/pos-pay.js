@@ -88,7 +88,7 @@ function open(ctx){const{E,fmt,cfg,M_NAME,parseAmt}=U();return new Promise(res=>
   if(!r){if(!sure(er))try{await fnc('posCardCancel',{id})}catch(e){} /* אולי נוצרה – מבטלים (אם אושרה ולא בוטלה – תופיע אצל המנהל) */
    return termEnd((er&&er.message||'אין חיבור לשרת')+' – החיוב לא בוצע.'+MANUAL_HINT)}
   const t0=Date.now();
-  while(r.st==='wait'){
+  while(r.st==='wait'||r.st==='unk'){ /* סבב 2: 'unk' (לא ודאי) – ממשיכים לשאול עד ה-timeout */
    if(S.term.stop||Date.now()-t0>TERM_TMO){const tmo=!S.term.stop;let c=null;try{c=await fnc('posCardCancel',{id})}catch(e){}
     if(c&&c.st==='ok'){r=c;break}
     if(c&&(c.st==='cancel'||c.st==='void'))return termEnd((tmo?'אין תשובה מהמסוף. ':'')+'החיוב בוטל.'+MANUAL_HINT);
@@ -98,6 +98,7 @@ function open(ctx){const{E,fmt,cfg,M_NAME,parseAmt}=U();return new Promise(res=>
    try{r=await fnc('posCardStatus',{id})}catch(e){/* תקלה רגעית – ממשיכים לשאול עד ה-timeout */}
   }
   if(r.st==='no')return termEnd('הכרטיס נדחה'+(r.msg?' ('+r.msg+')':'')+'.'+MANUAL_HINT);
+  if(r.st==='voiding')return termEnd('החיוב בתהליך ביטול.'+MANUAL_HINT);
   if(r.st!=='ok')return termEnd((r.st==='cancel'||r.st==='void'?'החיוב בוטל.':(r.msg||'שגיאה בחיוב במסוף')+'.')+MANUAL_HINT);
   const p={m:'card',amt:r.amt,last4:r.last4,appr:r.appr,ref:r.appr,src:'term',cardTx:r.id,tx:r.tx||'reg'};if(r.n>1)p.inst=r.n;if(r.brand)p.brand=r.brand;
   const a=PayCalc.add(gross,S.pays,S.debt,p,opt());

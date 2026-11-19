@@ -479,6 +479,7 @@ async function saleIn(request) {
     const list = paysIn(input.pays, gross, cfg, today);
     // גל 3: אשראי במסוף מחובר – החיוב אושר בשרת (poscard), באותו סכום, מאותה קופה, ועוד לא שייך למכירה. פרטי החיוב – מהרשומה, לא מהמכשיר
     const cards = {};
+    let cardMock = false;
     ctx.forEach((c, i) => { cards[c] = snaps[2 + pids.length + cpnCodes.length + gcodes.length + i]; });
     for (const p of list.filter((x) => x.cardTx)) {
       const x = cards[p.cardTx];
@@ -488,6 +489,8 @@ async function saleIn(request) {
       if (v.sale) throw pre('card-tx-used', 'עסקת האשראי כבר שייכת למכירה אחרת', { i: p.i });
       if (v.dev !== input.dev) throw pre('card-tx-dev', 'עסקת האשראי שייכת לקופה אחרת', { i: p.i });
       if (v.amt !== p.amt) throw pre('card-tx-amt', 'סכום התשלום שונה מסכום החיוב במסוף', { i: p.i });
+      // סבב 2 (ליקוי 5): חיוב של מסוף מדומה – רק בסביבת בדיקה; המכירה מסומנת test:true והתשלום mock:true
+      if (v.mock === true || v.mode === 'mock') { if (!require('./lib/pos-card-prov').mockOk()) throw pre('card-tx-mock', 'חיוב ממסוף מדומה לא נרשם בייצור', { i: p.i }); p.mock = true; cardMock = true; }
       Object.assign(p, { src: 'term', last4: v.last4, appr: v.appr, term: String(v.mode || ''), tx: v.tx || 'reg' });
       if ((v.n || 1) > 1) p.inst = v.n; else delete p.inst;
       if (v.brand) p.brand = v.brand; else delete p.brand;
@@ -561,7 +564,7 @@ async function saleIn(request) {
       retQty: co.lines.map(() => 0), retAmt: co.lines.map(() => 0), retByM: {}, soldAt: input.soldAt, at: now, off: input.off === true,
     }, cust ? { cust, custName: String((cd && (cd.bn || cd.name)) || '').slice(0, 80) } : {}, note ? { note } : {}, md ? { manDisc: md } : {},
     chk ? Object.assign({ chk: true }, chk) : {}, priceChk.length ? { chkPrice: priceChk.slice(0, 50) } : {}, warn.length ? { warn } : {}, ovr ? { discOvr: true } : {},
-    promoOff.length ? { promoOff } : {}, dc.used.length ? { aps: dc.used.map(apPub) } : {}, apLate ? { apLate: true } : {}, apCrit ? { apCrit: true } : {});
+    promoOff.length ? { promoOff } : {}, dc.used.length ? { aps: dc.used.map(apPub) } : {}, apLate ? { apLate: true } : {}, apCrit ? { apCrit: true } : {}, cardMock ? { test: true } : {});
     // ---- כתיבות ----
     B.flush();
     tx.create(db.doc('possale/' + id), doc);
