@@ -252,7 +252,9 @@ describe('ימות שלב 4: לקוחות משוב ← רשימת תפוצה ב�
     const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     for (const f of ['lib/yemot-client.js', 'yemot-fblist.js']) {
       const t = strip(fs.readFileSync(path.join(H.ROOT, 'functions', f), 'utf8'));
-      assert.ok(!/'NEW'|'REMOVE'|ClearTemplateEntries|UpdateTemplateEntr|DeleteTemplate|resetList/.test(t), f);
+      assert.ok(!/'NEW'|'REMOVE'|ClearTemplateEntries|UpdateTemplateEntries|DeleteTemplate|resetList/.test(t), f);
+      // (משימה 2026-11-19) UpdateTemplateEntry (יחיד) – רק בעטיפה setEntryBlocked בלקוח (חסימה/ביטול חסימה לפי rowid), ולא ישירות ב-yemot-fblist.js
+      assert.equal((t.match(/UpdateTemplateEntry/g) || []).length, f === 'lib/yemot-client.js' ? 1 : 0, f);
     }
     assert.match(fs.readFileSync(path.join(H.ROOT, 'functions', 'lib/yemot-client.js'), 'utf8'), /updateType: 'UPDATE'/);
   });

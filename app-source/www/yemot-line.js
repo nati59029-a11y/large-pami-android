@@ -96,6 +96,9 @@ ACT.ylFb=()=>{if(window.yfOpen)window.yfOpen()};
 // כניסת מנהל ל"שליחת צינתוקים" (yemot-fblist.js, window.ytOpen; משימה 2026-11-18). בלי הקובץ – לא מוצג.
 const tzOpt=()=>`<button class="opt" data-a="ylTz" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">שליחת צינתוקים<small>ללקוחות דפי המשוב או לכל הלקוחות · מנהל</small></span>${ico('chev')}</button>`;
 ACT.ylTz=()=>{if(window.ytOpen)window.ytOpen()};
+// כניסת מנהל ל"מספרים בקו" (yemot-fblist.js, window.ynOpen; משימה 2026-11-19). בלי הקובץ – לא מוצג.
+const numOpt=()=>`<button class="opt" data-a="ylNum" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">מספרים בקו<small>כמה נרשמו, חיפוש מספר, וחסימה בלקוחות משוב</small></span>${ico('chev')}</button>`;
+ACT.ylNum=()=>{if(window.ynOpen)window.ynOpen()};
 // ---------- המסכים ----------
 V.yl=a=>{a=a||'';
  if(Y.rec&&Y.rec.on&&a!==Y.rec.act)recDiscard();
@@ -107,9 +110,9 @@ function vMain(){const m=isA(),ly=LY();
  ${opt('1',`שלוחה ${xn('recipes')} · מתכונים`,'כתיבה או סריקה מצילום · החדש מושמע ראשון')}
  ${opt('2',`שלוחה ${xn('promos')} · מבצעים`,'בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
  ${opt('3',`שלוחה ${xn('updates')} · עדכונים`,'הקלדה או הקלטה · החדש מושמע ראשון')}
- ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('cfg','הגדרות הקו','מילון הגייה, לקוחות משוב בימות, כל התוכן בשלוחה אחת')}${window.ytOpen?tzOpt():''}`:''}`}}
+ ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('cfg','הגדרות הקו','מילון הגייה, לקוחות משוב בימות, מספרים בקו, כל התוכן בשלוחה אחת')}${window.ytOpen?tzOpt():''}`:''}`}}
 // "הגדרות הקו" (מנהל, משימה 2026-11-18): שלושת הכרטיסים שהיו במסך הראשי – בלי שינוי בהתנהגות שלהם
-function vCfg(){return{t:'הגדרות הקו',s:'מנהל',h:`${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${Y.st?layoutCard():'<p class="note">טוען…</p>'}`}}
+function vCfg(){return{t:'הגדרות הקו',s:'מנהל',h:`${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${window.ynOpen?numOpt():''}${Y.st?layoutCard():'<p class="note">טוען…</p>'}`}}
 // כרטיס מנהל: "כל התוכן בשלוחה אחת" (setLineLayout). מוצג רק אחרי שהמצב נטען מהשרת, כדי לא להציג מצב שגוי.
 function layoutCard(){const ly=LY();
  return`<div class="card" id="ylLayout" style="margin-top:12px"><b>כל התוכן בשלוחה אחת</b><p class="note" style="margin:4px 0 10px">${ly.single?`מופעל: מבצעים, מתכונים, עדכונים ושעות – כולם עולים לשלוחה ${esc(ly.ext)}.`:'כבוי: כל סוג תוכן עולה לשלוחה משלו (1 עד 4).'} הודעות שכבר בקו נשארות במקומן עד שהן יורדות. ההחלפה לא מוחקת כלום, ואפשר לחזור בכל רגע.</p>
