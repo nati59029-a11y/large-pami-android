@@ -10,7 +10,7 @@ const out = {}; let fail = 0;
 const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
 const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cxSales'].map((k) => [k, true])); // cxSales – תוספת "מכירות כספית" (19.11.2026)
 const T0 = Date.UTC(2026, 10, 18, 1, 10);
-const RUNS = [{ id: 'r2', at: T0, end: T0 + 600e3, st: 'fail', manual: false, days: ['2026-11-17'], err: { code: 'selector-miss', msg: 'x', step: 'catalog' }, imp: null },
+const RUNS = [{ id: 'r2', at: T0, end: T0 + 600e3, st: 'fail', manual: false, days: ['2026-11-17'], err: { code: 'selector-miss', msg: 'עדכון מחירים: התור ריק אחרי בחירת הקובץ', step: 'queue' }, imp: null },
   { id: 'r1', at: T0 - 864e5, st: 'ok', manual: true, days: ['2026-11-15', '2026-11-16'], err: null, imp: { price: { n: 3, ok: true, text: '', id: 25520, status: 'בוצע', errors: 0, loaded: 3 } } }];
 
 async function scenario(browser, www, sa, shots) {
@@ -30,7 +30,7 @@ async function scenario(browser, www, sa, shots) {
     let R = { ok: true };
     if (n === 'cxCfg') R = { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa };
     if (n === 'cxBotTok' && d.op === 'upd') { if (st.oldSrv) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'פעולה לא מוכרת', details: { reason: 'bad-op' } } }) }); st.ureq = { id: 'qupd0001', at: Date.now(), took: null, res: null }; R = { ok: true, req: { id: 'qupd0001', at: st.ureq.at } }; }
-    if (n === 'cxBotTok' && d.op === 'info') R = { now: Date.now(), reqMs: 600000, ureq: st.ureq || null, updVer: '0.1.10', tp: st.tp || null, dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'x', step: 'catalog', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, li: st.dev ? { kind: 'price', at: T0, id: 25521, status: 'בוצע', errors: 0, loaded: 1 } : null, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
+    if (n === 'cxBotTok' && d.op === 'info') R = { now: Date.now(), reqMs: 600000, ureq: st.ureq || null, updVer: '0.1.10', tp: st.tp || null, dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'עדכון מחירים: התור ריק אחרי בחירת הקובץ', step: 'queue', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, li: st.dev ? { kind: 'price', at: T0, id: 25521, status: 'בוצע', errors: 0, loaded: 1 } : null, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
     if (n === 'cxBotTok' && d.op === 'new') { st.dev = { id: 'ab12cd34', at: T0, last: T0 + 60e3, ver: '0.1.0', ua: '', upd: { at: T0, ok: false, ver: '0.1.0', err: 'bad-hash', fails: 2, rx: T0 } }; R = { token: 'biz-o.' + 'A'.repeat(43), id: 'ab12cd34' }; }
     if (n === 'cxBotTok' && d.op === 'revoke') { st.dev = null; R = { ok: true }; }
     if (n === 'cxBotDisc') R = { id: 'd1', at: T0, size: 30, data: JSON.stringify({ pages: [{ p: '#/catalogs' }] }) };
@@ -95,7 +95,7 @@ async function scenario(browser, www, sa, shots) {
   check(P + '3ב דוח היכרות – ' + (sa ? 'מוצג למנהל־על' : 'מוסתר ממנהל רגיל'), sa === /דוח היכרות/.test(v.text));
   await page.click('[data-a=cxBotRuns]'); await H.settle(page, 400);
   v = await q(); await shot((sa ? 'sa-' : '') + 'bot-4-runs');
-  check(P + '4 הריצות האחרונות: אוטומטי/ידני, ימים, תקלה, טעינת מחירים', /ידני – "סנכרן עכשיו"/.test(v.text) && /אוטומטי/.test(v.text) && /15\/11, 16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /מחירים לכספית: 3 \(טעינה 25520: נטענו 3, שגויים 0\)/.test(v.text) && fine(v), v.small);
+  check(P + '4 הריצות האחרונות: אוטומטי/ידני, ימים, תקלה, טעינת מחירים', /ידני – "סנכרן עכשיו"/.test(v.text) && /אוטומטי/.test(v.text) && /15\/11, 16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /פירוט: עדכון מחירים: התור ריק אחרי בחירת הקובץ \(צעד queue\)/.test(v.text) && /מחירים לכספית: 3 \(טעינה 25520: נטענו 3, שגויים 0\)/.test(v.text) && fine(v), v.small);
   await page.evaluate(() => closeDlg()); await H.settle(page, 300);
   await page.fill('form[data-f=cxBotMaxF] input[name=n]', '5');
   await page.click('form[data-f=cxBotMaxF] button'); await H.settle(page, 400);
