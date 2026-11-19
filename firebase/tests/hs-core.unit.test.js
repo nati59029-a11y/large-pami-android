@@ -15,7 +15,7 @@ const it_ = (id, o) => Object.assign({ id, n: 'מוצר ' + id, nk: 'מוצר ' 
 
 describe('חוסרים – hs-core', () => {
   it('נטען בדפדפן מדומה (window.HsCore) עם כל הפונקציות', () => {
-    for (const k of ['build', 'forSup', 'groups', 'suggest', 'xIndex', 'waText', 'custText', 'intl', 'hAdd']) assert.equal(typeof C[k], 'function', k);
+    for (const k of ['build', 'forSup', 'groups', 'suggest', 'xIndex', 'prevIndex', 'picks', 'waText', 'custText', 'intl', 'hAdd']) assert.equal(typeof C[k], 'function', k);
   });
 
   it('build: שם ריק או רווחים נדחה; שם ארוך מ-80 נדחה; 80 מותר', () => {
@@ -234,5 +234,23 @@ describe('חוסרים – שלב 2: matchInv', () => {
     assert.equal(C.unpartQ({ st: 'open', q: 5, h: [e] }), null);
     assert.equal(C.unpartQ({ st: 'open', q: 6, h: [e, { k: 'unp' }] }), null);
     assert.equal(C.unpartQ({ st: 'arr', q: 6, h: [e] }), null);
+  });
+  it('picks: מוצרים מתאימים – המלאי קודם, אחריו חוסרים קודמים, בלי כפילות, עד 6', () => {
+    const prod = PM.index([{ id: 'p1', name: 'קוטג 5%', sup: 'תנובה' }, { id: 'p2', name: 'קוטג 9%' }, { id: 'p3', name: 'חומוס אחלה' }]);
+    const items = [it_('a', { n: 'קוטג 5%', sups: ['s1'], supN: ['תנובה'], t: 2 }), it_('b', { n: 'קוטג עיזים', sups: ['s2'], supN: ['שטראוס'], t: 1, st: 'arr' }),
+      it_('c', { n: 'קוטג גדול', st: 'del' }), it_('d', { n: 'קוטג עיזים', sups: ['s3'], supN: ['אסם'], t: 5 }), it_('e', { n: 'שקיות', gen: true, sups: ['s1'] })];
+    const prev = C.prevIndex(items, PM, '');
+    const L = J(C.picks('קוטג', { prod, prev }, PM));
+    assert.deepEqual(L.map((x) => [x.n, x.src]), [['קוטג 5%', 'prod'], ['קוטג 9%', 'prod'], ['קוטג עיזים', 'prev']]);
+    assert.deepEqual(L[0].sups, [{ name: 'תנובה' }]); assert.deepEqual(L[1].sups, []);
+    assert.deepEqual(L[2].sups, [{ id: 's3', name: 'אסם' }], 'החוסר החדש ביותר עם אותו שם');
+    assert.ok(!L.some((x) => /גדול/.test(x.n)), 'נמחק – לא מוצע');
+    const g = J(C.picks('שקיות', { prev }, PM)); assert.deepEqual(g, [], 'הצעה יחידה זהה לשם – אין רשימה');
+    assert.deepEqual(J(C.picks('שקית', { prev }, PM)).map((x) => [x.n, x.sups.length]), [['שקיות', 0]], 'פריט כללי – בלי ספק');
+    assert.deepEqual(J(C.picks('ק', { prod, prev }, PM)), [], 'פחות מ-2 תווים');
+    assert.deepEqual(J(C.picks('מברג', { prod, prev }, PM)), []);
+    assert.equal(C.prevIndex(items, PM, 'd') && J(C.picks('קוטג עיזים', { prev: C.prevIndex(items, PM, 'd') }, PM)).length, 0, 'בלי החוסר שבעריכה – רק b, זהה לשם');
+    const many = PM.index(Array.from({ length: 20 }, (_, i) => ({ id: 'q' + i, name: 'חלב ' + i })));
+    assert.equal(C.picks('חלב', { prod: many }, PM).length, 6);
   });
 });
