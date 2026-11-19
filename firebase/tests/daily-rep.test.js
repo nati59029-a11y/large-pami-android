@@ -377,4 +377,37 @@ describe('drRemind', () => {
     await run(Date.UTC(2026, 10, 23, 15, 59)); assert.equal(PUSH.length, 2);
     await run(Date.UTC(2026, 10, 23, 16, 0)); assert.equal(PUSH.length, 4);
   });
+  // "סיכום יום" (19.11.2026): לפי משמרת ונוכחות, ותזכורת שנייה אחרי שעה (drcfg/rem_<key>.u2)
+  it('סיכום יום: משמרת + יציאה בקופה – תזכורת אחרי היציאה, שנייה אחרי שעה, לא יותר', async () => {
+    await put(`b/${A}`, { features: { tasks: true, dailyRep: true, pos: true } }, true);
+    await put(`b/${A}/shf/s1`, { u: E3, nm: 'רון', fx: false, d: '2026-11-16', s: '07:00', e: '15:00' });
+    await put(`b/${A}/posclock/${E3}_1`, { who: E3, name: 'רון', in: IL(2026, 11, 16, 7, 0), out: IL(2026, 11, 16, 14, 40), day: '20261116' });
+    await call('drSubmit', E1, { txt: 'א' }, MON());
+    PUSH = [];
+    await run(IL(2026, 11, 16, 14, 30)); assert.equal(PUSH.length, 0, 'לפני היציאה');
+    await run(IL(2026, 11, 16, 14, 45));
+    assert.deepEqual(PUSH.map((p) => [p.uid, p.msg.title, p.msg.id]), [[E3, 'סיכום יום', E3 + '_20261116']], 'אחרי היציאה, לא ב-18:00');
+    await run(IL(2026, 11, 16, 15, 0)); assert.equal(PUSH.length, 1, 'אין כפילות');
+    await run(IL(2026, 11, 16, 15, 45));
+    assert.deepEqual(PUSH.slice(1).map((p) => [p.uid, p.msg.title]), [[E3, 'סיכום יום – תזכורת']]);
+    await run(IL(2026, 11, 16, 18, 0)); await run(IL(2026, 11, 16, 20, 0));
+    assert.equal(PUSH.length, 2, 'לא יותר משתיים');
+    const rem = await get(`b/${A}/drcfg/rem_20261116`);
+    assert.ok(rem.u[E3] && rem.u2[E3]);
+  });
+  it('סיכום יום: שליחה בין הראשונה לשנייה מבטלת את השנייה', async () => {
+    await run(IL(2026, 11, 16, 18, 0));
+    assert.deepEqual(PUSH.map((p) => p.uid).sort(), [E1, E3]);
+    await call('drSubmit', E3, { txt: 'ב' }, IL(2026, 11, 16, 18, 30));
+    PUSH = [];
+    await run(IL(2026, 11, 16, 19, 0));
+    assert.deepEqual(PUSH.map((p) => [p.uid, p.msg.title]), [[E1, 'סיכום יום – תזכורת']]);
+  });
+  it('סיכום יום: מסמך rem_ ישן (רק u) – אין ראשונה נוספת, השנייה שעה אחרי', async () => {
+    await put(`b/${A}/drcfg/rem_20261116`, { day: '2026-11-16', u: { [E3]: IL(2026, 11, 16, 18, 0) } });
+    await run(IL(2026, 11, 16, 18, 15));
+    assert.deepEqual(PUSH.map((p) => [p.uid, p.msg.title]), [[E1, 'סיכום יום']]);
+    await run(IL(2026, 11, 16, 19, 0));
+    assert.deepEqual(PUSH.slice(1).map((p) => [p.uid, p.msg.title]), [[E3, 'סיכום יום – תזכורת']]);
+  });
 });
