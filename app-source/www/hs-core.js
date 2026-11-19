@@ -110,6 +110,34 @@ function suggest(name, ctx, PM) {
   return [...R.values()].sort((a, b) => b.s - a.s || String(a.name).localeCompare(String(b.name), 'he')).slice(0, 5);
 }
 
+// ---------- מוצרים מתאימים בזמן הקלדת שם (20.11.2026) ----------
+// prevIndex(items, PM, skipId) → אינדקס של שמות חוסרים קודמים (פתוחים / הגיעו; לא נמחקו, לא skipId). שם אחד לכל מפתח – החדש ביותר.
+//   כל רשומה: { id, name, sups: [{ id, name }] } (ספקי החוסר, מ-sups/supN; פריט כללי – בלי ספקים)
+function prevIndex(items, PM, skipId) {
+  if (!PM) return null;
+  const L = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.n === 'string' && clean(x.n) && x.st !== 'del' && x.id !== skipId && ID.test(String(x.id || '')))
+    .sort((a, b) => (+b.ut || +b.t || 0) - (+a.ut || +a.t || 0));
+  const seen = new Set(), P = [];
+  L.forEach((x) => { const k = keyOf(x.n, PM); if (!k || seen.has(k)) return; seen.add(k);
+    const sups = x.gen || !Array.isArray(x.sups) ? [] : x.sups.map((id, i) => ({ id, name: clean((x.supN || [])[i], 60) })).filter((s) => typeof s.id === 'string' && ID.test(s.id));
+    P.push({ id: 'h' + P.length, name: clean(x.n, MAXN), sups }); });
+  return P.length ? PM.index(P) : null;
+}
+// picks(name, { prod: אינדקס המלאי (PM.index), prev: prevIndex }, PM) → עד 6 הצעות [{ n, k, src: 'prod'|'prev', sups: [{ id?, name }], s }].
+// המלאי קודם, אחריו חוסרים קודמים; בלי כפילויות לפי PM.key. סף PICK_MIN (0.6): רוב המילים שהוקלדו צריכות להתאים.
+// הצעה יחידה שזהה בדיוק לשם שהוקלד – אין רשימה (אין מה לבחור).
+const PICK_MIN = 0.6, PICK_MAX = 6;
+function picks(name, ctx, PM) {
+  const n = clean(name, 200); if (n.length < 2 || !PM) return [];
+  ctx = ctx || {};
+  const out = [], seen = new Set();
+  const add = (nm, src, sups, s) => { const t = clean(nm, MAXN), k = keyOf(t, PM); if (!t || !k || seen.has(k) || out.length >= PICK_MAX) return; seen.add(k); out.push({ n: t, k, src, sups, s }); };
+  try { if (ctx.prod) PM.search(ctx.prod, n, { limit: PICK_MAX * 2, min: PICK_MIN }).forEach((h) => { const sp = h.p && typeof h.p.sup === 'string' ? clean(h.p.sup, 60) : ''; add(h.p && h.p.name, 'prod', sp ? [{ name: sp }] : [], h.s); }); } catch (e) { /* */ }
+  try { if (ctx.prev) PM.search(ctx.prev, n, { limit: PICK_MAX * 2, min: PICK_MIN }).forEach((h) => add(h.p.name, 'prev', (h.p.sups || []).slice(0, MAXS), h.s)); } catch (e) { /* */ }
+  if (out.length === 1 && out[0].k === keyOf(n, PM)) return [];
+  return out;
+}
+
 // הודעת וואטסאפ לספק: הפריטים שלו, הכלליים ושורות "להזמין מספקים" – שם וכמות בלבד (בלי פרטי לקוחות)
 function waText(g, biz) {
   const L = [];
@@ -223,6 +251,6 @@ function unpartQ(x) {
   return x && x.st === 'open' && e && e.k === 'part' && typeof e.q0 === 'number' && e.q === x.q ? e.q0 : null;
 }
 
-const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ };
+const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, prevIndex, picks, PICK_MIN, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.HsCore = api;
 })(typeof self !== 'undefined' ? self : this);
