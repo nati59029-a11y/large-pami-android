@@ -2,7 +2,8 @@
    window.LpPosHw:
      available()                         -> Promise<bool>  יש תוסף LpPos (ב-APK ישן או בדפדפן: false)
      printer() / setPrinter(p)           הגדרת המדפסת של המכשיר הזה (localStorage 'lp-pos-hw', לא נשמר בענן ולא בנתוני העסק)
-        p: {type:'usb'|'bt'|'net'|'mock', width:384|576, drawerPin:2|5, host,port | address | deviceName,vendorId,productId}
+        p: {type:'usb'|'bt'|'net'|'mock'|'win'|'serial', width:384|576, drawerPin:2|5, host,port | address | deviceName,vendorId,productId | baud,usbVendorId,usbProductId}
+        'win' ו-'serial' – רק במחשב (דפדפן Chrome), דרך pos-hw-web.js (window.LpPosWeb). באנדרואיד – התוסף LpPos בלבד, כמו קודם.
      listDevices()                       -> {usb:[], bt:{state,devices:[]}, displays:[], keyboards:[]}
      requestUsb(dev) / requestBt()       הרשאות (USB: אנדרואיד שואל לכל מכשיר; בלוטות': רק באנדרואיד 12 ומעלה)
      print(receipt,{preview}) / printTest()   קבלה = {width?, lines:[...], cut, drawer} – ראו LpPosRender.java. העברית מצוירת כתמונה בטלפון.
@@ -20,7 +21,10 @@ const KEY='lp-pos-hw',WIDTHS=[384,576];
 const L={};
 function on(n,cb){(L[n]=L[n]||[]).push(cb);return()=>{L[n]=(L[n]||[]).filter(f=>f!==cb)}}
 function emit(n,d){(L[n]||[]).slice().forEach(f=>{try{f(d)}catch(e){}})}
-function plug(){try{const C=root.Capacitor;return C&&C.Plugins&&C.Plugins.LpPos||null}catch(e){return null}}
+/* התוסף המקורי (אנדרואיד). רק כשאין אותו ולא רצים בתוך אפליקציה מקורית – "התוסף" של הדפדפן (pos-hw-web.js) */
+function plug(){try{const C=root.Capacitor,N=C&&C.Plugins&&C.Plugins.LpPos;if(N)return N;
+ if(C&&typeof C.isNativePlatform==='function'&&C.isNativePlatform())return null;return root.LpPosWeb&&root.LpPosWeb.web===true?root.LpPosWeb:null}catch(e){return null}}
+function web(){const P=plug();return!!(P&&P.web===true)}
 let avail=null,nativeSubs=false;
 function available(){if(avail)return avail;const P=plug();if(!P||typeof P.isAvailable!=='function')return Promise.resolve(false);
  avail=Promise.resolve().then(()=>P.isAvailable()).then(r=>!!(r&&r.ok),()=>false);avail.then(ok=>{if(ok)subNative()});return avail}
@@ -32,7 +36,8 @@ function need(){const P=plug();if(!P)throw new Error('אין חיבור לחומ
 function cfg(){try{const c=JSON.parse(root.localStorage.getItem(KEY)||'{}');return c&&typeof c==='object'?c:{}}catch(e){return{}}}
 function saveCfg(c){try{root.localStorage.setItem(KEY,JSON.stringify(c))}catch(e){}}
 const HOST=/^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$|^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
-const BTADDR=/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/i;
+const BTADDR=/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/i,BAUDS=[9600,19200,38400,115200];
+const u16=v=>v!=null&&v!==''&&+v>=0&&+v<=65535&&+v%1===0;
 /* מחזיר הגדרה נקייה (רק השדות המותרים) או null */
 function cleanPrinter(p){if(!p||typeof p!=='object')return null;
  const o={type:p.type,width:WIDTHS.includes(+p.width)?+p.width:576,drawerPin:+p.drawerPin===5?5:2,name:String(p.name||'').slice(0,60)};
@@ -40,16 +45,19 @@ function cleanPrinter(p){if(!p||typeof p!=='object')return null;
  else if(p.type==='bt'){if(!BTADDR.test(String(p.address||'')))return null;o.address=String(p.address).toUpperCase()}
  else if(p.type==='usb'){if(p.deviceName!=null&&!/^\/dev\/bus\/usb\/\d{3}\/\d{3}$/.test(String(p.deviceName)))return null;
   if(p.deviceName)o.deviceName=String(p.deviceName);if(p.vendorId>=0)o.vendorId=+p.vendorId|0;if(p.productId>=0)o.productId=+p.productId|0}
- else if(p.type!=='mock')return null;
+ else if(p.type==='serial'){const b=p.baud==null||p.baud===''?9600:+p.baud;if(!BAUDS.includes(b))return null;o.baud=b;
+  if(u16(p.usbVendorId))o.usbVendorId=+p.usbVendorId;if(u16(p.usbProductId))o.usbProductId=+p.usbProductId}
+ else if(p.type!=='mock'&&p.type!=='win')return null;
  return o}
 function printer(){return cleanPrinter(cfg().printer)}
 function setPrinter(p){const c=cfg();if(p==null){delete c.printer}else{const x=cleanPrinter(p);if(!x)throw new Error('הגדרת מדפסת לא תקינה');c.printer=x}
  saveCfg(c);const P=plug();if(P&&P.disconnect)P.disconnect().catch(()=>{});emit('change',{printer:printer()})}
 function pDesc(p){if(!p)return'לא נבחרה מדפסת';const w=p.width===384?'58 מ"מ':'80 מ"מ';
- return(p.type==='net'?'רשת '+p.host+':'+p.port:p.type==='bt'?'בלוטות\' '+(p.name||p.address):p.type==='usb'?'USB '+(p.name||''):'מדפסת מדומה (בלי חומרה)')+' · '+w}
+ return(p.type==='net'?'רשת '+p.host+':'+p.port:p.type==='bt'?'בלוטות\' '+(p.name||p.address):p.type==='usb'?'USB '+(p.name||''):p.type==='win'?'מדפסת Windows (מנהל התקן)':p.type==='serial'?'כבל Serial/USB · '+p.baud:'מדפסת מדומה (בלי חומרה)')+' · '+w}
 
 /* ---------- מכשירים והרשאות ---------- */
 async function listDevices(){return need().listDevices()}
+async function requestSerial(){const P=need();if(typeof P.requestSerial!=='function')throw new Error('אין חיבור Serial באפליקציה הזו');return P.requestSerial()}
 async function requestUsb(d){d=d||{};return need().requestUsbPermission({deviceName:d.deviceName,vendorId:d.vendorId,productId:d.productId})}
 async function requestBt(){return need().requestBtPermission()}
 
@@ -57,7 +65,9 @@ async function requestBt(){return need().requestBtPermission()}
 async function print(receipt,o){o=o||{};const P=need(),p=o.printer!==undefined?o.printer:printer();
  if(!p&&!o.previewOnly)throw new Error('לא נבחרה מדפסת');
  return P.print({printer:o.previewOnly?{type:'none',width:(p&&p.width)||576}:p,receipt,preview:!!o.preview})}
-async function openDrawer(){const P=need(),p=printer();if(!p)throw new Error('לא נבחרה מדפסת');return P.openDrawer({printer:p,pin:p.drawerPin})}
+/* o.reason – רק לדפדפן (מדפסת Windows: אחרי קבלה של מזומן/החזר לא מדפיסים פתק נוסף). באנדרואיד הקריאה לתוסף לא השתנתה */
+async function openDrawer(o){const P=need(),p=printer();if(!p)throw new Error('לא נבחרה מדפסת');const a={printer:p,pin:p.drawerPin};
+ if(P.web===true&&o&&typeof o.reason==='string')a.reason=o.reason;return P.openDrawer(a)}
 function nowStr(d){d=d||new Date();const z=n=>String(n).padStart(2,'0');return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear()+' '+z(d.getHours())+':'+z(d.getMinutes())}
 /* קבלת בדיקה: עברית, עמודות, לוגו, ברקוד ו-QR. logo = data:image/png;base64,... (לא חובה) */
 function testReceipt(o){o=o||{};const lines=[];
@@ -115,8 +125,9 @@ function cartHtml(c){c=c||{};const rows=(Array.isArray(c.lines)?c.lines:[]).slic
  '.list{flex:1;overflow:hidden}.tot{display:flex;justify-content:space-between;padding:2vh 24px;font-size:8vh;font-weight:bold;background:#f2f2f2}.tot b{direction:ltr}.msg{padding:1vh 24px 2vh;font-size:4vh;text-align:center}'+
  '</style></head><body><h1>'+esc(c.title||'ברוכים הבאים')+'</h1><div class=list><table>'+rows+'</table></div>'+
  (c.total!=null?'<div class=tot><span>סה"כ</span><b>'+money(c.total)+'</b></div>':'')+(c.msg?'<div class=msg>'+esc(c.msg)+'</div>':'')+'</body></html>'}
+/* show בלי await לפני הקריאה לתוסף: בדפדפן החלון השני נפתח רק מתוך לחיצה של המשתמש */
 const display={info:async()=>{const P=plug();if(!P)return{available:false,displays:[],showing:false};return P.displayInfo()},
- show:async html=>{const P=plug();if(!P)return{shown:false};return P.displayShow({html:String(html||'')})},
+ show:async html=>{const P=plug();if(!P)return{shown:false};try{return await P.displayShow({html:String(html||'')})}catch(e){if(P.web===true)return{shown:false};throw e}},
  showCart:async c=>display.show(cartHtml(c)),
  clear:async()=>{const P=plug();if(P)return P.displayClear()}};
 
@@ -129,6 +140,7 @@ function printerState(p,st){
  if(st.coverOpen)return{state:'err',msg:'המכסה פתוח'};
  if(st.online===false)return{state:'err',msg:'המדפסת לא מוכנה (שגיאה או לא מקוונת)'};
  if(st.paperLow)return{state:'warn',msg:'הנייר עומד להיגמר'};
+ if(st.via==='win')return{state:'ok',msg:'מוגדרת – ההדפסה עוברת דרך Windows (אין דיווח אם הנייר יצא)'};
  if(!st.answered)return{state:'ok',msg:'מחוברת (המדפסת לא מדווחת על נייר ומכסה)'};
  return{state:'ok',msg:'מחוברת ומוכנה'}}
 async function status(){const P=plug(),p=printer(),out={native:!!P};
@@ -160,11 +172,19 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
  async function check(){const s=box.querySelector('#phSum');s.textContent='בודק…';try{const r=await status();s.innerHTML=row('מדפסת קבלות',r.printer)+row('מגירת כסף',r.drawer)+row('סורק ברקודים',r.scanner)+row('מסך לקוח',r.display)}catch(e){s.textContent='הבדיקה נכשלה: '+(e&&e.message||e)}}
  function msg(t){box.querySelector('#phMsg').textContent=t}
  async function act(f){if(busy)return;busy=true;try{await f()}catch(e){msg('שגיאה: '+(e&&e.message||e))}finally{busy=false}}
- function render(){const p=printer();
+ function render(){const p=printer(),W=web();
   box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:8px 0">בדיקת ציוד קופה</h2><button data-k=close '+btn+'>סגירה</button></div>'+
   '<div id=phSum aria-live=polite></div><button data-k=check '+btn+'>בדיקה מחדש</button>'+
   '<h3>מדפסת קבלות</h3><div>'+esc(pDesc(p))+'</div>'+
-  '<button data-k=find '+btn+'>חיפוש מדפסות (USB ובלוטות\')</button><button data-k=net '+btn+'>מדפסת רשת (IP)</button><button data-k=mock '+btn+'>מדפסת מדומה</button>'+
+  (W?'<button data-k=win '+btn+'>'+(p&&p.type==='win'?'✓ ':'')+'מדפסת Windows (מנהל התקן)</button><button data-k=serial '+btn+'>'+(p&&p.type==='serial'?'✓ ':'')+'מדפסת בכבל Serial/USB (Chrome)</button>'
+   :'<button data-k=find '+btn+'>חיפוש מדפסות (USB ובלוטות\')</button><button data-k=net '+btn+'>מדפסת רשת (IP)</button>')+'<button data-k=mock '+btn+'>מדפסת מדומה</button>'+
+  (W&&p&&p.type==='serial'?'<div>מהירות (baud): '+BAUDS.map(b=>'<button data-k=baud data-b='+b+' '+btn+'>'+(p.baud===b?'✓ ':'')+b+'</button>').join('')+'</div>':'')+
+  (W?'<details style="margin:6px 0"><summary>הוראות למחשב בחנות</summary><div style="font-size:14px;line-height:1.6">'+
+   '<b>מדפסת Windows:</b> התקינו את מנהל ההתקן של המדפסת וקבעו אותה כמדפסת ברירת המחדל. כדי שהקבלה תודפס בלי חלון הדפסה – צרו קיצור דרך ל-Chrome '+
+   'והוסיפו בסוף שדה "יעד": <code dir=ltr>--kiosk-printing</code> (סגרו את כל חלונות Chrome ופתחו מהקיצור). '+
+   'מגירה: בהגדרות מנהל ההתקן (העדפות הדפסה ← מגירה / Cash Drawer) בחרו "פתח מגירה בתחילת מסמך". אין דיווח אם הנייר יצא – בדקו בעין.<br>'+
+   '<b>כבל Serial/USB:</b> לחצו על הכפתור ובחרו את יציאת ה-COM של המדפסת; בחרו מהירות זהה להגדרת המדפסת (בדרך כלל 9600 או 115200). '+
+   'הדפדפן זוכר את היציאה. אם מנהל ההתקן של Windows תופס את המדפסת – השתמשו ב"מדפסת Windows".</div></details>':'')+
   (p?'<div>רוחב נייר: <button data-k=w58 '+btn+'>'+(p.width===384?'✓ ':'')+'58 מ"מ</button><button data-k=w80 '+btn+'>'+(p.width===576?'✓ ':'')+'80 מ"מ</button></div>'+
    '<div>מגירה: <button data-k=pin2 '+btn+'>'+(p.drawerPin===2?'✓ ':'')+'פין 2</button><button data-k=pin5 '+btn+'>'+(p.drawerPin===5?'✓ ':'')+'פין 5</button></div>'+
    '<button data-k=test '+btn+'>הדפסת קבלת בדיקה</button><button data-k=drawer '+btn+'>פתיחת מגירה</button><button data-k=forget '+btn+'>ביטול המדפסת</button>':'')+
@@ -189,14 +209,19 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
   if(k==='bt')return act(async()=>{const x=box._bt[+b.dataset.i];if(!x)return;setPrinter({type:'bt',address:x.address,name:x.name,width:p?p.width:576});render();msg('נבחרה מדפסת בלוטות\'')});
   if(k==='net')return act(async()=>{const h=(root.prompt('כתובת IP של המדפסת (לדוגמה 192.168.1.50):',p&&p.host||'')||'').trim();if(!h)return;
    const port=(root.prompt('פורט (בדרך כלל 9100):',String(p&&p.port||9100))||'9100').trim();setPrinter({type:'net',host:h,port:+port,width:p?p.width:576});render();msg('נבחרה מדפסת רשת')});
+  if(k==='win')return act(async()=>{setPrinter({type:'win',width:p?p.width:576,drawerPin:p?p.drawerPin:2});render();msg('נבחרה מדפסת Windows – הקבלה נשלחת למדפסת ברירת המחדל')});
+  if(k==='serial')return act(async()=>{const r=await requestSerial();
+   setPrinter({type:'serial',baud:p&&p.type==='serial'?p.baud:9600,usbVendorId:r&&r.usbVendorId,usbProductId:r&&r.usbProductId,width:p?p.width:576,drawerPin:p?p.drawerPin:2});render();msg('נבחרה מדפסת בכבל Serial/USB')});
+  if(k==='baud'&&p&&p.type==='serial')return act(async()=>{setPrinter(Object.assign({},p,{baud:+b.dataset.b}));render();msg('מהירות: '+b.dataset.b)});
   if(k==='mock')return act(async()=>{setPrinter({type:'mock',width:p?p.width:576});render();msg('נבחרה מדפסת מדומה – ההדפסה מוצגת כתמונה בלבד')});
   if(k==='forget')return act(async()=>{setPrinter(null);render()});
   if(/^w(58|80)$/.test(k)&&p)return act(async()=>{setPrinter(Object.assign({},p,{width:k==='w58'?384:576}));render()});
   if(/^pin[25]$/.test(k)&&p)return act(async()=>{setPrinter(Object.assign({},p,{drawerPin:k==='pin5'?5:2}));render()});
-  if(k==='test')return act(async()=>{msg('מדפיס…');const r=await printTest();msg('הודפס ('+r.bytes+' בתים, '+r.ms+'ms)');
+  if(k==='test')return act(async()=>{msg('מדפיס…');const r=await printTest();msg(r.via==='win'?'נשלח למדפסת Windows – בדקו שהקבלה יצאה':'הודפס ('+r.bytes+' בתים, '+r.ms+'ms)');
    const pv=box.querySelector('#phPrev');pv.innerHTML='';if(r.preview){const im=d.createElement('img');im.alt='תצוגת הקבלה';im.src='data:image/png;base64,'+r.preview;im.style.cssText='max-width:100%;border:1px solid #8886;background:#fff';pv.append(im)}check()});
-  if(k==='drawer')return act(async()=>{await openDrawer();msg('נשלחה פקודת פתיחה למגירה')});
-  if(k==='dshow')return act(async()=>{const r=await display.showCart({title:'בדיקת מסך לקוח',lines:[{name:'לחם אחיד פרוס',qty:2,price:13.8},{name:'Coffee 200g',qty:1,price:24.9}],total:38.7,msg:'תודה ולהתראות'});msg(r&&r.shown?'מוצג במסך הלקוח':'לא נמצא מסך לקוח')});
+  if(k==='drawer')return act(async()=>{const r=await openDrawer({reason:'test'});msg(r&&r.slip?'הודפס פתק "פתיחת מגירה" – המגירה נפתחת דרך מנהל ההתקן':'נשלחה פקודת פתיחה למגירה')});
+  if(k==='dshow')return act(async()=>{const r=await display.showCart({title:'בדיקת מסך לקוח',lines:[{name:'לחם אחיד פרוס',qty:2,price:13.8},{name:'Coffee 200g',qty:1,price:24.9}],total:38.7,msg:'תודה ולהתראות'});
+   msg(r&&r.shown?(W?'מוצג בחלון הלקוח – גררו אותו למסך השני אם לא עבר לבד':'מוצג במסך הלקוח'):r&&r.blocked?'הדפדפן חסם את חלון הלקוח – אשרו חלונות קופצים לאתר הזה':'לא נמצא מסך לקוח')});
   if(k==='dclear')return act(async()=>{await display.clear();msg('מסך הלקוח נוקה');check()})});
  offs.push(onScan(s=>{const el=box.querySelector('#phScan');if(el)el.textContent=s.code+'  ('+Math.round(s.ms)+'ms)';check()}));
  offs.push(on('rejected',()=>{const el=box.querySelector('#phScan');if(el)el.textContent='נקלט קלט שנראה כמו כרטיס אשראי – נזרק ולא נשמר'}));
@@ -207,5 +232,5 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
 /* רטט (P9): קודם התוסף (navigator.vibrate לא עובד בכל WebView), ואם אין – navigator.vibrate */
 async function vibrate(ms){ms=Math.max(10,Math.min(1000,+ms||40));const P=plug();if(P&&typeof P.vibrate==='function'){try{const r=await P.vibrate({ms});if(r&&r.ok)return true}catch(e){}}
  try{return!!(root.navigator&&root.navigator.vibrate&&root.navigator.vibrate(ms))}catch(e){return false}}
-return{available,plug,vibrate,printer,setPrinter,cleanPrinter,pDesc,listDevices,requestUsb,requestBt,print,printTest,testReceipt,openDrawer,status,printerState,
+return{available,plug,web,requestSerial,vibrate,printer,setPrinter,cleanPrinter,pDesc,listDevices,requestUsb,requestBt,print,printTest,testReceipt,openDrawer,status,printerState,
  onScan,ScanDetector,looksLikeCard,display,cartHtml,on,openPanel}});
