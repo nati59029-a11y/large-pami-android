@@ -623,7 +623,7 @@ const nRegs=()=>{try{return typeof ZREG!=='undefined'&&ZREG?ZREG:{}}catch(e){ret
 /* סגירת קופה: התאריך (ISO בהתראות ישנות, "d.m" בכותרת בחדשות – השנה לפי מועד יצירת ההתראה) והסניפים מהשורות "• סניף <שם>: ..." */
 function nZcInfo(n){const R=nRegs(),ti=String(n.title||''),bo=String(n.body||'');let d='',m=/\b(\d{4}-\d{2}-\d{2})\b/.exec(ti+'\n'+bo);
  if(m)d=m[1];else if((m=/(\d{1,2})\.(\d{1,2})/.exec(ti))){const a=ilDay(n.t||n.at||Date.now());let y=+a.slice(0,4);const iso=yy=>yy+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');if(dDiff(iso(y),a)>1)y--;d=iso(y);if(isNaN(Date.parse(d+'T12:00:00Z')))d=''}
- const L=[];bo.split('\n').filter(l=>/^\s*•/.test(l)).forEach(l=>{for(const g of Object.keys(R)){if(!(l.includes('סניף '+R[g].n)||new RegExp('\\b'+g+'\\b').test(l)))continue;const x=L.find(y=>y.g===g)||(L.push({g,n:R[g].n,miss:false}),L[L.length-1]);if(/לא נשלחה/.test(l))x.miss=true}});
+ const L=[];bo.split('\n').filter(l=>/^\s*•/.test(l)).forEach(l=>{for(const g of Object.keys(R)){if(!(l.includes('סניף '+R[g].n)||l.includes('• '+R[g].n+':')||new RegExp('\\b'+g+'\\b').test(l)))continue;/* 19.11: בעסק שאינו לארג' פעמי השרת כותב "• קופה: ..." */const x=L.find(y=>y.g===g)||(L.push({g,n:R[g].n,miss:false}),L[L.length-1]);if(/לא נשלחה/.test(l))x.miss=true}});
  return{d,L}}
 /* חשבונית לתשלום: "חשבונית <מספר> של <ספק> – יתרה ..." – החשבונית הפתוחה במכשיר עם אותו מספר ואותו ספק (בדיוק כמו ששלחנו במראה – secFin) */
 function nInvOf(n){const b=String(n.body||''),o={t:null,sub:''};try{

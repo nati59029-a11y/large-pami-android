@@ -46,6 +46,31 @@ const view = async (pg, v) => { await pg.evaluate((x) => { go(x); if (x === 'zc'
     check('7 בלי שגיאות JavaScript בדף', !pg.__errors.length, pg.__errors);
     await ctx.close(); }
 
+  // ---- עסק חדש: התראת המזכירה על סגירה חסרה – הנוסח מהשרת (closeCands עם gen) מזוהה ככפתור "הכנסת סגירת קופה – קופה" ----
+  { const R = require('../../functions/lib/sec-remind');
+    const note = R.closeCands([{ reg: 'i_nl', d: '2026-10-30', st: 'ok' }, { reg: 'i_yh', d: '2026-10-30', st: 'ok' }], '2026-11-03', true)[0];
+    check('13 השרת, עסק חדש: התראה על "קופה" אחת, בלי שמות לארג\' פעמי', !!note && /^• קופה: לא נשלחה סגירת קופה ליום שני 2\.11\./.test(note.body) && !LP.test(note.body) && !/סניף|i_yh|i_nl/.test(note.body), note);
+    const FEAT = { scan: true, tasks: true, suppliers: true, cashClose: true, secretary: true };
+    const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b', features: FEAT } }, admins: { 'b/acme/|ma': 1 }, staff: { 'b/acme/|ma': 1 } };
+    const { ctx, page: pg } = await H.newPage(browser, www, cfg, [], 'gs'); await pg.setViewportSize({ width: 412, height: 900 });
+    const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: false, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: { wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3, rt: {} }, types: { close: 'סגירת קופה חסרה או עם הפרש' }, unseen: 0 };
+    const N = [Object.assign({ id: 'c1', k: 'rem', at: H.T0 - 6e4, t: H.T0 - 6e4, seen: true, st: 'open', rep: 2, n: 1 }, { typ: note.typ, title: note.title, body: note.body })];
+    await ctx.route(/:5001\/.*/, async (route) => { const n = new URL(route.request().url()).pathname.split('/').pop(); let b = {}; try { b = JSON.parse(route.request().postData() || '{}').data || {}; } catch (e) { /* */ }
+      const ok = (r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
+      if (n === 'secState') return ok(st); if (n === 'secChatLoad') return ok({ ok: true, msgs: [] });
+      if (n === 'secNotes') return ok(b.op === 'list' ? { ok: true, notes: N, unseen: 0, types: st.types } : { ok: true });
+      return ok(n === 'getBackupKey' ? { key: Buffer.alloc(32, 7).toString('base64') } : {}); });
+    await H.login(pg, 'ma@x.co'); await pg.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden && ACT.startBlank) ACT.startBlank(); }); await sleep(800); await closeD(pg);
+    await pg.evaluate(() => { NAV = [{ v: 'home' }]; window.__sec.tab = 'notes'; window.__sec.nl = null; go('sec'); }); await sleep(900);
+    await pg.click('.secnb[data-id=c1]'); await sleep(400);
+    const d = await pg.evaluate(() => { const a = document.querySelector('#dlg #secNAct .btn'); return { b: a ? a.innerText : '', t: document.getElementById('dlg').innerText }; });
+    check('14 האפליקציה, עסק חדש: בהתראה כפתור "הכנסת סגירת קופה – קופה", בלי שמות לארג\' פעמי', /הכנסת סגירת קופה – קופה/.test(d.b) && !LP.test(d.t), d.b);
+    await pg.click('#secNAct [data-a=secNZc]'); await sleep(600);
+    const z = await pg.evaluate(() => ({ v: NAV[NAV.length - 1].v, reg: (document.querySelector('form[data-f=zcSend] select[name=reg]') || {}).value, d: (document.querySelector('form[data-f=zcSend] input[name=d]') || {}).value }));
+    check('14א לחיצה: מסך סגירת הקופה עם "קופה" (i_nl) והתאריך מההתראה', z.v === 'zc' && z.reg === 'i_nl' && z.d === '2026-11-02', z);
+    check('14ב בלי שגיאות JavaScript בדף', !pg.__errors.length, pg.__errors);
+    await ctx.close(); }
+
   // ---- לארג' פעמי: ללא שינוי ----
   { const cfg = { mode: 'new', biz: { [BZ0]: { dataRoot: 'legacy', features: ALL } }, admins: { '|m': 1 } };
     const { ctx, page: pg } = await H.newPage(browser, www, cfg, [], 'lp'); await pg.setViewportSize({ width: 412, height: 900 });

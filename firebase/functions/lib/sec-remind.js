@@ -155,11 +155,13 @@ function taskCands(tasks, names, now, today) {
 // שמות הקופות – אותם שמות כמו ZREG באפליקציה (index.html). קופה לא מוכרת – המזהה כמו שהוא.
 const REG = Object.freeze({ i_yh: 'יהודה הנשיא', i_nl: 'נחל לכיש' });
 const regName = (g) => (REG[g] ? 'סניף ' + REG[g] : 'קופה ' + String(g || '').slice(0, 40));
+// 19.11.2026: עסק שאינו לארג' פעמי (gen) – קופה אחת "קופה" (i_nl בלבד, כמו ZREG באפליקציה כש-BZGEN). סגירות של קופה אחרת (i_yh ישן) לא נספרות
 const HEB_WD = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const dm = (day) => +day.slice(8, 10) + '.' + +day.slice(5, 7);
 const dayL = (day) => 'יום ' + HEB_WD[wdOf(day)] + ' ' + dm(day);
-function closeCands(closings0, today) {
-  const closings = closings0.filter(notRej);
+function closeCands(closings0, today, gen) {
+  const closings = closings0.filter(notRej).filter((c) => !gen || c.reg === 'i_nl');
+  const rn = gen ? () => 'קופה' : regName;
   const P = prevBizDay(today);
   const regs = [...new Set(closings.filter((c) => typeof c.reg === 'string' && c.d >= K.addDays(today, -30)).map((c) => c.reg))];
   const onP = closings.filter((c) => c.d === P);
@@ -167,9 +169,9 @@ function closeCands(closings0, today) {
   const diffs = onP.map((c) => ({ c, a: cashDiff(c) })).filter((x) => x.a !== null && x.a >= EMP_MIN);
   if (!missing.length && !diffs.length) return [];
   const D = dayL(P);
-  const lines = missing.map((g) => '• ' + regName(g) + ': לא נשלחה סגירת קופה ל' + D + '.')
-    .concat(diffs.map((x) => '• ' + regName(x.c.reg) + ': בסגירת הקופה של ' + D + (x.c.by ? ' (שלח/ה: ' + String(x.c.by).slice(0, 40) + ')' : '') + ' יש הפרש מזומן של ' + ils(x.a) + ' בין המזומן שנספר בסגירה לבין הסכום בפתיחת הקופה.'));
-  const todo = (missing.length ? ['• לסגירה שלא נשלחה: לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה בעצמך.'] : [])
+  const lines = missing.map((g) => '• ' + rn(g) + ': לא נשלחה סגירת קופה ל' + D + '.')
+    .concat(diffs.map((x) => '• ' + rn(x.c.reg) + ': בסגירת הקופה של ' + D + (x.c.by ? ' (שלח/ה: ' + String(x.c.by).slice(0, 40) + ')' : '') + ' יש הפרש מזומן של ' + ils(x.a) + ' בין המזומן שנספר בסגירה לבין הסכום בפתיחת הקופה.'));
+  const todo = (missing.length ? ['• לסגירה שלא נשלחה: לבקש מהעובד' + (gen ? '' : ' בסניף') + ' לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה בעצמך.'] : [])
     .concat(diffs.length ? ['• להפרש: לפתוח את מסך סגירת הקופה, לבדוק את הסגירה ולברר את ההפרש עם העובד.'] : []);
   const title = missing.length && !diffs.length ? 'לא נשלחה סגירת קופה ל-' + dm(P) : !missing.length ? 'הפרש מזומן בסגירת הקופה של ' + dm(P) : 'סגירות קופה של ' + dm(P) + ' – יש מה לבדוק';
   return [{ typ: 'close', key: 'close:' + P, title, body: lines.join('\n') + '\nמה לעשות:\n' + todo.join('\n'), fire: today }];
