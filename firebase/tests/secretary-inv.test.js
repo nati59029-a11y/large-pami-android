@@ -284,14 +284,16 @@ describe('"נכנס ישר" (34–36), סניף (40), סוגי מסמכים (37,
     const ics = await arrive(Buffer.from('BEGIN:VCALENDAR'), null, { why: 'type', fn: 'invite.ics' });
     assert.equal(ics.st, 'rej'); assert.equal(ics.k, 'bad'); assert.equal(ics.notInv, 'type');
     const zip = await arrive(Buffer.from('x'), null, { why: 'zip', fn: 'docs.zip' });
-    assert.equal(zip.st, 'new', 'ארכיון – אולי חשבונית בפנים, ממתין');
+    assert.equal(zip.st, 'rej', 'ארכיון – לא מגיע (בעל העסק)');
+    const enc = await arrive(Buffer.from('x'), null, { why: 'enc', fn: 'locked.pdf' });
+    assert.equal(enc.st, 'new', 'PDF נעול – אולי חשבונית, ממתין');
     // רשומות ממתינות מלפני התיקון
     await put(`b/${A}/sec_inv/x${'1'.repeat(40)}`, { st: 'new', k: 'unk', t0: 'unknown', unsure: [], t: Date.now(), src: [{ ch: 'mail', from: 'a@b.example', t: 1 }], el: false, why: ['type'] });
     await put(`b/${A}/sec_inv/x${'2'.repeat(40)}`, { st: 'new', k: 'unk', t0: 'unknown', unsure: ['type'], t: Date.now(), src: [{ ch: 'mail', from: 'a@b.example', t: 1 }], el: false, why: ['type'] });
     await put(`b/${A}/sec_inv/x${'3'.repeat(40)}`, { st: 'new', k: 'bad', why: ['type'], t: Date.now(), src: [{ ch: 'mail', from: 'a@b.example', t: 1 }], el: false, np: 0 });
     const L = (await call('secInv', M1, { op: 'list' })).r.items.map((i) => i.id);
     assert.ok(!L.includes(no.id) && !L.includes(ics.id), 'שנדחו אוטומטית – לא ברשימה');
-    assert.ok(L.includes(rd.id) && L.includes(lo.id) && L.includes(zip.id), 'בספק – ברשימה');
+    assert.ok(L.includes(rd.id) && L.includes(lo.id) && L.includes(enc.id) && !L.includes(zip.id), 'בספק – ברשימה');
     assert.ok(!L.includes('x' + '1'.repeat(40)) && !L.includes('x' + '3'.repeat(40)), 'ישנים שבטוח אינם חשבונית – יצאו');
     assert.ok(L.includes('x' + '2'.repeat(40)), 'ישן שהסוג שלו לא בטוח – נשאר');
     const o1 = await get(`b/${A}/sec_inv/x${'1'.repeat(40)}`);

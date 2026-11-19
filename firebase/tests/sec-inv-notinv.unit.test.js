@@ -31,7 +31,7 @@ describe('staleNotInv – מה שכבר ממתין מלפני התיקון', () 
   it('לא זוהה בביטחון / מסמך שאינו של ספק / קובץ לא רלוונטי – נדחה', () => {
     assert.equal(SI.staleNotInv(base), true);
     assert.equal(SI.staleNotInv(Object.assign({}, base, { t0: 'deposit' })), true);
-    for (const w of ['type', 'exe', 'empty']) assert.equal(SI.staleNotInv({ st: 'new', k: 'bad', why: [w] }), true, w);
+    for (const w of ['type', 'exe', 'empty', 'zip', 'office']) assert.equal(SI.staleNotInv({ st: 'new', k: 'bad', why: [w] }), true, w);
   });
   it('בספק – נשאר', () => {
     assert.equal(SI.staleNotInv(Object.assign({}, base, { unsure: ['type'] })), false, 'סוג לא בטוח');
@@ -42,7 +42,7 @@ describe('staleNotInv – מה שכבר ממתין מלפני התיקון', () 
     assert.equal(SI.staleNotInv(Object.assign({}, base, { tc: 0.95, unr: true })), false, 'אי אפשר לקרוא');
     assert.equal(SI.staleNotInv(Object.assign({}, base, { tc: 0.75, unr: false })), false);
     assert.equal(SI.staleNotInv(Object.assign({}, base, { hold: 'local' })), false, 'מעוכב במכשיר');
-    for (const w of ['zip', 'office', 'big', 'dl', 'enc', 'active', 'unv']) assert.equal(SI.staleNotInv({ st: 'new', k: 'bad', why: [w] }), false, w);
+    for (const w of ['big', 'dl', 'enc', 'active', 'unv']) assert.equal(SI.staleNotInv({ st: 'new', k: 'bad', why: [w] }), false, w);
     assert.equal(SI.staleNotInv({ st: 'new', k: 'long' }), false);
   });
   it('רק ממתינות – לא בטיפול, לא שאושרו, ולא מסמכי ספק', () => {

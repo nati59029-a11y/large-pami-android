@@ -71,7 +71,7 @@ async function ingest(db, o) {
     // קובץ חשוד / לא נתמך: לא נשמר, לא נפתח ולא נשלח לזיהוי. כרטיס עם שם השולח
     const id = 'x' + SI.sha(src.ch + '|' + src.in + '|' + (o.idx || 0) + '|' + fn).slice(0, 40);
     const ref = db.doc('sec_inv/' + id);
-    // 19.11.2026 (בעל העסק): קובץ שבטוח אינו חשבונית (הזמנה ליומן, טקסט, HTML, קובץ הפעלה, קובץ ריק) – לא מוצג ב"ממתינות": נדחה אוטומטית
+    // 19.11.2026 (בעל העסק): קובץ שבטוח אינו חשבונית (הזמנה ליומן, טקסט, HTML, קובץ הפעלה, קובץ ריק, ארכיון, Word/Excel) – לא מוצג ב"ממתינות": נדחה אוטומטית
     const no = SI.NOT_INV_BAD.includes(chk.why);
     const st = no ? { st: 'rej', rejAt: now, rejBy: 'auto', notInv: chk.why, purgeAt: now + SI.KEEP_DAYS * 864e5 } : { st: 'new' };
     try { await ref.create(Object.assign({ k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }, st, histF)); } catch (e) { if (e && e.code === 6) return { id, dup: true, bad: true }; throw e; }
