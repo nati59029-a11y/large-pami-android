@@ -3,7 +3,7 @@
    נשמר ב-S.enotes: [{id, sub, t, d, at, ed?, ox?}]
      sub – כרטיס העובד; t – טקסט (חובה, עד 2000 תווים); d – תאריך ההערה (YYYY-MM-DD, ברירת מחדל היום); at – זמן יצירה (ISO);
      ed – זמן עריכה אחרונה (ISO); ox:1 – הערה שהועברה אוטומטית מ-ext.notes (ensure ב-index.html; ext.notes עצמו לא משתנה).
-   מנהל בלבד (כמו payroll.js): לעובד לא מוצג כלום. ההערות לא נשלחות לענף העובדים (wvWant/pubCfg), לא לתלוש ולא למזכירה; כן בגיבוי (S כולו).
+   מנהל בלבד (כמו payroll.js): לעובד לא מוצג כלום. ההערות לא נשלחות לענף העובדים (wvWant/pubCfg) ולא לתלוש; למזכירה – רק בשאלה בצ'אט ורק עם הרשאת מידע רגיש (secretary.js, secFin o.notes); כן בגיבוי (S כולו).
    מחיקת כרטיס עובד שיש לו הערות – חסומה (כמו תלושים, pslSubN); קודם מוחקים את ההערות, או מסתירים את הכרטיס.
    רכיבי העיצוב הקיימים בלבד (.card .btn .li .tag .cb .f .note .row).
    משתמש ב: S, ACT, FRM, isA, isW, subById, cat, save, dlg, closeDlg, ask, toast, rerender, esc, uid, today, dfmt, subsOf, catsOf. */

@@ -367,6 +367,52 @@ describe('מידע רגיש (10.8, 63): מוצפן, רק עם הרשאה, ונמ
     const logs = await coll(`b/${A}/sec_log`);
     assert.ok(logs.some((l) => l.act === 'toolDenied' && /proposeFact/.test(l.note || '')));
   });
+  it('שלב F: הערות עובדים מהמכשיר – בלי הרשאה נזרקות (לא מוצע כלי, לא מגיע למודל); עם הרשאה – מגיעות למודל דרך getEmployeeNotes, התור מוצפן; לא במראה', async () => {
+    await seed();
+    const NOTE = 'איחר שלוש פעמים בשבוע בגלל אוטובוס';
+    const fin = () => ({ v: 1, at: Date.now(), notes: [['יוסי אברהם', TODAY, NOTE]] });
+    const NL = () => allBodies().includes('שלוש פעמים בשבוע');
+    const ask = (u, extra) => call('secChat', u, Object.assign({ text: 'מה רשמתי על יוסי?', fin: fin() }, extra || {}));
+    // 1. מנהל בלי הרשאה (M2): הכלי לא מוצע, בקשה שלו נדחית, ההערה לא מגיעה למודל
+    GM.state.sec = model([{ name: 'getEmployeeNotes', args: { employee: 'יוסי' } }], () => 'אין לי גישה');
+    let r = await ask(M2);
+    assert.equal(r.status, 'OK', r.text);
+    assert.ok(!declNames(secReqs()[0]).includes('getEmployeeNotes'));
+    assert.deepEqual(r.result.denied, ['getEmployeeNotes']);
+    assert.ok(!NL(), 'הערה הגיעה למודל בלי הרשאה');
+    // 2. מתג עסקי כבוי (ההרשאה האישית קיימת) – אותו דבר
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update({ emp: false }));
+    GM.reset(); GM.state.sec = model([{ name: 'getEmployeeNotes', args: {} }], () => 'אין');
+    r = await ask(M1);
+    assert.ok(!declNames(secReqs()[0]).includes('getEmployeeNotes') && !NL(), 'מתג כבוי');
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update({ emp: true }));
+    // 3. מתג + הרשאה (M1) בלי הערות במכשיר – הכלי לא מוצע
+    GM.reset(); GM.state.sec = () => ({ text: 'בסדר' });
+    await call('secChat', M1, { text: 'שלום', fin: { v: 1, at: Date.now() } });
+    assert.ok(!declNames(secReqs()[0]).includes('getEmployeeNotes'));
+    const plain = (await coll(`b/${A}/sec_chat/${M1}/m`)).filter((x) => x.text === 'שלום');
+    assert.equal(plain.length, 1, 'תור בלי הערות – נשמר רגיל');
+    // 4. מתג + הרשאה + הערות: מוצע, ההערה מגיעה למודל, התור נשמר מוצפן, היומן בלי שם ובלי טקסט
+    GM.reset(); GM.state.sec = model([{ name: 'getEmployeeNotes', args: { employee: 'יוסי' } }], (R) => 'רשמת: ' + R.getEmployeeNotes.notes[0].text);
+    r = await ask(M1);
+    assert.equal(r.status, 'OK', r.text);
+    assert.ok(declNames(secReqs()[0]).includes('getEmployeeNotes'));
+    assert.ok(NL(), 'עם הרשאה – ההערה מגיעה למודל');
+    assert.match(r.result.reply, /שלוש פעמים/);
+    assert.ok(r.result.src.some((s) => s.k === 'getEmployeeNotes' && /מוצפן/.test(s.l)));
+    const raw = (await coll(`b/${A}/sec_chat/${M1}/m`)).filter((x) => x.text !== 'שלום' && x.role);
+    const sealed = raw.filter((x) => x.sens === true);
+    assert.equal(sealed.length, 2, 'שאלה ותשובה – מוצפנות');
+    assert.ok(sealed.every((x) => x.text === '' && x.box && x.box.ct));
+    assert.ok(!JSON.stringify(await coll(`b/${A}/sec_chat/${M1}/m`)).includes('שלוש פעמים'), 'טקסט קריא ב-sec_chat');
+    const lg = JSON.stringify(await coll(`b/${A}/sec_log`));
+    assert.ok(!lg.includes('יוסי') && !lg.includes('שלוש פעמים'), 'ביומן');
+    // 5. המראה: גם עם הרשאה – ההערות לא נשמרות
+    const mp = await call('secMirrorPut', M1, { fin: fin() });
+    assert.equal(mp.status, 'OK', mp.text);
+    const mr = await get(`b/${A}/sec_mirror/fin`);
+    assert.ok(mr && !mr.data.includes('שלוש פעמים') && !mr.data.includes('יוסי') && !('notes' in JSON.parse(mr.data)), 'הערות במראה');
+  });
   it('תיקון סבב 1: שם חלקי ("ה", "דנ") לא מתאים; כמה עובדים באותו שם – רק רשימת שמות לבירור, בלי תוכן', async () => {
     assert.equal(SENS.sameEmp('דנה לוי', 'ה'), false); assert.equal(SENS.sameEmp('משה כהן', 'ה'), false);
     assert.equal(SENS.sameEmp('דנה לוי', 'דנ'), false);
