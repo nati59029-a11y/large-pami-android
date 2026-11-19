@@ -550,7 +550,7 @@ const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
 function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
- <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}${snzCan(n)?`<button type="button" class="chip" data-a="secSnzT" data-id="${esc(n.id)}" aria-expanded="${X.snz===n.id}">⏰ תזכירי לי שוב</button>`:''}</div>${snzCan(n)&&X.snz===n.id?snzH(n.id):''}</div>`}
+ <div class="secrow">${nClosed(n)?'':nActH(n,1)}<button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}${snzCan(n)?`<button type="button" class="chip" data-a="secSnzT" data-id="${esc(n.id)}" aria-expanded="${X.snz===n.id}">⏰ תזכירי לי שוב</button>`:''}</div>${snzCan(n)&&X.snz===n.id?snzH(n.id):''}</div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
  const A=R.notes||[];pnShown();
  /* 19.11.2026: רק התראות פתוחות. מה שטופל (או כבר לא רלוונטי) – מוסתר, ואפשר לראות את 7 הימים האחרונים בקישור "טופלו לאחרונה" */
@@ -565,9 +565,9 @@ function noteDlg(id){const R=X.nl,n=R&&!R.err&&(R.notes||[]).find(x=>x.id===id);
  const st=n.st==='done'?'טופל':n.st==='gone'?'כבר לא רלוונטי':n.k==='rem'?'פתוחה – עוד לא סומנה כטופלה'+(n.rep?' · תחזור עוד '+n.rep+' פעמים':' · לא תחזור שוב'):'פתוחה';
  const row=(k,v)=>`<p class="note" style="margin:4px 0"><b>${k}:</b> ${esc(v)}</p>`;
  const todo=n.typ==='close'&&!/מה לעשות/.test(body)?'\nמה לעשות:\n• לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה.\n• אם יש הפרש מזומן – לבדוק את הסגירה במסך סגירת הקופה ולברר עם העובד.':'';
- dlg(`<h3 style="overflow-wrap:anywhere">${esc(nFix(n.title,n))}</h3>${row('סוג',nLab(n,T)||'התראה')}${row('נוצרה',tm(n.t||n.at))}${n.n>1?row('נשלחה',n.n+' פעמים (לאחרונה '+tm(n.at)+')'):''}${row('מצב',st)}
+ dlg(`<h3 style="overflow-wrap:anywhere">${esc(nFix(n.title,n))}</h3>${nActH(n,0)}${row('סוג',nLab(n,T)||'התראה')}${row('נוצרה',tm(n.t||n.at))}${n.n>1?row('נשלחה',n.n+' פעמים (לאחרונה '+tm(n.at)+')'):''}${row('מצב',st)}
  ${body||todo?`<div class="card" style="margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere" id="secNBody">${esc(body+todo)}</div>`:''}
- ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${nmlCan(n)?nmlH(n):''}${snzCan(n)?`<p class="note" style="margin:10px 0 2px"><b>תזכירי לי שוב:</b></p>${snzH(n.id,1)}`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
+ ${nmlCan(n)?nmlH(n):''}${snzCan(n)?`<p class="note" style="margin:10px 0 2px"><b>תזכירי לי שוב:</b></p>${snzH(n.id,1)}`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
 ACT.secNOpen=el=>noteDlg(el.dataset.id);
 /* 17.11.2026: "המזכירה שואלת לגבי מייל" – עונים לה ומטפלים במייל מתוך ההתראה עצמה, בלי להיכנס למסך המייל:
    כותבים מה לענות ← המזכירה מנסחת תשובה (secMail refine) ← רואים אותה, אפשר לערוך, ושולחים בלחיצה (secMailSend). או "לא לענות" (secMail done).
@@ -607,9 +607,86 @@ ACT.secNMlSend=()=>{const p=X.nml,b=nmlBox();if(!p||!b)return;const t=document.g
 ACT.secNMlNo=()=>{const b=nmlBox();if(!b)return;const nid=b.dataset.id;
  ask('לסמן את המייל כטופל? לא תישלח תשובה.',async()=>{try{const id=await nmlId(b);if(!id)throw new Error('לא מצאתי את המייל. אפשר לפתוח אותו בתיבת המייל.');await fnCall('secMail',{op:'done',id});await nmlEnd(nid,'המייל סומן כטופל, בלי תשובה')}catch(e){merr(e)}},'לא לענות')};
 ACT.secNMlOpen=async()=>{const b=nmlBox();if(!b)return;let id='';try{id=await nmlId(b)}catch(e){}closeDlg();X.nml=null;X.set=0;X.edit=0;X.mrv=0;X.tab='mail';X.ml={f:X.ml&&X.ml.f||'all',list:null,cur:id,card:null,clean:null};X.rep=null;go('sec')};
-ACT.secNZc=()=>{closeDlg();go('zc')};
 ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
 ACT.secNDoneD=el=>{closeDlg();ACT.secNDone(el)};
+/* 19.11.2026 (שלב 2): טיפול מיידי מתוך ההתראה – כפתור פעולה ראשי (זהב) בראש חלון הפרטים, וגם כשבב בשורה ברשימה. לפי סוג ההתראה ולפי הנתונים
+   שהשרת כבר מחזיר (כותרת וגוף) – בלי שינוי בשרת ובלי שדות חדשים. כל פעולה עוברת דרך המסכים והפונקציות הקיימים של האפליקציה:
+   סגירת קופה (V.zc, ממולא מראש בסניף ובתאריך), "סמן כשולם" (חלון סגירת התשלום של האפליקציה – payDlg), תזרים (צ'קים), משימות באיחור, גיבוי (bkCloud),
+   ולשוניות המזכירה (מידע על העסק, יומן, חשבוניות, ווצאפ). שום דבר לא נשלח בלי לחיצה מפורשת. */
+const nCln=v=>String(v==null?'':v).replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g,'').replace(/\s+/g,' ').trim();/* כמו clean בשרת (sec-tools.js) */
+const nRegs=()=>{try{return typeof ZREG!=='undefined'&&ZREG?ZREG:{}}catch(e){return {}}};
+/* סגירת קופה: התאריך (ISO בהתראות ישנות, "d.m" בכותרת בחדשות – השנה לפי מועד יצירת ההתראה) והסניפים מהשורות "• סניף <שם>: ..." */
+function nZcInfo(n){const R=nRegs(),ti=String(n.title||''),bo=String(n.body||'');let d='',m=/\b(\d{4}-\d{2}-\d{2})\b/.exec(ti+'\n'+bo);
+ if(m)d=m[1];else if((m=/(\d{1,2})\.(\d{1,2})/.exec(ti))){const a=ilDay(n.t||n.at||Date.now());let y=+a.slice(0,4);const iso=yy=>yy+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');if(dDiff(iso(y),a)>1)y--;d=iso(y);if(isNaN(Date.parse(d+'T12:00:00Z')))d=''}
+ const L=[];bo.split('\n').filter(l=>/^\s*•/.test(l)).forEach(l=>{for(const g of Object.keys(R)){if(!(l.includes('סניף '+R[g].n)||new RegExp('\\b'+g+'\\b').test(l)))continue;const x=L.find(y=>y.g===g)||(L.push({g,n:R[g].n,miss:false}),L[L.length-1]);if(/לא נשלחה/.test(l))x.miss=true}});
+ return{d,L}}
+/* חשבונית לתשלום: "חשבונית <מספר> של <ספק> – יתרה ..." – החשבונית הפתוחה במכשיר עם אותו מספר ואותו ספק (בדיוק כמו ששלחנו במראה – secFin) */
+function nInvOf(n){const b=String(n.body||''),o={t:null,sub:''};try{
+ if(typeof S==='undefined'||!S||!Array.isArray(S.tx)||typeof inv!=='function'||typeof bal!=='function')return o;
+ const L=inv().filter(t=>bal(t)>0.004&&b.startsWith('חשבונית '+nCln(String(t.inv||'').slice(0,30)).slice(0,30)+' של '+(nCln(String(subName(t)).slice(0,60)).slice(0,60)||'ספק')+' – '));
+ if(L.length===1&&(typeof msBrOk!=='function'||msBrOk(L[0])))o.t=L[0];
+ const m=/^חשבונית .*? של (.+?) – יתרה/.exec(b),sn=m?m[1]:'';const ss=sn?(S.subs||[]).filter(x=>x&&nCln(String(x.name||'').slice(0,60)).slice(0,60)===sn):[];
+ o.sub=o.t&&o.t.sub?o.t.sub:ss.length===1?ss[0].id:''}catch(e){}return o}
+/* יומן: "יום ראשון 15.11, 12:00" (או "2026-11-15 12:00" בהתראות ישנות) – היום עצמו, כדי לפתוח את היומן עליו */
+function nCalDay(n){const s=String(n.body||'');let m=/^(\d{4}-\d{2}-\d{2})/.exec(s);if(m)return m[1];m=/^יום [א-ת]+ (\d{1,2})\.(\d{1,2})/.exec(s);if(!m)return '';
+ const a=ilDay(n.at||Date.now());let y=+a.slice(0,4);const iso=yy=>yy+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');if(dDiff(iso(y),a)>180)y--;else if(dDiff(iso(y),a)<-180)y++;const d=iso(y);return isNaN(Date.parse(d+'T12:00:00Z'))?'':d}
+/* ווצאפ: "מ-<מספר מוצג> (שם): ..." – חזרה למזהה המספר (972...) כמו ב-waShow בשרת */
+function nWaOf(n){const m=/^מ-(\S+)/.exec(String(n.body||''));if(!m)return '';const s=m[1];let x;
+ if((x=/^0(5\d)-(\d{7})$/.exec(s)))return '972'+x[1]+x[2];if((x=/^0(\d{8,9})$/.exec(s)))return '972'+x[1];if((x=/^\+(\d{6,15})$/.exec(s)))return x[1];return ''}
+/* הפעולות לכל התראה: p = הראשית, s = משניות. {l: טקסט, a: פעולה (ברירת מחדל secNA), k: סוג, v: ערך, g/d: סניף ותאריך, pick: בחירת סניף} */
+function nAct(n){const typ=n.k==='emp'?'emp':n.k==='rem'?n.typ:'';const has=v=>typeof V[v]==='function';
+ if(n.k==='rep'&&n.ref)return{p:{l:'פתיחת הדוח',a:'secNRp',ref:n.ref},s:[]};
+ if(typ==='close'&&has('zc')){const I=nZcInfo(n);if(I.L.length===1){const x=I.L[0];return{p:x.miss&&I.d?{l:'הכנסת סגירת קופה – '+x.n,a:'secNZc',g:x.g,d:I.d}:{l:'פתיחת סגירת הקופה – '+x.n,a:'secNZc'},s:[]}}
+  return{p:I.L.length>1?{l:'פתיחת מסך סגירת הקופה',a:'secNZc',pick:1}:{l:'פתיחת מסך סגירת הקופה',a:'secNZc'},s:[]}}
+ if(typ==='emp'&&has('zc'))return{p:{l:'פתיחת סגירות הקופה',a:'secNZc'},s:[]};
+ if(typ==='invDue'){const o=nInvOf(n),card=o.sub&&has('card')?{l:'כרטיס הספק',k:'card',v:o.sub}:null,due={l:'כל החשבוניות לתשלום',k:'due'};
+  if(o.t&&n.st!=='done'&&n.st!=='gone'&&typeof payDlg==='function')return{p:{l:'סמן כשולם',k:'pay',v:o.t.id},s:card?[card]:[due]};
+  return card?{p:Object.assign({},card,{l:'פתיחת כרטיס הספק'}),s:[due]}:{p:{l:'פתיחת החשבוניות לתשלום',k:'due'},s:[]}}
+ if(typ==='invLate')return{p:{l:'פתיחת החשבוניות באיחור',k:'due',v:'late'},s:[]};
+ if(typ==='chk'&&has('cf')){const m=/(\d{4}-\d{2})-\d{2}/.exec(String(n.body||''));return{p:{l:'פתיחת התזרים (צ׳קים)',k:'cf',v:m?m[1]:''},s:[]}}
+ if(typ==='task'&&has('tk'))return{p:{l:'פתיחת המשימות באיחור',k:'tk'},s:[]};
+ if(typ==='backup'&&typeof bkCloud==='function'&&n.st!=='done'&&n.st!=='gone')return{p:{l:'גבה עכשיו',k:'bk'},s:[]};
+ if(typ==='fact')return{p:{l:'פתיחת המידע על העסק',k:'tab',v:'facts'},s:[]};
+ if(typ==='cal')return{p:{l:'פתח ביומן',k:'cal',v:nCalDay(n)},s:[]};
+ if(typ==='inv')return{p:{l:'פתיחת החשבוניות שהתקבלו',k:'tab',v:'inv'},s:[]};
+ if(typ==='win')return{p:{l:'פתיחת השיחה כדי לענות',k:'wa',v:nWaOf(n)},s:[]};
+ return null}
+const nBtnH=(n,x,cls,st)=>`<button type="button" class="${cls}" data-a="${x.a||'secNA'}" data-id="${esc(x.ref||n.id)}"${x.ref?'':` data-n="${esc(n.id)}"`}${x.k?` data-k="${x.k}"`:''}${x.v?` data-v="${esc(x.v)}"`:''}${x.g?` data-g="${esc(x.g)}" data-d="${esc(x.d)}"`:''}${x.pick?' data-pick="1"':''} style="${st}">${esc(x.l)}</button>`;
+/* li=1: שבב בשורה ברשימה (רק הראשית; לדוח כבר יש "פתיחת הדוח" בשורה). li=0: בראש חלון הפרטים – הראשית בולטת, המשניות מתחתיה */
+function nActH(n,li){const A=nAct(n);if(!A||!A.p)return '';
+ if(li)return n.k==='rep'?'':nBtnH(n,A.p,'chip secpa','min-height:44px');
+ return `<div id="secNAct" style="margin:6px 0 8px">${nBtnH(n,A.p,'btn w secpa1','min-height:48px')}${A.s.length?`<div class="secrow">${A.s.map(x=>nBtnH(n,x,'chip','min-height:44px')).join('')}</div>`:''}</div>`}
+{const c=document.createElement('style');c.textContent='.chip.secpa{border-color:var(--acc);color:var(--acc);font-weight:700}#secNAct .btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}';document.head.appendChild(c)}
+/* התראה שטופלה דרך הפעולה עצמה (שולם / גובה / נכנסה סגירה) – בדיוק כמו "טופל": יוצאת מהרשימה מיד, והשמירה בשרת ברקע עם ניסיונות חוזרים */
+function nAuto(id,msg,wait){if(!id)return;if(!nSt(id,'done'))X.nl=null;if(X.snz===id)X.snz='';if(msg)setTimeout(()=>toast(msg),wait||0);if(cur().v==='sec'&&X.tab==='notes'&&!typing())rerender();nDoneBg(id,0)}
+function nTab(t,after){closeDlg();X.set=0;X.edit=0;X.mrv=0;if(!TABS.some(x=>x[0]===t))return toast('המסך הזה לא זמין');ACT.secTab({dataset:{v:t}});if(after)after();if(cur().v!=='sec')go('sec');else rerender()}
+ACT.secNA=el=>{const k=el.dataset.k,v=el.dataset.v||'',id=el.dataset.n||el.dataset.id||'';
+ if(k==='pay'){const t=typeof S!=='undefined'&&S&&(S.tx||[]).find(x=>x.id===v);closeDlg();
+  if(!t||!(bal(t)>0.004)){toast('החשבונית כבר לא פתוחה במכשיר');go('due');return}if(typeof msBrOk==='function'&&!msBrOk(t))return toast('אין לך הרשאה לחשבונית הזו');
+  X.nPay={nid:id,tid:t.id};payDlg(t.id);return}
+ if(k==='card'){closeDlg();go('card',v);return}
+ if(k==='due'){closeDlg();go('due',v==='late'?{late:1}:undefined);return}
+ if(k==='cf'){closeDlg();go('cf',v||undefined);return}
+ if(k==='tk'){closeDlg();try{TKT='late'}catch(e){}go('tk');return}
+ if(k==='bk'){closeDlg();el.disabled=true;Promise.resolve(bkCloud(true)).then(r=>{if(r)nAuto(id,'✓ הגיבוי הושלם – ההתראה סומנה כטופלה',1800)}).catch(()=>{});return}
+ if(k==='tab')return nTab(v);
+ if(k==='cal')return nTab('cal',()=>{if(/^\d{4}-\d{2}-\d{2}$/.test(v)){X.cd=v;X.cm=v.slice(0,7)}});
+ if(k==='wa')return nTab('wa',()=>{if(v&&X.wa){X.wa.cur=v;X.wa.card=null}})};
+/* סגירת קופה מתוך ההתראה: סניף ותאריך ממולאים מראש (רק כשאין סגירה שהתחלת למלא – היא לא נדרסת). כמה סניפים – בוחרים. */
+ACT.secNZc=el=>{const ds=el&&el.dataset||{},id=ds.n||ds.id||'',n=id&&X.nl&&!X.nl.err&&(X.nl.notes||[]).find(x=>x.id===id);closeDlg();
+ if(ds.pick&&n){const I=nZcInfo(n);setTimeout(()=>dlg(`<h3>איזה סניף?</h3>${I.L.map(x=>`<button type="button" class="btn w" data-a="secNZc" data-n="${esc(id)}"${x.miss&&I.d?` data-g="${esc(x.g)}" data-d="${esc(I.d)}"`:''} style="margin-top:8px;min-height:48px">${esc((x.miss?'הכנסת סגירת קופה – ':'פתיחת סגירת הקופה – ')+x.n)}</button>`).join('')}<button type="button" class="btn g w" data-a="secNZc" style="margin-top:8px">רק לפתוח את מסך סגירת הקופה</button><button type="button" class="btn g w" data-a="closeDlg" style="margin-top:8px">ביטול</button>`),0);return}
+ const g=ds.g||'',d=ds.d||'';
+ if(g&&d&&typeof zcRegOk==='function'&&zcRegOk(g)&&/^\d{4}-\d{2}-\d{2}$/.test(d)){
+  const busy=typeof ZC!=='undefined'&&ZC&&(ZC.f||(ZC.z||[]).some(Boolean)||ZC.o);
+  if(busy)toast('יש סגירה שהתחלת למלא – לא שיניתי אותה');else{ZC=zcNew();ZC.f=zcEmpty();ZC.f.d=d;ZC.reg=g;ZC.rs='manual';ZC.sent=0}
+  if(n){const I=nZcInfo(n),R=new Set(I.L.filter(x=>x.miss).map(x=>x.g));X.nZc=R.size&&I.d===d?{id,d,regs:R}:null}}
+ go('zc')};
+/* סגירה שנשמרה לסניף ולתאריך שבהתראה – כשכל הסניפים החסרים בה נכנסו, ההתראה מסומנת כטופלה. הצלחה = מסך הסגירה התאפס (כמו בסוף FRM.zcSend) */
+if(typeof FRM.zcSend==='function'){const o=FRM.zcSend;FRM.zcSend=async(fm,ev)=>{const z0=typeof ZC!=='undefined'?ZC:null,pre=z0&&z0.f?{g:z0.reg,d:z0.f.d}:null;const r=await o(fm,ev);
+ try{const q=X.nZc,z1=typeof ZC!=='undefined'?ZC:null;if(q&&pre&&z1!==z0&&z1&&!z1.f&&pre.d===q.d&&q.regs.has(pre.g)){q.regs.delete(pre.g);if(!q.regs.size){X.nZc=null;nAuto(q.id,'ההתראה על סגירת הקופה סומנה כטופלה',2200)}}}catch(e){}return r}}
+/* "סמן כשולם": חלון סגירת התשלום של האפליקציה (payDlg/FRM.paysave) – אותה שמירה בדיוק. נסגרה במלואה – ההתראה מסומנת כטופלה; תשלום חלקי – נשארת */
+if(typeof FRM.paysave==='function'){const o=FRM.paysave;FRM.paysave=async(form,ev)=>{const p=X.nPay,ie=form&&form.querySelector&&form.querySelector('[name=id]'),tid=ie?ie.value:'';const r=await o(form,ev);
+ try{if(p&&p.tid===tid){const t=(S.tx||[]).find(x=>x.id===tid);if(t&&bal(t)<0.005){X.nPay=null;nAuto(p.nid,'החשבונית סומנה כשולמה – ההתראה סומנה כטופלה',1800)}}}catch(e){}return r}}
 ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.mrv=0;X.rp=null;X.nl=null;go('sec')};
 /* 15.11.2026: לחיצה על התראה בטלפון – "לפתוח את ההתראות" נשמר לדקה (גם בזיכרון הטלפון, למקרה שהמסך נטען מחדש) ומוחל שוב עד שרשימת ההתראות באמת מוצגת:
    בפתיחה מאפס האירוע יכול להגיע לפני שההרשאות, העסק או המזכירה נטענו, ומסך שנפתח בדרך מסתיר את המזכירה. כשההתראה אחת – גם פרטיה נפתחים. */
