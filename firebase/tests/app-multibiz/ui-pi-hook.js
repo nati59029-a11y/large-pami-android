@@ -171,6 +171,14 @@ const waitQ = async (page, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('9 "הגיעה החשבונית" עם צילום → piCreate לקובץ שצורף', !!a9.file && M.create.length === c9 + 1 && M.create[c9].reqId === a9.rq && M.create[c9].inv === '9101', { a9, nw: M.create.slice(c9).map((x) => x.reqId) });
   const c9b = M.create.length; const a9b = await aw('awe2', '9102', false);
   check('9א "הגיעה החשבונית" בלי צילום → בלי piCreate', !a9b.file && M.create.length === c9b, { a9b, nw: M.create.length - c9b });
+  // ---- 2ד. חוסרים, שלב 2 (19.11.2026): אחרי piCreate מוצלח – window.hsOnInv נקרא פעם אחת עם מזהה החשבונית ושורותיה;
+  //          חריגה בתוך hsOnInv לא מפריעה: ההוצאה נשמרת, piCreate נשלח, התור מתרוקן, אין ניסיון חוזר ואין שגיאת דף ----
+  await page.evaluate(() => { window.__hsOrig = window.hsOnInv; window.__hsCalls = []; window.hsOnInv = (d) => { window.__hsCalls.push(JSON.parse(JSON.stringify(d))); throw new Error('hs boom'); }; });
+  const c2d = M.create.length, n2d = (await txOf(page)).length; await scanSave(page, 'DOC HS'); const q2d = await waitQ(page);
+  const hc = await page.evaluate(() => window.__hsCalls);
+  check('2ד hsOnInv נקרא פעם אחת אחרי piCreate, עם id = i+reqId והשורות; חריגה בו לא עוצרת את הקליטה', q2d && M.create.length === c2d + 1 && (await txOf(page)).length === n2d + 1 && hc.length === 1 && hc[0].id === 'i' + M.create[c2d].reqId && hc[0].lines.length === 2 && hc[0].supId === 's1' && page.__errors.every((e) => errB.includes(e)), { hc: hc.map((x) => x.id), create: M.create.length - c2d, err: page.__errors });
+  await page.evaluate(() => { window.hsOnInv = window.__hsOrig; });
+
   check('9ב אין שגיאות JavaScript חדשות (מנהל)', page.__errors.every((e) => errB.includes(e)), page.__errors);
   await P.ctx.close();
 
