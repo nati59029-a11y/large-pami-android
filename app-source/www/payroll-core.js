@@ -114,7 +114,7 @@ const defPmon = (t) => t.plan || (t.date || '').slice(0, 7);
 
 // סיכום חודש לעובד. sub = כרטיס העובד ({id, pay}); mon = "YYYY-MM".
 // data = {wh, bon, psl, tx, pmon} – המערכים מ-S ופונקציית "חודש המשכורת" של רשומת tx (ברירת מחדל: plan || חודש התאריך).
-// עובד בלי pay ← null (אין שינוי התנהגות). עם pay.comp: data גם {tasks, salesByDay, hoursOpenByDay, now} (ראו compSum),
+// עובד בלי pay ← null (אין שינוי התנהגות). עם pay.comp: data גם {tasks, salesByDay, salesByHour, openMinByDay, now} (ראו compSum),
 // והתוצאה כוללת גם comp, exp (בונוס צפוי שלא אושר, באגורות – לא נכלל ב-due/left) ו-hints. בלי pay.comp – התוצאה כמו קודם.
 function monthSum(sub, mon, data) {
   if (!sub || typeof sub !== 'object' || !sub.pay || typeof sub.pay !== 'object') return null;
@@ -210,10 +210,17 @@ function monthSum(sub, mon, data) {
 // ===== רכיבי שכר גמישים (שלב B, משימה 2026-11-19_תנאי-שכר-והערות-עובד) =====
 // pay.comp:[{id,k,n,on,src?,ai?,...}] – סכומים בקלט בש"ח, אחוזים 0–100. הפלט באגורות שלמות.
 //  tk: {m:'all',a} | {m:'tier',t:[{p,a}]}   – בונוס משימות בזמן (כולן / מדרגות אחוז בזמן)
-//  sl: {t:[{min,a}], ss:'day'|'hrs'}         – בונוס מדרגות מכירות (המדרגה הגבוהה שהושגה)
-//  pc: {p, th?, ss}                          – אחוז מהמכירות (מהכול, או רק מהחלק שמעל th)
+//  sl: {t:[{min,a}], ss:'day'|'hrs', amt?}   – בונוס מדרגות מכירות (המדרגה הגבוהה שהושגה)
+//  pc: {p, th?, ss, amt?}                     – אחוז מהמכירות (מהכול, או רק מהחלק שמעל th)
 //  man: {n}                                  – בונוס ידני, בלי חישוב (תזכורת למנהל)
-// ss:'day' = מכירות החנות בימים שבהם לעובד יש שעות; ss:'hrs' = הערכה: מכירות היום × (דקות העובד ÷ דקות פעילות), עד 1.
+// amt:1 (רשות, רק sl/pc) – לעובד מוצגים סכומי המכירות; בלי – רק אחוז מהיעד (התצוגה לעובד בשלב E).
+// ss:'day' = מכירות החנות בימים שבהם לעובד יש שעות.
+// ss:'hrs' = המכירות בפועל בשעות המשמרת, לפי salesByHour {'YYYY-MM-DD':{'HH':₪, na?:₪}} (שעת המכירה בכספית, CxHours):
+//   שעה חלקית – יחסי לדקות המשמרת בתוך השעה; משמרת שחוצה חצות – החלק שאחרי חצות לפי שעות היום הבא; משמרות חופפות נספרות פעם אחת.
+//   הנחה: ההפסקה לא מנוכה (לא ידוע מתי היא נלקחה) – נספרות המכירות בכל שעות המשמרת.
+//   יום בלי פילוח שעות (נתונים ישנים): אם יש openMinByDay[d] (דקות פעילות החנות) – הערכה: מכירות היום × (דקות נטו ÷ דקות פעילות), עד 1, est;
+//   אחרת – כל מכירות היום ("לפי יום (אין שעות)", byDay). מכירות בלי שעה (na) ביום עם פילוח – נספרות במלואן (כמו לפי יום), naDays.
+// המשימות (ctx.tasks) צריכות להיות כבר מסוננות לעובד ולחודש – המנוע לא מסנן לפי עובד/תאריך.
 const KN = { tk: 'בונוס משימות בזמן', sl: 'בונוס מכירות', pc: 'אחוז ממכירות', man: 'בונוס ידני' };
 // אגורות → "52,300" / "52,300.50"
 function fmt(ag) {
@@ -263,19 +270,24 @@ function validComp(c) {
     t.sort((x, y) => x.min - y.min);
     if (t.some((u, i) => i && u.min === t[i - 1].min)) return bad('שתי מדרגות באותו סף');
     o.t = t; o.ss = ss;
+    if (c.amt) o.amt = 1;
   } else if (c.k === 'pc') {
     const p = num(c.p);
     if (p === null || p <= 0 || p > 100) return bad('אחוז לא תקין (מעל 0 ועד 100)');
     o.p = p;
     if (c.th !== undefined && c.th !== null && c.th !== '') { const th = amt(c.th); if (th === null) return bad('סף לא תקין'); o.th = th; }
     o.ss = ss;
+    if (c.amt) o.amt = 1;
   }
   return { ok: true, comp: o, err: '' };
 }
 function nextDay(d) { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + 1)).toISOString().slice(0, 10); }
-// בסיס המכירות של העובד בחודש (אגורות). {ag, est, days, w}
+const HH_RE = /^([01]\d|2[0-3])$/;
+const p2 = (n) => String(n).padStart(2, '0');
+// בסיס המכירות של העובד בחודש (אגורות). {ag, est, days, w[, real, byDay, estD, naDays]} – ראו ss למעלה
 function salesBase(id, mon, ctx, ss) {
-  const w = [], S = ctx.salesByDay, H = ctx.hoursOpenByDay;
+  const w = [], S = ctx.salesByDay, SH = ctx.salesByHour && typeof ctx.salesByHour === 'object' ? ctx.salesByHour : null;
+  const OM = ctx.openMinByDay && typeof ctx.openMinByDay === 'object' ? ctx.openMinByDay : null;
   const own = [];
   (Array.isArray(ctx.wh) ? ctx.wh : []).forEach((r) => {
     if (!r || r.sub !== id || typeof r.d !== 'string' || r.d.slice(0, 7) !== mon) return;
@@ -283,8 +295,9 @@ function salesBase(id, mon, ctx, ss) {
     if (sm.ok && sm.min > 0) own.push({ d: r.d, sm });
   });
   const days = [...new Set(own.map((x) => x.d))].sort();
-  if (!S || typeof S !== 'object') { w.push('אין נתוני מכירות – בונוס המכירות נספר 0'); return { ag: 0, est: ss === 'hrs', days: days.length, w }; }
-  const sale = (d) => { const v = num(S[d]); return v === null ? null : toAg(v); };
+  const hasS = S && typeof S === 'object';
+  if (!hasS && !(ss === 'hrs' && SH)) { w.push('אין נתוני מכירות – בונוס המכירות נספר 0'); return { ag: 0, est: false, days: days.length, w }; }
+  const sale = (d) => { const v = hasS ? num(S[d]) : null; return v === null ? null : toAg(v); };
   let miss = 0;
   if (ss === 'day') {
     let ag = 0;
@@ -292,24 +305,44 @@ function salesBase(id, mon, ctx, ss) {
     if (miss) w.push('חסרים נתוני מכירות ל-' + miss + ' ימי עבודה – נספרו 0');
     return { ag, est: false, days: days.length, w };
   }
-  // hrs: דקות העובד לפי יום קלנדרי (משמרת שחוצה חצות מתחלקת בין שני הימים; ההפסקה מתחלקת יחסית)
-  const em = new Map();
+  // hrs: דקות המשמרת לפי יום קלנדרי ושעה (איחוד משמרות חופפות); em – דקות נטו (ההפסקה מתחלקת יחסית) להערכה ביום בלי פילוח
+  const cov = new Map(), em = new Map();
+  const cv = (d) => { let a = cov.get(d); if (!a) { a = new Uint8Array(DAY); cov.set(d, a); } return a; };
   own.forEach(({ d, sm }) => {
     const p1 = Math.min(sm.gross, DAY - sm.start), f = sm.min / sm.gross;
     em.set(d, (em.get(d) || 0) + p1 * f);
-    if (sm.gross > p1) { const d2 = nextDay(d); em.set(d2, (em.get(d2) || 0) + (sm.gross - p1) * f); }
+    const a = cv(d);
+    for (let t = sm.start; t < sm.start + p1; t++) a[t] = 1;
+    if (sm.gross > p1) {
+      const d2 = nextDay(d), b = cv(d2), rest = Math.min(DAY, sm.gross - p1);
+      em.set(d2, (em.get(d2) || 0) + (sm.gross - p1) * f);
+      for (let t = 0; t < rest; t++) b[t] = 1;
+    }
   });
-  let x = 0, noOpen = 0;
-  [...em.keys()].sort().forEach((d) => {
+  let x = 0, real = 0, byDay = 0, estD = 0, naDays = 0;
+  [...cov.keys()].sort().forEach((d) => {
+    const H = SH && SH[d] && typeof SH[d] === 'object' ? SH[d] : null;
+    if (H && Object.keys(H).some((k) => HH_RE.test(k) && num(H[k]) !== null)) {
+      const a = cov.get(d);
+      for (let h = 0; h < 24; h++) {
+        const v = num(H[p2(h)]);
+        if (v === null) continue;
+        let m = 0;
+        for (let t = h * 60; t < h * 60 + 60; t++) m += a[t];
+        if (m) x += (toAg(v) * m) / 60;
+      }
+      const na = num(H.na);
+      if (na) { x += toAg(na); naDays++; }
+      real++;
+      return;
+    }
     const v = sale(d);
     if (v === null) { miss++; return; }
-    const op = H && typeof H === 'object' ? num(H[d]) : null;
-    if (op === null || op <= 0) { if (v) noOpen++; return; }
-    x += v * Math.min(1, em.get(d) / op);
+    const op = OM ? num(OM[d]) : null;
+    if (op !== null && op > 0) { x += v * Math.min(1, em.get(d) / op); estD++; } else { x += v; byDay++; }
   });
   if (miss) w.push('חסרים נתוני מכירות ל-' + miss + ' ימי עבודה – נספרו 0');
-  if (noOpen) w.push('אין שעות פעילות ל-' + noOpen + ' ימים עם מכירות – נספרו 0 בהערכה לפי שעות');
-  return { ag: rnd(x), est: true, days: em.size, w };
+  return { ag: rnd(x), est: estD > 0, days: cov.size, real, byDay, estD, naDays, w };
 }
 const isLateFlag = (v) => v === '1' || v === 1 || v === true;
 // חישוב רכיב אחד (רכיב מנורמל ע"י validComp). get(ss) מחזיר את בסיס המכירות (במטמון)
@@ -323,11 +356,13 @@ function compOne(c, ctx, get) {
     const late = [], lateOpen = [], pend = [];
     (Array.isArray(ctx.tasks) ? ctx.tasks : []).forEach((t) => {
       if (!t || typeof t !== 'object') return;
-      const dl = num(t.dl);
-      if (dl === null || dl <= 0) { nod++; return; }
+      // יעד בפועל כמו tkDl באפליקציה: dl>0 ← dl; dl===0 ← בלי יעד; אחרת (חסר/-1) ← due (72 שעות עסקים מהיצירה)
+      const dl0 = num(t.dl), du = num(t.due), dl = dl0 !== null && dl0 > 0 ? dl0 : dl0 === 0 ? null : du !== null && du > 0 ? du : null;
       const done = t.st === 'done', sb = num(t.sub);
-      if (isLateFlag(t.late)) late.push(t);
-      else if (done) on++;
+      // איחור כמו tkIsLate: late='1', או הוגשה/בוצעה אחרי היעד, או פתוחה אחרי היעד
+      if (isLateFlag(t.late)) { late.push(t); return; }
+      if (dl === null) { nod++; return; }
+      if (done) { if (sb !== null && sb > dl) late.push(t); else on++; }
       else if (t.st === 'wait' && sb !== null && sb > 0) (sb <= dl ? pend : late).push(t);
       else if (nw > dl) lateOpen.push(t);
       else pend.push(t);
@@ -373,7 +408,10 @@ function compOne(c, ctx, get) {
   it.sales = sb.ag;
   if (sb.est) it.est = true;
   const sl = 'מכירות ' + fmt(sb.ag);
-  const basis = c.ss === 'hrs' ? 'הערכה: חלק יחסי ממכירות החנות לפי השעות שעבדת מתוך שעות הפעילות (' + sb.days + ' ימים)' : 'לפי מכירות החנות ב-' + sb.days + ' ימי עבודה';
+  if (sb.byDay) it.byDay = sb.byDay;
+  const basis = c.ss !== 'hrs' ? 'לפי מכירות החנות ב-' + sb.days + ' ימי עבודה'
+    : 'לפי המכירות בשעות המשמרות (שעת המכירה בכספית) – ' + (sb.real || 0) + ' ימים' + (sb.byDay ? ' · לפי יום (אין שעות): ' + sb.byDay + ' ימים' : '')
+      + (sb.estD ? ' · הערכה לפי שעות הפעילות: ' + sb.estD + ' ימים' : '') + (sb.naDays ? ' · כולל מכירות בלי שעה ב-' + sb.naDays + ' ימים' : '');
   if (c.k === 'sl') {
     const T = c.t.map((u) => ({ min: toAg(u.min), a: toAg(u.a) }));
     let cur = null;
@@ -400,8 +438,8 @@ function compOne(c, ctx, get) {
   } else hint('כל 1,000 ₪ מכירות נוספות = עוד ' + fmt(Math.round(1000 * c.p)) + ' ₪', { per1k: Math.round(1000 * c.p) });
   return it;
 }
-// חישוב כל הרכיבים הפעילים של העובד בחודש. ctx = {wh, tasks, salesByDay, hoursOpenByDay, now}
-// מחזיר {items:[{id,k,n,amt,det:[],hints:[],est?,man?,tk?,sales?}], sum, hints, warnings}. לא זורק.
+// חישוב כל הרכיבים הפעילים של העובד בחודש. ctx = {wh, tasks, salesByDay, salesByHour, openMinByDay, now}
+// מחזיר {items:[{id,k,n,amt,det:[],hints:[],est?,byDay?,man?,tk?,sales?}], sum, hints, warnings}. לא זורק.
 function compSum(sub, mon, ctx) {
   const out = { items: [], sum: 0, hints: [], warnings: [] };
   const p = sub && typeof sub === 'object' && sub.pay && typeof sub.pay === 'object' ? sub.pay : null;

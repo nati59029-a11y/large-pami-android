@@ -44,12 +44,31 @@ describe('validComp – אימות ונרמול', () => {
 });
 
 describe('compSum – בונוס משימות', () => {
-  it('all: כל המשימות בזמן ← הבונוס; משימות בלי יעד (dl=0/חסר/-1) לא נספרות', () => {
-    const tasks = [tk('1'), tk('2'), tk('3', { dl: 0, st: 'open' }), tk('4', { dl: undefined, st: 'open' }), tk('5', { dl: -1, late: '1' })];
+  it('all: כל המשימות בזמן ← הבונוס; משימות בלי יעד (dl=0, או dl חסר/-1 בלי due) לא נספרות', () => {
+    const tasks = [tk('1'), tk('2'), tk('3', { dl: 0, st: 'open' }), tk('4', { dl: undefined, st: 'open' }), tk('5', { dl: -1, st: 'open' })];
     const it = one({ id: 'c1', k: 'tk', m: 'all', a: 150 }, { tasks });
     assert.equal(it.amt, 15000);
     assert.deepEqual([it.tk.on, it.tk.dec, it.tk.nod], [2, 2, 3]);
     assert.ok(it.det[0].includes('2 מתוך 2 משימות בזמן'));
+  });
+  it('יעד בפועל כמו tkDl: בלי dl (חסר/-1) ← due; פתוחה אחרי ה-due = באיחור ומבטלת את הבונוס', () => {
+    const tasks = [tk('1'), tk('2', { dl: -1, due: NOW - 3 * H, st: 'open', sub: 0 }), tk('3', { dl: undefined, due: NOW + 3 * H, st: 'open', sub: 0 })];
+    const it = one({ id: 'c1', k: 'tk', m: 'all', a: 150 }, { tasks });
+    assert.deepEqual([it.tk.on, it.tk.lateOpen, it.tk.pend, it.tk.nod], [1, 1, 1, 0]);
+    assert.equal(it.amt, 0);
+    // dl>0 גובר על due
+    const it2 = one({ id: 'c1', k: 'tk', m: 'all', a: 150 }, { tasks: [tk('1', { due: NOW - 100 * H })] });
+    assert.equal(it2.amt, 15000);
+  });
+  it('כמו tkIsLate: done עם sub אחרי היעד = באיחור (גם בלי late); late=1 = באיחור גם בלי יעד', () => {
+    const tasks = [tk('1'), tk('2', { sub: NOW - 47 * H })]; // dl = NOW-48h
+    const it = one({ id: 'c1', k: 'tk', m: 'all', a: 200 }, { tasks });
+    assert.deepEqual([it.tk.on, it.tk.late, it.tk.pct], [1, 1, 50]);
+    assert.equal(it.amt, 0);
+    const it2 = one({ id: 'c1', k: 'tk', m: 'all', a: 200 }, { tasks: [tk('1'), tk('5', { dl: 0, late: '1' })] });
+    assert.deepEqual([it2.tk.late, it2.amt], [1, 0]);
+    const it3 = one({ id: 'c1', k: 'tk', m: 'all', a: 200 }, { tasks: [tk('1', { due: NOW - 49 * H, dl: -1, sub: NOW - 50 * H })] });
+    assert.deepEqual([it3.tk.on, it3.amt], [1, 20000]);
   });
   it('all: משימה שאחרה ומשימה פתוחה אחרי היעד ← 0, עם hints בשמות', () => {
     const tasks = [tk('1'), tk('2', { late: '1', n: 'ספירת מלאי' }), tk('3', { st: 'open', sub: 0, n: 'ניקוי מחסן' })];
@@ -135,31 +154,56 @@ describe('compSum – מכירות', () => {
     it = one({ id: 'p', k: 'pc', p: 2, th: 20000 }, { wh: W1, salesByDay: { '2026-11-01': 25000 } });
     assert.equal(it.amt, 10000); assert.ok(it.det[0].includes('סף 20,000 = 5,000 × 2% = 100'));
   });
-  it('ss:hrs – הערכה לפי שעות: יחס דקות, מוגבל ל-1, est:true', () => {
+  it('ss:hrs – מכירות בפועל לפי שעה: שעה חלקית יחסית לדקות, לא est', () => {
+    const W2 = [wh('2026-11-01', '08:30', '11:00')]; // 08 חצי, 09, 10 מלאות
+    const SH = { '2026-11-01': { '07': 900, '08': 100, '09': 200, 10: 300, 11: 5000 } };
+    const it = one({ id: 'p', k: 'pc', p: 100, ss: 'hrs' }, { wh: W2, salesByDay: { '2026-11-01': 6500 }, salesByHour: SH });
+    assert.equal(it.sales, 55000); // 50 + 200 + 300
+    assert.equal(it.est, undefined); assert.equal(it.byDay, undefined);
+    assert.ok(it.det.some((d) => d.includes('בשעות המשמרות')));
+  });
+  it('ss:hrs – חציית חצות: החלק שאחרי חצות לפי שעות היום הבא; הפסקה לא מנוכה; משמרות חופפות פעם אחת', () => {
+    const W3 = [wh('2026-11-01', '22:00', '02:00', { brk: 60 }), wh('2026-11-01', '23:00', '23:30')];
+    const SH = { '2026-11-01': { 21: 999, 22: 100, 23: 200 }, '2026-11-02': { '00': 300, '01': 400, '02': 999 } };
+    const it = one({ id: 'p', k: 'pc', p: 100, ss: 'hrs' }, { wh: W3, salesByHour: SH, salesByDay: { '2026-11-01': 1299, '2026-11-02': 1699 } });
+    assert.equal(it.sales, 100000);
+  });
+  it('ss:hrs – יום בלי פילוח שעות: בלי דקות פעילות ← כל מכירות היום (byDay); עם openMinByDay ← הערכה (est); na נספר במלואו', () => {
+    const W4 = [wh('2026-11-01', '08:00', '12:00'), wh('2026-11-02', '08:00', '12:00'), wh('2026-11-03', '08:00', '12:00'), wh('2026-11-04', '08:00', '12:00')];
+    const SD = { '2026-11-01': 1000, '2026-11-02': 1000, '2026-11-03': 800 };
+    const SH = { '2026-11-01': {}, '2026-11-03': { '08': 100, na: 50 } };
+    const r = cs([{ id: 'p', k: 'pc', p: 100, ss: 'hrs' }], { wh: W4, salesByDay: SD, salesByHour: SH });
+    const it = r.items[0];
+    assert.equal(it.sales, 215000); // 1000 + 1000 (לפי יום) + 100 + 50 (na); 04 – חסר
+    assert.equal(it.byDay, 2); assert.equal(it.est, undefined);
+    assert.ok(it.det.some((d) => d.includes('לפי יום (אין שעות): 2 ימים')));
+    assert.ok(it.det.some((d) => d.includes('בלי שעה ב-1')));
+    assert.ok(r.warnings.some((w) => w.includes('חסרים נתוני מכירות ל-1')));
+    const it2 = one({ id: 'p', k: 'pc', p: 100, ss: 'hrs' }, { wh: W4.slice(0, 2), salesByDay: SD, openMinByDay: { '2026-11-01': 480 } });
+    assert.equal(it2.sales, 150000); // 1000×240/480 + 1000 (בלי דקות פעילות – לפי יום)
+    assert.equal(it2.est, true); assert.equal(it2.byDay, 1);
+  });
+  it('ss:hrs – הערכה (יום בלי פילוח, עם דקות פעילות): יחס דקות נטו, מוגבל ל-1; חציית חצות והפסקה יחסית', () => {
     const W2 = [wh('2026-11-01', '08:00', '12:00'), wh('2026-11-02', '06:00', '23:00')];
-    const it = one({ id: 'p', k: 'pc', p: 10, ss: 'hrs' }, { wh: W2, salesByDay: { '2026-11-01': 10000, '2026-11-02': 5000 }, hoursOpenByDay: { '2026-11-01': 480, '2026-11-02': 600 } });
+    const it = one({ id: 'p', k: 'pc', p: 10, ss: 'hrs' }, { wh: W2, salesByDay: { '2026-11-01': 10000, '2026-11-02': 5000 }, openMinByDay: { '2026-11-01': 480, '2026-11-02': 600 } });
     assert.equal(it.est, true);
     assert.equal(it.sales, 1000000); // 10,000×240/480 + 5,000×1
-    assert.equal(it.amt, 100000);
+    const W3 = [wh('2026-11-01', '22:00', '02:00', { brk: 60 })];
+    const it3 = one({ id: 'p', k: 'pc', p: 100, ss: 'hrs' }, { wh: W3, salesByDay: { '2026-11-01': 1000, '2026-11-02': 2000 }, openMinByDay: { '2026-11-01': 900, '2026-11-02': 900 } });
+    assert.equal(it3.sales, 30000); // 1000×90/900 + 2000×90/900
   });
-  it('ss:hrs – חציית חצות: הדקות מתחלקות בין שני הימים; הפסקה מתחלקת יחסית', () => {
-    const W3 = [wh('2026-11-01', '22:00', '02:00', { brk: 60 })]; // 120 דק' ברוטו בכל יום, נטו 90+90
-    const it = one({ id: 'p', k: 'pc', p: 100, ss: 'hrs' }, { wh: W3, salesByDay: { '2026-11-01': 1000, '2026-11-02': 2000 }, hoursOpenByDay: { '2026-11-01': 900, '2026-11-02': 900 } });
-    assert.equal(it.sales, 30000); // 1000×90/900 + 2000×90/900 = 100+200
-  });
-  it('ss:hrs – יום בלי שעות פעילות ← 0 לאותו יום + אזהרה; חסר יום מכירות ← אזהרה', () => {
-    const W4 = [wh('2026-11-01', '08:00', '12:00'), wh('2026-11-02', '08:00', '12:00'), wh('2026-11-03', '08:00', '12:00')];
-    const r = cs([{ id: 'p', k: 'pc', p: 100, ss: 'hrs' }], { wh: W4, salesByDay: { '2026-11-01': 1000, '2026-11-02': 1000 }, hoursOpenByDay: { '2026-11-01': 240 } });
-    assert.equal(r.items[0].sales, 100000);
-    assert.ok(r.warnings.some((w) => w.includes('אין שעות פעילות')));
-    assert.ok(r.warnings.some((w) => w.includes('חסרים נתוני מכירות ל-1')));
+  it('validComp: amt:1 (להציג סכומים) נשמר רק ב-sl/pc', () => {
+    assert.equal(PC.validComp({ id: 'a', k: 'pc', p: 2, amt: 1 }).comp.amt, 1);
+    assert.equal(PC.validComp({ id: 'a', k: 'sl', t: [{ min: 1, a: 1 }], amt: true }).comp.amt, 1);
+    assert.equal(PC.validComp({ id: 'a', k: 'pc', p: 2 }).comp.amt, undefined);
+    assert.equal(PC.validComp({ id: 'a', k: 'tk', m: 'all', a: 1, amt: 1 }).comp.amt, undefined);
   });
   it('בלי נתוני מכירות בכלל ← 0 + אזהרה, לא זורק', () => {
     const r = cs([sl, { id: 'p', k: 'pc', p: 2, ss: 'hrs' }], { wh: W });
     assert.deepEqual(r.items.map((x) => x.amt), [0, 0]);
     assert.ok(r.warnings.some((w) => w.includes('אין נתוני מכירות')));
     assert.doesNotThrow(() => PC.compSum(emp([sl]), MON, null));
-    assert.doesNotThrow(() => PC.compSum(emp([sl]), MON, { wh: 'x', salesByDay: 5, hoursOpenByDay: 'y' }));
+    assert.doesNotThrow(() => PC.compSum(emp([sl]), MON, { wh: 'x', salesByDay: 5, salesByHour: 'z', openMinByDay: 'y' }));
   });
 });
 
@@ -217,7 +261,7 @@ describe('monthSum – הרחבה (exp, comp, hints)', () => {
 
 describe('autoBon – רשומות בונוס מוצעות', () => {
   const COMP = [{ id: 'c1', k: 'tk', m: 'all', a: 150 }, { id: 'p1', k: 'pc', p: 1.5, ss: 'hrs' }, { id: 'm', k: 'man' }];
-  const D = { wh: [wh('2026-11-01', '08:00', '12:00')], tasks: [tk('1')], salesByDay: { '2026-11-01': 12345.67 }, hoursOpenByDay: { '2026-11-01': 240 }, now: NOW };
+  const D = { wh: [wh('2026-11-01', '08:00', '12:00')], tasks: [tk('1')], salesByDay: { '2026-11-01': 12345.67 }, openMinByDay: { '2026-11-01': 240 }, now: NOW };
   it('רשומה לכל רכיב מחושב (לא man), a/calc בש"ח, det טקסט, est בהערכה', () => {
     const L = PC.autoBon(emp(COMP), MON, D);
     assert.equal(L.length, 2);
