@@ -73,7 +73,7 @@ const nmOf=b=>{const k=String(b||'').toLowerCase();if(!k)return '';return NM[k]|
 
 /* ---------- טעינה ---------- */
 async function hsLoad(){if(HS.busy||!on())return;HS.busy=1;HS.err='';const h=HS;
- try{const L=await qrun(stQ('open',500));h.L=L.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.off=0;/* סנכרון ספקים: ספק שנרשם בחוסר בלי כרטיס – לכרטסת (מנהל, sup-sync.js) */if(mgr()&&window.supSync)window.supSync(h.L.flatMap(x=>(x.supN||[]).concat(x.od&&x.od.sup?[x.od.sup]:[])))}
+ try{const L=await qrun(stQ('open',500));h.L=L.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.off=0;/* סנכרון ספקים: ספק שנרשם בחוסר בלי כרטיס – לכרטסת (מנהל, sup-sync.js) */if(mgr()&&window.supSyncNames)window.supSyncNames(h.L.flatMap(x=>(x.supN||[]).concat(x.od&&x.od.sup?[x.od.sup]:[])))}
  catch(e){if(e&&e.code===403)h.off=1;else h.err=tkErr(e)}
  finally{h.busy=0;h.at=Date.now()}
  paint()}
@@ -155,7 +155,7 @@ async function odPut(id,od){const x=find(id);if(!x)return false;const ut=nextUt(
 FRM.hsOdSave=async f=>{const o=HS.od;if(!o)return;const sup=String(f.sup.value||'').replace(/\s+/g,' ').trim().slice(0,60),eta=String(f.eta.value||'');
  if(eta&&!/^\d{4}-\d{2}-\d{2}$/.test(eta))return toast('תאריך לא תקין');
  const bt=f.querySelector('button:not([type])');if(bt)bt.disabled=true;
- if(await odPut(o.id,{u:SY.uid,byN:fbBy().slice(0,100),t:0,sup,eta})){HS.od=null;closeDlg();toast('סומן: הוזמן');if(sup&&window.supSync)window.supSync([sup]);rerender()}else if(bt)bt.disabled=false};
+ if(await odPut(o.id,{u:SY.uid,byN:fbBy().slice(0,100),t:0,sup,eta})){HS.od=null;closeDlg();toast('סומן: הוזמן');if(sup&&window.supSyncNames)window.supSyncNames([sup]);rerender()}else if(bt)bt.disabled=false};
 ACT.hsOdRm=()=>{const o=HS.od;if(!o)return;ask('לבטל את הסימון "הוזמן"?',async()=>{if(await odPut(o.id,null)){HS.od=null;closeDlg();toast('הסימון בוטל');rerender()}},'כן, לבטל')};
 function listH(L,mode,empty){return L===null?'<div class="empty">טוען…</div>':L.length?L.map(x=>itemH(x,mode)).join(''):`<div class="empty">${empty}</div>`}
 

@@ -33,7 +33,7 @@ function supSync(names){try{if(!isA()||!Array.isArray(S.subs))return 0;const c=t
  try{pubCfg().catch(()=>{})}catch(e){}
  toast(add.length===1?'נוסף לכרטסת הספקים: '+add[0].name:'נוספו '+add.length+' ספקים חדשים לכרטסת הספקים');
  return add.length}catch(e){return 0}}
-window.supSync=supSync;
+window.supSyncNames=supSync;/* לא window.supSync – השם הזה תפוס ב-index.html (סנכרון חשבוניות ספקים, async) והדריסה שברה אותו */
 /* בדיקה תקופתית אצל המנהל: כשרשימת המוצרים או "להזמין מספקים" נטענה מחדש (הפניה חדשה) – משלימים כרטיסים חסרים */
 let pP=null,pS=null;
 setInterval(()=>{try{if(!isA())return;const P=window.__ox&&window.__ox.P,O=window.__so&&window.__so.L;
