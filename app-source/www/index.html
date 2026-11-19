@@ -504,7 +504,7 @@ function defaults(){
  cats.push({id:'p_inc',kind:'inc',name:'ממתין לסיווג',beh:'simple',hid:true},{id:'p_exp',kind:'exp',name:'ממתין לסיווג',beh:'simple',hid:true});
  return{v:3,theme:'paper',fs:1,cats,subs,tx:[],fixTpl:[],fixOk:{},loans:[],ccx:[],imp:null,created:new Date().toISOString()};
 }
-const cat=id=>S.cats.find(c=>c.id===id),subById=id=>S.subs.find(x=>x.id===id);
+const cat=id=>S.cats.find(c=>c.id===id),subById=id=>S.subs.find(x=>x.id===id);/* 19.11.2026: תנועה/כרטיס/הוצאה קבועה שמפנים לקטגוריה שאינה קיימת (למשל קטגוריות לארג' פעמי בעסק חדש – נתוני דוגמה או סגירת קופה) הפילו מסכים. מוסיפים את הקטגוריה החסרה בשם כללי (fx:1), בלי למחוק או לשנות שום רשומה. נבדק רק כשמספר התנועות/הכרטיסים השתנה */function catFix(){if(!S||!Array.isArray(S.cats)||!Array.isArray(S.tx)||!Array.isArray(S.subs))return;const k=S.tx.length+'/'+S.subs.length+'/'+S.cats.length;if(catFix.k===k)return;catFix.k=k;const H=new Set(S.cats.map(c=>c.id)),M=new Map();const add=(id,kd)=>{if(typeof id!=='string'||!id||H.has(id)||M.has(id))return;M.set(id,kd==='inc'||/^i_/.test(id)?'inc':'exp')};S.tx.forEach(t=>t&&add(t.cat,t.t));S.subs.forEach(x=>x&&add(x.cat,''));(S.fixTpl||[]).forEach(f=>f&&add(f.cat,'exp'));if(!M.size)return;const N={i_nl:['קופה','simple'],i_yh:['קופה 2','simple'],i_cnl:['כרטיסים','simple'],i_cyh:['כרטיסים 2','simple'],e_bak:['ספקים 2','sup'],e_salb:['משכורות 2','emp'],e_card:['כרטיסים','cc']};M.forEach((kd,id)=>{const n=N[id]||['ללא קטגוריה',kd==='inc'?'simple':'free'];S.cats.push({id,kind:kd,name:n[0],beh:n[1],fx:1});H.add(id)});catFix.k=S.tx.length+'/'+S.subs.length+'/'+S.cats.length}
 const catsOf=k=>S.cats.filter(c=>c.kind===k&&!c.hid);
 const heKey=s=>String(s||'').replace(/["'׳״`’]/g,'').trim();
 function heCmp(a,b){a=heKey(a);b=heKey(b);if(!a||!b)return a?-1:b?1:0;const c=x=>/^[א-ת]/.test(x)?0:/^[A-Za-z]/.test(x)?1:2,d=c(a)-c(b);return d||a.localeCompare(b,'he')}
@@ -741,7 +741,7 @@ ACT.wtab=el=>{if(!isW())return;const w=el.dataset.w;WS='home';tab(w==='tk'?'tk':
 V.wkMore=()=>({t:'עוד',s:esc((SY.email||'').split('@')[0]),h:`<button class="btn g" style="width:100%" data-a="updChk">בדוק עדכון והתקן</button><button class="btn g" style="width:100%;margin-top:8px" data-a="syOut">התנתק</button><p class="note" style="margin:12px 0 0">הכנסות, הוצאות, סריקה ושאר המסכים נמצאים בבית.</p>`});
 let SCROLL={};
 function render(dir,keep){
- const c=cur();try{if(c.v!=='brand'&&BR)brFree()}catch(e){}/* 7: שחרור תמונות המיתוג ביציאה מהמסך */const x=V[c.v]?V[c.v](c.a):{t:'?',h:''};
+ try{catFix()}catch(e){}const c=cur();try{if(c.v!=='brand'&&BR)brFree()}catch(e){}/* 7: שחרור תמונות המיתוג ביציאה מהמסך */const x=V[c.v]?V[c.v](c.a):{t:'?',h:''};
  const y=window.scrollY;
  $('#main').innerHTML=x.h;
  $('#ttl').innerHTML=`${x.s?`<small>${esc(x.s)}</small>`:''}${esc(x.t)}`;
