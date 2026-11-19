@@ -441,10 +441,11 @@ async function cxHist(w, input) {
 // =====================================================================================================
 // A2 (17.11.2026): דוח מכירות לפריטים מכספית → מלאי.
 //   cxTx/{bk}_{yyyymmdd}_{עסקה}  { d, tx, bk, bn, bd: מזהה היום, dc:[d|קוד] (חיפוש שורות של מוצר), sb: סניף המלאי, un: יש שורה "לא בטוח",
-//                                   lines:[{ k, c, n, a, ds, w?, q, qs, why?, pid?, P? }], run, at, upd }
+//                                   lines:[{ k, c, n, a, ds, w?, t?, q, qs, why?, pid?, P? }], run, at, upd }   (t = שעת המכירה בדקות, C1)
 //       k = קוד|פדיון|הנחה|מופע (CC.salesGroup) – מפתח השורה בתוך העסקה. שורה שהמפתח שלה כבר שמור – לא נספרת שוב (העלאה חוזרת / דוח חופף).
 //       qs: sure / disc / unsure (כמות מוצעת – יורדת מהמלאי ומסומנת לבדיקה) / own (תוקן) / ok (אושר) / skip (קוד מיוחד) / nolink (קוד לא מוכר).
-//   cxDay/{bk}_{yyyymmdd}        { d, bk, bn, gross, ret, disc, ntx, nl, sp, un, it:{ קוד:{ n, cat, q, r, a, ds, u, sp? } } } – סיכום יומי לכל סניף בכספית (A3).
+//   cxDay/{bk}_{yyyymmdd}        { d, bk, bn, gross, ret, disc, ntx, nl, sp, un, it:{ קוד:{ n, cat, q, r, a, ds, u, sp? } }, h?:{ 'HH'|'na': נטו } } – סיכום יומי לכל סניף בכספית (A3).
+//       h (C1, 19.11.2026): פדיון נטו לפי שעת המכירה (שורה בלי שעה → 'na'). רק לשורות שנקלטו מאז; ימים ישנים – בלי h (CC.salesHours).
 //   prod/{id}.q.<br> יורד/עולה ב-FieldValue.increment; stockLog { why:'cx', src:'caspit', d, note: עסקה + סניף, run }.
 //   שורת "לא בטוח" לא עוצרת את שאר השורות: הכמות המוצעת יורדת מהמלאי, ובעל העסק מאשר או מתקן (cxFix – ההפרש נרשם בתנועות).
 // =====================================================================================================
@@ -464,6 +465,7 @@ function cleanLine(x) {
   if (!d || !c || !tx || !BK_RE.test(bk) || a == null || ds == null) return null;
   const w = x.w == null ? null : nOr(x.w, 0, 100000);
   const o = { d, c, n: s(x.n, 80), tx, bk, bn: s(x.bn, 60), w: w > 0 ? w : null, ds: CC.r2(ds), a: CC.r2(a) };
+  if (Number.isInteger(x.t) && x.t >= 0 && x.t < 1440) o.t = x.t; // C1: שעת המכירה (דקות) – רשות. חסר/לא תקין → בלי שעה (סל 'na'), השורה לא נדחית
   if (x.bkn === true) o.bkn = true; // מפתח הסניף לפי השם (אין מספר סניף בקובץ) – previewSales ממיר
   return o;
 }
@@ -522,6 +524,7 @@ async function previewSales(db, w, ref, ins) {
       if (sv && sv.has(l.k)) { cnt.dup++; rows.push([idx, l.d, l.tx, l.c, l.n, l.a, l.ds, l.bk, 'dup', null, null, '']); continue; }
       const o = { i: idx, k: l.k, c: l.c, n: l.n, a: l.a, ds: l.ds };
       if (l.w) o.w = l.w;
+      if (typeof l.t === 'number') o.t = l.t; // C1: שעת המכירה
       const x = X.get(l.c), pid = x && x.pid && P.has(x.pid) ? x.pid : null;
       if (skip.has(l.c)) Object.assign(o, { qs: 'skip', q: null });
       else if (!pid) Object.assign(o, { qs: 'nolink', q: null });
@@ -646,13 +649,14 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
       const cur = txw.get(g.id) || { lines: s0 && s0.exists ? (s0.get('lines') || []).slice() : [], fresh: !(s0 && s0.exists), g, logs: new Map() };
       txw.set(g.id, cur);
       const have = new Set(cur.lines.map((l) => l.k));
-      const did = dayIdOf(g), D = day.get(did) || { d: g.d, bk: g.bk, bn: g.bn, gross: 0, ret: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, it: {} };
+      const did = dayIdOf(g), D = day.get(did) || { d: g.d, bk: g.bk, bn: g.bn, gross: 0, ret: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, it: {}, h: {} };
       day.set(did, D);
       for (const l0 of g.L) {
         if (have.has(l0.k)) { res.dup++; continue; }
         have.add(l0.k);
         const l = { k: l0.k, c: l0.c, n: l0.n, a: l0.a, ds: l0.ds || 0, q: l0.q, qs: l0.qs };
         if (l0.w) l.w = l0.w;
+        if (typeof l0.t === 'number') l.t = l0.t;
         if (l0.why) l.why = l0.why;
         if (l0.P != null) l.P = l0.P;
         if (l0.pid) l.pid = l0.pid;
@@ -672,6 +676,7 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
         D.disc += l.ds; D.nl++;
         if (l.qs === 'skip') D.sp += l.a - l.ds;
         if (l.qs === 'unsure') D.un++;
+        const hk = CC.hourKey(l.t); D.h[hk] = (D.h[hk] || 0) + l.a - l.ds; // C1: פדיון נטו לפי שעה (בלי שעה → 'na'); סכום השעות = gross − ret − disc
         const key = fkey(l.c), it = D.it[key] || (D.it[key] = { n: l.n || (p && p.name) || '', cat: (p && p.cat) || '', q: 0, r: 0, a: 0, ds: 0, u: 0, sp: l.qs === 'skip' });
         const q = typeof l.q === 'number' ? l.q : 0;
         if (q > 0) it.q += q; else it.r += -q;
@@ -695,7 +700,8 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
       if (!D.nl && !D.ntx) continue;
       const it = {};
       for (const [c, v] of Object.entries(D.it)) it[c] = Object.assign({ n: v.n, cat: v.cat, q: FV().increment(O.r3(v.q)), r: FV().increment(O.r3(v.r)), a: inc(v.a), ds: inc(v.ds), u: FV().increment(v.u) }, v.sp ? { sp: true } : {});
-      tx.set(db.doc('cxDay/' + id), { d: D.d, bk: D.bk, bn: D.bn || '', gross: inc(D.gross), ret: inc(D.ret), disc: inc(D.disc), ntx: FV().increment(D.ntx), nl: FV().increment(D.nl), sp: inc(D.sp), un: FV().increment(D.un), it, upd: now }, { merge: true });
+      const h = Object.fromEntries(Object.entries(D.h).map(([k, v]) => [k, inc(v)]));
+      tx.set(db.doc('cxDay/' + id), Object.assign({ d: D.d, bk: D.bk, bn: D.bn || '', gross: inc(D.gross), ret: inc(D.ret), disc: inc(D.disc), ntx: FV().increment(D.ntx), nl: FV().increment(D.nl), sp: inc(D.sp), un: FV().increment(D.un), it, upd: now }, Object.keys(h).length ? { h } : {}), { merge: true });
     }
     tx.set(mark, { at: now, res, ix });
     tx.update(ref, Object.fromEntries(Object.entries(res).map(([kk, v]) => ['res.' + kk, FV().increment(v)])));
@@ -706,7 +712,7 @@ const dayIdOf = (g) => CC.dayId(g.bk, g.d);
 // =====================================================================================================
 // A3: מסך "מכירות כספית" (מנהל בלבד, החלטה 5) – סיכומים יומיים, שורות, תיקון כמות "לא בטוח". לא יוצר הכנסות.
 // =====================================================================================================
-// cxSales({ from, to }) – עד 92 ימים → { days:[cxDay בלי it], items:{ קוד:{ n, cat, sp?, v:{ i:[q,r,a,ds,u] } } }, cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
+// cxSales({ from, to }) – עד 92 ימים → { days:[cxDay בלי it, כולל h – מכירות לפי שעה], items:{ קוד:{ n, cat, sp?, v:{ i:[q,r,a,ds,u] } } }, cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
 async function cxSales(w, input) {
   onlyKeys(input, ['from', 'to']);
   const from = CC.dateOf(input.from), to = CC.dateOf(input.to);

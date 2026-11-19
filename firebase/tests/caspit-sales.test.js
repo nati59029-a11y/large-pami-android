@@ -267,4 +267,35 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
     assert.equal(await q(B, 'p1', 'b2'), -2);
     assert.equal(await q(B, 'p1', '_'), 5);
   });
+  it('C1: שעת מכירה – נשמרת בעסקה ובפילוח השעות של הסיכום היומי (בלי שעה → na, חצות → 00); cxSales מחזיר h; קובץ בלי שעות – יום בלי שעות', async () => {
+    const F = [HDR, L('25/11/2026 14:05', 'מוצר א', '300001', '8001', Y, 20), L('25/11/2026 14:50', 'מוצר א', '300001', '8001', Y, 10, 2), L('25/11/2026 09:00', 'מוצר ב', '300002', '8002', Y, -4.5),
+      L('25/11/2026', 'פריט כללי', '1000', '8003', Y, 7), L('26/11/2026 00:00', 'מוצר א', '300001', '8004', Y, 10), L('25/11/2026 23:59', 'מוצר א', '300001', '8101', N2, 10)];
+    const lines = CC.parseSales(F).lines;
+    assert.deepEqual(lines.map((l) => l.t), [845, 890, 540, undefined, 0, 1439]);
+    // שעה לא תקינה מהלקוח – השורה נקלטת בלי שעה (לא נדחית)
+    const up = await ok('cxUpload', MGR, { run: run(), kind: 'sales', part: 0, parts: 1, lines: [Object.assign({}, lines[0], { t: 5000 })] });
+    assert.deepEqual([up.n, up.bad], [1, 0]);
+    const id = await send(MGR, F);
+    await ok('cxPreview', MGR, { run: id });
+    await ok('cxApply', MGR, { run: id });
+    const d = await day('6200_20261125');
+    assert.deepEqual(d.h, { 14: 28, '09': -4.5, na: 7 }); // 20 + (10 − 2 הנחה); החזרה במינוס; בלי שעה → na
+    assert.equal(CC.r2(Object.values(d.h).reduce((a, b) => a + b, 0)), CC.r2(d.gross - d.ret - d.disc));
+    assert.deepEqual((await day('6200_20261126')).h, { '00': 10 });
+    assert.deepEqual((await day('7700_20261125')).h, { 23: 10 });
+    const t = (await adm().doc(`b/${A}/cxTx/6200_20261125_8001`).get()).data();
+    assert.deepEqual(t.lines.map((l) => l.t), [845, 890]);
+    // העלאה חוזרת – לא סופרים שוב גם בשעות
+    const id2 = await send(MGR, F); await ok('cxPreview', MGR, { run: id2 }); await ok('cxApply', MGR, { run: id2 });
+    assert.deepEqual((await day('6200_20261125')).h, { 14: 28, '09': -4.5, na: 7 });
+    const s = await ok('cxSales', MGR, { from: '2026-11-25', to: '2026-11-26' });
+    const H = CC.salesHours(CC.unpackDays(s));
+    assert.deepEqual(H.hours['2026-11-25'], { 14: 28, '09': -4.5, 23: 10, na: 7 });
+    assert.deepEqual(H.day, { '2026-11-25': 40.5, '2026-11-26': 10 });
+    assert.deepEqual(CC.salesHours(CC.unpackDays(s), '7700').hours, { '2026-11-25': { 23: 10 } });
+    // קובץ בלי שעות (FILE1) – הכול ב-na, והיום חוזר בלי שעות (גם יום ישן בלי h בכלל – ראו בדיקת היחידה)
+    assert.deepEqual((await day('6200_20261116')).h, { na: 72.1 });
+    const old = await ok('cxSales', MGR, { from: '2026-11-16', to: '2026-11-16' });
+    assert.deepEqual(CC.salesHours(CC.unpackDays(old)).hours['2026-11-16'], {});
+  });
 });

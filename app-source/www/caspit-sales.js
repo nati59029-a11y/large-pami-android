@@ -99,7 +99,7 @@ ACT.cxSApply=()=>{const R=X.R;if(!R.br)return toast('קודם בוחרים מא�
 ACT.cxSGo=async()=>{closeDlg();X.st='busy';rerender();
  try{let r,first=true;for(let i=0;i<20;i++){r=await fnCall('cxApply',first?{run:X.run,qty:X.qty}:{run:X.run});first=false;if(r.done)break}
   if(!r||!r.done)throw new Error('השמירה לא הסתיימה. לחצו שוב "אשר ושמור" – מה שכבר נשמר לא יישמר פעמיים.');
-  X.res=r.res||{};X.ap=new Set(r.ix||[]);X.st='done';Y.D=null;rerender();toast('✓ המכירות נשמרו');if(typeof window.__oxReload==='function')window.__oxReload()}
+  X.res=r.res||{};X.ap=new Set(r.ix||[]);X.st='done';Y.D=null;HC.clear();rerender();toast('✓ המכירות נשמרו');if(typeof window.__oxReload==='function')window.__oxReload()}
  catch(e){if(e&&e.reason==='stale'){try{X.R=await fnCall('cxPreview',{run:X.run});toast('קישורי המוצרים השתנו מאז התצוגה (נשמר קטלוג). מה שכבר נשמר מסומן "כבר נקלט". בדקו שוב ואשרו.')}catch(e2){X.R=null;X.st='';rerender();return err(e2)}X.st='pv';rerender();return}X.st='pv';rerender();err(e)}};
 V.cxSalesPv=()=>{const T='קליטת דוח מכירות';if(!ok())return{t:T,h:'<div class="empty">המסך מיועד למנהל בלבד</div>'};
  if(X.st==='busy')return{t:T,s:'שומר…',h:'<div class="card"><p style="margin:0">שומר את המכירות ומעדכן את המלאי…</p><p class="note">אל תסגרו את האפליקציה עד שהפעולה מסתיימת.</p></div>'};
@@ -215,4 +215,23 @@ ACT.cxYRc=el=>{const [d,rg]=el.dataset.k.split('|'),reg=regMap(),bks=[...new Set
 ACT.cxYRz=el=>{const [d,rg]=el.dataset.k.split('|'),Z=(Y.ZC||[]).filter(z=>z.d===d&&z.reg===rg);const sn=t=>typeof subName==='function'?subName(t):'';
  dlg(`<h3>סגירת קופה · ${esc(regNm(rg))} · ${esc(df(d))}</h3><div style="max-height:60vh;overflow:auto">${Z.map(z=>`<div class="card" style="margin:6px 0;padding:10px"><b>דוח Z ${esc(z.no||'—')}</b> <small class="note">${z.tm?esc(z.tm):''}${z.od&&z.od!==z.d?' · נפתחה ב-'+esc(df(z.od))+(z.otm?' '+esc(z.otm):''):''}${z.by?' · '+esc(z.by):''}</small>${z.T.map(t=>`<div class="row" style="justify-content:space-between;gap:8px;margin-top:6px"><span>${esc(sn(t)||t.note||'הכנסה')}</span><b dir="ltr">${ils(t.amt)}</b></div>`).join('')||'<p class="note">ההכנסות של הסגירה לא נמצאו במכשיר</p>'}<div class="row" style="justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px"><b>סה"כ</b><b dir="ltr">${ils(z.amt)}</b></div></div>`).join('')||'<p class="note">אין</p>'}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
 
+/* ===================== C1: מכירות לפי יום ולפי שעה – לבונוסי מכירות בשכר ===================== */
+/* window.CxHours (מכשיר המנהל; cxSales מותר למנהל בלבד). mon = 'YYYY-MM', br = מספר סניף בכספית (bk, למשל '6200'); בלי br – כל הסניפים.
+   month(mon,br) → Promise<{ 'YYYY-MM-DD': { 'HH': ש"ח, na?: ש"ח } }>  ·  days(mon,br) → Promise<{ 'YYYY-MM-DD': ש"ח נטו }>  ·  get(mon,br) → Promise<{ day, hours }>
+   סכומים = פדיון נטו (אחרי הנחות, החזרות במינוס), כמו "הכנסה נטו" במסך. יום בלי פילוח שעות (נתונים ישנים) → {} (הקורא מחליט). C.salesHours.
+   מקור: מה שמסך המכירות כבר טען (אם הטווח מכסה את החודש), אחרת קריאת cxSales אחת לחודש, שמורה 10 דקות. נמחק אחרי קליטת דוח מכירות. */
+const HC=new Map(),HTTL=6e5;
+function hDays(mon){
+ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mon||'')))return Promise.reject(new Error('חודש לא תקין (YYYY-MM)'));
+ const f=mon+'-01',l=new Date(Date.UTC(+mon.slice(0,4),+mon.slice(5,7),0)).toISOString().slice(0,10),t0=ymd(new Date()),need=l<t0?l:t0;
+ if(Y.D&&Y.D.f<=f&&Y.D.t>=need)return Promise.resolve(Y.D.days.filter(x=>x&&x.d>=f&&x.d<=l));
+ const c=HC.get(mon);if(c&&Date.now()-c.at<HTTL)return c.p;
+ const p=fnCall('cxSales',{from:f,to:l}).then(x=>C.unpackDays(x).map(d=>{delete d.it;return d}));
+ HC.set(mon,{at:Date.now(),p});p.catch(()=>{if(HC.get(mon)&&HC.get(mon).p===p)HC.delete(mon)});
+ return p}
+window.CxHours={
+ get:(mon,br)=>hDays(mon).then(D=>C.salesHours(D,br||'')),
+ month:(mon,br)=>hDays(mon).then(D=>C.salesHours(D,br||'').hours),
+ days:(mon,br)=>hDays(mon).then(D=>C.salesHours(D,br||'').day),
+ clear:()=>HC.clear()};
 })();

@@ -337,3 +337,66 @@ describe('תיקון סבב 1 (A2/A3)', () => {
     assert.ok(!C.qSignOk(10, -1) && !C.qSignOk(-10, 1));
   });
 });
+
+describe('C1: שעת מכירה ופילוח לפי שעה', () => {
+  it('timeOf: תאריך+שעה (dd/mm/yyyy, ISO, שניות), מספר Excel עם שבר; תאריך בלבד / לא תקין → -1', () => {
+    assert.equal(C.timeOf('16/11/2026 14:32'), 14 * 60 + 32);
+    assert.equal(C.timeOf('16/11/2026 9:05:59'), 9 * 60 + 5);
+    assert.equal(C.timeOf('16.11.26 23:59'), 1439);
+    assert.equal(C.timeOf('2026-11-16 14:32'), 872);
+    assert.equal(C.timeOf('2026-11-16T14:32:05.123'), 872);
+    assert.equal(C.timeOf(46342 + 0.5), 720);
+    assert.equal(C.timeOf(46342 + (14 * 60 + 32) / 1440), 872);
+    assert.equal(C.timeOf(new Date(2026, 10, 16, 8, 15)), 495);
+    for (const v of ['16/11/2026', '2026-11-16', 46342, new Date(2026, 10, 16), '', null, 'x', '31/02/2026 10:00', '16/11/2026 24:00', '16/11/2026 10:60', '2026-11-16T14:32:05Z', '2026-11-16T14:32+02:00', '16/11/2026 14:32 PM'])
+      assert.equal(C.timeOf(v), -1, String(v));
+    // dateOf לא השתנה: תאריך עם שעה → אותו יום
+    assert.equal(C.dateOf('16/11/2026 23:59'), '2026-11-16');
+    assert.equal(C.dateOf(46342.99999), '2026-11-16');
+  });
+  it('חצות: 00:00 = שעה 00 (לא "בלי שעה"); 23:59:59 נשאר באותו יום', () => {
+    assert.equal(C.timeOf('17/11/2026 00:00'), 0);
+    assert.equal(C.hourKey(C.timeOf('17/11/2026 00:00')), '00');
+    assert.equal(C.timeOf('16/11/2026 23:59:59'), 1439);
+    assert.equal(C.hourKey(1439), '23');
+    const ms = 46342 + 86399 / 86400; // 23:59:59 כמספר Excel
+    assert.equal(C.dateOf(ms), '2026-11-16'); assert.equal(C.timeOf(ms), 1439);
+    assert.deepEqual([C.hourKey(-1), C.hourKey(undefined), C.hourKey(1440), C.hourKey(61)], ['na', 'na', 'na', '01']);
+  });
+  it('parseSales: t רק כשיש שעה; לא חלק ממפתח השורה (אותה מכירה עם/בלי שעה = אותו k)', () => {
+    const rows = [SH, sl('16/11/2026 14:32', '1', '9', '10'), sl('16/11/2026', '2', '9', '5'), sl('17/11/2026 00:00', '1', '8', '10')];
+    const p = C.parseSales(rows);
+    assert.deepEqual(p.lines.map((l) => [l.d, l.t]), [['2026-11-16', 872], ['2026-11-16', undefined], ['2026-11-17', 0]]);
+    assert.ok(!('t' in p.lines[1]));
+    const k = (rs) => C.salesGroup(C.parseSales(rs).lines).flatMap((g) => g.L.map((l) => g.id + '#' + l.k));
+    assert.deepEqual(k([SH, sl('16/11/2026 14:32', '1', '9', '10')]), k([SH, sl('16/11/2026', '1', '9', '10')]));
+  });
+  it('salesHours: לפי יום ושעה, כל הסניפים או סניף אחד; בלי שעה → na; יום ישן בלי h → {}; פילוח חלקי → ההפרש ל-na', () => {
+    const days = [
+      { d: '2026-11-16', bk: '6200', gross: 100, ret: 10, disc: 5, h: { 10: 50, 14: 30, na: 5 } },
+      { d: '2026-11-16', bk: '7700', gross: 40, ret: 0, disc: 0, h: { 14: 40 } },
+      { d: '2026-11-15', bk: '6200', gross: 70, ret: 0, disc: 0 }, // נתונים ישנים – בלי פילוח
+      { d: '2026-11-17', bk: '6200', gross: 60, ret: 0, disc: 0, h: { '00': 20 } }, // חלקי: 40 נקלטו לפני הפילוח
+      { d: '2026-11-18', bk: '6200', gross: 10, ret: 0, disc: 0, h: { 99: 5, x: 5, 12: 'abc' } }, // מפתחות לא תקינים – מתעלמים
+    ];
+    const all = C.salesHours(days);
+    assert.deepEqual(all.day, { '2026-11-16': 125, '2026-11-15': 70, '2026-11-17': 60, '2026-11-18': 10 });
+    assert.deepEqual(all.hours['2026-11-16'], { 10: 50, 14: 70, na: 5 });
+    assert.deepEqual(all.hours['2026-11-15'], {});
+    assert.deepEqual(all.hours['2026-11-17'], { '00': 20, na: 40 });
+    assert.deepEqual(all.hours['2026-11-18'], {});
+    const one = C.salesHours(days, '7700');
+    assert.deepEqual(one, { day: { '2026-11-16': 40 }, hours: { '2026-11-16': { 14: 40 } } });
+    // יום עם סניף חדש (עם h) וסניף ישן (בלי h): הישן נכנס ל-na, סכום השעות = הסך היומי
+    const mix = C.salesHours([{ d: '2026-11-19', bk: 'a', gross: 30, h: { 11: 30 } }, { d: '2026-11-19', bk: 'b', gross: 12.5 }]);
+    assert.deepEqual(mix.hours['2026-11-19'], { 11: 30, na: 12.5 });
+    assert.deepEqual(C.salesHours([]), { day: {}, hours: {} });
+    // קובץ בלי שעות: הכול ב-na → יום בלי שעות
+    assert.deepEqual(C.salesHours([{ d: '2026-11-20', bk: 'a', gross: 9, h: { na: 9 } }]), { day: { '2026-11-20': 9 }, hours: { '2026-11-20': {} } });
+  });
+  it('packDays/unpackDays מעבירים את h (תשובת cxSales)', () => {
+    const D = C.unpackDays(C.packDays([{ d: '2026-11-16', bk: '6200', gross: 10, h: { 14: 10 }, it: { 1: { n: 'x', q: 1, a: 10 } } }]));
+    assert.deepEqual(D[0].h, { 14: 10 });
+    assert.deepEqual(C.salesHours(D).hours, { '2026-11-16': { 14: 10 } });
+  });
+});
