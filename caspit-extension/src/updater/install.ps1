@@ -1,5 +1,6 @@
 ﻿# לארג' פעמי – התקנה חד-פעמית של העדכון האוטומטי לתוסף כספית (0.1.7). מופעל מ-install-auto-update.cmd שבתיקיית התוסף.
-# יוצר משימה מתוזמנת של Windows למשתמש הנוכחי (בלי הרשאות מנהל): כל יום ב-02:30, וגם 2 דקות אחרי כניסה למחשב;
+# יוצר משימה מתוזמנת של Windows למשתמש הנוכחי (בלי הרשאות מנהל): כל יום ב-02:30, וגם 2 דקות אחרי כניסה למחשב,
+# ומ-0.1.10 גם כל 10 דקות לאורך היום (גרסה חדשה מגיעה למחשב תוך עד 10 דקות מהפרסום). הרצה חוזרת של ההתקנה מעדכנת את המשימה הקיימת (-Force);
 # אם המחשב היה כבוי בשעה הזו – רצה כשהוא נדלק (StartWhenAvailable). המשימה מריצה את caspit-update.ps1 על התיקייה הזו.
 # הקובץ נשמר ב-UTF-8 עם BOM (בשביל ההודעות בעברית ב-Windows PowerShell 5.1).
 $ErrorActionPreference = 'Stop'
@@ -30,11 +31,14 @@ try {
   $t1 = New-ScheduledTaskTrigger -Daily -At '02:30'
   $t2 = New-ScheduledTaskTrigger -AtLogOn -User $user
   $t2.Delay = 'PT2M'
+  # כל 10 דקות, כל היום: גורם יומי שמתחיל ב-00:00 וחוזר כל 10 דקות במשך יום (Repetition מגורם חד-פעמי – הדרך המקובלת ב-PowerShell 5.1)
+  $t3 = New-ScheduledTaskTrigger -Daily -At '00:00'
+  $t3.Repetition = (New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
   $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
   $pri = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-  Register-ScheduledTask -TaskName 'LargePami Caspit Update' -Action $act -Trigger @($t1, $t2) -Settings $set -Principal $pri -Force | Out-Null
+  Register-ScheduledTask -TaskName 'LargePami Caspit Update' -Action $act -Trigger @($t1, $t2, $t3) -Settings $set -Principal $pri -Force | Out-Null
   Start-ScheduledTask -TaskName 'LargePami Caspit Update'
-  Say ("העדכון האוטומטי הותקן.`n`nכל לילה ב-02:30 (וגם אחרי הדלקת המחשב) המחשב בודק אם יש גרסה חדשה של התוסף, מתקין אותה, והתוסף נטען מחדש לבד.`nאם העדכון ייכשל – תגיע התראה למנהל באפליקציה.`n`nתיקיית התוסף: " + $ext) $false
+  Say ("העדכון האוטומטי הותקן.`n`nכל 10 דקות (וגם ב-02:30 ואחרי הדלקת המחשב) המחשב בודק אם יש גרסה חדשה של התוסף, מתקין אותה, והתוסף נטען מחדש לבד.`nאם העדכון ייכשל – תגיע התראה למנהל באפליקציה.`n`nתיקיית התוסף: " + $ext) $false
   exit 0
 } catch {
   Say ('ההתקנה נכשלה: ' + $_.Exception.Message + "`n`nאפשר לנסות שוב: קליק ימני על install-auto-update.cmd ← הפעל כמנהל.") $true

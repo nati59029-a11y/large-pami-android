@@ -3,6 +3,8 @@
         תצוגה מקדימה (cxPreview) עם משבצות לחיצות, תיקון כמויות "לא בטוח", ואישור (cxApply). שורה שכבר נקלטה לא נספרת שוב.
    A3 – V.cxSales: "מכירות כספית": תקופה (היום, אתמול, שבוע, חודש, טווח), סיכומים, "כמה נמכר מכל מוצר", קופות, קטגוריות,
         שורות "לא בטוח" לאישור/תיקון (cxFix), התאמה מול סגירת קופה (S.zc במכשיר, לכל יום ולכל קופה + סך יומי).
+        מכירות היום (19.11): cxSales עם pt:true מחזיר גם תמונת מצב חלקית מהרובוט (יום בלי סיכום סופי, x.pt={at,hm}) – תווית "חלקי – עד השעה HH:MM",
+        לא נכללת בהתאמה לסגירת קופה ולא ב-CxHours (שכר). בלילה הסיכום הסופי מחליף אותה.
         החלטת בעל העסק (18.11): דוחות כספית – לתצוגה ולהשוואה בלבד. ההכנסות נרשמות רק מסגירת הקופה (אין הגדרת "מקור הכנסות").
    כל מספר לחיץ ומציג את השורות שמאחוריו (החלטה 12). רכיבי העיצוב הקיימים בלבד (.card .btn .chip .li .tag .note .kg .k .empty .f).
    משתמש ב: V, ACT, CHG, INP, FRM, fnCall, esc, ils, toast, dlg, closeDlg, ask, rerender, go, cur, fd, SY, S, ZREG, zcThr, bzF, dfmt, subName, CaspitCore. */
@@ -125,11 +127,19 @@ const addD=(d,n)=>new Date(Date.parse(d+'T12:00:00Z')+n*864e5).toISOString().sli
 function range(p){const t=ymd(new Date());if(p==='yday'){const y=addD(t,-1);return[y,y]}if(p==='week')return[addD(t,-6),t];if(p==='month')return[t.slice(0,8)+'01',t];if(p==='custom'&&Y.from&&Y.to)return[Y.from,Y.to];return[t,t]}
 const PER=[['today','היום'],['yday','אתמול'],['week','שבוע'],['month','חודש'],['custom','טווח']];
 /* תיקון סבב 1 (הערה 5): השרת מחזיר עד 92 ימים בבקשה, בצורה קומפקטית (CaspitCore.unpackDays); טווח ארוך – כמה בקשות */
-async function yLoad(){const [f,t]=range(Y.per);Y.load=1;Y.err='';
- try{let r=null,days=[];for(const [a,b] of C.chunks(f,t,92)){const x=await fnCall('cxSales',{from:a,to:b});days=days.concat(C.unpackDays(x));r=r||x}
+/* מכירות היום (19.11): pt:true → גם תמונת מצב חלקית מהרובוט (x.pt = { at, hm }), רק ליום שעוד אין לו סיכום סופי.
+   שרת ישן (bad-field) → בלי pt עד סוף הטעינה הזו; בטעינה הבאה של המסך מנסים שוב (השרת אולי עודכן בינתיים) */
+let ptOk=true;
+async function yLoad(){const [f,t]=range(Y.per);Y.load=1;Y.err='';ptOk=true;
+ try{let r=null,days=[];for(const [a,b] of C.chunks(f,t,92)){let x;if(ptOk){try{x=await fnCall('cxSales',{from:a,to:b,pt:true})}catch(e){if(e&&e.reason==='bad-field')ptOk=false;else throw e}}if(!x)x=await fnCall('cxSales',{from:a,to:b});days=days.concat(C.unpackDays(x));r=r||x}
   Y.D=Object.assign(r,{days,f,t});Y.T=C.aggDays(days);Y.U=null}catch(e){Y.err=e.message||'הטעינה נכשלה';Y.D=null}
  Y.load=0;if(cur().v==='cxSales')rerender()}
 const catN=c=>c?(Y.D&&Y.D.cats&&Y.D.cats[c])||'קטגוריה':'בלי קטגוריה';
+/* ימים חלקיים בתקופה: { 'YYYY-MM-DD': 'HH:MM' } (השעה המאוחרת מבין הסניפים) */
+const ptDays=()=>{const o={};for(const x of(Y.D?Y.D.days:[]))if(x&&x.pt&&x.pt.hm&&(!o[x.d]||x.pt.hm>o[x.d]))o[x.d]=String(x.pt.hm);return o};
+const ptTag=d=>{const h=ptDays()[d];return h?` <span class="tag t1">חלקי – עד השעה ${esc(h)}</span>`:''};
+function ptH(){const P=ptDays(),ds=Object.keys(P).sort();if(!ds.length)return '';
+ return `<div class="card" role="status" style="border-color:var(--warn)"><p style="margin:0">${ds.map(d=>`<b>${esc(df(d))}</b>${ptTag(d)}`).join(' · ')}</p><p class="note" style="margin-bottom:0">המכירות של היום מתעדכנות מהמחשב בחנות בכל שעה עגולה (07:00–23:00, לא בשבת וחג). זה נתון חלקי: בלילה הוא מוחלף בסכום הסופי. הוא לא נכלל בהתאמה לסגירת קופה, ופירוט העסקאות שלו יופיע אחרי הסיכום הסופי.</p></div>`}
 const bkN=bk=>{const b=Y.T&&Y.T.br[bk];return esc((b&&b.bn)||bk)};
 V.cxSales=()=>{const T='מכירות כספית';if(!ok())return{t:T,h:'<div class="empty">אין לך הרשאה למסך הזה</div>'};const M=mgr();if(!M&&(Y.tab==='rec'||Y.tab==='un'))Y.tab='prod';
  const per=`<div class="chips scroll-x nw" role="group" style="margin-bottom:8px">${PER.map(([k,l])=>`<button class="chip${Y.per===k?' on':''}" data-a="cxYPer" data-k="${k}" aria-pressed="${Y.per===k}" style="min-height:44px">${l}</button>`).join('')}</div>
@@ -143,7 +153,7 @@ V.cxSales=()=>{const T='מכירות כספית';if(!ok())return{t:T,h:'<div cla
  let body='';
  if(Y.tab==='prod')body=prodH();else if(Y.tab==='hr')body=hrH();else if(Y.tab==='reg')body=regH();else if(Y.tab==='cat')body=catH();else if(Y.tab==='rec')body=recH();else body=unH();
  return{t:T,s:(f===t?df(f):df(f)+' – '+df(t))+(D.cfg&&D.cfg.lastSales?' · דוח אחרון נקלט '+new Date(D.cfg.lastSales.at).toLocaleDateString('he-IL'):''),h:per+(!D.days.length?`<div class="card"><p style="margin-top:0">אין מכירות מכספית בתקופה הזו.</p>${M?'<p class="note">מעלים "דוח מכירות לפריטים" מכספית במסך "סנכרון כספית".</p><button class="btn w" style="min-height:48px" data-a="go" data-v="cxSync">לסנכרון כספית</button>':''}</div>`+(M&&Y.tab==='rec'?recH():''):
-  `<div class="card"><div class="kg">${k('הכנסה נטו (אחרי הנחות והחזרות)',A.net,'pos','net',1)}${k('פדיון מכירות',A.gross,'','gross',1)}${k('החזרות',A.ret,A.ret?'neg':'','ret',1)}${k('הנחות',A.disc,'','disc',1)}${k('עסקאות',A.ntx,'','ntx')}${M?k('לא בטוח',A.un,A.un?'neg':'','un'):''}</div><p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את הפירוט לפי יום, ומשם את העסקאות.${A.sp?' מתוך הפדיון, קודים מיוחדים (למשל פריט כללי): <bdi dir="ltr">'+ils(A.sp)+'</bdi>.':''}</p>${hrLine()}</div>
+  ptH()+`<div class="card"><div class="kg">${k('הכנסה נטו (אחרי הנחות והחזרות)',A.net,'pos','net',1)}${k('פדיון מכירות',A.gross,'','gross',1)}${k('החזרות',A.ret,A.ret?'neg':'','ret',1)}${k('הנחות',A.disc,'','disc',1)}${k('עסקאות',A.ntx,'','ntx')}${M?k('לא בטוח',A.un,A.un?'neg':'','un'):''}</div><p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את הפירוט לפי יום, ומשם את העסקאות.${A.sp?' מתוך הפדיון, קודים מיוחדים (למשל פריט כללי): <bdi dir="ltr">'+ils(A.sp)+'</bdi>.':''}</p>${hrLine()}</div>
  ${M?'<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="go" data-v="cxSee">עובדים שרואים את המסך</button>':''}<div class="chips scroll-x nw" role="tablist" style="margin:8px 0">${tabs.map(([id,l])=>`<button class="chip${Y.tab===id?' on':''}" role="tab" aria-selected="${Y.tab===id}" data-a="cxYTab" data-k="${id}" style="min-height:44px">${l}</button>`).join('')}</div>${body}`)}};
 ACT.cxYPer=el=>{Y.per=el.dataset.k;Y.D=null;Y.err='';Y.n=PG;rerender()};
 ACT.cxYRe=()=>{Y.D=null;Y.err='';rerender()};
@@ -174,7 +184,7 @@ ACT.cxYPL=el=>{const i=Y.T.items.find(x=>x.c===el.dataset.k);if(!i)return;const 
 /* ---- משבצות הסיכום → פירוט לפי יום → עסקאות היום ---- */
 const YDL={net:['הכנסה נטו',d=>d.net,1],gross:['פדיון מכירות',d=>d.gross,1],ret:['החזרות',d=>d.ret,1],disc:['הנחות',d=>d.disc,1],ntx:['עסקאות',d=>d.ntx,0]};
 ACT.cxYDl=el=>{const k=el.dataset.k;if(k==='un'){if(!mgr())return;Y.tab='un';rerender();return}const m=YDL[k];if(!m)return;
- dlg(`<h3>${m[0]} לפי יום</h3><div style="max-height:60vh;overflow:auto">${Y.T.days.map(d=>btn('cxYDay',`data-d="${d.d}"`,`<div class="m"><b>${esc(df(d.d))}</b><small>${nf(d.ntx)} עסקאות</small></div><b ${m[2]?'dir="ltr"':''} style="flex:none">${m[2]?ils(m[1](d)):nf(m[1](d))}</b>`)).join('')||'<p class="note">אין</p>'}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>${m[0]} לפי יום</h3><div style="max-height:60vh;overflow:auto">${Y.T.days.map(d=>btn('cxYDay',`data-d="${d.d}"`,`<div class="m"><b>${esc(df(d.d))}${ptTag(d.d)}</b><small>${nf(d.ntx)} עסקאות</small></div><b ${m[2]?'dir="ltr"':''} style="flex:none">${m[2]?ils(m[1](d)):nf(m[1](d))}</b>`)).join('')||'<p class="note">אין</p>'}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
 async function dayTx(d,bks,title,flt){dlg(`<h3>${esc(title)}</h3><p class="note">טוען…</p>`);
  try{let L=[];for(const bk of bks){const r=await fnCall('cxLines',{bd:C.dayId(bk,d)});L=L.concat(r.tx)}if(flt)L=L.map(x=>Object.assign({},x,{lines:x.lines.filter(flt)})).filter(x=>x.lines.length);dlg(txH(L,title+' · '+nf(L.length)+' עסקאות'))}catch(e){dlg(`<h3>${esc(title)}</h3><p class="note">${esc(e.message||'הטעינה נכשלה')}</p><button class="btn g w" style="min-height:44px" data-a="closeDlg">סגור</button>`)}}
 ACT.cxYDay=el=>{const d=el.dataset.d,bk=el.dataset.b;const bks=bk?[bk]:[...new Set(Y.D.days.filter(x=>x.d===d).map(x=>x.bk))];dayTx(d,bks,'עסקאות '+df(d)+(bk?' · '+((Y.T.br[bk]||{}).bn||bk):''))};
@@ -191,14 +201,14 @@ const hrNm=h=>h===C.HOUR_NA?'בלי שעה':h+':00–'+String((+h+1)%24).padStar
 function hrH(){const {S}=hrStat(),ds=Object.keys(S.day).sort().reverse(),has=ds.filter(d=>Object.keys(S.hours[d]).length),no=ds.filter(d=>!Object.keys(S.hours[d]).length);
  if(!has.length)return `<div class="card"><p class="note" style="margin:0">אין פילוח לפי שעה בתקופה הזו – בדוחות שנקלטו לא נמצאה שעת מכירה (או שנקלטו לפני העדכון).</p></div>`;
  return `<p class="note">פדיון נטו (אחרי הנחות והחזרות) לפי שעת המכירה. לחיצה על שעה מציגה את העסקאות.</p>`+has.map(d=>{const H=S.hours[d],ks=Object.keys(H).sort((x,y)=>x===C.HOUR_NA?1:y===C.HOUR_NA?-1:x<y?-1:1),mx=Math.max(...ks.map(h=>Math.abs(H[h])))||1;
-  return `<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;gap:6px"><b>${esc(df(d))}</b><b dir="ltr">${ils(S.day[d])}</b></div>${ks.map(h=>btn('cxYHr',`data-d="${d}" data-h="${h}"`,`<span style="flex:none;width:96px;font-size:.85rem" dir="ltr">${esc(hrNm(h))}</span><span aria-hidden="true" style="flex:1;min-width:40px;height:10px;border-radius:5px;background:var(--line);position:relative;overflow:hidden"><span style="position:absolute;top:0;bottom:0;inset-inline-start:0;width:${Math.round(Math.abs(H[h])/mx*100)}%;background:${H[h]<0?'var(--warn)':'var(--acc)'}"></span></span><b dir="ltr" style="flex:none">${ils(H[h])}</b>`,'gap:8px;align-items:center;min-height:44px')).join('')}</div>`}).join('')
+  return `<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;gap:6px"><b>${esc(df(d))}${ptTag(d)}</b><b dir="ltr">${ils(S.day[d])}</b></div>${ks.map(h=>btn('cxYHr',`data-d="${d}" data-h="${h}"`,`<span style="flex:none;width:96px;font-size:.85rem" dir="ltr">${esc(hrNm(h))}</span><span aria-hidden="true" style="flex:1;min-width:40px;height:10px;border-radius:5px;background:var(--line);position:relative;overflow:hidden"><span style="position:absolute;top:0;bottom:0;inset-inline-start:0;width:${Math.round(Math.abs(H[h])/mx*100)}%;background:${H[h]<0?'var(--warn)':'var(--acc)'}"></span></span><b dir="ltr" style="flex:none">${ils(H[h])}</b>`,'gap:8px;align-items:center;min-height:44px')).join('')}</div>`}).join('')
   +(no.length?`<p class="note">ימים בלי שעת מכירה: ${no.map(d=>esc(df(d))).join(', ')}</p>`:'')}
 ACT.cxYHr=el=>{const d=el.dataset.d,h=el.dataset.h,bks=[...new Set(Y.D.days.filter(x=>x.d===d).map(x=>x.bk))];dayTx(d,bks,'עסקאות '+df(d)+' · '+hrNm(h),l=>C.hourKey(l.t)===h)};
 
 /* ---- קופות (סניפים בכספית) ---- */
 function regH(){const B=Object.values(Y.T.br).sort((a,b)=>b.net-a.net);return B.map(b=>btn('cxYReg',`data-k="${esc(b.bk)}"`,`<div class="m"><b>${esc(b.bn)}</b><small>${nf(b.ntx)} עסקאות · פדיון <bdi dir="ltr">${ils(b.gross)}</bdi>${b.ret?' · החזרות <bdi dir="ltr">'+ils(b.ret)+'</bdi>':''}${b.disc?' · הנחות <bdi dir="ltr">'+ils(b.disc)+'</bdi>':''}</small></div><b dir="ltr" style="flex:none">${ils(b.net)}</b>`)).join('')||'<div class="empty">אין</div>'}
 ACT.cxYReg=el=>{const bk=el.dataset.k,L=Y.D.days.filter(x=>x.bk===bk).sort((a,b)=>a.d<b.d?1:-1);
- dlg(`<h3>${bkN(bk)} לפי יום</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>btn('cxYDay',`data-d="${x.d}" data-b="${esc(bk)}"`,`<div class="m"><b>${esc(df(x.d))}</b><small>${nf(x.ntx)} עסקאות</small></div><b dir="ltr" style="flex:none">${ils((x.gross||0)-(x.ret||0)-(x.disc||0))}</b>`)).join('')}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>${bkN(bk)} לפי יום</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>btn('cxYDay',`data-d="${x.d}" data-b="${esc(bk)}"`,`<div class="m"><b>${esc(df(x.d))}${ptTag(x.d)}</b><small>${nf(x.ntx)} עסקאות</small></div><b dir="ltr" style="flex:none">${ils((x.gross||0)-(x.ret||0)-(x.disc||0))}</b>`)).join('')}</div><button class="btn g w" style="min-height:44px;margin-top:8px" data-a="closeDlg">סגור</button>`)};
 
 /* ---- קטגוריות ---- */
 function catH(){const L=Object.values(Y.T.cats).sort((a,b)=>b.a-a.a);return L.map(c=>btn('cxYCat',`data-k="${esc(c.cat)}"`,`<div class="m"><b>${esc(catN(c.cat))}</b><small>${nf(c.n)} מוצרים · ${nf(c.q)} יחידות נטו</small></div><b dir="ltr" style="flex:none">${ils(c.a)}</b>`)).join('')||'<div class="empty">אין</div>'}
@@ -228,9 +238,10 @@ const RCLS={ok:'t3',gap:'t1',over:'t4',noz:'',nocx:'',span:'',part:'',none:''};
 const rTag=(st,gap)=>`<span class="tag ${RCLS[st]||''}">${st==='ok'?'✓ תואם':st==='gap'||st==='over'?'פער <bdi dir="ltr">'+ils(gap)+'</bdi>'+(st==='over'?' – מעל הסף':''):esc(C.RST[st]||st)}</span>`;
 function recH(){if(!zcOn())return '<div class="card"><p class="note" style="margin:0">סגירת קופה לא פעילה בעסק – אין מול מה להשוות.</p></div>';
  const D=Y.D,reg=regMap();if(!Object.keys(reg).length)return mapH()+'<div class="card"><p class="note" style="margin:0">כדי להשוות, מחברים קודם את קופות כספית לקופות של סגירת הקופה (למעלה).</p></div>';
- const zc=zcList(D.f,D.t),th=typeof zcThr==='function'?zcThr():0,R=C.recon(D.days,reg,zc,th,Object.keys(ZREG));Y.R=R;Y.ZC=zc;
+ const P=ptDays(),pd=Object.keys(P).sort(),zc=zcList(D.f,D.t).filter(z=>!P[z.d]),th=typeof zcThr==='function'?zcThr():0,R=C.recon(D.days.filter(x=>!x.pt),reg,zc,th,Object.keys(ZREG));Y.R=R;Y.ZC=zc;
+ const ptN=pd.length?`<p class="note" role="status">${pd.map(d=>esc(df(d))+' (חלקי – עד השעה '+esc(P[d])+')').join(', ')} – לא נכלל בהתאמה עד הסיכום הסופי בלילה.</p>`:'';
  const money=(a,key,v)=>`<button type="button" class="btn g s" data-a="${a}" data-k="${key}" style="min-height:44px;min-width:0"><bdi dir="ltr">${ils(v)}</bdi></button>`;
- return mapH()+`<p class="note">לכל יום ולכל קופה: ההכנסה בכספית (פדיון פחות הנחות והחזרות) מול ההכנסות שנכנסו מסגירת הקופה.${th?' סף הפער: '+ils(th)+'.':' לא הוגדר סף פער (בהגדרות).'} לחיצה על סכום מציגה את השורות.</p>`+(R.map(x=>`<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><b>${esc(df(x.d))}</b>${rTag(x.tot.st,x.tot.gap)}</div>
+ return mapH()+ptN+`<p class="note">לכל יום ולכל קופה: ההכנסה בכספית (פדיון פחות הנחות והחזרות) מול ההכנסות שנכנסו מסגירת הקופה.${th?' סף הפער: '+ils(th)+'.':' לא הוגדר סף פער (בהגדרות).'} לחיצה על סכום מציגה את השורות.</p>`+(R.map(x=>`<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><b>${esc(df(x.d))}</b>${rTag(x.tot.st,x.tot.gap)}</div>
  ${x.regs.filter(c=>c.st!=='none').map(c=>`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><b>${esc(regNm(c.reg))}</b>${rTag(c.st,c.gap)}</div>
  ${c.sx&&c.sx.length?`<p class="note" style="margin:4px 0 0">${c.sx.map(z=>'דוח Z '+esc(z.no||'—')+' נפתח ביום הזה ('+esc(df(z.od))+') ונסגר ב-'+esc(df(z.d))).join(' · ')} – חלק מהכסף של היום נמצא בסגירה ההיא.</p>`:''}<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px"><span class="note" style="margin:0">כספית</span>${c.hasCx?money('cxYRc',x.d+'|'+c.reg,c.cx):'<span>—</span>'}<span class="note" style="margin:0">סגירה</span>${c.zs.length?money('cxYRz',x.d+'|'+c.reg,c.z):'<span>—</span>'}</div>${c.sp?`<p class="note" style="margin:4px 0 0">מתוך הסכום בכספית, קודים מיוחדים (שוברים, תשלום חוב, פריט כללי): <bdi dir="ltr">${ils(c.sp)}</bdi></p>`:''}</div>`).join('')}
  ${x.regs.filter(c=>c.st!=='none').length>1?`<div class="row" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px;gap:8px;flex-wrap:wrap"><b>סך היום</b><span class="note" style="margin:0">כספית <bdi dir="ltr">${ils(x.tot.cx)}</bdi> · סגירות <bdi dir="ltr">${ils(x.tot.z)}</bdi></span></div>`:''}
@@ -271,7 +282,7 @@ const HC=new Map(),HTTL=6e5;
 function hDays(mon){
  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mon||'')))return Promise.reject(new Error('חודש לא תקין (YYYY-MM)'));
  const f=mon+'-01',l=new Date(Date.UTC(+mon.slice(0,4),+mon.slice(5,7),0)).toISOString().slice(0,10),t0=ymd(new Date()),need=l<t0?l:t0;
- if(Y.D&&Y.D.f<=f&&Y.D.t>=need)return Promise.resolve(Y.D.days.filter(x=>x&&x.d>=f&&x.d<=l));
+ if(Y.D&&Y.D.f<=f&&Y.D.t>=need)return Promise.resolve(Y.D.days.filter(x=>x&&!x.pt&&x.d>=f&&x.d<=l)); /* בלי מכירות היום החלקיות (לא סופי – לא לשכר) */
  if(!payOk())return Promise.resolve([]);
  const c=HC.get(mon);if(c&&Date.now()-c.at<HTTL)return c.p;
  const p=fnCall('cxSales',{from:f,to:l}).then(x=>C.unpackDays(x).map(d=>{delete d.it;return d}));

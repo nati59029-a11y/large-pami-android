@@ -1,6 +1,6 @@
 {
-  "v": 4,
-  "note": "גרסה 2 (18.11.2026) – לפי 3 דוחות היכרות וצילומי מסך מכספית (/bo). קטלוג ודוח מכירות – אומתו. העלאה לכספית: בחירת סוג → בחירת קובץ (שורה ב\"ממתין לטעינה\"; רק השורה שלנו) → \"העלה קבצים והרץ טעינה\" → שורה חדשה ב\"טעינות קודמות\" עם השם הייחודי שלנו, עד \"בוצע\" (שגויים/נטענו). בטבלה הזו לא לוחצים כלום.",
+  "v": 5,
+  "note": "גרסה 5 (19.11.2026) – היכרות שעות עובדים לפי הסבר בעל העסק: \"עובדים\" (#/employees, קריאה בלבד) ו\"שעות לעובד\" (#/employee-time-tracks/<מזהה>). הזרימה empHours רק בהיכרות (לא בסנכרון הלילי): מסמנים \"הצג רק עובדים פעילים\", נכנסים לעובד הראשון ולוחצים \"יצוא לאקסל\" של דף השעות (החודש הנוכחי). לא לוחצים \"עריכה\", \"עובד חדש\", \"הוספת כניסה ויציאה\" או \"יצוא לאקסל\" של רשימת העובדים. גרסה 2 (18.11.2026): קטלוג ודוח מכירות – אומתו; העלאה לכספית: בחירת סוג → בחירת קובץ → \"העלה קבצים והרץ טעינה\" → שורה חדשה ב\"טעינות קודמות\" עד \"בוצע\".",
   "base": "https://caspit.valu.co.il/bo",
   "start": "#/catalogs",
   "importEnabled": true,
@@ -254,6 +254,76 @@
         "submit": true,
         "wait": 2000
       }
+    ],
+    "empHours": [
+      {
+        "op": "nav",
+        "hash": "#/employees",
+        "ms": 3000,
+        "fresh": true
+      },
+      {
+        "op": "waitFor",
+        "t": {
+          "textAny": [
+            "שעות לעובד"
+          ],
+          "tag": "button,a,[role=button],input[type=button]"
+        },
+        "ms": 30000,
+        "stop": true
+      },
+      {
+        "op": "click",
+        "t": {
+          "textAny": [
+            "הצג רק עובדים פעילים"
+          ],
+          "tag": "label,span,div,[role=checkbox]"
+        },
+        "check": true,
+        "safe": true,
+        "wait": 2000
+      },
+      {
+        "op": "click",
+        "t": {
+          "textAny": [
+            "שעות לעובד"
+          ],
+          "tag": "button,a,[role=button],input[type=button]",
+          "nth": 0
+        },
+        "safe": true,
+        "stop": true,
+        "wait": 2000
+      },
+      {
+        "op": "waitFor",
+        "t": {
+          "textAny": [
+            "הוספת כניסה ויציאה"
+          ],
+          "tag": "button,a,[role=button],input[type=button]"
+        },
+        "ms": 30000,
+        "stop": true
+      },
+      {
+        "op": "click",
+        "at": "#/employee-time-tracks/",
+        "t": {
+          "textAny": [
+            "יצוא לאקסל",
+            "ייצוא לאקסל"
+          ],
+          "tag": "button,a,[role=button],input[type=button]"
+        },
+        "capture": true,
+        "safe": true,
+        "stop": true,
+        "ms": 30000
+      }
     ]
   },
   "disc": [
@@ -297,17 +367,17 @@
       ]
     },
     {
-      "name": "hours",
-      "hash": "#/hours-reports",
+      "name": "employees",
+      "hash": "#/employees",
       "menu": [
         "עובדים"
       ],
       "btn": true
     },
     {
-      "name": "on-shift",
-      "hash": "#/report-active-employee-on-stores",
-      "btn": true
+      "name": "emp-hours",
+      "flow": "empHours",
+      "priv": true
     }
   ]
 }

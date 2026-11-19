@@ -85,6 +85,38 @@ function safeDays(list, today, max) {
   const s = new Set((Array.isArray(list) ? list : []).filter((d) => typeof d === 'string' && DAY_RE.test(d) && d < today && d >= min && addDays(d, 0) === d));
   return [...s].sort();
 }
-const api = { TZ, AT, MAX_DAYS, parts, dayStr, addDays, slotDay, isDue, offset, zonedToUtc, nextAt, daysToFetch, safeDays };
+// ---------- מכירות היום כל שעה (0.1.10) ----------
+// שבת וחג – כמו בשרת (functions/lib/tk-time.js isRest, functions/lib/shifts-core.js quiet): יום מנוחה = שבת, או יום טוב
+// (ראש השנה א'–ב', כיפור, סוכות, שמיני עצרת, פסח א' וז', שבועות). חלון שקט: מערב שבת/חג 14:00 ועד מוצאי שבת/חג 21:00 (לפי tz).
+// כשל בלוח העברי של הדפדפן = לא חג (שבת – תמיד).
+const YT = { Tishri: [1, 2, 10, 15, 22], Nisan: [15, 21], Sivan: [6] };
+const QS = 14, QE = 21;
+let HEB = null;
+function restDay(day) {
+  const [y, m, d] = String(day).split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d, 12));
+  if (t.getUTCDay() === 6) return true;
+  try {
+    HEB = HEB || new Intl.DateTimeFormat('en-u-ca-hebrew', { timeZone: 'UTC', day: 'numeric', month: 'long' });
+    const p = HEB.formatToParts(t);
+    const mo = (p.find((x) => x.type === 'month') || {}).value, dd = +((p.find((x) => x.type === 'day') || {}).value);
+    return (YT[mo] || []).includes(dd);
+  } catch (e) { return false; }
+}
+function quiet(now, tz) {
+  const day = dayStr(now, tz), h = parts(now, tz).h;
+  if (restDay(day) && h < QE) return true;
+  return h >= QS && restDay(addDays(day, 1));
+}
+// השעה העגולה הנוכחית כמזהה 'YYYY-MM-DD HH' – רק בין from ל-to (כולל, שעון tz) ולא בחלון השקט; אחרת null
+function hourSlot(now, tz, from, to) {
+  const p = parts(now, tz);
+  if (p.h < from || p.h > to || quiet(now, tz)) return null;
+  return `${p.y}-${p2(p.m)}-${p2(p.d)} ${p2(p.h)}`;
+}
+// השעה העגולה הבאה (בישראל ההפרש מ-UTC הוא שעות שלמות – גם בשעון קיץ)
+const nextHour = (now) => Math.floor(now / 3600e3) * 3600e3 + 3600e3;
+const hmOf = (now, tz) => { const p = parts(now, tz); return `${p2(p.h)}:${p2(p.mi)}`; };
+const api = { TZ, AT, MAX_DAYS, parts, dayStr, addDays, slotDay, isDue, offset, zonedToUtc, nextAt, daysToFetch, safeDays, restDay, quiet, hourSlot, nextHour, hmOf };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxDays = api;
 })(typeof self !== 'undefined' ? self : this);

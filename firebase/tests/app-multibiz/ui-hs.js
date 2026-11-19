@@ -129,7 +129,14 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   check('8א הפריט עם 2 ספקים מופיע גם אצל שטראוס, וגם הכלליים', g.s2 && /חלב 3% ליטר/.test(g.s2) && /שקיות גדולות/.test(g.s2) && !/קוטג/.test(g.s2), g.s2);
   check('8ב "להזמין מספקים" לא נכנס לבד: יוגורט פרי (supord) לא מוצג, ואין שאילתה ל-supord', !Object.values(g).some((t) => /יוגורט פרי|מהזמנת לקוח/.test(t)) && !LOG.some((l) => l.coll === 'supord'), { g, so: LOG.filter((l) => l.coll === 'supord').length });
   check('8ג אסם (רק פריט שהגיע) – לא מוצג', !g.s3, Object.keys(g));
+  const chT = () => mp.evaluate(() => [...document.querySelectorAll('[data-a=hsSel]')].map((e) => e.innerText.replace(/\s+/g, ' ').trim() + (e.classList.contains('on') ? '*' : '')));
+  let ch = await chT();
+  check('8ד כפתורי ספקים במקום תיבת בחירה: "הכל" (נבחר), תנובה ושטראוס עם מספר; בלי אסם (אין לו פריטים)', !(await mp.$('select[data-c=hsSel]')) && ch[0] === 'הכל*' && ch.some((t) => /^תנובה \(\d+\)$/.test(t)) && ch.some((t) => /^שטראוס \(\d+\)$/.test(t)) && !ch.some((t) => /אסם/.test(t)), ch);
   await shot(mp, shots, 'hs-3-לפי-ספק');
+  await mp.click('[data-a=hsSel][data-id=s2]'); await sleep(200);
+  check('8ה לחיצה על "שטראוס" – רק הכרטיס של שטראוס, והכפתור מסומן', await mp.evaluate(() => [...document.querySelectorAll('[data-hsg]')].map((e) => e.dataset.hsg).join() === 's2' && document.querySelector('[data-a=hsSel][data-id=s2]').classList.contains('on')));
+  await mp.click('[data-a=hsSel][data-id=""]'); await sleep(200);
+  check('8ו "הכל" – כל הכרטיסים חוזרים', await mp.evaluate(() => !!document.querySelector('[data-hsg=s1]') && !!document.querySelector('[data-hsg=s2]')));
   // וואטסאפ: פעם ראשונה מבקש טלפון ושומר
   LOG.length = 0; await mp.click('[data-a=hsWa][data-id=s1]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('#dlg[open] #hsPh')));
   check('9 וואטסאפ לספק בלי טלפון: חלון בקשת טלפון', await mp.evaluate(() => !!document.querySelector('#dlg[open] #hsPh')));
@@ -343,12 +350,12 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   await mp.click('[data-a=hsNew]'); await waitFor(() => mp.evaluate(() => cur().v === 'hsEd'));
   await mp.fill('input[data-i=hsN]', 'חומוס אחלה');
   await waitFor(() => mp.evaluate((id) => !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`), nidA), 3000);
-  check('44 זיהוי מהמלאי: "זוהה במלאי: חומוס אחלה 400 גרם · ספק: אחלה" והספק נבחר אוטומטית', await mp.evaluate((id) => /זוהה במלאי: חומוס אחלה 400 גרם · ספק: אחלה/.test(document.getElementById('hsSug').innerText) && !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`), nidA));
+  check('44 זיהוי מהמלאי: רשימת מוצרים מתאימים – "חומוס אחלה 400 גרם", ספק: אחלה · במלאי; והספק נבחר אוטומטית', await mp.evaluate((id) => { const b = [...document.querySelectorAll('#hsSug [data-a=hsPick]')].map((e) => e.innerText.replace(/\s+/g, ' ')); return b.length === 1 && /חומוס אחלה 400 גרם ספק: אחלה · במלאי/.test(b[0]) && !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`); }, nidA));
   await shot(mp, shots, 'hs-7-זיהוי-מלאי');
-  await mp.click('[data-a=hsPName]'); await sleep(200);
-  check('44א "השתמש בשם הזה" – שם המוצר מהמלאי', await mp.evaluate(() => document.querySelector('input[data-i=hsN]').value === 'חומוס אחלה 400 גרם'));
+  await mp.click('#hsSug [data-a=hsPick]'); await sleep(200);
+  check('44א לחיצה על מוצר מתאים – שם המוצר מהמלאי, הספק נשאר, והרשימה נסגרת', await mp.evaluate((id) => document.querySelector('input[data-i=hsN]').value === 'חומוס אחלה 400 גרם' && !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`) && !document.querySelector('#hsSug [data-a=hsPick]'), nidA));
   check('44ב אפשר לשנות: הספק ניתן להסרה ויש בחירת ספק נוסף', await mp.evaluate(() => !!document.querySelector('#hsSups select[data-c=hsSupPick]')));
-  const sy = await mp.evaluate((id) => { const n1 = window.supSync(window.supCatNames()), n2 = window.supSync(['אחלה', ' תנובה ', 'אסם']); const c = S.subs.filter((s) => s.name === 'אחלה'); return { n1, n2, c: c.length, id: c[0] && c[0].id === id, cat: c[0] && c[0].cat, tn: S.subs.filter((s) => s.name === 'תנובה').length }; }, nidA);
+  const sy = await mp.evaluate((id) => { const n1 = window.supSyncNames(window.supCatNames()), n2 = window.supSyncNames(['אחלה', ' תנובה ', 'אסם']); const c = S.subs.filter((s) => s.name === 'אחלה'); return { n1, n2, c: c.length, id: c[0] && c[0].id === id, cat: c[0] && c[0].cat, tn: S.subs.filter((s) => s.name === 'תנובה').length }; }, nidA);
   check('45 סנכרון: ספק מהמלאי בלי כרטיס ("אחלה") נוסף לכרטסת "ספקים" פעם אחת, במזהה לפי השם; ספקים קיימים לא שוכפלו', sy.n1 === 1 && sy.n2 === 0 && sy.c === 1 && sy.id && sy.cat === 'e_sup' && sy.tn === 1, sy);
   check('45א הספק החדש מופיע ברשימת כל הספקים (למלאי ולבחירה)', await mp.evaluate(() => window.supAll().includes('אחלה') && window.supAll().includes('תנובה')));
   // תמונה בטופס – נגיעה מגדילה, עם שיתוף
@@ -363,6 +370,34 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   // מוצר במלאי: עריכה לא מוחקת קוד פריט, ושדה ספק נשמר
   const px = await mp.evaluate(() => { try { return { a: JSON.stringify(window.__pExtRead(null, { name: 'x' }, false)), b: JSON.stringify(window.__pExtRead(null, { sup: ' אחלה ' }, false)) }; } catch (e) { return { e: String(e) }; } });
   check('47 טופס מוצר: שדה שלא בטופס (קוד פריט) לא נשלח כמחיקה; ספק נשלח מנוקה', px.a && !/sku|sup/.test(px.a) && /"sup":"אחלה"/.test(px.b) && !/sku/.test(px.b), px);
+  // ---- 20.11.2026: מוצרים מתאימים – מהמלאי ומחוסרים קודמים, בחירה ממלאת שם + ספק, בלי כפילויות ----
+  const pkT = () => mp.evaluate(() => [...document.querySelectorAll('#hsSug [data-a=hsPick]')].map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+  const sel = () => mp.evaluate(() => [...document.querySelectorAll('#hsSups [data-a=hsSupRm]')].map((e) => e.dataset.id).sort().join());
+  const newF = async (n) => { await mp.evaluate(() => { closeDlg(); go('hs'); }); await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-a=hsNew]'))); await mp.click('[data-a=hsNew]'); await waitFor(() => mp.evaluate(() => cur().v === 'hsEd')); if (n) { await mp.fill('input[data-i=hsN]', n); await sleep(500); } };
+  await newF('קוטג');
+  let pk = await pkT();
+  check('49 הקלדה "קוטג": הצעה מחוסר קודם – "קוטג 5%", ספק: תנובה · הוזן בעבר', pk.length === 1 && /^קוטג 5% ספק: תנובה · הוזן בעבר$/.test(pk[0]), pk);
+  await mp.click('#hsSug [data-a=hsPick]'); await sleep(200);
+  check('49א לחיצה: השם "קוטג 5%" והספק תנובה נבחר (חוסר חדש, בלי בחירה ידנית)', await mp.evaluate(() => document.querySelector('input[data-i=hsN]').value === 'קוטג 5%') && await sel() === 's1', await sel());
+  await newF(''); await mp.selectOption('#hsSups select[data-c=hsSupPick]', 's2'); await sleep(150);
+  await mp.fill('input[data-i=hsN]', 'קוטג'); await sleep(500);
+  await mp.click('#hsSug [data-a=hsPick]'); await sleep(200);
+  check('49ב ספק שנבחר ידנית (שטראוס) נשאר, ותנובה נוסף לידו', await sel() === 's1,s2', await sel());
+  await mp.evaluate(() => { window.__ox.P = window.__ox.P.concat([{ id: 'p3', name: 'קוטג 5%', sup: 'תנובה' }, { id: 'p4', name: 'קוטג 9%' }]); });
+  await newF('קוטג');
+  pk = await pkT();
+  check('49ג בלי כפילות: "קוטג 5%" במלאי ובחוסר קודם – מופיע פעם אחת, מהמלאי (המלאי קודם); מוצר בלי ספק – בלי "ספק:"', pk.filter((t) => /^קוטג 5%/.test(t)).length === 1 && pk.some((t) => /^קוטג 5% ספק: תנובה · במלאי$/.test(t)) && pk.some((t) => /^קוטג 9% במלאי$/.test(t)) && !pk.some((t) => /הוזן בעבר/.test(t)), pk);
+  await mp.fill('input[data-i=hsN]', 'קוטג 9%'); await sleep(500);
+  check('49ד השם זהה בדיוק להצעה היחידה – אין רשימה', (await pkT()).length === 0, await pkT());
+  await mp.fill('input[data-i=hsN]', 'שקיות'); await sleep(500);
+  pk = await pkT();
+  check('49ה חוסר קודם כללי ("שקיות גדולות") – מוצע בלי ספק; לחיצה ממלאת רק את השם', pk.length === 1 && /^שקיות גדולות הוזן בעבר$/.test(pk[0]), pk);
+  await mp.click('#hsSug [data-a=hsPick]'); await sleep(200);
+  check('49ו אחרי לחיצה: השם מולא, לא נבחר ספק', await mp.evaluate(() => document.querySelector('input[data-i=hsN]').value === 'שקיות גדולות') && await sel() === '', await sel());
+  await mp.fill('input[data-i=hsN]', 'קו'); await sleep(500);
+  check('49ז 2 תווים מספיקים להצעות; מסך 360px בלי גלילה לרוחב', (await pkT()).length >= 1 && await noOverflow(mp), await pkT());
+  await mp.fill('input[data-i=hsN]', 'קוטג'); await sleep(500);
+  await shot(mp, shots, 'hs-9-מוצרים-מתאימים');
   check('48 אין שגיאות JS', mp.__errors.length === 0, mp.__errors);
   await x.ctx.close();
 
