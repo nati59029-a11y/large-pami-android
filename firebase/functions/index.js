@@ -393,3 +393,5 @@ Object.assign(exports, require('./caspit'));
 Object.assign(exports, require('./caspit-bot'));
 // משמרות – שלב 3 (18.11.2026): shApi (טבלה שבועית, עריכה, משימות למשמרת, הגדרות), shTick (מתוזמנת כל 10 דקות, us-central1) – shifts.js
 Object.assign(exports, require('./shifts'));
+// כלל שכר בכתב חופשי – שלב D (19.11.2026): payRuleAi – מנהל בלבד, עסק במבנה b, 50 פענוחים ביום לעסק; מחזיר רכיבים לאישור, לא שומר (payroll-ai.js + lib/pay-ai.js)
+Object.assign(exports, require('./payroll-ai'));
