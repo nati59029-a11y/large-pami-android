@@ -18,7 +18,7 @@ const st=document.createElement('style');st.textContent=`
 .cmg-sel{display:flex;gap:6px;margin-bottom:8px;align-items:center}
 .cmg-sel select,.cmg-sel input{flex:1;min-width:0;background:var(--srf-3);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px;font:inherit;font-size:.85rem}
 .cmg-sums{display:flex;gap:6px;text-align:center}
-.cmg-sums div{flex:1;background:var(--srf-3);border-radius:10px;padding:8px 2px;font-size:.75rem;color:var(--mut)}
+.cmg-sums>button{border:0;font-family:inherit;cursor:pointer;flex:1;background:var(--srf-3);border-radius:10px;padding:8px 2px;font-size:.75rem;color:var(--mut)}
 .cmg-sums b{display:block;font-size:1.15rem;color:var(--ink)}
 .cmg-list{padding:2px 12px}
 .cmg-li{display:flex;align-items:center;gap:8px;padding:9px 0;border:0;border-bottom:1px solid var(--line);font:inherit;font-size:.85rem;color:var(--ink);background:none;width:100%;text-align:start;box-sizing:border-box}
@@ -86,7 +86,7 @@ V.cm=()=>{const T='קופה והפקדות';if(!isA())return{t:T,s:'',h:'<div cl
  const sel=`<div class="cmg-sel"><select data-c="cmgPer" aria-label="תקופה">${opt('w','השבוע',CM.per)}${opt('m','החודש',CM.per)}${opt('r','טווח תאריכים',CM.per)}</select><select data-c="cmgReg" aria-label="קופה">${opt('','שתיהן',CM.reg)}${Object.keys(ZREG).map(k=>opt(k,esc(ZREG[k].n),CM.reg)).join('')}</select><button class="btn g s" data-a="cmgRe" ${CM.busy?'disabled':''}>רענן</button></div>`
   +(CM.per==='r'?`<div class="cmg-sel"><input type="date" data-c="cmgA" aria-label="מתאריך" value="${esc(CM.a||R.a)}" max="${today()}"><span>עד</span><input type="date" data-c="cmgB" aria-label="עד תאריך" value="${esc(CM.b||R.b)}" max="${today()}"></div>`:'')
   +`<p class="note" style="margin:0 0 8px">${esc(dfmt(R.a))} – ${esc(dfmt(R.b))}${CM.per==='r'&&R.M.length>=MAXM?' · עד 12 חודשים':''}</p>`;
- const sumH=`<div class="card"><div class="cmg-sums"><div>סך פערים<b dir="ltr" style="color:var(--${kc(X.G)})">${ld?'…':sgn(X.G)}</b></div><div>ממתין להפקדה<b dir="ltr" style="color:var(--${X.W>=0.005?'warn':'ink'})">${ld?'…':ils(X.W)}</b></div><div>ממתין לאישור<b>${ld?'…':X.N}</b></div></div></div>`;
+ const sumH=`<div class="card"><div class="cmg-sums"><button type="button" data-a="cmgK" data-k="g">סך פערים ‹<b dir="ltr" style="color:var(--${kc(X.G)})">${ld?'…':sgn(X.G)}</b></button><button type="button" data-a="cmgK" data-k="w">ממתין להפקדה ‹<b dir="ltr" style="color:var(--${X.W>=0.005?'warn':'ink'})">${ld?'…':ils(X.W)}</b></button><button type="button" data-a="cmgK" data-k="n">ממתין לאישור ‹<b>${ld?'…':X.N}</b></button></div></div>`;
  const err=R.err.map(e=>`<p class="note" style="color:var(--bad)">${esc(e)}</p>`).join('')+(CM.tab==='c'&&typeof COQ!=='undefined'&&COQ.err?`<p class="note" style="color:var(--bad)">${esc(COQ.err)}</p>`:'');
  let body;
  if(ld)body='<p class="note" style="padding:8px">טוען…</p>';
@@ -96,7 +96,12 @@ V.cm=()=>{const T='קופה והפקדות';if(!isA())return{t:T,s:'',h:'<div cl
  return{t:T,s:'מנהל',h:tabs+sel+sumH+err+body}};
 
 ACT.cmgTab=el=>{CM.tab=el.dataset.k==='c'?'c':'z';rerender()};
-ACT.cmgOpen=el=>{ZS.m=el.dataset.m;ZS.open=el.dataset.id;rerender()};/* ZS.m – בשביל הצילומים והפתקים בפירוט הקיים (zsImg / zsCoPic) */
+/* 19.11.2026: לחיצה על סכום בכרטיס הסיכום – הרשימה שמרכיבה אותו (אותם נתונים כמו sums) */
+ACT.cmgK=el=>{const R=rows();if(R.miss)return;const k=el.dataset.k,X=sums(R);
+ if(k==='g'){const L=R.Z.filter(x=>x.z.st!=='rej'&&Math.abs(sg(zcRes(x.z.c)))>=0.005);kDlg('סך פערים',L.map(zRow).join('')?`<div class="cmg-list">${L.map(zRow).join('')}</div>`:'',kFoot('סה״כ',sgn(X.G)))}
+ else if(k==='w'){const L=R.CO.filter(x=>x.dep==='1'&&!x.dp);kDlg('ממתין להפקדה',L.length?`<div class="cmg-list">${L.map(cRow).join('')}</div>`:'',kFoot('סה״כ',ils(X.W)))}
+ else{const L=R.Z.filter(x=>x.z.st==='new');kDlg('ממתין לאישור',L.length?`<div class="cmg-list">${L.map(zRow).join('')}</div>`:'',kFoot('סה״כ',String(L.length))+(L.length?'<button class="btn w" style="margin-top:8px" data-a="kGo" data-v="zc">לסגירות לאישור</button>':''))}};
+ACT.cmgOpen=el=>{closeDlg();ZS.m=el.dataset.m;ZS.open=el.dataset.id;rerender()};/* ZS.m – בשביל הצילומים והפתקים בפירוט הקיים (zsImg / zsCoPic) */
 ACT.cmgRe=()=>{if(CM.busy)return;if(typeof COQ!=='undefined'&&!COQ.b)coLoad().then(re).catch(re);load(1).catch(()=>{});rerender()};
 CHG.cmgPer=el=>{CM.per=['w','m','r'].includes(el.value)?el.value:'w';if(CM.per==='r'&&!CM.a){const[a,b]=[NOWM()+'-01',today()];CM.a=a;CM.b=b}rerender()};
 CHG.cmgReg=el=>{CM.reg=zcRegOk(el.value)?el.value:'';rerender()};
