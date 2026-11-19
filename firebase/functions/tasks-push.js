@@ -9,7 +9,7 @@
 // בלי התראה: משימה קבועה (rc), משימה ישנה בלי to שלא נתפסה, תפיסה/העברה, "נקרא", סימון רשימה, אישור מנהל (wait → done),
 //   משימה מהמייל של המזכירה (ml / owner ריק), ויצירה של משימה שאינה פתוחה או שנוצרה (cr) לפני יותר מ-10 דקות (העתקה / migrate.js).
 // "שליחת משימות" (19.11.2026): משימה שעובד מורשה שלח (dg == '1', owner = השולח) – ממתינה לאישור / בוצעה / תגובה של עובד
-//   הולכות גם לשולח (plus), רק אם הוא עובד פעיל שהמתג perms.tkS דולק אצלו עכשיו. תגובה של השולח עצמו – כמו תגובת מנהל: למטפל.
+//   הולכות רק לשולח (plus) – לא למנהלים (19.11.2026), רק אם הוא עובד פעיל שהמתג perms.tkS דולק אצלו עכשיו. תגובה של השולח עצמו – כמו תגובת מנהל: למטפל.
 //   על עצם השליחה המנהלים לא מקבלים התראה (כמו היום: role 'a' = רק לנמענים).
 // מנהל־על (superadmins/{uid}) נחשב מנהל כשקובעים מי עשה את הפעולה, ולעולם לא מקבל התראה כעובד.
 // לעולם לא למי שעשה את הפעולה; עובד – רק פעיל (staff/{uid}.active == true); מנהלים – מ-admins.
@@ -61,7 +61,8 @@ function evOf(b, a, actor, adm) {
   const ev = evOf0(b, a, actor, adm);
   if (!ev || a.dg !== '1' || !isId(a.owner) || (adm && adm.has(a.owner))) return ev;
   if (ev.k === 'cm' && !ev.mgr && a.cBy === a.owner) return { k: 'cm', to: handlerOf(a), actor: a.cBy, mgr: true, snd: true };
-  if (ev.to === 'adm' && ['wait', 'done', 'cm'].includes(ev.k) && ev.actor !== a.owner) return Object.assign({}, ev, { plus: [a.owner] });
+  // החלטת בעל העסק (19.11.2026): על משימת dg המנהלים לא מקבלים התראות – רק השולח (הם רואים הכול באפליקציה)
+  if (ev.to === 'adm') return ['wait', 'done', 'cm'].includes(ev.k) && ev.actor !== a.owner ? Object.assign({}, ev, { to: [], plus: [a.owner] }) : null;
   return ev;
 }
 function evOf0(b, a, actor, adm) {
@@ -137,7 +138,7 @@ async function deliver(bizId, id, kind, mk, opts) {
     const pt = (d) => (d.exists && Array.isArray(d.get('pushTokens')) ? d.get('pushTokens').filter((t) => typeof t === 'string') : []);
     const tokensOf = async (u) => { const [s, p] = await Promise.all([snap(u), db.doc('push_tokens/' + u).get()]); return [...new Set(pt(s).concat(pt(p)))]; }; // כמו RM.tokensOf
     let name = '';
-    if ((ev.to === 'adm' || ev.mgr) && isId(ev.actor)) { const s = await staffOf(ev.actor); name = clean((s && s.name) || x.name); }
+    if ((ev.to === 'adm' || ev.mgr || (ev.plus && ev.plus.length)) && isId(ev.actor)) { const s = await staffOf(ev.actor); name = clean((s && s.name) || x.name); }
     const msg = msgOf(ev, a, name);
     const plus = ids(ev.plus).filter((u) => !adm.has(u) && !sup.has(u));
     const list = (ev.to === 'adm' ? [...adm] : ev.to.slice(0, MAX_TO)).concat(plus);
