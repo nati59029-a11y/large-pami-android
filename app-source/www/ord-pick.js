@@ -102,6 +102,8 @@ ACT.oxPkDone=async el=>{const id=el.dataset.id,o=ordOf(id);if(!o)return;const s=
   L.push(m)}
  if(L.every(m=>m.act==='rm'))return toast('כל המוצרים מסומנים להורדה. לביטול ההזמנה – "ביטול הזמנה" בכרטיס ההזמנה');
  el.disabled=true;s.err='';
+ // 19.11.2026: מוצרים שסומנו "להזמין מספק" – אחרי השמירה שואלים אם להוסיף גם לחוסרים (hs.js, window.hsAskSo). אותו מוצר פעמיים – שורה אחת, הכמויות מצטרפות (כמו בשרת)
+ const SOQ=[];s.l.forEach((x,i)=>{if(x.act!=='ord')return;const it=s.it[i],k=it.pid?'p:'+it.pid:'n:'+it.n,q=num(x.qty),e=SOQ.find(y=>y.k===k);if(e){e.qty=n3(e.qty+q);e.sup=String(x.sup||'').trim()}else SOQ.push({k,n:it.n,qty:q,sup:String(x.sup||'').trim()})});
  try{const r=await fnCall('orderPick',Object.assign({id,reqId:s.rq,l:L},typeof s.upd==='number'?{upd:s.upd}:{}));s.sent=1;
   if(s.l.some(x=>x.act==='rm'||x.act==='rep')&&!(r&&r.applied)){
    const items=[];s.it.forEach((it,i)=>{const x=s.l[i];if(x.act==='rm')return;if(x.act==='rep'){items.push({pid:x.pid,qty:it.qty});return}
@@ -109,7 +111,8 @@ ACT.oxPkDone=async el=>{const id=el.dataset.id,o=ordOf(id);if(!o)return;const s=
    try{const u=await fnCall('updateOrder',Object.assign({id,items},r&&typeof r.upd==='number'?{ver:r.upd}:{}));if(u&&u.warn&&u.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+u.warn.map(w=>w.n).join(', ')),2700)}
    catch(e){el.disabled=false;if(e&&e.reason==='stale')return stale(id);s.err=(e&&e.message||'הפעולה נכשלה')+' – השינויים במוצרים לא נשמרו. תקנו ולחצו שוב "סיום וסיכום".';toast(s.err);rerender();return}}
   delete PS[id];await after(id);
-  if(r&&r.st==='ok'){toast('הכול במלאי – אפשר להמשיך');back()}else rerender()}
+  if(r&&r.st==='ok'){toast('הכול במלאי – אפשר להמשיך');back()}else rerender();
+  if(SOQ.length&&typeof window.hsAskSo==='function')try{window.hsAskSo(ordOf(id)||o,SOQ)}catch(e){}}
  catch(e){el.disabled=false;if(e&&e.reason==='stale')return stale(id);err(e)}};
 // תיקון אחרי בדיקה: עובד אחר שינה את ההזמנה בזמן הסימון – לא דורסים. טוענים מחדש ומתחילים סימון חדש
 async function stale(id){toast('ההזמנה השתנתה בינתיים (מישהו אחר עדכן אותה). נטען מחדש – סמנו שוב.');delete PS[id];await after(id);const o=ordOf(id);if(o&&canPick(o))sess(o);rerender()}

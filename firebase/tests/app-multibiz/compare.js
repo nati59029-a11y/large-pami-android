@@ -36,6 +36,14 @@ if (mode === 'legacy') {
   const grR = B2.filter(grT); B2 = B2.filter((r) => !grT(r));
   const grOk = (r) => { try { const q = JSON.parse(r.body).structuredQuery; const f = q.where.fieldFilter; return f.field.fieldPath === 'mem' && f.op === 'ARRAY_CONTAINS' && f.value.stringValue === r.who.split('@')[0]; } catch (e) { return false; } };
   if (grR.some((r) => !grOk(r)) || new Set(grR.map((r) => r.who + '|' + r.step)).size !== grR.length) { console.log('נכשל: שאילתת grp לא צפויה', grR.map((r) => r.who + '|' + r.step + '|' + r.body)); fail++; }
+  /* חוסרים (18.11.2026, שלב 1): משבצת "חוסרים" (במסך ה-+ ובבית של העובד) סופרת את הפריטים הפתוחים – runQuery על hsr, where st == 'open'.
+     חריג צר: רק השאילתה הזו בדיוק, לכל היותר פעם אחת למשתמש בכל שלב. אם תיכנס ל-main – מסננים גם שם */
+  const hsT = (r) => { try { return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && JSON.parse(r.body).structuredQuery.from[0].collectionId === 'hsr'; } catch (e) { return false; } };
+  for (let i = A.length - 1; i >= 0; i--) if (hsT(A[i])) A.splice(i, 1);
+  const hsR = B2.filter(hsT); B2 = B2.filter((r) => !hsT(r));
+  const hsOk = (r) => { try { const q = JSON.parse(r.body).structuredQuery, f = q.where.fieldFilter; return f.field.fieldPath === 'st' && f.op === 'EQUAL' && f.value.stringValue === 'open' && q.limit <= 500 && !q.select; } catch (e) { return false; } };
+  if (hsR.some((r) => !hsOk(r)) || new Set(hsR.map((r) => r.who + '|' + r.step)).size !== hsR.length) { console.log('נכשל: שאילתת hsr לא צפויה', hsR.map((r) => r.who + '|' + r.step + '|' + r.body)); fail++; }
+  console.log(`חוסרים – שאילתות hsr (מונה המשבצת): ענף ${hsR.length}`);
   console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
   if (idn.some((r) => r.method !== 'GET')) { console.log('נכשל: קריאת זיהוי שאינה GET'); fail++; }
   /* הגעה מיידית (feature/inbox-live, 11.11.2026): אצל מנהל, inbox (status==new) ו-mq (st==new) נמשכים גם 3 שניות אחרי הפתיחה, כל 20 שניות ובחזרה לאפליקציה,
