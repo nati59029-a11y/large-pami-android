@@ -6,7 +6,7 @@
 //                                     setBusinessOrg, setStaffBranches (סניפים/בנקים/כרטיסים, 2026-11-08).
 //                                     setStaffEmail (שינוי מייל של עובד קיים – 17.11.2026).
 //   מנהל העסק (בתוך העסק שלו בלבד):   setStaffActive (השבתה והחזרה של עובד קיים).
-//                                     setStaffPrc (רק בלארג' פעמי במצב legacy: המתג prc בלבד – 12.11.2026).
+//                                     setStaffPrc (מנהל העסק: המתג prc או yl של עובד – 12.11.2026, הורחב 19.11.2026).
 //                                     setStaffTkS (המתג tkS "שליחת משימות" בלבד, legacy וגם b – 19.11.2026).
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
 // כניסה ראשונה (שלב 6ג, עדכון חוזה 9, החלטת המשתמש "א"): אין קוד חד־פעמי ואין שליחת מייל בשרת.
@@ -476,6 +476,11 @@ async function setStaffPerms(request) {
   const [s, a] = await Promise.all([sRef.get(), db.doc(T.bizRef(biz, 'admins/' + uid)).get()]);
   if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
   if (a.exists) throw new HttpsError('failed-precondition', 'למנהל העסק יש את כל ההרשאות', { reason: 'is-admin' });
+  // 19.11.2026 (הכרעת בעל העסק): החלת דרגה בלבד (בלי perms) לא נוגעת במתגים שמנהל העסק בוחר לכל עובד (MGR_KEYS) – נשאר מה שיש לעובד
+  if (input.perms === undefined) {
+    const old = s.get('perms');
+    for (const k of MGR_KEYS) perms[k] = !!(old && typeof old === 'object' && !Array.isArray(old) && old[k] === true);
+  }
   const upd = { perms };
   if (input.rank !== undefined) upd.rank = r ? r.id : '';
   const b = db.batch();
@@ -485,18 +490,25 @@ async function setStaffPerms(request) {
   return { ok: true, uid, perms, rank: upd.rank !== undefined ? upd.rank : (s.get('rank') || '') };
 }
 
-// setStaffPrc({uid, on}) – 12.11.2026, תמחור חשבונית (החלטה 8): בלארג' פעמי במצב legacy מנהל העסק (או מנהל־על) מדליק/מכבה לעובד
-// רק את המתג prc ("עדכון מחירים ומלאי"). בעסק במבנה b – נדחה (שם כל המתגים דרך setStaffPerms, מנהל־על בלבד).
-// שאר ההרשאות לא משתנות: עובד שכבר יש לו perms – משתנה רק perms.prc. עובד ישן בלי perms – נכתבת מפה מלאה של ברירות המחדל
-// (R.DEFAULT_PERMS, בדיוק מה שיש לו היום בשרת ובחוקים: hasPerm / rOrdPerm) ועליה prc. כיבוי לעובד בלי perms – אין מה לשנות.
+// setStaffPrc({uid, on, key?}) – 12.11.2026, תמחור חשבונית (החלטה 8); הורחב 19.11.2026 (הכרעת בעל העסק): מנהל העסק (או מנהל־על)
+// מדליק/מכבה לעובד מתג אחד: key = 'prc' ("עדכון מחירים ומלאי", תוספת מדף או הזמנות) או 'yl' ("שלוחות הקו", תוספת yemot).
+// בלי key = 'prc' (גרסאות ישנות של האפליקציה). בכל עסק – legacy ומבנה b. תוספת כבויה בעסק – נדחה (feature-off).
+// שאר ההרשאות לא משתנות: עובד שכבר יש לו perms – משתנה רק perms.<key>. עובד ישן בלי perms – נכתבת מפה מלאה של ברירות המחדל
+// (R.DEFAULT_PERMS, בדיוק מה שיש לו היום בשרת ובחוקים: hasPerm / rOrdPerm / dflt) ועליה המתג. כיבוי לעובד בלי perms – אין מה לשנות.
+const STAFF_KEY_FEAT = Object.freeze({ prc: ['shelf', 'orders'], yl: ['yemot'] });
+const MGR_KEYS = Object.freeze(Object.keys(STAFF_KEY_FEAT));
 async function setStaffPrc(request) {
   const who = await requireStaff(request);
   if (who.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל העסק בלבד');
-  if (who.biz.dataRoot !== 'legacy') throw new HttpsError('failed-precondition', 'בעסק הזה ההרשאות נקבעות במסך העובדים (מנהל המערכת)', { reason: 'not-legacy' });
   const input = inputObject(request);
+  const key = input.key === undefined ? 'prc' : input.key;
+  if (typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(STAFF_KEY_FEAT, key)) throw bad('bad-key', 'מתג לא מוכר');
   const uid = typeof input.uid === 'string' ? input.uid : '';
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
   if (typeof input.on !== 'boolean') throw bad('bad-on', 'ערך לא תקין');
+  if (!STAFF_KEY_FEAT[key].some((f) => who.biz.features && who.biz.features[f] === true)) {
+    throw new HttpsError('failed-precondition', 'התוספת הזו לא מופעלת בעסק שלך. פנו לספק.', { reason: 'feature-off', feature: STAFF_KEY_FEAT[key][0] });
+  }
   const on = input.on;
   const db = getFirestore();
   const sRef = db.doc(T.bizRef(who.biz, 'staff/' + uid));
@@ -507,11 +519,12 @@ async function setStaffPrc(request) {
     if (a.exists || s.get('role') === 'manager') throw new HttpsError('failed-precondition', 'למנהל העסק יש את כל ההרשאות', { reason: 'is-admin' });
     const p = s.get('perms');
     const has = !!p && typeof p === 'object' && !Array.isArray(p);
-    if (has) tx.update(sRef, { 'perms.prc': on });
-    else if (on) tx.update(sRef, { perms: Object.assign({}, R.DEFAULT_PERMS, { prc: true }) });
-    tx.set(auditRef(who.bizId), auditData(who.uid, 'setStaffPrc', uid + '=' + on));
+    if (has) tx.update(sRef, { ['perms.' + key]: on });
+    else if (on) tx.update(sRef, { perms: Object.assign({}, R.DEFAULT_PERMS, { [key]: true }) });
+    // ההערה ביומן נשארת כמו קודם עבור prc (uid=on); למתג אחר: uid:key=on
+    tx.set(auditRef(who.bizId), auditData(who.uid, 'setStaffPrc', uid + (key === 'prc' ? '' : ':' + key) + '=' + on));
   });
-  return { ok: true, uid, prc: on };
+  return { ok: true, uid, [key]: on };
 }
 
 // setStaffTkS({uid, on}) – 19.11.2026, "שליחת משימות": מנהל העסק (או מנהל־על בתוך העסק) מדליק/מכבה לעובד רק את המתג tkS.

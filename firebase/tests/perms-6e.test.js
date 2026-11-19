@@ -14,7 +14,7 @@ const GM = require('./gemini-mock');
 const A = 'biz-a';
 const ALL = { scan: true, shelf: true, feedback: true, tasks: true, suppliers: true, requests: true, cashClose: true, yemot: true, orders: true };
 const MGR = 'p_mgr', OLD = 'p_old', NOEXP = 'p_noexp', TRF = 'p_trf', SUPER = 'p_super';
-const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, tkS: false }; // pos, posMgr – קופה שלב 0 (17.11.2026); shf – משמרות (main, 18.11.2026)
+const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false }; // pos, posMgr – קופה שלב 0 (17.11.2026); shf – משמרות (main, 18.11.2026); yl – שלוחות הקו (19.11.2026)
 
 const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 const fnUrl = (name) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${name}`;
@@ -122,6 +122,19 @@ describe('6ה – פונקציות: הוספת עובד, דרגות ומתגים
     const p2 = await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: Object.assign({}, p1.result.perms, { sup: true }) });
     assert.equal(p2.status, 'OK', p2.text);
     await assertSucceeds(db(OLD).doc(`b/${A}/supinv/s1`).get()); // מתג בודד לעובד הזה
+    // 19.11.2026: החלת דרגה לא מכבה את המתגים שמנהל העסק בחר (yl / prc), ולא מדליקה אותם
+    const y1 = await call('setStaffPrc', MGR, { uid: OLD, on: true, key: 'yl' });
+    assert.equal(y1.status, 'OK', y1.text);
+    const p3 = await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, rank: 'cash' });
+    assert.equal(p3.status, 'OK', p3.text);
+    const o3 = (await getDoc(`b/${A}/staff/${OLD}`)).perms;
+    assert.equal(o3.yl, true, 'yl נשמר אחרי החלת דרגה');
+    assert.equal(o3.prc, false, 'prc לא הודלק מהדרגה');
+    assert.equal(o3.sup, false, 'שאר המתגים – מהדרגה');
+    const y2 = await call('setStaffPrc', MGR, { uid: OLD, on: false, key: 'yl' });
+    assert.equal(y2.status, 'OK', y2.text);
+    const p4 = await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: Object.assign({}, p2.result.perms, { sup: true }) });
+    assert.equal(p4.status, 'OK', p4.text);
     const add = await call('addStaff', SUPER, { bizId: A, email: 'new6e@example.invalid', name: 'חדש', rank: 'cash' });
     assert.equal(add.status, 'OK', add.text);
     const ns = await getDoc(`b/${A}/staff/${add.result.uid}`);

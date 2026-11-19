@@ -40,6 +40,11 @@ async function requireStaff(request, opts) {
   if (o.yemotLine && bizId !== T.BIZ0) {
     throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר לעסק שלך. פנו לספק.', { reason: 'yemot-not-connected' });
   }
+  // 19.11.2026 (הכרעת בעל העסק): "שלוחות הקו" לעובד – רק עם המתג yl (כבוי כברירת מחדל, גם לעובד ישן בלי perms).
+  // מנהל ומנהל־על – כמו היום. השיחות לקו (yemot-hook.js) והפונקציות המתוזמנות לא עוברות כאן.
+  if (o.yemotLine && role !== 'manager' && !hasPerm({ role, staff, admin, superadmin: m.superadmin }, 'yl')) {
+    throw new HttpsError('permission-denied', 'אין לך הרשאה לשלוחות הקו. פנו למנהל.', { reason: 'no-line-perm' });
+  }
   const s = T.scope();
   if (s) Object.assign(s, { bizId, prefix, biz, uid });
   return { uid, role, staff, admin, bizId, biz, prefix, superadmin: m.superadmin };
@@ -59,9 +64,10 @@ function inputObject(request) {
 // s3m (14.11.2026, store3d): "שרטוט מפה" – עובד ששומר מפה (s3SaveMap) וקורא גרסאות קודמות; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
 // pos / posMgr (קופה, שלב 0, 17.11.2026): קופאי / אחראי משמרת – כבויים כברירת מחדל, גם לעובד ישן בלי perms. pos לבד לא נותן עלות (p/cost).
 // shf (18.11.2026, shifts.js): "משמרות" – עובד שרואה את כל המשמרות, עורך ושולח משימות למשמרת; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
+// yl (19.11.2026): "שלוחות הקו" – עובד שמשתמש בפונקציות הקו (requireStaff עם yemotLine); כבוי כברירת מחדל, גם לעובד ישן בלי perms.
 // tkS (19.11.2026, tasks-send.js + חוקי tasks): "שליחת משימות" – עובד ששולח משימות לעובדים אחרים ומאשר/מחזיר/מוחק רק את מה ששלח (dg == '1'); כבוי כברירת מחדל.
-const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf', 'tkS']);
-const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, tkS: false });
+const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf', 'yl', 'tkS']);
+const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false });
 // 18.11.2026 (הכרעת בעל העסק): קופה – רק מנהל־על מחליט מי מקבל, גם מנהלים. pos / posMgr של מנהל עסק = admins/{uid}.perms
 // (רק השרת כותב: setStaffPerms, מנהל־על בלבד). מנהל־על (גם כשהוא מנהל בעסק) = הכול, כמו היום. שאר ההרשאות של מנהל לא השתנו.
 // אותה הגדרה בדיוק כמו perm() בכללי Firestore של b/{bizId}.

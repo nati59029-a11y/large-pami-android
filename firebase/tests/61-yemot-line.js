@@ -115,7 +115,7 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     require('../functions/index.js');
   });
   after(async () => { await M.stop(); });
-  beforeEach(async () => { await H.seed(env); M.reset(); });
+  beforeEach(async () => { await H.seed(env); await H.grantLine(env); M.reset(); });
 
   // ---------------- 0. ייצוא ----------------
   it('index.js מייצא את הפונקציות החדשות (publishLineItem, removeLineItem, getLineState), ולא את uploadPreview (פ1=טלפון) ולא את tzintukJoin (מושבת)', () => {
@@ -139,6 +139,45 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
       assert.equal(M.state.requests.length, 0);
     });
   }
+
+  // ---------------- 1א. המתג "שלוחות הקו" (yl, 19.11.2026) ----------------
+  it('עובד בלי המתג yl (עובד ישן בלי perms / yl כבוי) – כל פונקציות הקו נדחות (no-line-perm) בלי פנייה לימות; מנהל העסק מדליק (setStaffPrc key=yl) – מותר; מנהל תמיד מותר', async () => {
+    const FNS = [['publishLineItem', item('recipes')], ['getLineState', {}], ['sendPromoToLine', { statusOnly: true }], ['previewVoice', { text: 'בדיקה' }],
+      ['getLineBoard', { slot: 'recipes' }], ['getLineAudio', {}], ['extendLineItem', {}], ['restoreLineItem', {}], ['removeLineItem', { requestId: rid(), id: 'x'.repeat(10) }],
+      ['listLineFiles', {}], ['setLineLayout', {}], ['yemotFbList', {}], ['sendLineTzintuk', {}]];
+    const denied = async (uid) => {
+      for (const [fn, data] of FNS) {
+        const r = await call(fn, uid, data);
+        assert.equal(r.status, 'PERMISSION_DENIED', fn + ': ' + r.text);
+        assert.equal(r.error.details.reason, 'no-line-perm', fn);
+        assert.equal(r.error.message, 'אין לך הרשאה לשלוחות הקו. פנו למנהל.');
+      }
+    };
+    // עובד עם perms ו-yl כבוי, ואחר כך עובד ישן בלי perms
+    await env.withSecurityRulesDisabled(async (c) => { await c.firestore().doc('staff/u_emp').update({ perms: require('../functions/lib/roles').DEFAULT_PERMS }); });
+    await denied('u_emp');
+    await env.withSecurityRulesDisabled(async (c) => { const d = c.firestore().doc('staff/u_emp'); const cur = (await d.get()).data(); delete cur.perms; await d.set(cur); });
+    assert.equal((await readDoc(env, 'staff/u_emp')).perms, undefined);
+    await denied('u_emp');
+    assert.equal(M.state.requests.length, 0);
+    // עובד לא מדליק לעצמו
+    assert.equal((await call('setStaffPrc', 'u_emp2', { uid: 'u_emp', on: true, key: 'yl' })).error.details.reason, 'manager-only');
+    // מנהל העסק מדליק: perms = ברירות המחדל + yl
+    const on = await call('setStaffPrc', 'u_mgr', { uid: 'u_emp', on: true, key: 'yl' });
+    assert.equal(on.status, 'OK', on.text); assert.deepEqual(on.result, { ok: true, uid: 'u_emp', yl: true });
+    assert.deepEqual((await readDoc(env, 'staff/u_emp')).perms, Object.assign({}, require('../functions/lib/roles').DEFAULT_PERMS, { yl: true }));
+    const ok = await call('publishLineItem', 'u_emp', item('recipes'));
+    assert.equal(ok.status, 'OK', ok.text);
+    assert.equal((await call('getLineState', 'u_emp', {})).status, 'OK');
+    // חלקי המנהל נשארים למנהל בלבד גם עם המתג
+    assert.equal((await call('setLineLayout', 'u_emp', { single: true, confirm: true })).error.details.reason, 'manager-only');
+    // כיבוי – נחסם שוב
+    assert.equal((await call('setStaffPrc', 'u_mgr', { uid: 'u_emp', on: false, key: 'yl' })).status, 'OK');
+    assert.equal((await readDoc(env, 'staff/u_emp')).perms.yl, false);
+    assert.equal((await call('getLineState', 'u_emp', {})).error.details.reason, 'no-line-perm');
+    // מנהל – בלי שום מתג
+    assert.equal((await call('getLineState', 'u_mgr', {})).status, 'OK');
+  });
 
   // ---------------- 2. עובד ← אף פעם לא צינתוק (קריטריון 1) ----------------
   it('עובד ששולח עם בקשת צינתוק מהמסך החדש (origin=builder): נדחה (tzintuk-manager-only) בעברית, ושרת הדמה לא קיבל אף קריאה – גם לא צינתוק', async () => {
@@ -1084,7 +1123,7 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     const r = await call('publishLineItem', 'u_mgr', recItem('opening', 1));
     assert.equal(r.status, 'OK', r.text); assert.equal(M.calls('DownloadFile').length, 0); assert.ok(!dir('').has('M1000.tts'));
     // קובץ ותיק בלי רשומה: ההגנה הקיימת
-    await H.seed(env); M.reset();
+    await H.seed(env); await H.grantLine(env); M.reset();
     const l = await call('publishLineItem', 'u_mgr', recItem('opening', 1));
     assert.equal(l.error.details.reason, 'opening-legacy-file'); assert.equal(dir('').get('M1000.wav'), 'פתיחה מוקלטת');
     assert.equal(M.calls('DownloadFile').length, 0); assert.equal(M.calls('UploadFile').length, 0);

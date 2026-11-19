@@ -70,7 +70,7 @@ describe('ימות שלב 4: לקוחות משוב ← רשימת תפוצה ב�
     // המפתח לא מופיע ביומן ולא בשום תשובה שראינו
     for (const t of LOGS.concat(SEEN)) assert.ok(!t.includes(SECRET), 'המפתח דלף: ' + t.slice(0, 200));
   });
-  beforeEach(async () => { await H.seed(env); M.reset(); });
+  beforeEach(async () => { await H.seed(env); await H.grantLine(env); M.reset(); });
 
   it('index.js מייצא את yemotFbList, ולא את runFbSync/_core', () => {
     const ex = require('../functions/index.js');
