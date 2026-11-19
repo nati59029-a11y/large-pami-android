@@ -27,12 +27,12 @@ const str=v=>v==null?'':String(v);
 /* טיוטה של המסך: נשמרת רק ב"שמירה" */
 const PD={sub:'',p:null};
 function draft(s){const p=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};
- return{mode:p.mode==='mo'?'mo':'hr',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'?p.uid:'',
+ return{mode:p.mode==='mo'?'mo':'hr',from:monV(p.from)?p.from:'',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'?p.uid:'',
   rules:(Array.isArray(p.rules)?p.rules:[]).filter(r=>r&&typeof r==='object').map(r=>({id:typeof r.id==='string'&&r.id?r.id:uid(),d:Array.isArray(r.d)?r.d.map(Number).filter(k=>Number.isInteger(k)&&k>=0&&k<=6):[],s:str(r.s),e:str(r.e),r:str(r.r)})),
   add:(Array.isArray(p.add)?p.add:[]).filter(a=>a&&typeof a==='object').map(a=>({id:typeof a.id==='string'&&a.id?a.id:uid(),n:str(a.n),k:a.k==='day'?'day':'mo',a:str(a.a)}))}}
 /* קורא את הטופס שעל המסך לתוך הטיוטה (לפני ציור מחדש, כדי שמה שהוקלד לא יימחק) */
 function pull(){const f=document.querySelector('#main form[data-f=payCfgF]'),p=PD.p;if(!f||!p)return;const g=n=>{const e=f.elements[n];return e?e.value:undefined};
- const set=(k,n)=>{const v=g(n);if(v!==undefined)p[k]=v};set('rate','rate');set('mo','mo');set('m','m');set('uid','uid');
+ const set=(k,n)=>{const v=g(n);if(v!==undefined)p[k]=v};set('rate','rate');set('mo','mo');set('m','m');set('uid','uid');set('from','from');
  if(f.elements.slip)p.slip=f.elements.slip.checked;
  p.rules.forEach((r,i)=>{['s','e','r'].forEach(k=>{const v=g('r'+k+i);if(v!==undefined)r[k]=v})});
  p.add.forEach((a,i)=>{const n=g('an'+i),k=g('ak'+i),v=g('aa'+i);if(n!==undefined)a.n=n;if(k!==undefined)a.k=k==='day'?'day':'mo';if(v!==undefined)a.a=v})}
@@ -53,7 +53,7 @@ function sumLine(p){if(!p||typeof p!=='object')return 'לא הוגדר';const a=
  if(p.m)a.push(p.m);if(p.slip)a.push('תלוש');const nr=Array.isArray(p.rules)?p.rules.length:0,na=Array.isArray(p.add)?p.add.length:0;
  if(nr)a.push(nr+' כללי תעריף');if(na)a.push(na+' תוספות');return a.join(' · ')}
 window.payCardH=s=>{try{if(!on()||!s||!empOf(s.id))return'';
- return `<button class="li" data-a="payOpen" data-id="${esc(s.id)}"><div class="m"><b>הגדרות שכר</b><small>${esc(sumLine(s.pay))}</small></div>${s.pay?'':'<span class="tag">חדש</span>'}${typeof ico==='function'?ico('chev','chev'):''}</button>`+monRowH(s)}catch(e){return''}};
+ return `<button class="li" data-a="payOpen" data-id="${esc(s.id)}"><div class="m"><b>הגדרות שכר</b><small>${esc(sumLine(s.pay))}</small></div>${s.pay?'':'<span class="tag">חדש</span>'}${typeof ico==='function'?ico('chev','chev'):''}</button>`+monRowH(s)+(typeof window.pslRowH==='function'?window.pslRowH(s):'')}catch(e){return''}};
 ACT.payOpen=el=>{if(!on())return;const s=empOf(el.dataset.id);if(!s)return;PD.sub=s.id;PD.p=draft(s);stTry=0;go('payCfg',s.id)};
 
 /* ---- המסך ---- */
@@ -65,7 +65,7 @@ V.payCfg=id=>{const T='הגדרות שכר';if(!on())return{t:T,h:'<div class="e
  h+=`<div class="card"><div class="sec" style="margin-top:0"><h3>סוג שכר</h3></div><div class="chips" role="group" aria-label="סוג שכר" style="margin-bottom:10px">${ch('payMode','hr','לפי שעה',hr)}${ch('payMode','mo','חודשי קבוע',!hr)}</div>`;
  h+=hr?fld('תעריף לשעה (₪)','rate',p.rate,'text','inputmode="decimal" autocomplete="off" placeholder="למשל 45"'):fld('סכום חודשי (₪)','mo',p.mo,'text','inputmode="decimal" autocomplete="off" placeholder="למשל 8000"');
  h+=selO('אמצעי תשלום','m',[['','לא נבחר'],...SAL_METHODS],p.m);
- h+=`<label class="cb"><input type="checkbox" name="slip" value="1"${p.slip?' checked':''}> מקבל תלוש</label></div>`;
+ h+=`<label class="cb"><input type="checkbox" name="slip" value="1"${p.slip?' checked':''}> מקבל תלוש</label>`+fld('שכר החל מחודש (רשות)','from',p.from,'month')+`<p class="note" style="margin:0">חודשים קודמים לא יוצעו כ"חודש פתוח". ריק – מהחודש שבו נשמרו ההגדרות לראשונה.</p></div>`;
  /* קישור למשתמש */
  const st=staff(),L=st.L||[],known=!p.uid||L.some(u=>u.uid===p.uid);
  const opts=[['','בלי קישור'],...L.map(u=>[u.uid,uName(u)+(u.active===false?' (מושבת)':'')]),...(known?[]:[[p.uid,'משתמש שמור (לא ברשימה)']])];
@@ -101,7 +101,7 @@ function build(p){const o={mode:p.mode==='mo'?'mo':'hr'};
  if(mo){const v=posN(mo);if(v==null)return 'סכום חודשי: מספר חיובי';o.mo=v}
  if(o.mode==='hr'&&o.rate==null)return 'חסר תעריף לשעה';
  if(o.mode==='mo'&&o.mo==null)return 'חסר סכום חודשי';
- o.m=SAL_METHODS.includes(p.m)?p.m:'';o.slip=!!p.slip;o.uid=typeof p.uid==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(p.uid)?p.uid:'';
+ o.m=SAL_METHODS.includes(p.m)?p.m:'';o.slip=!!p.slip;if(monV(s_(p.from)))o.from=s_(p.from);o.uid=typeof p.uid==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(p.uid)?p.uid:'';
  o.rules=[];for(let i=0;i<p.rules.length;i++){const r=p.rules[i],n='כלל תעריף '+(i+1)+': ';
   if(!r.d.length)return n+'בחרו לפחות יום אחד';if(!hmOk(r.s)||!hmOk(r.e))return n+'שעה בפורמט HH:MM';if(r.s===r.e)return n+'שעת ההתחלה והסיום זהות';
   const v=posN(r.r);if(v==null)return n+'תעריף: מספר חיובי';o.rules.push({id:r.id,d:[...new Set(r.d)].sort(),s:r.s,e:r.e,r:v})}
@@ -109,7 +109,7 @@ function build(p){const o={mode:p.mode==='mo'?'mo':'hr'};
   if(!nm)return n+'חסר שם';const v=posN(a.a);if(v==null)return n+'סכום: מספר חיובי';o.add.push({id:a.id,n:nm,k:a.k==='day'?'day':'mo',a:v})}
  return o}
 FRM.payCfgF=()=>{if(!on()||!PD.p)return;const s=empOf(PD.sub);if(!s)return toast('הכרטיס לא נמצא');pull();const o=build(PD.p);if(typeof o==='string')return toast(o);
- const old=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};s.pay=Object.assign({},old,o);save();PD.sub='';PD.p=null;toast('הגדרות השכר נשמרו');
+ const old=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};s.pay=Object.assign({},old,o);/* 19.11: from – תחילת השכר. בשמירה הראשונה בלי ערך = החודש הנוכחי; אחר כך לא משתנה (אלא בשדה) */if(!monV(s.pay.from))s.pay.from=curMon();save();PD.sub='';PD.p=null;toast('הגדרות השכר נשמרו');
  if(cur().v==='payCfg'&&NAV.length>1){NAV.pop();render(0,true)}else rerender()};
 /* ===== שלב ג': שכר חודשי – שעות, בונוס, סיכום ו"נשאר להעביר" (מנהל בלבד) =====
    החישוב כולו ב-PayCore.monthSum (payroll-core.js, באגורות). כאן רק תצוגה והזנה.
@@ -145,13 +145,14 @@ V.payMon=id=>{const T='שכר חודשי';if(!on())return{t:T,h:'<div class="emp
  if(PM.sub!==s.id||!monV(PM.mon)){PM.sub=s.id;PM.mon=curMon()}const m=PM.mon,r=monSum(s,m);
  if(!r)return{t:T,s:s.name,h:'<div class="empty">חישוב השכר לא זמין כרגע</div>'};
  const slip=!!s.pay.slip,K=(k,l,v,x)=>`<button class="k${x||''}" data-a="payBrk" data-k="${k}" style="font:inherit;color:inherit;text-align:inherit;width:100%;cursor:pointer"><small>${l} ›</small><b>${v}</b></button>`;
- let h=`<div class="card"><label class="f" style="margin:0"><span>חודש</span><input type="month" data-c="payMonM" value="${esc(m)}"></label></div>`;
+ let h=`<div class="card"><label class="f" style="margin:0"><span>חודש</span><input type="month" data-c="payMonM" value="${esc(m)}"></label>${monV(s.pay.from)&&m<s.pay.from?`<p class="note" style="margin:8px 0 0" data-prefrom>לפני תחילת השכר (${esc(mfmt(s.pay.from))}) – החודש לא מוצע כחודש פתוח בתשלום מהקופה.</p>`:''}</div>`;
  const big=r.status==='over'?-r.left:Math.max(0,r.left);
  h+=`<div class="hero"><small>${esc(mfmt(m))}${s.pay.m?' · '+esc(s.pay.m):''}${slip?' · תלוש':''}</small><div class="big">${ag(big)}</div><small>${r.status==='over'?'שולם ביתר':'נשאר להעביר'} · <b data-st="${r.status}">${esc(stH(r))}</b></small></div>`;
  if(r.warnings.length)h+=`<div class="card"><span class="tag t1">לבדיקה</span>${r.warnings.map(w=>`<div class="note">${esc(w)}</div>`).join('')}</div>`;
  h+=`<div class="kg" style="margin-bottom:10px">${K('hrs','שעות · '+r.days+' ימים',hmF(r.minutes))}${K('base',r.mode==='mo'?'בסיס (חודשי)':'בסיס לפי שעות',ag(r.base))}${K('add','תוספות',ag(r.adds.reduce((a,x)=>a+x.amt,0)))}${K('bon',slip?'בונוס (לרו"ח)':'בונוס',ag(r.bonus))}${K('calc','לפי החישוב',ag(r.calc))}`;
  if(r.slip)h+=K('slip','לפי התלוש · הפרש '+ag(r.slip.diff),ag(r.slip.net));
  h+=`${K('paid','שולם',ag(r.paid))}${K('left',r.status==='over'?'שולם ביתר':'נשאר להעביר',ag(Math.abs(r.left)),r.status==='open'?' neg':'')}</div>`;
+ if(slip&&typeof window.pslMonH==='function')h+=window.pslMonH(s,m);/* תלוש החודש – שלב ה', payroll-psl.js */
  /* שעות */
  const W=whOf(s.id,m),P=PC();
  h+=`<div class="sec"><h3>שעות עבודה</h3></div>`;
@@ -227,4 +228,6 @@ FRM.payBonF=f=>{if(!on())return;const s=empOf(PM.sub);if(!s||!s.pay)return toast
  else{if(!monV(PM.mon))return toast('חודש לא תקין');AR('bon').push({id:uid(),sub:s.id,mon:PM.mon,a,n})}
  save();closeDlg();toast('הבונוס נשמר');rerender()};
 ACT.payBonDel=el=>{if(!on())return;const id=el.dataset.id;ask('למחוק את הבונוס?',()=>{const L=AR('bon'),i=L.findIndex(x=>x&&x.id===id&&x.sub===PM.sub);if(i>=0){L.splice(i,1);save();toast('הבונוס נמחק')}rerender()},'מחיקה')};
+/* 19.11 (בעל העסק): הוצאה מקופה לעובד עם הגדרות שכר – החודש הפתוח הוותיק ביותר מבין 3 החודשים שלפני חודש התשלום (status 'open' ו-left>0), אחרת ''. index.html קורא בבדיקת typeof (בלי הקובץ – חודש התשלום, כמו קודם) */
+window.payOpenMon=(id,mon)=>{try{const s=empOf(id);if(!s||!s.pay||!PC()||!monV(mon))return'';let y=+mon.slice(0,4),m=+mon.slice(5,7);const L=[],fr=monV(s.pay.from)?s.pay.from:'';for(let i=0;i<3;i++){m--;if(!m){m=12;y--}L.unshift(y+'-'+z2(m))}for(const k of L){if(fr&&k<fr)continue;const r=monSum(s,k);if(r&&r.status==='open'&&r.left>0)return k}return''}catch(e){return''}};
 })();

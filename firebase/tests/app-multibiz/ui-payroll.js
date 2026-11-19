@@ -97,15 +97,15 @@ const seedEmp = (page) => page.evaluate(() => { const emp = S.cats.find((c) => c
     await clearT(pg); await save(pg); await sleep(300);
     const p = await pay(pg, 'pyE2');
     const exp = { mode: 'hr', rate: 45.5, mo: 7000, m: 'העברה', slip: true, uid: '', rules: [{ d: [5, 6], s: '22:00', e: '06:00', r: 55 }], add: [{ n: 'נסיעות', k: 'day', a: 22.5 }] };
-    const strip = (o) => o && Object.assign({}, o, { rules: (o.rules || []).map(({ id, ...r }) => r), add: (o.add || []).map(({ id, ...a }) => a) });
-    check('8 נשמר ב-subs[].pay במבנה המוסכם (מספרים, ימים, מזהים)', p && JSON.stringify(strip(p)) === JSON.stringify(exp) && typeof p.rules[0].id === 'string' && typeof p.add[0].id === 'string', p);
+    const strip = (o) => o && Object.assign({}, o, { from: undefined, rules: (o.rules || []).map(({ id, ...r }) => r), add: (o.add || []).map(({ id, ...a }) => a) });
+    check('8 נשמר ב-subs[].pay במבנה המוסכם (מספרים, ימים, מזהים; from = החודש הנוכחי)', p && JSON.stringify(strip(p)) === JSON.stringify(exp) && p.from === await pg.evaluate(() => NOWM()) && typeof p.rules[0].id === 'string' && typeof p.add[0].id === 'string', p);
     check('8א חזרה לכרטיס, הודעה, ושורה מעודכנת', await pg.evaluate(() => cur().v === 'card') && /נשמרו/.test(await toasts(pg))
       && /לפי שעה.*העברה.*תלוש.*1 כללי תעריף.*1 תוספות/.test(await pg.evaluate(() => document.querySelector('#main [data-a=payOpen]').innerText)));
     check('8ב שאר הנתונים לא השתנו (תנועות, קטגוריות, כרטיסים אחרים)', await pg.evaluate(() => JSON.stringify({ tx: S.tx, cats: S.cats, subs: S.subs.filter((s) => s.id !== 'pyE2') })) === before);
     check('8ג שדות אחרים ב-pay נשמרים בעריכה (תוספת שדה משלב אחר)', await pg.evaluate(() => { const s = S.subs.find((x) => x.id === 'pyE2'); s.pay.zz = 1; save(); return true; }));
     await pg.click('#main [data-a=payOpen]'); await sleep(250); await pg.fill('input[name=rate]', '46'); await save(pg); await sleep(300);
     const p2 = await pay(pg, 'pyE2');
-    check('8ד עריכה: התעריף התעדכן, zz נשאר, מזהי הכללים נשמרו', p2 && p2.rate === 46 && p2.zz === 1 && p2.rules[0].id === p.rules[0].id && p2.add[0].id === p.add[0].id, p2);
+    check('8ד עריכה: התעריף התעדכן, zz נשאר, מזהי הכללים נשמרו', p2 && p2.rate === 46 && p2.zz === 1 && p2.from === p.from && p2.rules[0].id === p.rules[0].id && p2.add[0].id === p.add[0].id, p2);
 
     // טעינה מחדש
     await pg.reload(); await pg.waitForLoadState('load'); await H.settle(pg, 2000); await closeD(pg);
@@ -275,6 +275,60 @@ const seedEmp = (page) => page.evaluate(() => { const emp = S.cats.find((c) => c
     check('33א גיבוי כולל S.wh/S.bon, ושחזור (parseBackup/ensure) מחזיר אותם', pv.bk && pv.rs, pv);
     await pg.reload(); await pg.waitForLoadState('load'); await H.settle(pg, 2000); await closeD(pg);
     check('34 אחרי טעינה מחדש: שעות ובונוסים נשמרו', await pg.evaluate(() => isA() && S.wh.length === 2 && S.bon.length === 2));
+    // 19.11 (בעל העסק): הוצאה מקופה לעובד עם הגדרות שכר – מוצע החודש הפתוח הוותיק (מ-3 החודשים הקודמים) כ"חודש משכורת"
+    { await pg.evaluate(() => { const emp = S.cats.find((c) => c.beh === 'emp' && !c.hid);
+        S.subs.push({ id: 'pyOM', cat: emp.id, name: 'עובד חודש פתוח', pay: { mode: 'mo', mo: 3000, m: 'מזומן', slip: false, uid: '', rules: [], add: [] } });
+        ['08', '09'].forEach((m) => S.tx.push({ id: 'pyOM' + m, t: 'exp', cat: emp.id, sub: 'pyOM', date: '2026-' + m + '-28', amt: 3000, plan: '2026-' + m, pays: [{ id: 'p' + m, d: '2026-' + m + '-28', a: 3000, m: 'מזומן' }] }));
+        const it = (id, sub, amt, d) => ({ id, by: 'עובד בדיקה', at: d + 'T09:00:00Z', d: { date: d, reg: true, creg: 'i_nl', cat: emp.id, sub, amt, note: 'משכורת ' + id } });
+        S.inbox.push(it('pyQ1', 'pyOM', 100, '2026-11-05'), it('pyQ2', 'pyOM', 50, '2026-11-06'), it('pyQ3', 'pyOM', 2950, '2026-11-07'), it('pyQ4', 'pyE1', 70, '2026-11-08'), it('pyQ5', 'pyE1', 80, '2026-11-09'));
+        save(); });
+      const st = (m) => pg.evaluate((k) => { const s = S.subs.find((x) => x.id === 'pyOM'); const r = PayCore.monthSum(s, k, { wh: S.wh, bon: S.bon, psl: S.psl, tx: S.tx.filter((t) => (cat(t.cat) || {}).beh === 'emp'), pmon }); return r && r.status; }, m);
+      const txOf = (src) => pg.evaluate((i) => { const t = S.tx.find((x) => x.src === i); return t ? t.plan : null; }, src);
+      check('36 payOpenMon: אוגוסט וספטמבר נסגרו – אוקטובר הוא החודש הפתוח הוותיק; עובד בלי pay – ריק', await pg.evaluate(() => window.payOpenMon('pyOM', '2026-11') === '2026-10' && window.payOpenMon('pyE1', '2026-11') === ''));
+      // אישור מהיר (בחירת קטגוריה ועובד): מוצע אוקטובר, שינוי ידני לנובמבר נשמר
+      await pg.evaluate(() => ACT.inbOk({ dataset: { id: 'pyQ1', pick: '1' } })); await sleep(200);
+      const q1 = await pg.evaluate(() => { const i = document.querySelector('#dlg form[data-f=inbRegF] input[name=pl]'); return { v: i && i.value, n: !!document.querySelector('#dlg [data-plopen]') }; });
+      check('37 אישור מהיר: "חודש משכורת" = אוקטובר (החודש הפתוח) עם הסבר', q1.v === '2026-10' && q1.n, q1);
+      await pg.fill('#dlg form[data-f=inbRegF] input[name=pl]', '2026-11'); await pg.click('#dlg form[data-f=inbRegF] button:not([type=button])'); await sleep(250);
+      check('37א שינוי ידני לנובמבר – נרשם לנובמבר, אוקטובר עדיין פתוח', (await txOf('pyQ1')) === '2026-11' && (await st('2026-10')) === 'open', await txOf('pyQ1'));
+      // טופס "בדיקה ושינוי" ← "שמור ואשר": מוצע אוקטובר ונרשם אליו
+      await pg.evaluate(() => ACT.inbEdit({ dataset: { id: 'pyQ2' } })); await sleep(200);
+      check('38 טופס הבדיקה: "חודש משכורת" = אוקטובר', await pg.evaluate(() => { const i = document.querySelector('#dlg form[data-f=inbsave] input[name=plan]'); return i && i.value; }) === '2026-10');
+      await pg.click('#dlg [data-a=inbSaveOk]'); await sleep(300); await closeD(pg);
+      check('38א "שמור ואשר" – נרשם לאוקטובר', (await txOf('pyQ2')) === '2026-10', await txOf('pyQ2'));
+      // אישור מהיר בלי שינוי – יתרת אוקטובר (2950) ← אוקטובר נסגר
+      await pg.evaluate(() => ACT.inbOk({ dataset: { id: 'pyQ3', pick: '1' } })); await sleep(200);
+      check('39 אישור מהיר בלי שינוי: מוצע אוקטובר', await pg.evaluate(() => document.querySelector('#dlg input[name=pl]').value) === '2026-10');
+      await pg.click('#dlg form[data-f=inbRegF] button:not([type=button])'); await sleep(250);
+      check('39א נרשם לאוקטובר, ואוקטובר נסגר; עכשיו אין חודש פתוח', (await txOf('pyQ3')) === '2026-10' && (await st('2026-10')) === 'closed' && await pg.evaluate(() => window.payOpenMon('pyOM', '2026-11') === ''), await st('2026-10'));
+      // עובד בלי pay – חודש התשלום, כמו היום
+      await pg.evaluate(() => ACT.inbOk({ dataset: { id: 'pyQ4', pick: '1' } })); await sleep(200);
+      await pg.evaluate(() => { const s = document.querySelector('#dlg select[name=sub]'); s.value = 'pyE1'; s.dispatchEvent(new Event('change', { bubbles: true })); }); await sleep(200);
+      const q4 = await pg.evaluate(() => ({ v: document.querySelector('#dlg input[name=pl]').value, n: !!document.querySelector('#dlg [data-plopen]') }));
+      check('40 עובד בלי pay, אישור מהיר: חודש התשלום (נובמבר), בלי הסבר', q4.v === '2026-11' && !q4.n, q4);
+      await pg.click('#dlg form[data-f=inbRegF] button:not([type=button])'); await sleep(250);
+      check('40א עובד בלי pay – נרשם לחודש התשלום', (await txOf('pyQ4')) === '2026-11');
+      await pg.evaluate(() => ACT.inbEdit({ dataset: { id: 'pyQ5' } })); await sleep(200);
+      check('40ב עובד בלי pay, טופס הבדיקה: חודש התשלום', await pg.evaluate(() => document.querySelector('#dlg form[data-f=inbsave] input[name=plan]').value) === '2026-11');
+      await pg.click('#dlg [data-a=inbSaveOk]'); await sleep(300); await closeD(pg);
+      check('40ג "שמור ואשר" – נרשם לחודש התשלום', (await txOf('pyQ5')) === '2026-11');
+      await shot(pg, shots, 'pay-4-חודש-פתוח');
+      // עובד חודשי חדש (הגדרות נשמרו עכשיו): from = החודש הנוכחי ← החודשים שלפני לא מוצעים, תשלום מקופה = חודש התשלום
+      await pg.evaluate(() => { const emp = S.cats.find((c) => c.beh === 'emp' && !c.hid); S.subs.push({ id: 'pyNM', cat: emp.id, name: 'עובד חודשי חדש' }); save(); go('card', 'pyNM'); }); await sleep(250);
+      await pg.click('#main [data-a=payOpen]'); await sleep(250); await pg.click('[data-a=payMode][data-v=mo]'); await sleep(150);
+      check('41 בהגדרות יש שדה "שכר החל מחודש" (ריק לעובד חדש)', await pg.evaluate(() => { const i = document.querySelector('#main input[name=from]'); return !!i && i.value === ''; }));
+      await pg.fill('input[name=mo]', '3000'); await save(pg); await sleep(300);
+      const nm = await pg.evaluate(() => { const s = S.subs.find((x) => x.id === 'pyNM'), M = NOWM(); return { from: s.pay.from, M, open: window.payOpenMon('pyNM', M) }; });
+      check('41א עובד חודשי חדש: from = החודש הנוכחי, ואין חודש קודם פתוח', nm.from === nm.M && nm.open === '', nm);
+      await pg.evaluate(() => { const emp = S.cats.find((c) => c.beh === 'emp' && !c.hid); S.inbox.push({ id: 'pyQ6', by: 'עובד בדיקה', at: new Date().toISOString(), d: { date: today(), reg: true, creg: 'i_nl', cat: emp.id, sub: 'pyNM', amt: 500, note: 'מקדמה' } }); save(); ACT.inbOk({ dataset: { id: 'pyQ6', pick: '1' } }); }); await sleep(200);
+      check('41ב תשלום מקופה: מוצע חודש התשלום (לא 3 חודשים אחורה), בלי הסבר', await pg.evaluate(() => document.querySelector('#dlg input[name=pl]').value === NOWM() && !document.querySelector('#dlg [data-plopen]')));
+      await pg.click('#dlg form[data-f=inbRegF] button:not([type=button])'); await sleep(250);
+      check('41ג נרשם לחודש התשלום', (await txOf('pyQ6')) === await pg.evaluate(() => NOWM()));
+      await pg.evaluate(() => { go('payMon', 'pyNM'); const e = document.querySelector('#main input[data-c=payMonM]'); e.value = addMon(NOWM(), -1); e.dispatchEvent(new Event('change', { bubbles: true })); }); await sleep(200);
+      check('41ד במסך השכר החודשי, חודש לפני from: הערה "לפני תחילת השכר"', await pg.evaluate(() => /לפני תחילת השכר/.test((document.querySelector('#main [data-prefrom]') || {}).innerText || '')));
+      await pg.evaluate(() => { const e = document.querySelector('#main input[data-c=payMonM]'); e.value = NOWM(); e.dispatchEvent(new Event('change', { bubbles: true })); }); await sleep(200);
+      check('41ה בחודש from עצמו – בלי ההערה', await pg.evaluate(() => !document.querySelector('#main [data-prefrom]')));
+    }
     check('35 אין שגיאות JS', pg.__errors.length === 0, pg.__errors);
     await x.ctx.close(); }
 
