@@ -210,6 +210,7 @@ async function board(request, key, base) {
       ref: { kind: e.kind, id: e.doc.id, ext, file: f.name }, file: f.name, origin: 'app', title: titleOf(e.kind, x), kind: kindOf(x), ...(shared ? { type: e.type } : {}),
       createdAt: x.createdAt || null, byRole: x.byRole || null, until: x.until || null, temporary: e.kind === 'promo' ? true : !!x.temporary,
       durationSec: x.durationSec || f.duration || null, size: f.size, uncertain: unsure, listen,
+      ...fullText(x),
       actions: { remove: mgr && slot !== 'opening' && !unsure && !locked, extend: canExtend },
     };
   });
@@ -234,6 +235,7 @@ async function board(request, key, base) {
     recent.push({
       ref: { kind: e.kind, id: e.doc.id }, title: e.kind === 'backup' ? `קובץ ותיק ${x.file}` : titleOf(e.kind, x), kind: e.kind === 'backup' ? x.kind : kindOf(x), ...(shared && e.type ? { type: e.type } : {}),
       file: x.file || null, downAt, downReason, until: x.until || null, hasSavedAudio: !!saved, alreadyRestored: already,
+      ...(e.kind === 'backup' ? {} : fullText(x)),
       restore: {
         allowed: mgr && !already && (!!saved || txt),
         needsUntil: e.kind === 'promo' || ((e.type || slot) === 'hours' && x.temporary === true),
@@ -244,6 +246,8 @@ async function board(request, key, base) {
   recent.sort((a, b) => (a.downAt < b.downAt ? 1 : -1));
   return { ok: true, slot, ext, fetchedAt, cached, stale, canManage: mgr, onLine, missing, recent: recent.slice(0, RECENT_MAX) };
 }
+// הנוסח המלא שנשלח (בקשת בעל העסק 19.11: לראות ולהעתיק אותו). הקלטה – אין נוסח.
+const fullText = (x) => (kindOf(x) === 'text' && hasText(x) ? { text: cleanText(x.text).slice(0, TEXT_OUT_MAX) } : {});
 function titleOf(kind, x) {
   if (x.title) return String(x.title);
   if (kind === 'promo') return (x.source && x.source.name) || (hasText(x) ? cleanText(x.text).slice(0, 60) : 'מבצע');
