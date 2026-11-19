@@ -11,7 +11,7 @@ const state = { requests: [], files: new Map(), dirs: {}, modes: {}, templates: 
 const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tts': 'עדכון ותיק' }, '4': { '000.tts': 'שעות ותיקות' }, '': { 'M1000.wav': 'פתיחה מוקלטת', 'ext.ini': 'type=menu' } };
 function reset(files, dirs) {
   state.requests = [];
-  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok', templates: 'ok', create: 'ok', entries: 'ok', phonelist: 'ok', tzl: 'ok' };
+  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok', templates: 'ok', create: 'ok', entries: 'ok', phonelist: 'ok', tzl: 'ok', update: 'ok' };
   state.templates = []; state.tzl = {}; state.nextTpl = 1001; state.headerRow = false;
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
@@ -51,7 +51,7 @@ function start(port) {
       const auth = req.headers.authorization || '';
       state.requests.push({ cmd, auth, url: req.url, body, at: Date.now() });
       const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download', GetTextFile: 'text',
-        GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: 'tzl' }[cmd];
+        GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: 'tzl', UpdateTemplateEntry: 'update' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       // tzphones (משימה 2026-11-17): מצב נפרד ל-RunTzintuk עם מערך מספרים (צינתוק ללקוחות משוב). לא הוגדר = כמו tzintuk
       // מערך מצבים (שליחה בקבוצות): מצב לכל קריאת מערך לפי הסדר; אחרי סוף המערך – 'ok'
@@ -126,6 +126,16 @@ function start(port) {
         const t = tplOf();
         if (!t) return reply(res, 200, { responseStatus: 'ERROR', message: 'templateId invalid' });
         return reply(res, 200, OK({ templateId: t.templateId, entries: [...t.entries.entries()].map(([phone, e], i) => ({ rowid: i + 1, index: i, phone, blocked: e.blocked === undefined ? false : e.blocked, name: e.name || null, moreinfo: null })) }));
+      }
+      // UpdateTemplateEntry (api-55, משימה 2026-11-19): לפי rowid (= מיקום ב-Map + 1). blocked 1/0. mode 'ignore': עונה OK בלי לשנות; 'hangafter': משנה ולא עונה
+      if (cmd === 'UpdateTemplateEntry') {
+        const t = tplOf();
+        if (!t) return reply(res, 200, { responseStatus: 'ERROR', message: 'templateId invalid' });
+        const k = [...t.entries.keys()][Number(body.rowid) - 1];
+        if (!k) return reply(res, 200, { responseStatus: 'ERROR', message: 'rowid invalid' });
+        if (mode !== 'ignore') { const e = t.entries.get(k); e.blocked = String(body.blocked) === '1'; if (body.name !== undefined) e.name = body.name; }
+        if (mode === 'hangafter') return;
+        return reply(res, 200, OK());
       }
       if (cmd === 'UploadPhoneList') {
         const t = tplOf();
