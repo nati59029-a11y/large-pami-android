@@ -452,17 +452,51 @@ describe('תמחור – לארג\' פעמי במצב legacy (שורש)', () => 
     // רישום ביומן
     const acts = (await coll('b/largpeami/audit')).filter((x) => x.act === 'setStaffPrc').map((x) => x.note).sort();
     assert.deepEqual(acts, [LE + '=false', LE + '=false', LE + '=true', LP + '=false', LP + '=true'].sort());
+    // 19.11.2026: המתג yl ("שלוחות הקו") – גם ב-legacy; רק yl משתנה
+    assert.equal((await call('setStaffPrc', LM, { uid: LE, on: true, key: 'yl' })).status, 'OK');
+    assert.deepEqual((await get('staff/' + LE)).perms, Object.assign({}, DEF, { prc: false, yl: true }));
+    assert.equal((await call('setStaffPrc', LP, { uid: LE, on: false, key: 'yl' })).reason, 'manager-only');
+    assert.equal((await get('staff/' + LE)).perms.yl, true);
     // setStaffPerms ב-legacy – עדיין נדחה (שאר ההרשאות לא משתנות מהאפליקציה)
     assert.equal((await call('setStaffPerms', LM, { bizId: 'largpeami', uid: LE, perms: { prc: true } })).reason, 'not-superadmin');
   });
 });
 
-describe('setStaffPrc – עסק במבנה b (לא legacy)', () => {
+describe('setStaffPrc – עסק במבנה b (19.11.2026: מותר גם כאן) והמתג yl ("שלוחות הקו")', () => {
   beforeEach(() => seed());
-  it('נדחה גם למנהל העסק וגם למנהל־על; ההרשאות לא משתנות', async () => {
-    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: true })).reason, 'not-legacy');
-    assert.equal((await call('setStaffPrc', SUPER, { bizId: A, uid: OLD, on: true })).reason, 'not-legacy');
-    assert.equal((await call('setStaffPrc', P1, { uid: OLD, on: true })).reason, 'manager-only');
+  it('מנהל העסק: prc ו-yl לעובד; רק המתג שנשלח משתנה; עובד ישן מקבל ברירות מחדל + המתג; עובד – לא; מנהל־על – כן; מתג לא מוכר / מנהל – נדחה', async () => {
+    const DEF = require('../functions/lib/roles').DEFAULT_PERMS;
+    // עובד (גם עם prc) – לא לעצמו ולא לאחר
+    for (const key of [undefined, 'prc', 'yl']) assert.equal((await call('setStaffPrc', P1, { uid: OLD, on: true, key })).reason, 'manager-only', String(key));
     assert.equal((await get(`b/${A}/staff/${OLD}`)).perms, undefined);
+    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: true, key: 'sal' })).reason, 'bad-key');
+    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: true, key: 7 })).reason, 'bad-key');
+    assert.equal((await call('setStaffPrc', MGR, { uid: MGR, on: true, key: 'yl' })).reason, 'is-admin');
+    // yl לעובד ישן בלי perms: ברירות המחדל + yl (שאר ההרשאות כמו היום)
+    const y = await call('setStaffPrc', MGR, { uid: OLD, on: true, key: 'yl' });
+    assert.equal(y.status, 'OK', y.text); assert.deepEqual(y.result, { ok: true, uid: OLD, yl: true });
+    assert.deepEqual((await get(`b/${A}/staff/${OLD}`)).perms, Object.assign({}, DEF, { yl: true }));
+    // בלי key = prc (גרסאות ישנות של האפליקציה): רק prc משתנה, yl נשאר
+    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: true })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/staff/${OLD}`)).perms, Object.assign({}, DEF, { yl: true, prc: true }));
+    // עובד עם perms – רק המתג שנשלח
+    assert.equal((await call('setStaffPrc', MGR, { uid: P1, on: true, key: 'yl' })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/staff/${P1}`)).perms, Object.assign({}, PRC, { yl: true }));
+    assert.equal((await call('setStaffPrc', MGR, { uid: P1, on: false, key: 'prc' })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/staff/${P1}`)).perms, Object.assign({}, PRC, { yl: true, prc: false }));
+    // מנהל־על בתוך העסק – מותר
+    assert.equal((await call('setStaffPrc', SUPER, { bizId: A, uid: P2, on: true, key: 'yl' })).status, 'OK');
+    assert.equal((await get(`b/${A}/staff/${P2}`)).perms.yl, true);
+    // רישום ביומן: prc – כמו קודם (uid=on); yl – uid:yl=on
+    const acts = (await coll(`b/${A}/audit`)).filter((x) => x.act === 'setStaffPrc').map((x) => x.note).sort();
+    assert.deepEqual(acts, [OLD + ':yl=true', OLD + '=true', P1 + ':yl=true', P1 + '=false', P2 + ':yl=true'].sort());
+  });
+  it('תוספת כבויה בעסק – נדחה (feature-off) ובלי שינוי: yl בלי yemot, prc בלי מדף והזמנות', async () => {
+    assert.equal((await call('setStaffPrc', SM, { uid: SP, on: true, key: 'yl' })).reason, 'feature-off'); // מדף בלבד – אין קו
+    assert.equal((await call('setStaffPrc', SM, { uid: SP, on: false, key: 'prc' })).status, 'OK'); // מדף – prc מותר
+    assert.deepEqual((await get(`b/${S}/staff/${SP}`)).perms, Object.assign({}, PRC, { prc: false }));
+    await prep((d) => d.doc(`b/${X}/staff/xw`).set({ name: 'x', role: 'employee', active: true }));
+    for (const key of ['prc', 'yl', undefined]) assert.equal((await call('setStaffPrc', XM, { uid: 'xw', on: true, key })).reason, 'feature-off', String(key));
+    assert.equal((await get(`b/${X}/staff/xw`)).perms, undefined);
   });
 });

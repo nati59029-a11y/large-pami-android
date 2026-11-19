@@ -14,7 +14,7 @@ const YM_MSG={ // הודעות לפי reason מהחוזה; כולן בעברית
  'busy':'השליחה של המבצע הזה כבר בטיפול. נסו שוב בעוד רגע.','bad-promo-key':'הבקשה לא תקינה. נסו שוב.',
  'no-key':'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.',
  'not-signed-in':'צריך להתחבר לאפליקציה.',
- 'not-staff':'אין לך הרשאה לשלוח מבצעים לקו.','staff-disabled':'המשתמש שלך מושבת. פנו למנהל.',
+ 'not-staff':'אין לך הרשאה לשלוח מבצעים לקו.','no-line-perm':'אין לך הרשאה לשלוחות הקו. פנו למנהל.','staff-disabled':'המשתמש שלך מושבת. פנו למנהל.',
  'empty-text':'הנוסח ריק. כתבו מה יוקרא בקו.','text-too-long':`הנוסח ארוך מדי (עד ${YM_TEXT_MAX} תווים).`,
  'bad-date':'תאריך ההורדה לא תקין.','date-past':'תאריך ההורדה כבר עבר.','date-too-far':`אפשר להשאיר מבצע בקו עד ${YM_MAX_DAYS} ימים.`,
  'bad-request-id':'הבקשה לא תקינה. נסו שוב.','bad-input':'הקלט לא תקין.','internal':'שגיאה בשליחה לקו.'};
@@ -141,7 +141,9 @@ if(typeof shAdd==='function'){const shAdd0=shAdd;window.shAdd=function(k,it,idx)
    כפתור "שמור, שלח לקו וצנתק" מוצג למנהל בלבד (הנוחות במסך; האכיפה בשרת). שמירה רגילה ("אישור והוספה") לא משתנה. */
 let YB=null; // {withTz, at}: נקבע בכל שליחת טופס (גם null בשמירה רגילה), כך שאין מצב תקוע
 const ymIsAdmin=()=>typeof SY!=='undefined'&&!!SY&&SY.role==='admin';
-window.ymSaveBtns=()=>`<div class="row" style="margin-top:8px"><button class="btn g grow" name="go" value="ym">שמור ושלח לקו</button>${ymIsAdmin()?'<button class="btn g grow" name="go" value="ymtz">שמור, שלח לקו וצנתק</button>':''}</div>`;
+/* 19.11.2026: עובד בלי המתג "שלוחות הקו" (yl) – בלי כפתורי "שלח לקו" (השרת דוחה no-line-perm). מנהל – כמו היום */
+const ymLineOk=()=>{try{return typeof isW==='function'&&isW()?!!(SY.perms&&typeof SY.perms==='object'&&SY.perms.yl===true):true}catch(e){return false}};
+window.ymSaveBtns=()=>!ymLineOk()?'':`<div class="row" style="margin-top:8px"><button class="btn g grow" name="go" value="ym">שמור ושלח לקו</button>${ymIsAdmin()?'<button class="btn g grow" name="go" value="ymtz">שמור, שלח לקו וצנתק</button>':''}</div>`;
 if(typeof shAdd==='function'){const shAdd1=window.shAdd;window.shAdd=function(k,it,idx){const r=shAdd1.call(this,k,it,idx);
  if(YB&&Date.now()-YB.at<60000&&k!=='price'&&typeof r==='number'){const b=YB;YB=null;setTimeout(()=>ymOpen(k,r,{builder:true,withTz:b.withTz}),0)}return r}}
 if(typeof FRM!=='undefined'&&FRM.shpromo){const f0=FRM.shpromo;FRM.shpromo=function(f,e){const v=e&&e.submitter&&e.submitter.value;
@@ -149,5 +151,5 @@ if(typeof FRM!=='undefined'&&FRM.shpromo){const f0=FRM.shpromo;FRM.shpromo=funct
  const r=f0.apply(this,arguments);const d=document.getElementById('dlg');if(!(d&&d.open))YB=null; // אם לא נפתח חלון אישור-החלפה, אין מה להשאיר
  return r}}
 window.ymText=ymText; // נוסח המבצע האוטומטי – משותף גם למשבצת "שלוחות הקו" (yemot-line.js)
-window.ymBtn=(k,i)=>k==='price'?'':`<button class="btn s g" style="flex:0 0 100%" data-a="ymSend" data-k="${esc(k)}" data-i="${+i}">שלח לקו</button>`;
+window.ymBtn=(k,i)=>k==='price'||!ymLineOk()?'':`<button class="btn s g" style="flex:0 0 100%" data-a="ymSend" data-k="${esc(k)}" data-i="${+i}">שלח לקו</button>`;
 })();
