@@ -54,7 +54,8 @@ async function loadTasks(uid,mon){
     return out}catch(e){return null}}
 
 /* ---------- בניית הנתונים (טהור, בלי רשת) ---------- */
-const dataOf=()=>{const S=g('S')||{};return{wh:S.wh,bon:S.bon,psl:S.psl,tx:S.tx,pmon:g('pmon')}};
+/* בונוס אוטומטי (src:'auto') בסכום 0 = "נבדק, לא הגיע" – לא נכנס לפירוט בדוחות (גם לא לסכום – הוא 0) */
+const dataOf=()=>{const S=g('S')||{};return{wh:S.wh,bon:Array.isArray(S.bon)?S.bon.filter(b=>!(b&&b.src==='auto'&&window.PayCore&&window.PayCore.num(b.a)===0)):S.bon,psl:S.psl,tx:S.tx,pmon:g('pmon')}};
 function empModel(sub,mon,dr,tk){
   const PC=window.PayCore,ms=PC.monthSum(sub,mon,dataOf());if(!ms)return null;
   const S=g('S')||{},days={};

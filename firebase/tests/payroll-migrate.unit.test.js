@@ -10,7 +10,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const HTML = path.join(__dirname, '..', '..', 'app-source', 'www', 'index.html');
-const PAY = "['wh','bon','psl'].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[]});";
+const PAY = "['wh','bon','psl','enotes'].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[]});", PAY_END = "x.nmig=1}catch(e){}});"; // PAY..PAY_END = מיגרציית שכר + הערות עובד (S.enotes, הגירה מ-ext.notes)
 
 // הקוד של ensure מתוך index.html: מ-"function ensure(d){" עד " return d}"
 function ensureSrc() {
@@ -25,10 +25,10 @@ function mk(src) {
 }
 const SRC = ensureSrc();
 const ensureNew = () => mk(SRC);
-const ensureOld = () => { assert.ok(SRC.includes(PAY), 'שורת המיגרציה של השכר לא נמצאה ב-ensure'); return mk(SRC.replace(PAY, '')); };
+const ensureOld = () => { assert.ok(SRC.includes(PAY), 'שורת המיגרציה של השכר לא נמצאה ב-ensure'); const a = SRC.indexOf(PAY), b = SRC.indexOf(PAY_END); assert.ok(b > a, 'סוף מיגרציית ההערות לא נמצא'); return mk(SRC.slice(0, a) + SRC.slice(b + PAY_END.length)); };
 const J = (o) => JSON.stringify(o);
 const clone = (o) => JSON.parse(J(o));
-const strip = (o) => { const c = clone(o); delete c.wh; delete c.bon; delete c.psl; return c; };
+const strip = (o) => { const c = clone(o); delete c.wh; delete c.bon; delete c.psl; delete c.enotes; return c; };
 
 // גיבויים / מצבים ישנים לדוגמה (נתונים סינתטיים)
 const OLD = [
@@ -55,7 +55,7 @@ describe('ensure – מיגרציית שכר (S.wh, S.bon, S.psl)', () => {
     OLD.forEach((o, i) => {
       const a = ensureOld()(clone(o)), b = ensureNew()(clone(o));
       assert.equal(J(strip(b)), J(a), 'מקרה ' + i);
-      assert.deepEqual(Object.keys(b).filter((k) => !(k in a)).sort(), ['bon', 'psl', 'wh'], 'מקרה ' + i);
+      assert.deepEqual(Object.keys(b).filter((k) => !(k in a)).sort(), ['bon', 'enotes', 'psl', 'wh'], 'מקרה ' + i);
     });
   });
   it('נתוני שכר קיימים לא משתנים; ערך שאינו מערך ← מערך ריק; ensure פעמיים = פעם אחת', () => {
@@ -68,5 +68,22 @@ describe('ensure – מיגרציית שכר (S.wh, S.bon, S.psl)', () => {
     assert.equal(J(ensureNew()(clone(st))), J(st), 'ensure פעם שנייה שינתה משהו');
     const bad = ensureNew()(clone(Object.assign({}, OLD[1], { wh: { a: 1 }, bon: 'x', psl: null })));
     assert.equal(J([bad.wh, bad.bon, bad.psl]), '[[],[],[]]');
+  });
+});
+
+describe('ensure – הערות עובד (S.enotes, הגירה מ-ext.notes)', () => {
+  const st = () => ({ cats: [{ id: 'e_sal', kind: 'exp', beh: 'emp' }], subs: [{ id: 's1', cat: 'e_sal', name: 'דנה', ext: { start: '2025-03-01', notes: 'ישן' } }, { id: 's2', cat: 'e_sal', name: 'בלי', ext: { notes: '  ' } }, { id: 's3', cat: 'e_sal', name: 'ג' }] });
+  it('הערה ox:1 אחת לכרטיס עם ext.notes; ext.notes לא משתנה; הרצה חוזרת בלי כפילות', () => {
+    const e = ensureNew(), r = e(st()); e(r); e(r);
+    assert.equal(r.enotes.length, 1); const n = r.enotes[0];
+    assert.equal(J([n.sub, n.t, n.d, n.ox]), J(['s1', 'ישן', '2025-03-01', 1]));
+    assert.equal(r.subs[0].ext.notes, 'ישן'); assert.equal(r.subs[1].ext.notes, '  ');
+  });
+  it('הערה מועברת שנמחקה לא נוצרת מחדש', () => {
+    const e = ensureNew(), r = e(st()); r.enotes = []; e(r); assert.equal(r.enotes.length, 0);
+  });
+  it('S.enotes שאינו מערך מתוקן; הערות קיימות לא משתנות', () => {
+    const e = ensureNew(), a = e({ enotes: 5 }); assert.equal(J(a.enotes), '[]');
+    const b = e({ enotes: [{ id: 'x', sub: 's9', t: 'ת', d: '2026-01-01', at: 'a' }] }); assert.equal(b.enotes.length, 1);
   });
 });

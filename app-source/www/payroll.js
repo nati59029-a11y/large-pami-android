@@ -30,12 +30,15 @@ function draft(s){const p=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?
  return{mode:p.mode==='mo'?'mo':'hr',from:monV(p.from)?p.from:'',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'?p.uid:'',tz:str(p.tz),tz0:!!p.tz,
   rules:(Array.isArray(p.rules)?p.rules:[]).filter(r=>r&&typeof r==='object').map(r=>({id:typeof r.id==='string'&&r.id?r.id:uid(),d:Array.isArray(r.d)?r.d.map(Number).filter(k=>Number.isInteger(k)&&k>=0&&k<=6):[],s:str(r.s),e:str(r.e),r:str(r.r)})),
   add:(Array.isArray(p.add)?p.add:[]).filter(a=>a&&typeof a==='object').map(a=>({id:typeof a.id==='string'&&a.id?a.id:uid(),n:str(a.n),k:a.k==='day'?'day':'mo',a:str(a.a)}))}}
+/* רכיבי שכר (payroll-comp.js, רשות): comp/show/ab בטיוטה */
+function draftC(s){const d=draft(s);if(window.PayComp)try{PayComp.draftX(s,d)}catch(e){}return d}
 /* קורא את הטופס שעל המסך לתוך הטיוטה (לפני ציור מחדש, כדי שמה שהוקלד לא יימחק) */
 function pull(){const f=document.querySelector('#main form[data-f=payCfgF]'),p=PD.p;if(!f||!p)return;const g=n=>{const e=f.elements[n];return e?e.value:undefined};
  const set=(k,n)=>{const v=g(n);if(v!==undefined)p[k]=v};set('rate','rate');set('mo','mo');set('m','m');set('uid','uid');set('tz','tz');set('from','from');
  if(f.elements.slip)p.slip=f.elements.slip.checked;
  p.rules.forEach((r,i)=>{['s','e','r'].forEach(k=>{const v=g('r'+k+i);if(v!==undefined)r[k]=v})});
- p.add.forEach((a,i)=>{const n=g('an'+i),k=g('ak'+i),v=g('aa'+i);if(n!==undefined)a.n=n;if(k!==undefined)a.k=k==='day'?'day':'mo';if(v!==undefined)a.a=v})}
+ p.add.forEach((a,i)=>{const n=g('an'+i),k=g('ak'+i),v=g('aa'+i);if(n!==undefined)a.n=n;if(k!==undefined)a.k=k==='day'?'day':'mo';if(v!==undefined)a.a=v});
+ if(window.PayComp)PayComp.pullX(f,p)}
 const re=()=>{pull();rerender()};
 
 /* ---- רשימת המשתמשים באפליקציה (עובדי העסק) – אותה רשימה של מסך "עובדים" ---- */
@@ -51,14 +54,14 @@ const uName=u=>u.name||String(u.email||'').split('@')[0]||u.uid;
 function sumLine(p){if(!p||typeof p!=='object')return 'לא הוגדר';const a=[];
  if(p.mode==='mo')a.push('חודשי'+(posN(p.mo)?' '+ils(p.mo):''));else a.push('לפי שעה'+(posN(p.rate)?' '+ils(p.rate):''));
  if(p.m)a.push(p.m);if(p.slip)a.push('תלוש');const nr=Array.isArray(p.rules)?p.rules.length:0,na=Array.isArray(p.add)?p.add.length:0;
- if(nr)a.push(nr+' כללי תעריף');if(na)a.push(na+' תוספות');return a.join(' · ')}
+ if(nr)a.push(nr+' כללי תעריף');if(na)a.push(na+' תוספות');const nc=Array.isArray(p.comp)?p.comp.length:0;if(nc)a.push(nc+' רכיבי שכר');if(p.show)a.push('העובד רואה');return a.join(' · ')}
 window.payCardH=s=>{try{if(!on()||!s||!empOf(s.id))return'';
  return `<button class="li" data-a="payOpen" data-id="${esc(s.id)}"><div class="m"><b>הגדרות שכר</b><small>${esc(sumLine(s.pay))}</small></div>${s.pay?'':'<span class="tag">חדש</span>'}${typeof ico==='function'?ico('chev','chev'):''}</button>`+monRowH(s)+(typeof window.pslRowH==='function'?window.pslRowH(s):'')}catch(e){return''}};
-ACT.payOpen=el=>{if(!on())return;const s=empOf(el.dataset.id);if(!s)return;PD.sub=s.id;PD.p=draft(s);stTry=0;go('payCfg',s.id)};
+ACT.payOpen=el=>{if(!on())return;const s=empOf(el.dataset.id);if(!s)return;PD.sub=s.id;PD.p=draftC(s);stTry=0;go('payCfg',s.id)};
 
 /* ---- המסך ---- */
 V.payCfg=id=>{const T='הגדרות שכר';if(!on())return{t:T,h:'<div class="empty">המסך זמין למנהל בלבד</div>'};const s=empOf(id);if(!s)return{t:T,h:'<div class="empty">הכרטיס לא נמצא</div>'};
- if(PD.sub!==s.id||!PD.p){PD.sub=s.id;PD.p=draft(s)}const p=PD.p,hr=p.mode!=='mo';
+ if(PD.sub!==s.id||!PD.p){PD.sub=s.id;PD.p=draftC(s)}const p=PD.p,hr=p.mode!=='mo';
  const ch=(a,v,lbl,onn,x)=>`<button type="button" class="chip${onn?' on':''}" aria-pressed="${onn}" data-a="${a}" data-v="${v}" ${x||''}>${lbl}</button>`;
  let h=`<form data-f="payCfgF" novalidate>`;
  /* סוג שכר וסכום */
@@ -84,6 +87,7 @@ V.payCfg=id=>{const T='הגדרות שכר';if(!on())return{t:T,h:'<div class="e
  h+=p.add.map((a,i)=>`<div class="card">${fld('שם התוספת','an'+i,a.n,'text',`maxlength="${MAXN}" autocomplete="off" placeholder="למשל נסיעות"`)}<div ${G2}>${selO('סוג','ak'+i,[['mo',KN.mo],['day',KN.day]],a.k)}${fld('סכום (₪)','aa'+i,a.a,'text','inputmode="decimal" autocomplete="off"')}</div>
 <button type="button" class="btn g s" data-a="payAddDel" data-i="${i}">מחיקת התוספת</button></div>`).join('');
  if(p.add.length<MAXA)h+=`<button type="button" class="btn g w" ${big} data-a="payAddAdd">＋ תוספת קבועה</button>`;
+ if(window.PayComp)h+=PayComp.cfgH(s,p);/* רכיבי שכר, כלל חופשי, תצוגה לעובד – payroll-comp.js */
  h+=`<button type="submit" class="btn w" ${big} style="margin-top:16px">שמירה</button><p class="note">הגדרות השכר גלויות למנהל בלבד.</p></form>`;
  return{t:T,s:s.name,h}};
 
@@ -107,10 +111,14 @@ function build(p){const o={mode:p.mode==='mo'?'mo':'hr'};
   const v=posN(r.r);if(v==null)return n+'תעריף: מספר חיובי';o.rules.push({id:r.id,d:[...new Set(r.d)].sort(),s:r.s,e:r.e,r:v})}
  o.add=[];for(let i=0;i<p.add.length;i++){const a=p.add[i],n='תוספת '+(i+1)+': ',nm=s_(a.n).slice(0,MAXN);
   if(!nm)return n+'חסר שם';const v=posN(a.a);if(v==null)return n+'סכום: מספר חיובי';o.add.push({id:a.id,n:nm,k:a.k==='day'?'day':'mo',a:v})}
+ if(window.PayComp){const c=PayComp.buildX(p,o);if(typeof c==='string')return c;Object.assign(o,c)}
  return o}
-FRM.payCfgF=()=>{if(!on()||!PD.p)return;const s=empOf(PD.sub);if(!s)return toast('הכרטיס לא נמצא');pull();const o=build(PD.p);if(typeof o==='string')return toast(o);
- const old=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};s.pay=Object.assign({},old,o);/* 19.11: from – תחילת השכר. בשמירה הראשונה בלי ערך = החודש הנוכחי; אחר כך לא משתנה (אלא בשדה) */if(!monV(s.pay.from))s.pay.from=curMon();save();PD.sub='';PD.p=null;toast('הגדרות השכר נשמרו');
- if(cur().v==='payCfg'&&NAV.length>1){NAV.pop();render(0,true)}else rerender()};
+/* stay (payroll-comp.js – אישור כלל בכתב): נשארים במסך עם טיוטה חדשה. מחזיר true כשנשמר */
+function saveCfg(stay){if(!on()||!PD.p)return false;const s=empOf(PD.sub);if(!s){toast('הכרטיס לא נמצא');return false}if(!stay)pull();const o=build(PD.p);if(typeof o==='string'){toast(o);return false}
+ const old=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};s.pay=Object.assign({},old,o);/* 19.11: from – תחילת השכר. בשמירה הראשונה בלי ערך = החודש הנוכחי; אחר כך לא משתנה (אלא בשדה) */if(!monV(s.pay.from))s.pay.from=curMon();save();toast('הגדרות השכר נשמרו');
+ if(stay){PD.p=draftC(s);rerender();return true}PD.sub='';PD.p=null;
+ if(cur().v==='payCfg'&&NAV.length>1){NAV.pop();render(0,true)}else rerender();return true}
+FRM.payCfgF=()=>{saveCfg(false)};
 /* ===== שלב ג': שכר חודשי – שעות, בונוס, סיכום ו"נשאר להעביר" (מנהל בלבד) =====
    החישוב כולו ב-PayCore.monthSum (payroll-core.js, באגורות). כאן רק תצוגה והזנה.
    שעות: S.wh {id,sub,d,in,out,brk,src,n}. הזנה ידנית = src:'man'. שורה מכספית (src:'cx', בעתיד) – בעריכה המקור נשמר ב-cx {d,in,out,brk} (פעם אחת, לא נדרס).
@@ -132,7 +140,10 @@ const PM={sub:'',mon:''};
 const whOf=(id,m)=>AR('wh').filter(r=>r&&r.sub===id&&typeof r.d==='string'&&r.d.slice(0,7)===m).sort((a,b)=>(a.d+(a.in||'')).localeCompare(b.d+(b.in||'')));
 const bonOf=(id,m)=>AR('bon').filter(b=>b&&b.sub===id&&b.mon===m);
 const paidL=(id,m)=>S.tx.filter(t=>isEmpT(t)&&t.sub===id&&!t.x&&!t.ec&&pmon(t)===m).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-function monSum(s,m){const P=PC();if(!P||!s||!s.pay)return null;try{return P.monthSum(s,m,{wh:AR('wh'),bon:AR('bon'),psl:AR('psl'),tx:S.tx.filter(isEmpT),pmon})}catch(e){return null}}
+/* רכיבי שכר (payroll-comp.js): עם נתוני משימות/מכירות שנטענו; כשעוד לא נטענו (או בלי הקובץ) – החישוב בלי הרכיבים, כמו קודם */
+function monSum(s,m){const P=PC();if(!P||!s||!s.pay)return null;try{const D={wh:AR('wh'),bon:AR('bon'),psl:AR('psl'),tx:S.tx.filter(isEmpT),pmon};let s2=s;
+ if(Array.isArray(s.pay.comp)){const c=window.PayComp?PayComp.ctxReady(s,m):null;if(c)Object.assign(D,c);else s2=Object.assign({},s,{pay:Object.assign({},s.pay,{comp:undefined})})}
+ return P.monthSum(s2,m,D)}catch(e){return null}}
 const stH=r=>!r?'':r.due===0&&r.paid===0?'אין סכום לחודש':STL[r.status]||'';
 function monRowH(s){if(!s.pay||!PC())return'';const m=curMon(),r=monSum(s,m);if(!r)return'';
  const t=r.due===0&&r.paid===0?'אין סכום לחודש':r.status==='over'?'שולם ביתר '+ag(-r.left):r.status==='closed'?'נסגר':'נשאר להעביר '+ag(r.left);
@@ -152,6 +163,7 @@ V.payMon=id=>{const T='שכר חודשי';if(!on())return{t:T,h:'<div class="emp
  h+=`<div class="kg" style="margin-bottom:10px">${K('hrs','שעות · '+r.days+' ימים',hmF(r.minutes))}${K('base',r.mode==='mo'?'בסיס (חודשי)':'בסיס לפי שעות',ag(r.base))}${K('add','תוספות',ag(r.adds.reduce((a,x)=>a+x.amt,0)))}${K('bon',slip?'בונוס (לרו"ח)':'בונוס',ag(r.bonus))}${K('calc','לפי החישוב',ag(r.calc))}`;
  if(r.slip)h+=K('slip','לפי התלוש · הפרש '+ag(r.slip.diff),ag(r.slip.net));
  h+=`${K('paid','שולם',ag(r.paid))}${K('left',r.status==='over'?'שולם ביתר':'נשאר להעביר',ag(Math.abs(r.left)),r.status==='open'?' neg':'')}</div>`;
+ if(window.PayComp)h+=PayComp.monH(s,m,r);/* רכיבי שכר: צפוי/מאושר, פירוט, מה אפשר לשפר, אישור בונוסים – payroll-comp.js */
  if(slip&&typeof window.pslMonH==='function')h+=window.pslMonH(s,m);/* תלוש החודש – שלב ה', payroll-psl.js */
  /* שעות */
  const W=whOf(s.id,m),P=PC();
@@ -162,7 +174,7 @@ V.payMon=id=>{const T='שכר חודשי';if(!on())return{t:T,h:'<div class="emp
  /* בונוס */
  const B=bonOf(s.id,m);
  h+=`<div class="sec"><h3>בונוס חודשי</h3></div>`;
- h+=B.length?B.map(b=>`<button class="li" data-a="payBonEd" data-id="${esc(b.id)}"><div class="m"><b>${ag(PayCore.toAg(b.a))}</b><small>${esc(b.n||'')}</small></div>${typeof ico==='function'?ico('chev','chev'):''}</button>`).join(''):'<p class="note">אין בונוס בחודש הזה.</p>';
+ h+=B.length?B.map(b=>`<button class="li" data-a="payBonEd" data-id="${esc(b.id)}"><div class="m"><b>${ag(PayCore.toAg(b.a))}</b><small>${esc(b.n||'')}${b.src==='auto'?(b.del?' · <span data-bdel>בוטל – הרכיב לא יחושב שוב לחודש הזה (לשחזור: עריכת הסכום)</span>':' · אושר מרכיב שכר'):''}</small></div>${typeof ico==='function'?ico('chev','chev'):''}</button>`).join(''):'<p class="note">אין בונוס בחודש הזה.</p>';
  h+=`<button type="button" class="btn g w" ${big_} data-a="payBonEd">＋ בונוס</button>`;
  if(slip)h+=`<p class="note">עובד בתלוש: הבונוס לא נכנס לחישוב, ועובר לרואה החשבון. הסכום הסופי – לפי התלוש.</p>`;
  /* לרואה החשבון */
@@ -221,13 +233,19 @@ ACT.payWhDel=el=>{if(!on())return;const id=el.dataset.id;ask('למחוק את ש
 /* בונוס חודשי */
 ACT.payBonEd=el=>{if(!on())return;const s=empOf(PM.sub);if(!s||!s.pay)return;const id=el.dataset.id||'',b=id?AR('bon').find(x=>x&&x.id===id&&x.sub===s.id):null;if(id&&!b)return toast('הבונוס לא נמצא');
  dlg(`<h3>${b?'עריכת בונוס':'בונוס ל'+esc(mfmt(PM.mon))}</h3><form data-f="payBonF" novalidate><input type="hidden" name="id" value="${esc(id)}">${fld('סכום (₪)','a',b?str(b.a):'','text','inputmode="decimal" autocomplete="off"')}${fld('על מה','n',b?str(b.n):'','text',`maxlength="${MAXT}" autocomplete="off" placeholder="למשל עמידה ביעד מכירות"`)}
-<div class="row"><button type="submit" class="btn grow" ${big_}>שמירה</button>${b?`<button type="button" class="btn r grow" ${big_} data-a="payBonDel" data-id="${esc(id)}">מחיקה</button>`:''}<button type="button" class="btn g grow" ${big_} data-a="closeDlg">ביטול</button></div></form>`)};
+<div class="row"><button type="submit" class="btn grow" ${big_}>שמירה</button>${b?`<button type="button" class="btn r grow" ${big_} data-a="payBonDel" data-id="${esc(id)}">${b.src==='auto'&&b.cid?'בטל בונוס':'מחיקה'}</button>`:''}<button type="button" class="btn g grow" ${big_} data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.payBonF=f=>{if(!on())return;const s=empOf(PM.sub);if(!s||!s.pay)return toast('הכרטיס לא נמצא');const g=n=>s_((f.elements[n]||{}).value||'');
- const id=g('id'),a=posN(g('a')),n=g('n').slice(0,MAXT);if(a==null)return toast('סכום הבונוס: מספר חיובי');if(!n)return toast('חסר פירוט – על מה הבונוס');
- if(id){const b=AR('bon').find(x=>x&&x.id===id&&x.sub===s.id);if(!b)return toast('הבונוס לא נמצא');Object.assign(b,{a,n})}
+ const id=g('id'),b0=id?AR('bon').find(x=>x&&x.id===id&&x.sub===s.id):null,z=b0&&b0.src==='auto'&&/^0+([.,]0*)?$/.test(g('a'));/* בונוס שאושר אוטומטית יכול להישאר 0 */
+ const a=z?0:posN(g('a')),n=g('n').slice(0,MAXT);if(a==null)return toast('סכום הבונוס: מספר חיובי');if(!n)return toast('חסר פירוט – על מה הבונוס');
+ if(id){const b=b0;if(!b)return toast('הבונוס לא נמצא');Object.assign(b,{a,n});if(b.del&&a>0)delete b.del}
  else{if(!monV(PM.mon))return toast('חודש לא תקין');AR('bon').push({id:uid(),sub:s.id,mon:PM.mon,a,n})}
  save();closeDlg();toast('הבונוס נשמר');rerender()};
-ACT.payBonDel=el=>{if(!on())return;const id=el.dataset.id;ask('למחוק את הבונוס?',()=>{const L=AR('bon'),i=L.findIndex(x=>x&&x.id===id&&x.sub===PM.sub);if(i>=0){L.splice(i,1);save();toast('הבונוס נמחק')}rerender()},'מחיקה')};
+/* בונוס שאושר מרכיב שכר (src:'auto' עם cid) לא נמחק: מתאפס (a:0, del:1) כדי שהרכיב יישאר "טופל" לחודש ולא יחזור כצפוי (apprMap). a:0 מסונן מהדוחות ומהעובד */
+ACT.payBonDel=el=>{if(!on())return;const id=el.dataset.id,b0=AR('bon').find(x=>x&&x.id===id&&x.sub===PM.sub),au=!!b0&&b0.src==='auto'&&typeof b0.cid==='string'&&!!b0.cid;
+ ask(au?'לבטל את הבונוס? הרכיב לא יחושב שוב לחודש הזה ולא יוצג לעובד. לשחזור – עריכת הסכום.':'למחוק את הבונוס?',()=>{const L=AR('bon'),i=L.findIndex(x=>x&&x.id===id&&x.sub===PM.sub);
+  if(i>=0){if(au){Object.assign(L[i],{a:0,del:1});save();toast('הבונוס בוטל')}else{L.splice(i,1);save();toast('הבונוס נמחק')}}rerender()},au?'ביטול הבונוס':'מחיקה')};
 /* 19.11 (בעל העסק): הוצאה מקופה לעובד עם הגדרות שכר – החודש הפתוח הוותיק ביותר מבין 3 החודשים שלפני חודש התשלום (status 'open' ו-left>0), אחרת ''. index.html קורא בבדיקת typeof (בלי הקובץ – חודש התשלום, כמו קודם) */
+/* גשר ל-payroll-comp.js (רכיבי שכר) */
+window.PayUI={on,empOf,PD,PM,pull,re,monSum,curMon,ag,AR,saveCfg,draftC};
 window.payOpenMon=(id,mon)=>{try{const s=empOf(id);if(!s||!s.pay||!PC()||!monV(mon))return'';let y=+mon.slice(0,4),m=+mon.slice(5,7);const L=[],fr=monV(s.pay.from)?s.pay.from:'';for(let i=0;i<3;i++){m--;if(!m){m=12;y--}L.unshift(y+'-'+z2(m))}for(const k of L){if(fr&&k<fr)continue;const r=monSum(s,k);if(r&&r.status==='open'&&r.left>0)return k}return''}catch(e){return''}};
 })();
