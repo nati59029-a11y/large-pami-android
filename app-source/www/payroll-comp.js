@@ -2,7 +2,7 @@
    בלי הקובץ הזה – הגדרות השכר והשכר החודשי כמו קודם (payroll.js בודק typeof window.PayComp). מנהל בלבד.
    נשמר ב-subs[].pay (תוספות בלבד, רשות):
      comp:[רכיב] – המבנה ב-PayCore.validComp (payroll-core.js): tk / sl / pc / man; ב-sl/pc גם ss ('day'|'hrs') ו-amt:1 (להציג לעובד סכומים).
-     show:true – "העובד רואה את השכר שלו" (רק עם pay.uid; התצוגה לעובד – בשלב הבא).
+     show:true – "העובד רואה את השכר שלו" (רק עם pay.uid; התצוגה לעובד – pay-me.js, מראה wv/pay_<חודש>_<uid>).
      ab:'YYYY-MM' – החודש האחרון שהבונוסים שלו אושרו (ידנית או אוטומטית). בהוספת רכיבים לראשונה = החודש הקודם (לא מאשרים בדיעבד חודשים שלפני הרכיבים).
    בונוס שאושר = רשומת S.bon {id,sub,mon,a,n,src:'auto',cid,calc,det[,est]} (PayCore.autoBon). אחרי אישור החישוב החי של הרכיב נעצר (monthSum);
    הבונוס נערך/נמחק כמו בונוס רגיל. אישור אוטומטי: payAutoAppr() מ-enterApp במכשיר המנהל, מה-3 בחודש, לחודש הקודם, פעם אחת (ab).
@@ -241,5 +241,5 @@ window.payAutoAppr=async()=>{try{if(autoRan||!on()||typeof S==='undefined'||!S||
  if(ch)save();if(emp){toast('אושרו אוטומטית בונוסים ל'+(typeof mfmt==='function'?mfmt(tgt):tgt)+': '+emp+' עובדים');try{rerender()}catch(e){}}
  return n}catch(e){return 0}};
 
-window.PayComp={draftX,pullX,buildX,cfgH,monH,ctxReady,descr,_reset:()=>{Object.keys(ST).forEach(k=>delete ST[k]);Object.keys(TC).forEach(k=>delete TC[k]);Object.keys(SC).forEach(k=>delete SC[k]);autoRan=false}};
+window.PayComp={draftX,pullX,buildX,cfgH,monH,ctxReady,ensure,descr,_reset:()=>{Object.keys(ST).forEach(k=>delete ST[k]);Object.keys(TC).forEach(k=>delete TC[k]);Object.keys(SC).forEach(k=>delete SC[k]);autoRan=false}};
 })();
