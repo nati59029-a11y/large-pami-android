@@ -240,6 +240,32 @@ function mapClassify(sh) {
   return { k, t0: 'invoice', f: out, unsure };
 }
 
+// ---------- "בטוח שזה לא חשבונית" (19.11.2026, בעל העסק) ----------
+// המזכירה מציגה רק מסמכי ספק (חשבונית, זיכוי, קבלה, תעודת משלוח) וצ'קים. מה שבטוח אינו כזה – לא נשאר ב"ממתינות":
+// נדחה אוטומטית (st:'rej', rejBy:'auto', notInv), נשמר 30 יום כמו כל דחייה, ואז הקובץ נמחק. בכל ספק – נשאר וממתין לבדיקה.
+const SURE = 0.85;                              // ביטחון מינימלי בסוג המסמך כדי לקבוע "לא חשבונית" (מעל סף "לא בטוח" 0.7 – הנחה שמרנית)
+const NOT_INV_BAD = ['type', 'exe', 'empty', 'zip', 'office']; // קובץ שאינו PDF/תמונה (הזמנה ליומן, טקסט, HTML), קובץ הפעלה, קובץ ריק, ארכיון/Word/Excel (בעל העסק 19.11: שלא יגיעו)
+// sh = CL.shapeClassify(raw...), raw = התשובה הגולמית של המודל (בה השדה unreadable של "unknown"). מחזיר את הסוג שזוהה, או '' (ספק / מסמך ספק)
+function sureNotInv(sh, raw) {
+  const s = sh && typeof sh === 'object' ? sh : {};
+  if (!s.type || s.type === 'invoice' || s.type === 'check' || s.uncertainType) return '';
+  if (!(typeof s.typeConfidence === 'number' && s.typeConfidence >= SURE)) return '';
+  const rf = raw && typeof raw === 'object' && raw.fields && typeof raw.fields === 'object' ? raw.fields : {};
+  if (s.type === 'unknown' && rf.unreadable !== false) return ''; // "אי אפשר לדעת" (או שהמודל לא ענה על השאלה) – ספק, נשאר
+  return String(s.type).slice(0, 20);
+}
+// רשומה שכבר ממתינה בתור (מלפני התיקון): בטוח שאינה חשבונית? רק מה שלא נגעו בו (לא בטיפול, לא מעוכב בידי המכשיר)
+function staleNotInv(x) {
+  if (!x || x.st !== 'new' || x.hold || x.purged) return false;
+  const why = Array.isArray(x.why) ? x.why : [];
+  if (x.k === 'bad') return why.length === 1 && NOT_INV_BAD.includes(why[0]);
+  if (x.k !== 'unk' || x.err || !x.t0 || x.t0 === 'check' || x.t0 === 'invoice') return false;
+  if ((Array.isArray(x.unsure) ? x.unsure : []).includes('type')) return false;
+  if (typeof x.tc === 'number' && x.tc < SURE) return false;
+  if (x.t0 === 'unknown' && x.unr !== false && typeof x.tc === 'number') return false; // רשומה חדשה ש"אי אפשר לדעת" – נשארת
+  return true;
+}
+
 // ---------- ספק, שולח וסניף ----------
 // cfg.sups = [{ id, name, hp, br:[...] }] – רשימת הספקים שהמכשיר של המנהל מפרסם (secInv op:'sups'); cfg.links = { <מפתח שולח>: <ספק> }
 // מחזיר { sub, subN, match: 'hp'|'snd'|'name'|'' }. 'name' = "נראה כמו X – לאשר?" – לעולם לא זכאי ל"נכנס ישר"
@@ -314,4 +340,4 @@ function dupKeys(m, sub) {
 // מפתח השולח: ווצאפ – מספר, מייל – כתובת
 const senderKey = (ch, from) => (ch === 'wa' ? 'wa:' : 'm:') + String(from || '').toLowerCase().slice(0, 200);
 
-module.exports = { MAX_FILE, MAX_PAGES, PART, CAP_DEFAULT, KEEP_DAYS, CLAIM_MS, KINDS, sha, hpN, hpOk, NINV, nameKey, inspect, badByName, mapClassify, matchSup, brOf, invCfgOf, eligOf, fullOf, dupKeys, senderKey };
+module.exports = { SURE, NOT_INV_BAD, sureNotInv, staleNotInv, MAX_FILE, MAX_PAGES, PART, CAP_DEFAULT, KEEP_DAYS, CLAIM_MS, KINDS, sha, hpN, hpOk, NINV, nameKey, inspect, badByName, mapClassify, matchSup, brOf, invCfgOf, eligOf, fullOf, dupKeys, senderKey };
