@@ -74,7 +74,8 @@
   המשימה מריצה `updater/caspit-update.ps1 -Target <תיקיית התוסף>`. הסקריפט:
   1. מוצא ב-GitHub API (מאגר ציבורי, בלי סיסמה) את ה-release `caspit-ext-v*` הגבוה.
   2. אם הוא חדש יותר: מוריד, בודק SHA-256 מול ה-digest של GitHub, בודק שה-`key` (מזהה התוסף) לא השתנה ושהגרסה תואמת.
-  3. מחליף קבצים (robocopy /MIR, `manifest.json` אחרון) וכותב `upd.json` אחרון: `{ at, ok, ver, err, fails }`.
+  3. כותב `upd.json` במצב "copying" (`ver` ריק), מעתיק קבצים בלי למחוק כלום (robocopy /E /XJ, `manifest.json` אחרון), וכותב `upd.json` אחרון: `{ at, ok, ver, err, fails }`.
+  - מסרב לשורש כונן ולתיקיות כלליות (`unsafe-folder`), גם בסקריפט וגם בהתקנה (תיקון בודק סבב 1: `/MIR` היה עלול למחוק את "מסמכים").
 - **בתוסף (`lib/upd.js`, `updTick` ב-sw.js, כל דקה/15 דקות):** קורא `manifest.json` ו-`upd.json` מהדיסק. מרענן את עצמו (`chrome.runtime.reload`) רק אם הגרסה בדיסק חדשה, `upd.ok` עם אותה גרסה, אין ריצה, ולא ניסה כבר לאותה גרסה בשעה האחרונה. `upd` נשלח ב-hello. בחלון התוסף: שורת "גרסה ועדכון אוטומטי".
 - **בשרת:** hello שומר `upd` (מסונן; לא תקין → מתעלמים) ב-`private/cxbot`. `cxBotWatch` (אחרי 10:00, רק אם יש upd):
   - `updfail`: `fails ≥ 2`.

@@ -16,6 +16,14 @@ try {
     Say 'לא נמצאו קבצי התוסף ליד הקובץ הזה. יש לחלץ קודם את קובץ ה-zip של התוסף לתיקייה, ולהפעיל את install-auto-update.cmd מתוכה.' $true
     exit 1
   }
+  $full = [IO.Path]::GetFullPath($ext).TrimEnd('\')
+  $deny = @([Environment]::GetFolderPath('UserProfile'), [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('MyDocuments'),
+    [Environment]::GetFolderPath('Windows'), [Environment]::GetFolderPath('ProgramFiles'), (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads')) |
+    Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }
+  if ($full.Length -le 3 -or ($deny -contains $full)) {
+    Say ('קבצי התוסף נמצאים ישירות בתיקייה כללית (' + $full + '). יש לחלץ את התוסף לתיקייה חדשה וריקה משלו (למשל "חיבור אפליקציה"), לטעון אותה ב-chrome://extensions, ולהפעיל את install-auto-update.cmd משם.') $true
+    exit 1
+  }
   $user = "$env:USERDOMAIN\$env:USERNAME"
   $arg = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $script + '" -Target "' + $ext + '"'
   $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg -WorkingDirectory $ext

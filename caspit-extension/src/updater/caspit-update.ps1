@@ -2,10 +2,10 @@
 # 1. Finds the newest release caspit-ext-v<x.y.z> of the public repo on GitHub.
 # 2. Newer than the installed manifest.json? Downloads caspit-extension-<x.y.z>.zip, checks its SHA-256 against the
 #    digest GitHub publishes for the asset, checks that the extension key (= extension id) is unchanged and the version matches.
-# 3. Replaces the files of the extension folder (manifest.json last) and writes upd.json last:
+# 3. Writes upd.json "copying", copies the new files over the extension folder (never deletes; manifest.json last), writes upd.json last:
 #    { v, at, ok, ver (version on disk), err, fails (failures in a row) }.
 # The extension reads upd.json, reloads itself when it is safe, and reports the status to the server (alerts to the manager).
-# Never touches anything outside the extension folder and a temp folder. ASCII only (Windows PowerShell 5.1).
+# Never touches anything outside the extension folder and a temp folder; refuses a drive root or a known user folder. ASCII only (Windows PowerShell 5.1).
 param([Parameter(Mandatory = $true)][string]$Target)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -15,11 +15,11 @@ $UpdFile = Join-Path $Target 'upd.json'
 $cur = $null
 
 function Read-Json([string]$p) { return (Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json) }
-function Write-Upd([bool]$ok, [string]$ver, [string]$err) {
+function Write-Upd([bool]$ok, [string]$ver, [string]$err, [bool]$copying = $false) {
   $fails = 0
   if (-not $ok) {
     try { $fails = [int](Read-Json $UpdFile).fails } catch { $fails = 0 }
-    $fails = $fails + 1
+    if (-not $copying) { $fails = $fails + 1 }
   }
   $o = [ordered]@{ v = 1; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); ok = $ok; ver = $ver; err = $err; fails = $fails }
   $tmp = $UpdFile + '.tmp'
@@ -29,6 +29,12 @@ function Write-Upd([bool]$ok, [string]$ver, [string]$err) {
 
 try {
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  # safety: never a drive root or a known user / system folder (the extension must live in its own folder)
+  $full = [IO.Path]::GetFullPath($Target).TrimEnd('\')
+  $deny = @([Environment]::GetFolderPath('UserProfile'), [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('MyDocuments'),
+    [Environment]::GetFolderPath('Windows'), [Environment]::GetFolderPath('ProgramFiles'), (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads')) |
+    Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }
+  if ($full.Length -le 3 -or ($deny -contains $full)) { throw 'unsafe-folder' }
   $mf = Join-Path $Target 'manifest.json'
   if (-not (Test-Path -LiteralPath $mf)) { throw 'no-manifest' }
   $cur = Read-Json $mf
@@ -62,9 +68,11 @@ try {
     Expand-Archive -LiteralPath $zip -DestinationPath $x
     $nm = Read-Json (Join-Path $x 'manifest.json')
     if ([string]$nm.key -ne [string]$cur.key -or [string]$nm.version -ne $verS) { throw 'bad-manifest' }
-    # all files except manifest.json / upd.json (robocopy /MIR also removes files that are not in the new version);
+    # mark "copying" first (ver = ''): the extension never reloads while upd.json does not confirm the version on disk
+    Write-Upd $false '' 'copying' $true
+    # copy only - never delete anything in the folder (no /MIR); /XJ = do not follow junctions; manifest.json last.
     # robocopy exit code 0-7 = success, 8+ = failure
-    $null = robocopy $x $Target /MIR /XF manifest.json upd.json upd.json.tmp /R:3 /W:5 /NFL /NDL /NJH /NJS /NP
+    $null = robocopy $x $Target /E /XJ /XF manifest.json upd.json upd.json.tmp /R:3 /W:5 /NFL /NDL /NJH /NJS /NP
     if ($LASTEXITCODE -ge 8) { throw ('copy-failed-' + $LASTEXITCODE) }
     Copy-Item -LiteralPath (Join-Path $x 'manifest.json') -Destination $mf -Force
   } finally {
