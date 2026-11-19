@@ -1,5 +1,6 @@
 // תוסף כספית – מריץ צעדי מסך (selectors.json) בתוך הלשונית של כספית, בעולם המבודד של התוסף (לא נגיש לדף).
 // סט צעדים קבוע בלבד: nav | waitFor | click | select | setDate | setFile | text. אין הרצת קוד מהקובץ.
+// אפשרויות צעד: safe (מבוצע גם בהיכרות), stop (רכיב חסר עוצר גם בהיכרות), at (קידומת hash נדרשת), check (תיבת סימון – רק אם לא מסומנת).
 // מטרה (t): { css, text, textAny:[], aria, tag, nth, hidden, alt:{מטרה חלופית} } (hidden: גם רכיב מוסתר – רק לשדה קובץ) – קודם css/aria, אחר כך טקסט מדויק, ואז טקסט מוכל. רק רכיבים גלויים.
 // מצב probe (היכרות): מבצע רק nav וצעדים שמסומנים safe; צעד submit לעולם לא מבוצע; מדווח לכל צעד אם נמצא.
 // לעולם לא ממלא סיסמה או שם משתמש: setDate/setFile מסרבים לשדות סיסמה, ואין צעד "הקלדה" כללי.
@@ -76,6 +77,15 @@ function cssPath(el) {
     out.unshift(s);
   }
   return out.join('>');
+}
+// תיבת הסימון של רכיב: הרכיב עצמו, ה-control של התווית, או תיבה אחת בתוך ההורה הקרוב (עד 2 רמות)
+function checkbox(el) {
+  const isCb = (x) => x && String(x.tagName).toLowerCase() === 'input' && String(x.type).toLowerCase() === 'checkbox';
+  if (isCb(el)) return el;
+  const lb = el.closest && el.closest('label');
+  if (lb && isCb(lb.control)) return lb.control;
+  for (let p = el, k = 0; p && k < 3; p = p.parentElement, k++) { const L = p.querySelectorAll ? p.querySelectorAll('input[type=checkbox]') : []; if (L.length === 1) return L[0]; if (L.length > 1) break; }
+  return null;
 }
 const desc = (el) => (el ? { tag: String(el.tagName).toLowerCase(), css: cssPath(el), text: own(el).slice(0, 40) } : null);
 
@@ -309,17 +319,23 @@ async function runSteps(steps, ctx) {
       await sleep(s.ms || 1500);
       continue;
     }
+    // at: הצעד רץ רק כשה-hash מתחיל בקידומת הזו (למשל דף השעות של עובד) – אחרת עוצרים את כל הזרימה, גם בהיכרות
+    if (s.at && !(ctx.win && String(ctx.win.location.hash || '').startsWith(s.at))) { rec.err = 'wrong-hash'; res.ok = false; if (res.miss == null) res.miss = i; break; }
     const el = await waitFind(doc, s.t, ctx.probe ? Math.min(s.ms || 6000, 6000) : s.ms || 15000, sleep, now);
     rec.found = !!el;
     rec.el = desc(el);
-    if (!el) { if (s.optional) continue; res.ok = false; if (res.miss == null) res.miss = i; if (ctx.probe) continue; break; }
+    // stop: רכיב חסר עוצר את הזרימה גם בהיכרות (כדי שהצעדים הבאים לא ירוצו במסך הלא נכון)
+    if (!el) { if (s.optional) continue; res.ok = false; if (res.miss == null) res.miss = i; if (ctx.probe && !s.stop) continue; break; }
     if (s.op === 'waitFor') { rec.done = true; continue; }
     if (s.op === 'text') { res.text = own(el).slice(0, 500); rec.done = true; continue; }
     if (ctx.probe && (s.submit || !s.safe)) continue; // היכרות: לא משנים כלום בכספית
     if (isPass(el)) { rec.err = 'password-field'; res.ok = false; res.miss = i; break; }
     if (s.op === 'click') {
       if (s.capture && typeof ctx.onCapture === 'function') await ctx.onCapture(i);
-      el.click();
+      // check: תיבת סימון (לפי התווית או התיבה עצמה) – מסמנים רק אם עוד לא מסומנת; לוחצים על התיבה עצמה כשנמצאה
+      const cb = s.check ? checkbox(el) : null;
+      if (s.check && cb && cb.checked) { rec.done = true; rec.already = true; continue; }
+      (cb || el).click();
     } else if (s.op === 'select') {
       if (!(await choose(doc, el, fill(s.option, ctx.vars), C))) { rec.err = 'no-option'; res.ok = false; res.miss = i; break; }
     } else if (s.op === 'setDate') {

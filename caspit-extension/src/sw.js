@@ -717,7 +717,8 @@ async function runDisc() {
       await guardBo(tab); // היכרות – לא יוצאים מהמשרד האחורי
       page.hash = String(await inIso(tab, () => location.hash) || '').replace(/\d+/g, '{n}').slice(0, 80);
       page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
-      page.controls = await inIso(tab, () => self.CxSel.controls(document, 400));
+      // priv (שעות עובד): פקדים כמו בדף לקריאה בלבד – בלי טקסט (רק מילות פעולה של כפתורים), בלי אפשרויות בחירה – כדי ששמות עובדים לא ייכנסו
+      page.controls = pg.priv ? await inIso(tab, () => self.CxSel.controls(document, 400, { noText: true, btn: true })) : await inIso(tab, () => self.CxSel.controls(document, 400));
       rep.pages.push(page);
     }
     rep.net = (await inMain(tab, () => window.__cxHook && window.__cxHook.netLog())) || [];

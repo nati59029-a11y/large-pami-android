@@ -289,21 +289,30 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const txt = JSON.stringify(rep);
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'hours', 'on-shift']);
-  // נוכחות (0.1.6): "דוח שעות מרוכז" ו"דוח עובדים במשמרת" בכתובת ישירה, בלי שום לחיצה; כותרות הטבלה בלי השורות
-  const att = rep.pages[3];
-  assert.equal(att.ok, true, JSON.stringify(att));
-  assert.equal(att.hash, '#/hours-reports');
-  assert.equal(rep.pages[4].ok, true); assert.equal(rep.pages[4].hash, '#/report-active-employee-on-stores');
-  assert.deepEqual(att.heads, [['שם עובד', 'תאריך', 'שעת כניסה', 'שעת יציאה', 'סה"כ שעות']]);
-  assert.ok(att.controls.some((c) => c.id === 'attIn' && c.tag === 'button'), 'הפקדים נאספו (תגית/מזהה)');
-  assert.ok(att.controls.every((c) => (c.text === undefined || c.text === 'ייצוא לאקסל') && c.options === undefined && c.aria === undefined), 'דף לקריאה בלבד – רק טקסט של כפתורי פעולה, בלי אפשרויות: ' + JSON.stringify(att.controls));
-  assert.ok(att.controls.some((c) => c.text === 'ייצוא לאקסל'), 'טקסט כפתור פעולה נאסף');
-  assert.ok(!att.controls.some((c) => c.id === 'attIn' && c.text), 'כפתור בלי מילת פעולה – בלי טקסט');
-  assert.equal(att.controls.find((c) => c.id === 'empSel').optN, 3, 'רשימת בחירה – רק מספר האפשרויות');
-  for (const nm of ['כהנוביץ', '08:02', 'מזרחיאן', 'בלומנפלד', 'אבוטבולי', 'קרליבך', 'זילברשטיין']) assert.ok(!txt.includes(nm), 'שם / שעה של עובד בדוח: ' + nm);
-  assert.ok(rep.menu.some((l) => l.t === 'דוח שעות מרוכז' && l.h === '#/hours-reports') && rep.menu.some((l) => l.t === 'רשימת עובדים'), JSON.stringify(rep.menu));
-  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור (גם לא "עובדים")');
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours']);
+  // עובדים (0.1.9): רשימת העובדים – קריאה בלבד, בכתובת ישירה; כותרות הטבלה בלי השורות, טקסט רק של כפתורי פעולה
+  const emp = rep.pages[3];
+  assert.equal(emp.ok, true, JSON.stringify(emp));
+  assert.equal(emp.ro, true); assert.equal(emp.hash, '#/employees');
+  assert.deepEqual(emp.heads, [['שם', 'כרטיס מגנטי', 'טלפון נייד', 'מנהל', 'סטטוס', 'פעולות']]);
+  assert.ok(emp.controls.every((c) => (c.text === undefined || c.text === 'יצוא לאקסל') && c.options === undefined && c.aria === undefined), JSON.stringify(emp.controls));
+  // שעות לעובד: "הצג רק עובדים פעילים" → "שעות לעובד" של העובד הפעיל הראשון → "יצוא לאקסל" של דף השעות. החודש – ברירת המחדל
+  const eh = rep.pages[4];
+  assert.equal(eh.ok, true, JSON.stringify(eh.probe));
+  assert.deepEqual(eh.probe.map((x) => [x.op, x.found, x.done]), [['nav', true, true], ['waitFor', true, true], ['click', true, true], ['click', true, true], ['waitFor', true, true], ['click', true, true]]);
+  assert.equal(eh.hash, '#/employee-time-tracks/{n}');
+  assert.ok(eh.controls.every((c) => c.options === undefined && c.aria === undefined && c.placeholder === undefined), JSON.stringify(eh.controls));
+  assert.ok(eh.controls.some((c) => c.text === 'יצוא לאקסל') && eh.controls.some((c) => c.id === 'ttAdd'), 'פקדי דף השעות נאספו (בלי טקסט חופשי)');
+  const bo0 = caspitPage();
+  assert.equal(await bo0.evaluate(() => localStorage.getItem('empVisit')), '12', 'נכנסנו לעובד הפעיל הראשון (התיבה סומנה)');
+  const hf = rep.files.find((f) => f.flow === 'empHours');
+  assert.ok(hf && !hf.none, 'קובץ השעות נתפס: ' + JSON.stringify(rep.files));
+  assert.equal(hf.ext, 'csv'); assert.equal(hf.rows, 4); assert.equal(hf.kind, null); assert.equal(hf.hdr, null, 'קובץ לא מוכר – בלי שורת כותרות (בה יש שם עובד)');
+  // פרטיות: אין שמות עובדים, טלפונים או שעות מהרשימה / מדף השעות / מהקובץ
+  for (const nm of ['שפרינצק', 'רוזנצוויג', 'טננבאום', '7654321', '7654322', '07:41', '15:58', '8:17', '07:39']) assert.ok(!txt.includes(nm), 'שם / טלפון / שעה של עובד בדוח: ' + nm);
+  assert.ok(rep.menu.some((l) => l.t === 'רשימת עובדים' && l.h === '#/employees'), JSON.stringify(rep.menu));
+  // לא נלחצו: "עריכה", "עובד חדש", "הצג רק מנהלים", "יצוא לאקסל" של הרשימה, "הוספת כניסה ויציאה", ולא "עובדים" בתפריט
+  assert.equal(await bo0.evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור אסור');
   const imp = rep.pages[1];
   assert.ok(!imp.controls.some((c) => c.type === 'password'));
   assert.ok(imp.probe.every((p) => !p.done || ['nav', 'waitFor', 'text', 'select', 'histMark'].includes(p.op)), 'no change made on csv-imports: ' + JSON.stringify(imp.probe));
@@ -388,9 +397,9 @@ test('היכרות לא יוצאת מהמשרד האחורי: מסך שמעבי�
   await pop.close();
 });
 
-test('היכרות נוכחות: הקישור מוביל אל מחוץ למשרד האחורי → wrong-page, בלי לאסוף מהקופה ובלי לחיצות', async () => {
+test('היכרות עובדים: המסך מוביל אל מחוץ למשרד האחורי → wrong-page, בלי לאסוף מהקופה ובלי לחיצות', async () => {
   const cp = caspitPage() || ctx.pages().find((p) => p.url().startsWith('https://caspit.valu.co.il/'));
-  await cp.evaluate(() => { localStorage.setItem('redir', '#/hours-reports'); localStorage.setItem('posHits', '0'); localStorage.removeItem('attHits'); });
+  await cp.evaluate(() => { localStorage.setItem('redir', '#/employees'); localStorage.setItem('posHits', '0'); localStorage.removeItem('attHits'); });
   await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
   const pop = await ctx.newPage();
   await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
@@ -399,7 +408,7 @@ test('היכרות נוכחות: הקישור מוביל אל מחוץ למשר�
   assert.equal(s.discSt.st, 'fail');
   assert.equal(s.disc.rep.err.code, 'wrong-page');
   assert.deepEqual(s.disc.rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales'], 'עצר לפני שאסף משהו מהקופה');
-  assert.ok(s.disc.rep.menu.some((l) => l.h === '#/hours-reports'), 'רשימת הקישורים נשמרה גם כשהניווט נכשל');
+  assert.ok(s.disc.rep.menu.some((l) => l.h === '#/employees'), 'רשימת הקישורים נשמרה גם כשהניווט נכשל');
   for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
   const bo = ctx.pages().find((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
   if (bo) assert.equal(await bo.evaluate(() => localStorage.getItem('attHits')), null);
