@@ -504,7 +504,7 @@ function defaults(){
  cats.push({id:'p_inc',kind:'inc',name:'ממתין לסיווג',beh:'simple',hid:true},{id:'p_exp',kind:'exp',name:'ממתין לסיווג',beh:'simple',hid:true});
  return{v:3,theme:'paper',fs:1,cats,subs,tx:[],fixTpl:[],fixOk:{},loans:[],ccx:[],imp:null,created:new Date().toISOString()};
 }
-const cat=id=>S.cats.find(c=>c.id===id),subById=id=>S.subs.find(x=>x.id===id);/* 19.11.2026: תנועה/כרטיס/הוצאה קבועה שמפנים לקטגוריה שאינה קיימת (למשל קטגוריות לארג' פעמי בעסק חדש – נתוני דוגמה או סגירת קופה) הפילו מסכים. מוסיפים את הקטגוריה החסרה בשם כללי (fx:1), בלי למחוק או לשנות שום רשומה. נבדק רק כשמספר התנועות/הכרטיסים השתנה או כשהנתונים הוחלפו (שחזור). שם תפוס – מקבל מספר. לא לפי הוצאות קבועות (מחיקת קטגוריה לא תחזיר אותה) */function catFix(){if(!S||!Array.isArray(S.cats)||!Array.isArray(S.tx)||!Array.isArray(S.subs))return;const k=S.tx.length+'/'+S.subs.length+'/'+S.cats.length;if(catFix.s===S&&catFix.k===k)return;catFix.s=S;catFix.k=k;const H=new Set(S.cats.map(c=>c.id)),M=new Map();const add=(id,kd)=>{if(typeof id!=='string'||!id||H.has(id)||M.has(id))return;M.set(id,kd==='inc'||/^i_/.test(id)?'inc':'exp')};S.tx.forEach(t=>t&&add(t.cat,t.t));S.subs.forEach(x=>x&&add(x.cat,''));if(!M.size)return;const N={i_nl:['קופה','simple'],i_yh:['קופה 2','simple'],i_cnl:['כרטיסים','simple'],i_cyh:['כרטיסים 2','simple'],e_bak:['ספקים 2','sup'],e_salb:['משכורות 2','emp'],e_card:['כרטיסים','simple']};M.forEach((kd,id)=>{const n=N[id]||['ללא קטגוריה',kd==='inc'?'simple':'free'];let nm=n[0];for(let i=2;S.cats.some(c=>c.name===nm);i++)nm=n[0].replace(/ \d+$/,'')+' '+i;S.cats.push({id,kind:kd,name:nm,beh:n[1],fx:1});H.add(id)});catFix.k=S.tx.length+'/'+S.subs.length+'/'+S.cats.length}
+const cat=id=>S.cats.find(c=>c.id===id),subById=id=>S.subs.find(x=>x.id===id);/* 19.11.2026: תנועה/כרטיס/הוצאה קבועה שמפנים לקטגוריה שאינה קיימת (למשל קטגוריות לארג' פעמי בעסק חדש – נתוני דוגמה או סגירת קופה) הפילו מסכים. מוסיפים את הקטגוריה החסרה בשם כללי (fx:1), בלי למחוק או לשנות שום רשומה. נבדק רק כשמספר התנועות/הכרטיסים השתנה או כשהנתונים הוחלפו (שחזור). שם תפוס – מקבל מספר. לא לפי הוצאות קבועות (מחיקת קטגוריה לא תחזיר אותה) *//* קופה (ZREG) בלי קטגוריה – בעסק חדש אחרי #142 סגירת קופה נחסמה ב"הקטגוריה של הקופה לא קיימת": יוצרים אותה (קופה / קופה 2), בלי לגעת ברשומות */function catReg(id){const c=cat(id);if(c||typeof zcRegOk!=='function'||!zcRegOk(id)||!S||!Array.isArray(S.cats))return c;const b=id==='i_yh'?'קופה 2':'קופה';let nm=b;for(let i=2;S.cats.some(x=>x.name===nm);i++)nm=b.replace(/ \d+$/,'')+' '+i;const n={id,kind:'inc',name:nm,beh:'simple',fx:1};S.cats.push(n);return n}function catFix(){if(!S||!Array.isArray(S.cats)||!Array.isArray(S.tx)||!Array.isArray(S.subs))return;const k=S.tx.length+'/'+S.subs.length+'/'+S.cats.length;if(catFix.s===S&&catFix.k===k)return;catFix.s=S;catFix.k=k;const H=new Set(S.cats.map(c=>c.id)),M=new Map();const add=(id,kd)=>{if(typeof id!=='string'||!id||H.has(id)||M.has(id))return;M.set(id,kd==='inc'||/^i_/.test(id)?'inc':'exp')};S.tx.forEach(t=>t&&add(t.cat,t.t));S.subs.forEach(x=>x&&add(x.cat,''));if(!M.size)return;const N={i_nl:['קופה','simple'],i_yh:['קופה 2','simple'],i_cnl:['כרטיסים','simple'],i_cyh:['כרטיסים 2','simple'],e_bak:['ספקים 2','sup'],e_salb:['משכורות 2','emp'],e_card:['כרטיסים','simple']};M.forEach((kd,id)=>{const n=N[id]||['ללא קטגוריה',kd==='inc'?'simple':'free'];let nm=n[0];for(let i=2;S.cats.some(c=>c.name===nm);i++)nm=n[0].replace(/ \d+$/,'')+' '+i;S.cats.push({id,kind:kd,name:nm,beh:n[1],fx:1});H.add(id)});catFix.k=S.tx.length+'/'+S.subs.length+'/'+S.cats.length}
 const catsOf=k=>S.cats.filter(c=>c.kind===k&&!c.hid);
 const heKey=s=>String(s||'').replace(/["'׳״`’]/g,'').trim();
 function heCmp(a,b){a=heKey(a);b=heKey(b);if(!a||!b)return a?-1:b?1:0;const c=x=>/^[א-ת]/.test(x)?0:/^[A-Za-z]/.test(x)?1:2,d=c(a)-c(b);return d||a.localeCompare(b,'he')}
@@ -4824,7 +4824,7 @@ const zcNo=v=>s_(v).replace(/^0+(?=.)/,'');/* מספר דוח להשוואה: ב
 const zcDup=(reg,d,no,id)=>((S&&S.zc)||[]).find(x=>x.reg===reg&&x.d===d&&zcNo(x.no)===zcNo(no)&&x.id!==id);
 /* מה דורש אישור מנהל בסגירה שהגיעה מעובד – מחושב מחדש מהשדות, לא לפי מה שהשולח סימן */
 function zcNeed(it){const c=it.c,f=it.f,m=[];
- if(!zcRegOk(it.reg)||!cat(it.reg))m.push('הקטגוריה של הקופה לא קיימת במכשיר');
+ if(!zcRegOk(it.reg)||!catReg(it.reg))m.push('הקטגוריה של הקופה לא קיימת במכשיר');
  if(!f.d||!s_(f.no))m.push('חסרים תאריך או מספר דוח');
  if(!c.rows.length)m.push('אין סכומים להכנסה');
  if(!c.sumOk)m.push('סכום השורות לא שווה ל"סה״כ תקבולים"');
@@ -4838,7 +4838,7 @@ function zcNeed(it){const c=it.c,f=it.f,m=[];
 /* תת-קטגוריה לפי שם (כמו במיגרציה ב-ensure): קיימת – משתמשים בה; חסרה – נוספת */
 function zcSub(reg,name){let s=S.subs.find(x=>x.cat===reg&&!x.off&&heKey(x.name)===heKey(name))||S.subs.find(x=>x.cat===reg&&heKey(x.name)===heKey(name));if(!s){s={id:uid(),cat:reg,name};S.subs.push(s)}return s}
 /* הכנסה להכנסות: שורה לכל אמצעי תשלום, בתאריך שעל הדוח. מינוס (הנפקת שובר זיכוי) נרשם כהכנסה שלילית. עיגולים בתוך המזומן */
-function zcIns(it,ap){const f=it.f,c=it.c;if(!cat(it.reg)||!f.d||!c.rows.length)return false;if(S.zc.some(x=>x.id===it.id)||S.tx.some(t=>t.src==='zc:'+it.id))return true;
+function zcIns(it,ap){const f=it.f,c=it.c;if(!catReg(it.reg)||!f.d||!c.rows.length)return false;if(S.zc.some(x=>x.id===it.id)||S.tx.some(t=>t.src==='zc:'+it.id))return true;
  const ids=[],note='סגירת קופה · דוח Z '+s_(f.no)+(it.by?' · '+it.by:'');
  c.rows.forEach(r=>{const s=zcSub(it.reg,r.sub),t={id:uid(),src:'zc:'+it.id,t:'inc',cat:it.reg,sub:s.id,date:f.d,amt:r.amt,note,pays:[]};/* eu = מי ששלח את הסגירה */if(typeof it.ow==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(it.ow))t.eu=it.ow;S.tx.push(t);ids.push(t.id)});
  S.zc.push({id:it.id,reg:it.reg,d:f.d,tm:zcTime(f.tm),od:f.oD||'',otm:zcTime(f.oTm),no:s_(f.no),by:it.by||'',at:Date.now(),tx:ids,cash:{c:c.c,o:c.o,a:c.a,p:c.p},ap:ap||'',nsx:it.nsxR||undefined,co:it.co&&it.co.L?{z:it.co.z,s:it.co.s,ids:it.co.L.map(x=>x.id),ok:it.co.ok?1:0,done:0}:undefined});save();return true}
@@ -4979,7 +4979,7 @@ FRM.zcSend=async fm=>{if(!ZC||ZC.busy)return;const f=ZC.f,adm=isA();if(!f)return
  /* 6ז: עובד שלא רואה את כל ההוצאות – מחכים לסכום מהשרת. אם נכשל (למשל תאריך ישן) – הבדיקה "לא נבדקה", ונדרש הסבר כמו בהפרש */if(coSrvOn())await coSrv(ZC.reg,f.d,f.tm,{id:ZC.id,od:f.oD,otm:f.oTm});
  const co=coChk(ZC.reg,f.d,f.tm,f.cout,{id:ZC.id,inc:zcIncIds(),od:f.oD,otm:f.oTm});const nso=zcNsOpen(co);if(!adm&&nso.length&&!s_(ZC.nw)){zcChkR();return toast(ZNS+': צלם / צרף את הדף, או כתוב למה אין דף')}if(adm&&(co.ns.length||!co.ok)&&!zcNsxOk(ZC.nsx,co.ns,co)){zcChkR();return toast((co.ns.length?ZNS+': צרף את הדף':'הוצאת המזומן לא תואמת: הוסף הוצאה מקופה')+', או לחץ "המשך ללא התאמה"')}if(!adm&&!co.ok&&!s_(ZC.cw)){zcChkR();return toast('הוצאת המזומן לא תואמת להוצאות מקופה: הוסף הוצאה, או כתוב איפה ההפרש ולמה')}
  if(adm&&!fm._dupOk){const dp=zcDup(ZC.reg,f.d,s_(f.no));if(dp)return ask('כבר נרשמה סגירה של '+ZREG[ZC.reg].n+' מתאריך '+dfmt(f.d)+' עם דוח '+s_(f.no)+'. להכניס בכל זאת?',()=>{fm._dupOk=1;FRM.zcSend(fm)},'הכנס בכל זאת')}
- if(adm&&!cat(ZC.reg))return toast('הקטגוריה של הקופה לא קיימת');
+ if(adm&&!catReg(ZC.reg))return toast('הקטגוריה של הקופה לא קיימת');
  const nsp=adm?[]:co.ns.filter(x=>ZC.nsp&&ZC.nsp[x.id]).slice(0,4).map(x=>x.id);
  let pics;try{pics=[];for(const p of ZC.z.concat([ZC.o]).concat(nsp.map(k=>ZC.nsp[k])))pics.push(await fbShrink(p))}catch(e){return toast('הקטנת הצילומים נכשלה')}
  const all='PAGES:'+JSON.stringify(pics),np=Math.ceil(all.length/CH);if(np>8)return toast('הצילומים גדולים מדי. צלם שוב');
@@ -4998,7 +4998,7 @@ ACT.zcImg=async el=>{const x=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!
  let P=null;try{P=du.startsWith('PAGES:')?JSON.parse(du.slice(6)):null}catch(e){}if(!Array.isArray(P)||!P.length)return toast('הצילומים של הסגירה הזו לא עלו במלואם');if(!P.every(imgOk))return toast('התמונה לא תקינה ולא תוצג');
  viewImg('','LargePami_closing_'+x.id,du)};
 ACT.zcOk=async el=>{const it=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)return;
- if(!cat(it.reg))return toast('הקטגוריה של הקופה לא קיימת');if(!it.f.d||!it.c.rows.length)return toast('חסרים תאריך או סכומים – אי אפשר להכניס');
+ if(!catReg(it.reg))return toast('הקטגוריה של הקופה לא קיימת');if(!it.f.d||!it.c.rows.length)return toast('חסרים תאריך או סכומים – אי אפשר להכניס');
  const old=it.co?coMsg(it.co):'';try{await coLoad()}catch(e){}
  /* חישוב מחדש עכשיו: ההוצאות מקופה ששויכו או נוספו מאז הטעינה. ההודעה שהמנהל מאשר – המעודכנת */
  it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id:it.id,inc:it.inc,od:it.f.oD,otm:it.f.oTm});const pics=it.need.filter(m=>/הצילומים/.test(m));it.need=zcNeed(it).concat(it.co.ok?[]:coMsgs(it.co),pics,zcPendBefore(it)?[ZPB]:[]);const now=it.co.ok?'':coMsg(it.co),chg=now!==old;if(cur().v==='zc')zcRe();
