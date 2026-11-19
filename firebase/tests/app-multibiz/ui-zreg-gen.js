@@ -43,6 +43,15 @@ const view = async (pg, v) => { await pg.evaluate((x) => { go(x); if (x === 'zc'
     const old = await pg.evaluate(() => { const t = { id: 'zo1', t: 'exp', cat: (S.cats.find((x) => x.kind === 'exp') || {}).id, date: '2026-11-01', amt: 10, creg: 'i_yh', src: 'zow1', cowhy: 'ישן', pays: [], kind: 'inv' };
       S.tx.push(t); let ok = true; try { coMine(); coLastH(); } catch (e) { ok = String(e); } S.tx = S.tx.filter((x) => x.id !== 'zo1'); return ok; });
     check('6 הוצאה ישנה עם i_yh: חישובי הוצאה מקופה לא קורסים', old === true, old);
+    // עריכה של רשומה ישנה עם i_yh: הקופה נשארת נבחרת בשם "קופה 2" (לא מתחלפת בשקט ל"קופה")
+    const ed = await pg.evaluate(() => { const o = (h) => { const d = document.createElement('div'); d.innerHTML = h; return [...d.querySelectorAll('option')].map((x) => [x.value, x.textContent, x.selected]); };
+      return { co: o(coRegH('i_yh')), co1: o(coRegH('')) }; });
+    await pg.evaluate(() => { go('zc'); ACT.zcManual(); ZC.reg = 'i_yh'; ZC.rs = 'manual'; rerender(); }); await sleep(400); await closeD(pg);
+    const zf = await pg.evaluate(() => { const s = document.querySelector('#main select[name=reg]'); return s ? { v: s.value, o: [...s.options].map((x) => x.textContent) } : null; });
+    await pg.evaluate(() => { ZC = null; });
+    check('6א עריכה עם i_yh: בבחירת קופה להוצאה ובטופס הסגירה – "קופה 2" נבחרת; רגיל – רק "קופה" ונבחרת מראש',
+      JSON.stringify(ed.co) === JSON.stringify([['', 'בחר קופה', false], ['i_nl', 'קופה', false], ['i_yh', 'קופה 2', true]]) && JSON.stringify(ed.co1) === JSON.stringify([['', 'בחר קופה', false], ['i_nl', 'קופה', true]])
+      && zf && zf.v === 'i_yh' && zf.o.join() === 'בחר קופה,קופה,קופה 2', { ed, zf });
     check('7 בלי שגיאות JavaScript בדף', !pg.__errors.length, pg.__errors);
     await ctx.close(); }
 

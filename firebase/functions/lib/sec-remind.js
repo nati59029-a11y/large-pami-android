@@ -155,12 +155,13 @@ function taskCands(tasks, names, now, today) {
 // שמות הקופות – אותם שמות כמו ZREG באפליקציה (index.html). קופה לא מוכרת – המזהה כמו שהוא.
 const REG = Object.freeze({ i_yh: 'יהודה הנשיא', i_nl: 'נחל לכיש' });
 const regName = (g) => (REG[g] ? 'סניף ' + REG[g] : 'קופה ' + String(g || '').slice(0, 40));
-// 19.11.2026: עסק שאינו לארג' פעמי (gen) – קופה אחת "קופה" (i_nl בלבד, כמו ZREG באפליקציה כש-BZGEN). סגירות של קופה אחרת (i_yh ישן) לא נספרות
+// 19.11.2026: עסק שאינו לארג' פעמי (gen) – קופה אחת "קופה" (כמו ZREG באפליקציה כש-BZGEN). סגירה של i_yh (אפליקציה ישנה) נחשבת לאותה קופה:
+// היא "נשלחה" לאותו יום, והפרש בה מתריע בשם "קופה"; "לא נשלחה" – שורה אחת לעסק
 const HEB_WD = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const dm = (day) => +day.slice(8, 10) + '.' + +day.slice(5, 7);
 const dayL = (day) => 'יום ' + HEB_WD[wdOf(day)] + ' ' + dm(day);
 function closeCands(closings0, today, gen) {
-  const closings = closings0.filter(notRej).filter((c) => !gen || c.reg === 'i_nl');
+  const closings = closings0.filter(notRej).map((c) => (gen && typeof c.reg === 'string' ? Object.assign({}, c, { reg: 'i_nl' }) : c));
   const rn = gen ? () => 'קופה' : regName;
   const P = prevBizDay(today);
   const regs = [...new Set(closings.filter((c) => typeof c.reg === 'string' && c.d >= K.addDays(today, -30)).map((c) => c.reg))];
