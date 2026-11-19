@@ -525,13 +525,19 @@ describe('רובוט כספית – cxBotWatch', () => {
     assert.deepEqual({ ok: u.ok, ver: u.ver, err: u.err, fails: u.fails, z: u.z }, { ok: false, ver: '0.1.7', err: 'bad hash', fails: 2, z: undefined });
     const upd = () => (r) => r[A].filter((x) => x.startsWith('upd'));
     const day = (dd) => at(dd, 11);
-    // נכשל פעמיים ברצף → updfail (פעם ביום)
+    // נכשל ברצף → updfail (פעם ביום). 0.1.10 (בדיקה כל 10 דקות): 2 כישלונות לפני שעתיים – עוד לא (תקלת רשת קצרה); 6 ברצף – כן
     let t = day('2026-12-01');
     await ref.set({ sd: '2026-11-30', lr: null, last: t - 3600e3, ver: '0.1.7', upd: { at: t - 7200e3, ok: false, ver: '0.1.7', err: 'bad-hash', fails: 2, rx: t } }, { merge: true });
     PUSH.length = 0;
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), [], '2 כישלונות, האחרון לפני שעתיים');
+    await ref.set({ upd: { at: t - 600e3, ok: false, ver: '0.1.7', err: 'bad-hash', fails: 6, rx: t } }, { merge: true });
     assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updfail']);
     assert.match(PUSH.find((x) => x.id === 'updfail').body, /נכשל/);
     assert.deepEqual(upd()(await BOT.runWatch({ now: t + 3600e3, send })), [], 'פעם ביום');
+    // בדיקה יומית ישנה: 2 כישלונות, האחרון לפני 7 שעות → updfail
+    t = day('2026-12-07');
+    await ref.set({ sd: '2026-12-06', upd: { at: t - 7 * 3600e3, ok: false, ver: '0.1.7', err: 'x', fails: 2, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updfail']);
     // כישלון אחד – עוד לא
     t = day('2026-12-02');
     await ref.set({ sd: '2026-12-01', upd: { at: t - 7200e3, ok: false, ver: '0.1.7', err: 'x', fails: 1, rx: t } }, { merge: true });
@@ -553,5 +559,119 @@ describe('רובוט כספית – cxBotWatch', () => {
     t = day('2026-12-06');
     await ref.set({ sd: '2026-12-05', upd: null }, { merge: true });
     assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
+  });
+});
+
+describe('רובוט כספית – מכירות היום (חלקי) ו"עדכון המחשב" (תוסף 0.1.10)', () => {
+  const at = (day, hm) => { const [y, m, d] = day.split('-').map(Number); const [H, M] = hm.split(':').map(Number); return TK.zoned(y, m - 1, d, H, M); };
+  const DAY = '2026-12-02'; // יום רביעי
+  const dmyOf = (day) => day.split('-').reverse().join('/');
+  const lines = (day, rows) => CC.parseSales([SHDR, ...rows.map((r) => [dmyOf(day), ...r])]).lines;
+  const part = (b, now) => bot(TOK, Object.assign({ op: 'upload', ver: '0.1.10', run: rid('ct'), kind: 'sales', partial: true, part: 0, parts: 1 }, b), { o: { now } });
+  const PD = (id) => adm().doc(`b/${A}/cxDayP/${id}`);
+
+  it('upload חלקי: רק cxDayP עם pt (בלי מלאי, בלי cxDay, בלי sd); cxSales רק עם pt:true; העלאה נוספת מחליפה; שעה עתידית – מתוקנת', async () => {
+    const t = at(DAY, '10:05');
+    const L1 = lines(DAY, [['כוס נייר', '400001', '9101', 'סניף א', '6200', '', '0.0', '24'], ['צלחת', '400002', '9102', 'סניף ב', '7700', '', '0.0', '13'], ['פריט כללי', '1000', '9102', 'סניף ב', '7700', '', '0.0', '5']]);
+    const q0 = await q('cx400001'), d0 = await dev();
+    const r = await part({ day: DAY, hm: '10:05', lines: L1 }, t);
+    assert.equal(r.code, 200, JSON.stringify(r.body)); assert.equal(r.body.partial, true); assert.equal(r.body.n, 3);
+    assert.equal(await q('cx400001'), q0, 'המלאי לא השתנה');
+    assert.equal((await adm().collection(`b/${A}/cxDay`).where('d', '==', DAY).get()).size, 0, 'בלי סיכום יומי "סופי"');
+    assert.equal((await adm().collection(`b/${A}/cxTx`).where('d', '==', DAY).get()).size, 0, 'בלי עסקאות');
+    const a = (await PD('6200_20261202').get()).data(), b = (await PD('7700_20261202').get()).data();
+    assert.deepEqual(a.pt, { at: t, hm: '10:05' });
+    assert.equal(a.gross, 24); assert.equal(a.ntx, 1); assert.equal(a.it['400001'].q, 2, '24 ₪ / 12 ₪ = 2');
+    assert.equal(b.gross, 18); assert.equal(b.sp, 5); assert.equal(b.it['1000'].sp, true); assert.equal(b.un, 1, 'צלחת 13 ₪ מול 21 ₪ – לא בטוח');
+    const d1 = await dev();
+    assert.equal(d1.sd, d0.sd, 'היום האחרון שנקלט לא זז'); assert.deepEqual({ d: d1.tp.d, hm: d1.tp.hm, n: d1.tp.n }, { d: DAY, hm: '10:05', n: 3 });
+    // cxSales: אפליקציה ישנה (בלי pt) – לא רואה; חדשה – רואה עם pt
+    assert.equal((await ok('cxSales', MGR, { from: DAY, to: DAY })).days.length, 0);
+    const s1 = await ok('cxSales', MGR, { from: DAY, to: DAY, pt: true });
+    assert.equal(s1.days.length, 2); assert.ok(s1.days.every((x) => x.pt && x.pt.hm === '10:05'));
+    assert.equal(CC.aggDays(CC.unpackDays(s1)).net, 42);
+    assert.equal((await call('cxSales', MGR, { from: DAY, to: DAY, pt: 1 })).reason, 'bad-field');
+    // שעה אחר כך: רק סניף א (סניף ב נעלם → נמחק), סכום חדש
+    const L2 = lines(DAY, [['כוס נייר', '400001', '9101', 'סניף א', '6200', '', '0.0', '24'], ['כוס נייר', '400001', '9103', 'סניף א', '6200', '', '0.0', '12']]);
+    assert.equal((await part({ day: DAY, hm: '11:05', lines: L2 }, at(DAY, '11:05'))).code, 200);
+    assert.equal((await PD('7700_20261202').get()).exists, false);
+    const a2 = (await PD('6200_20261202').get()).data();
+    assert.equal(a2.gross, 36); assert.equal(a2.ntx, 2); assert.equal(a2.pt.hm, '11:05'); assert.equal(a2.it['400001'].q, 3);
+    // שעון מחשב שמקדים – "עד השעה" לא בעתיד
+    assert.equal((await part({ day: DAY, hm: '12:30', lines: L2 }, at(DAY, '12:01'))).code, 200);
+    assert.equal((await PD('6200_20261202').get()).get('pt.hm'), '12:01');
+  });
+
+  it('upload חלקי נדחה: לא היום, לפני 07:00, שישי מ-14:00 / שבת, כמה חלקים, שורות מיום אחר, שעה / שדה לא תקינים', async () => {
+    const L = lines(DAY, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]);
+    const t = at(DAY, '15:00');
+    assert.equal((await part({ day: BOT.addDays(DAY, -1), hm: '15:00', lines: lines(BOT.addDays(DAY, -1), [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, t)).body.reason, 'bad-day');
+    assert.equal((await part({ day: DAY, hm: '06:30', lines: L }, at(DAY, '06:30'))).body.reason, 'today-off');
+    const FRI = '2026-12-04', SAT = '2026-12-05';
+    assert.equal((await part({ day: FRI, hm: '15:00', lines: lines(FRI, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(FRI, '15:00'))).body.reason, 'today-off');
+    assert.equal((await part({ day: FRI, hm: '13:00', lines: lines(FRI, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(FRI, '13:00'))).code, 200, 'שישי לפני 14:00 – מותר');
+    assert.equal((await part({ day: SAT, hm: '12:00', lines: lines(SAT, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(SAT, '12:00'))).body.reason, 'today-off');
+    assert.equal((await part({ day: DAY, hm: '15:00', lines: L, parts: 2 }, t)).body.reason, 'bad-part');
+    assert.equal((await part({ day: DAY, hm: '15:00', lines: lines(BOT.addDays(DAY, -1), [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, t)).body.reason, 'day-mismatch');
+    assert.equal((await part({ day: DAY, hm: '25:00', lines: L }, t)).body.reason, 'bad-hm');
+    assert.equal((await part({ day: DAY, hm: '15:00', lines: L, partial: 'yes' }, t)).body.reason, 'bad-field');
+    assert.equal((await part({ day: DAY, hm: '15:00', lines: L, zz: 1 }, t)).body.reason, 'bad-field');
+    // בלי partial – יום לא שלם נדחה כמו קודם
+    assert.equal((await bot(TOK, { op: 'upload', ver: '0.1.10', run: rid('cs'), kind: 'sales', day: DAY, part: 0, parts: 1, lines: L }, { o: { now: t } })).body.reason, 'bad-day');
+  });
+
+  it('הלילה דורס: יום עם סיכום סופי (cxDay) – cxSales מחזיר רק אותו; דיווח שמקדם את sd מוחק את התמונות החלקיות', async () => {
+    assert.ok((await PD('6200_20261202').get()).exists);
+    await adm().doc(`b/${A}/cxDay/6200_20261202`).set({ d: DAY, bk: '6200', bn: 'סניף א', gross: 100, ret: 0, disc: 0, ntx: 4, nl: 4, sp: 0, un: 0, it: {} });
+    const s = await ok('cxSales', MGR, { from: DAY, to: DAY, pt: true });
+    assert.equal(s.days.length, 1); assert.equal(s.days[0].pt, undefined); assert.equal(s.days[0].gross, 100);
+    // הסנכרון הלילי של 3.12: מבקש את 2.12 ומדווח שנקלט
+    await adm().doc(`b/${A}/private/cxbot`).set({ sd: BOT.addDays(DAY, -1), req: null }, { merge: true });
+    const n3 = at(BOT.addDays(DAY, 1), '03:10');
+    const h = await okb(TOK, { op: 'hello', mode: 'sync' }, { o: { now: n3 } });
+    assert.deepEqual(h.days, [DAY]);
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: [DAY], sales: { [DAY]: { n: 4 } } } }, { o: { now: n3 } });
+    assert.equal((await dev()).sd, DAY);
+    assert.equal((await adm().collection(`b/${A}/cxDayP`).where('d', '<=', DAY).get()).size, 0, 'התמונות החלקיות נמחקו');
+    await adm().doc(`b/${A}/cxDay/6200_20261202`).delete();
+  });
+
+  it('"עדכון המחשב": רק מנהל; תוסף ישן → old-ext; בקשה → poll מחזיר uq רק לתוסף 0.1.10+, ו-caps תמיד; ack נשמר פעם אחת; pending; info; upd ב-poll – רק כשהשתנה', async () => {
+    const ref = adm().doc(`b/${A}/private/cxbot`);
+    await ref.set({ ver: '0.1.9', ureq: null, req: null }, { merge: true });
+    assert.equal((await call('cxBotTok', E1, { op: 'upd' })).reason, 'manager-only');
+    assert.equal((await call('cxBotTok', MB, { op: 'upd' })).reason, 'no-dev');
+    const o1 = await call('cxBotTok', MGR, { op: 'upd' });
+    assert.equal(o1.reason, 'old-ext'); assert.match(o1.text, /0\.1\.10/);
+    await ref.set({ ver: '0.1.10' }, { merge: true });
+    const r = await ok('cxBotTok', MGR, { op: 'upd' });
+    assert.match(r.req.id, /^q[a-z0-9]{6,30}$/);
+    assert.equal((await call('cxBotTok', MGR, { op: 'upd' })).reason, 'pending');
+    assert.equal((await dev()).req, null, 'לא נוגע בבקשת "סנכרן עכשיו"');
+    const p9 = await okb(TOK, { op: 'poll', ver: '0.1.9' });
+    assert.equal(p9.uq, undefined, 'תוסף ישן לא מקבל את הבקשה'); assert.deepEqual(p9.caps, BOT.CAPS); assert.equal(p9.want, false);
+    const p10 = await okb(TOK, { op: 'poll', ver: '0.1.10' });
+    assert.equal(p10.uq, r.req.id);
+    for (const res of [null, 'x', { st: 'boom' }, { st: 'same', z: 1 }]) assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.10', ack: r.req.id, res })).body.reason, 'bad-field', JSON.stringify(res));
+    assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.10', ack: '../x', res: { st: 'same' } })).body.reason, 'bad-field');
+    const pa = await okb(TOK, { op: 'poll', ver: '0.1.10', ack: r.req.id, res: { st: 'reload', cur: '0.1.10', disk: '0.1.11<x>' } });
+    assert.equal(pa.uq, undefined);
+    const u = (await dev()).ureq;
+    assert.ok(u.took > 0); assert.deepEqual(u.res, { st: 'reload', cur: '0.1.10', disk: '' });
+    await okb(TOK, { op: 'poll', ver: '0.1.10', ack: r.req.id, res: { st: 'same' } });
+    assert.equal((await dev()).ureq.res.st, 'reload', 'תשובה שנייה לאותה בקשה – לא נרשמת');
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.10' })).uq, undefined, 'הבקשה טופלה');
+    const i = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.equal(i.ureq.id, r.req.id); assert.equal(i.ureq.res.st, 'reload'); assert.equal(i.updVer, BOT.UPD_VER); assert.equal(i.tp.d, '2026-12-04', 'מכירות היום האחרונות (שישי 13:00)');
+    assert.notEqual((await ok('cxBotTok', MGR, { op: 'upd' })).req.id, r.req.id, 'אחרי תשובה – בקשה חדשה מותרת');
+    // מצב העדכון האוטומטי ב-poll: נשמר מסונן, ולא נכתב שוב כשלא השתנה
+    const U1 = { at: Date.now() - 60e3, ok: true, ver: '0.1.10', err: '', fails: 0 };
+    await okb(TOK, { op: 'poll', ver: '0.1.10', upd: U1 });
+    const s1 = (await dev()).upd;
+    assert.equal(s1.at, U1.at); assert.equal(s1.ok, true);
+    await okb(TOK, { op: 'poll', ver: '0.1.10', upd: U1 });
+    assert.equal((await dev()).upd.rx, s1.rx, 'לא נכתב שוב');
+    assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.10', upd: { at: 'x' } })).body.reason, 'bad-field');
+    await ref.set({ ureq: null }, { merge: true });
   });
 });

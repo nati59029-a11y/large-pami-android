@@ -307,7 +307,11 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.equal(await bo0.evaluate(() => localStorage.getItem('empVisit')), '12', 'נכנסנו לעובד הפעיל הראשון (התיבה סומנה)');
   const hf = rep.files.find((f) => f.flow === 'empHours');
   assert.ok(hf && !hf.none, 'קובץ השעות נתפס: ' + JSON.stringify(rep.files));
-  assert.equal(hf.ext, 'csv'); assert.equal(hf.rows, 4); assert.equal(hf.kind, null); assert.equal(hf.hdr, null, 'קובץ לא מוכר – בלי שורת כותרות (בה יש שם עובד)');
+  assert.equal(hf.ext, 'csv'); assert.equal(hf.rows, 4); assert.equal(hf.kind, null);
+  // 0.1.10: שורת הכותרות רק דרך רשימה לבנה (שורת הכותרת עם שם העובד – לא נבחרת), ומ-5 השורות הראשונות רק סוג התא
+  assert.deepEqual(hf.hdr, ['תאריך', 'כניסה', 'יציאה', 'שעות רגילות', '125%', '150%'], JSON.stringify(hf));
+  assert.equal(hf.hi, 1);
+  assert.deepEqual(hf.kinds, [['text'], ['text', 'text', 'text', 'text', 'num', 'num'], ['date', 'time', 'time', 'time', 'num', 'num'], ['date', 'time', 'time', 'time', 'num', 'num']]);
   // פרטיות: אין שמות עובדים, טלפונים או שעות מהרשימה / מדף השעות / מהקובץ
   for (const nm of ['שפרינצק', 'רוזנצוויג', 'טננבאום', '7654321', '7654322', '07:41', '15:58', '8:17', '07:39']) assert.ok(!txt.includes(nm), 'שם / טלפון / שעה של עובד בדוח: ' + nm);
   assert.ok(rep.menu.some((l) => l.t === 'רשימת עובדים' && l.h === '#/employees'), JSON.stringify(rep.menu));
@@ -610,6 +614,101 @@ test('עדכון אוטומטי (0.1.7): upd.json נקרא מהדיסק ונשל
     fs.rmSync(uf, { force: true });
     await sw.evaluate(() => { self.__cxTest.reload = null; return chrome.storage.local.remove(['updReload', 'upd']); });
     srv.exportN.price = 2;
+  }
+});
+
+test('מכירות היום כל שעה (0.1.10): רק דוח המכירות של היום, upload חלקי עם השעה; בלי hello / report / קטלוג; פעם אחת בשעה; לא בשבת; שרת ישן – לא', async () => {
+  const TZ = 'Asia/Jerusalem', W = D.zonedToUtc('2026-11-18', '10:05', TZ); // יום רביעי
+  const tt = (now) => sw.evaluate((n) => self.__cxTest.todayTick({ now: n }), now);
+  const cnt = () => ({ hello: srv.ops('hello').length, report: srv.ops('report').length, cat: srv.ops('upload').filter((c) => c.items).length, part: srv.ops('upload').filter((c) => c.partial).length, exp: srv.ops('export').length });
+  // בזמן הבדיקה – בלי ה-alarms שמפעילים ריצה שעתית "אמיתית" (לפי השעון של עכשיו) במקביל
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); return chrome.storage.local.remove(['caps', 'todaySt']); });
+  srv.caps = null;
+  // שרת ישן (בלי caps) – לא רץ
+  assert.equal(await tt(W), null);
+  srv.caps = ['today', 'uq'];
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.deepEqual((await store()).caps, { today: true, uq: true });
+  const c0 = cnt(), H0 = (await store()).salesHash || {};
+  const r = await tt(W);
+  assert.equal(r && r.st, 'ok', JSON.stringify(r));
+  assert.equal(r.n, 3); assert.equal(r.hm, '10:05'); assert.equal(r.day, '2026-11-18');
+  const up = srv.ops('upload').filter((c) => c.partial).at(-1);
+  assert.equal(up.partial, true); assert.equal(up.kind, 'sales'); assert.equal(up.day, '2026-11-18'); assert.equal(up.hm, '10:05');
+  assert.equal(up.part, 0); assert.equal(up.parts, 1); assert.equal(up.lines.length, 3); assert.ok(up.lines.every((l) => l.d === '2026-11-18'));
+  assert.ok(salesReq.at(-1).includes('20261118'), 'דוח המכירות של היום: ' + salesReq.at(-1));
+  const c1 = cnt();
+  assert.deepEqual({ ...c1, part: 0 }, { ...c0, part: 0 }, 'בלי hello, report, קטלוג או קבצים לכספית');
+  assert.equal(c1.part, c0.part + 1);
+  assert.deepEqual((await store()).salesHash || {}, H0, 'לא נרשם כיום שנקלט');
+  // אותה שעה – לא שוב; השעה הבאה – כן
+  assert.equal(await tt(W + 20 * 60e3), null);
+  assert.equal(cnt().part, c1.part);
+  assert.equal((await tt(W + 60 * 60e3)).hm, '11:05');
+  // לפני 07:00, שבת, ערב שבת מ-14:00 – לא
+  assert.equal(await tt(D.zonedToUtc('2026-11-18', '06:30', TZ)), null);
+  assert.equal(await tt(D.zonedToUtc('2026-11-21', '12:00', TZ)), null);
+  assert.equal(await tt(D.zonedToUtc('2026-11-20', '15:00', TZ)), null);
+  // ריצה אחרת באמצע (ממתינה לניסיון חוזר) – לא
+  const saved = await sw.evaluate(async () => (await chrome.storage.local.get('run')).run);
+  await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ run: Object.assign({}, run, { st: 'wait', retryAt: Date.now() + 600e3, touchedAt: Date.now() }) }); });
+  assert.equal(await tt(W + 2 * 3600e3), null);
+  await sw.evaluate(async (x) => chrome.storage.local.set({ run: x }), saved);
+  // שרת שלא מכיר partial (bad-field) → נכשל בשקט, ומפסיקים עד שהשרת יודיע אחרת
+  srv.noPartial = true;
+  const f = await tt(W + 3 * 3600e3);
+  assert.equal(f.st, 'fail'); assert.equal(f.code, 'bad-field');
+  assert.equal((await store()).caps.today, false);
+  assert.equal(cnt().report, c0.report, 'בלי דיווח לשרת');
+  srv.noPartial = false; srv.caps = null;
+  await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); });
+});
+
+test('"עדכון המחשב" (0.1.10): בקשה מהטלפון (poll uq) → בדיקת הדיסק, תשובה לשרת (ack) פעם אחת, וטעינה מחדש רק כשיש גרסה חדשה שהועתקה; upd נשלח ב-poll רק כשהשתנה', async () => {
+  const mf = path.join(ext, 'manifest.json'), uf = path.join(ext, 'upd.json'), orig = fs.readFileSync(mf, 'utf8');
+  const VER = JSON.parse(orig).version;
+  const pollOnce = () => sw.evaluate(() => self.__cxTest.pollOnce());
+  await sw.evaluate(async () => { self.__rl = 0; self.__cxTest.reload = () => { self.__rl++; }; await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); return chrome.storage.local.remove(['updReload', 'upd', 'updSent', 'lastUq', 'caps']); });
+  try {
+    srv.caps = ['today', 'uq'];
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: 1763500000000, ok: true, ver: VER, err: '', fails: 0 }));
+    await pollOnce(); // לומדים את היכולות
+    await pollOnce(); // עכשיו נשלח upd (השתנה)
+    const withUpd = srv.ops('poll').filter((p) => p.upd);
+    assert.deepEqual(withUpd.at(-1).upd, { at: 1763500000000, ok: true, ver: VER, err: '', fails: 0 });
+    const n0 = withUpd.length;
+    await pollOnce();
+    assert.equal(srv.ops('poll').filter((p) => p.upd).length, n0, 'upd לא נשלח שוב כשלא השתנה');
+    // בקשה: אין גרסה חדשה בדיסק → same, בלי טעינה
+    srv.uq = 'qupd0001aa'; srv.uqTook = false;
+    await pollOnce();
+    let ack = srv.ops('poll').filter((p) => p.ack).at(-1);
+    assert.deepEqual(ack && { ack: ack.ack, res: ack.res }, { ack: 'qupd0001aa', res: { st: 'same', cur: VER, disk: VER } });
+    assert.equal(await sw.evaluate(() => self.__rl), 0);
+    const nAck = srv.ops('poll').filter((p) => p.ack).length;
+    srv.uqTook = false; // גם אם השרת עדיין מחזיר אותה – לא עונים שוב
+    await pollOnce();
+    assert.equal(srv.ops('poll').filter((p) => p.ack).length, nAck);
+    // גרסה חדשה בדיסק שהמשימה סיימה להעתיק → reload (updReload: הבדיקה האוטומטית של כל דקה לא מקדימה את הבקשה)
+    await sw.evaluate(() => chrome.storage.local.set({ updReload: { to: '9.9.9', at: Date.now() } }));
+    fs.writeFileSync(mf, orig.replace(`"version": "${VER}"`, '"version": "9.9.9"'));
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: Date.now(), ok: true, ver: '9.9.9', err: '', fails: 0 }));
+    srv.uq = 'qupd0002bb'; srv.uqTook = false;
+    await pollOnce();
+    ack = srv.ops('poll').filter((p) => p.ack).at(-1);
+    assert.equal(ack.ack, 'qupd0002bb'); assert.equal(ack.res.st, 'reload'); assert.equal(ack.res.disk, '9.9.9');
+    assert.equal(await sw.evaluate(() => self.__rl), 1);
+    // ההעתקה עוד לא אושרה (upd.json "copying") → copying, בלי טעינה
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: Date.now(), ok: false, ver: '', err: 'copying', fails: 0 }));
+    srv.uq = 'qupd0003cc'; srv.uqTook = false;
+    await pollOnce();
+    assert.equal(srv.ops('poll').filter((p) => p.ack).at(-1).res.st, 'copying');
+    assert.equal(await sw.evaluate(() => self.__rl), 1);
+  } finally {
+    fs.writeFileSync(mf, orig);
+    fs.rmSync(uf, { force: true });
+    srv.uq = null; srv.caps = null;
+    await sw.evaluate(async () => { self.__cxTest.reload = null; await chrome.storage.local.remove(['updReload', 'upd', 'updSent', 'lastUq', 'caps']); await self.__cxTest.setupAlarms(); });
   }
 });
 

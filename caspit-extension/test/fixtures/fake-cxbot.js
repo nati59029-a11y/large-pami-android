@@ -22,7 +22,16 @@ function start(o) {
       S.calls.push(b);
       const op = b.op;
       // "סנכרן עכשיו": S.req = מזהה בקשה מהטלפון; poll מחזיר אותה עד ש-hello לוקח אותה (S.taken). S.noPoll – שרת ישן בלי poll
-      if (op === 'poll') { if (S.bizOff) return send(403, { ok: false, reason: 'biz-off' }); if (S.noPoll) return send(400, { ok: false, reason: 'bad-op' }); return send(200, S.req && !S.taken ? { ok: true, want: true, id: S.req } : { ok: true, want: false }); }
+      // 0.1.10: S.caps – יכולות השרת (today / uq); S.uq – בקשת "עדכון המחשב" עד שהתוסף עונה (ack)
+      if (op === 'poll') {
+        if (S.bizOff) return send(403, { ok: false, reason: 'biz-off' }); if (S.noPoll) return send(400, { ok: false, reason: 'bad-op' });
+        if (b.ack !== undefined && b.ack === S.uq) S.uqTook = true;
+        const out = S.req && !S.taken ? { ok: true, want: true, id: S.req } : { ok: true, want: false };
+        if (S.caps) out.caps = S.caps;
+        if (S.uq && !S.uqTook && b.ack === undefined) out.uq = S.uq;
+        return send(200, out);
+      }
+      if (op === 'upload' && b.partial !== undefined && S.noPartial) return send(400, { ok: false, reason: 'bad-field', msg: 'שדה לא מוכר' });
       if (op === 'hello' && b.req !== undefined) { if (b.req !== S.req || S.taken) return send(409, { ok: false, reason: 'req-gone', msg: 'הבקשה כבר טופלה' }); S.taken = true; }
       if (op === 'hello') return send(200, { ok: true, runId: S.runId || 'srvrun' + S.calls.length, minVer: '0.0.1', biz: { name: 'עסק בדיקה' }, days: S.days, schedule: { at: '03:00', tz: 'Asia/Jerusalem' }, limits: { price: 500, newMax: 50 } });
       if (op === 'upload') return send(200, { ok: true });

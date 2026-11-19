@@ -725,18 +725,93 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br, tm) {
 const dayIdOf = (g) => CC.dayId(g.bk, g.d);
 
 // =====================================================================================================
+// מכירות היום – תמונת מצב חלקית מהתוסף (19.11.2026; כל שעה 07:00–23:00, לא בשבת וחג; רובוט בלבד – caspit-bot.js upload עם partial).
+//   לא נוגע במלאי, ב-cxTx, ב-cxDay, ב-lastSales או ביום האחרון שנקלט: רק cxDayP/{bk}_{yyyymmdd} – אותה צורה כמו cxDay (סיכום יומי לכל סניף,
+//   כולל it ו-h) + pt:{ at, hm } ("חלקי – עד השעה hm"). כל העלאה מחליפה את כל מסמכי היום (סניף שנעלם – נמחק).
+//   cxSales מחזיר אותם רק עם pt:true, ורק ליום שאין לו אף cxDay – הסנכרון הלילי של היום "דורס" אותם; הדיווח שלו מוחק אותם (partDrop).
+//   הכמויות – כמו בתצוגה המקדימה (qtyOf לפי המחיר באפליקציה), רק לתצוגה.
+// =====================================================================================================
+const PMAX = 30000;
+async function cxPartial(w, input) {
+  void w;
+  const day = input.day, hm = input.hm, now = input.now || Date.now();
+  if (typeof day !== 'string' || !DATE_RE.test(day) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(hm))) throw bad('bad-day', 'יום / שעה לא תקינים');
+  if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > PMAX) throw bad('bad-lines', `שורות: 1 עד ${PMAX}`);
+  const all = input.lines.map(cleanLine), lines = all.filter((l) => l && l.d === day);
+  if (!lines.length) throw bad('bad-lines', 'אין שורות מכירה תקינות מהיום');
+  const db = T.tdb();
+  const cs = await db.doc(CFG).get();
+  const cfg = cfgOf(cs), skip = new Set(cfg.skip.map(String));
+  bkFix(lines, cs.exists && cs.get('bkn') && typeof cs.get('bkn') === 'object' ? cs.get('bkn') : {});
+  const codes = [...new Set(lines.map((l) => l.c))].filter((c) => !skip.has(c) && CC.CODE_RE.test(c) && !/^__.*__$/.test(c));
+  const X = new Map(), P = new Map();
+  for (let i = 0; i < codes.length; i += 300) (await db.getAll(...codes.slice(i, i + 300).map((c) => db.doc('cxItem/' + c)), { fieldMask: ['pid', 'pr'] })).forEach((x) => { if (x.exists) X.set(x.id, x.data()); });
+  const pids = [...new Set([...X.values()].map((x) => x.pid).filter((p) => typeof p === 'string' && p && !p.includes('/')))];
+  for (let i = 0; i < pids.length; i += 300) (await db.getAll(...pids.slice(i, i + 300).map((p) => db.doc('prod/' + p)), { fieldMask: ['price', 'name', 'cat'] })).forEach((x) => { if (x.exists) P.set(x.id, x.data()); });
+  const days = new Map(), txs = new Map();
+  for (const l of lines) {
+    const id = CC.dayId(l.bk, l.d);
+    let D = days.get(id);
+    if (!D) { D = { d: l.d, bk: l.bk, bn: l.bn || '', gross: 0, ret: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, it: {}, h: {} }; days.set(id, D); txs.set(id, new Set()); }
+    if (l.bn) D.bn = l.bn;
+    txs.get(id).add(l.tx);
+    const sp = skip.has(l.c), x = X.get(l.c), p = !sp && x && x.pid ? P.get(x.pid) : null;
+    let q = 0, u = 0;
+    if (p) {
+      const pr = typeof p.price === 'number' && p.price > 0 ? p.price : x.pr && typeof x.pr.fb === 'number' && x.pr.fb > 0 ? x.pr.fb : null;
+      const r = CC.qtyOf(l.a, l.ds, pr, l.w); q = r.q; if (r.qs === 'unsure') u = 1;
+    }
+    if (l.a >= 0) D.gross += l.a; else D.ret += -l.a;
+    D.disc += l.ds; D.nl++; D.un += u;
+    if (sp) D.sp += l.a - l.ds;
+    const hk = CC.hourKey(l.t); D.h[hk] = (D.h[hk] || 0) + l.a - l.ds;
+    const key = fkey(l.c), it = D.it[key] || (D.it[key] = Object.assign({ n: l.n || (p && p.name) || '', cat: (p && p.cat) || '', q: 0, r: 0, a: 0, ds: 0, u: 0 }, sp ? { sp: true } : {}));
+    if (q > 0) it.q += q; else it.r += -q;
+    it.a += l.a; it.ds += l.ds; it.u += u;
+  }
+  const R3 = (v) => Math.round(v * 1000) / 1000;
+  const pt = { at: now, hm };
+  const old = await db.collection('cxDayP').where('d', '==', day).get();
+  const b = db.batch();
+  for (const x of old.docs) if (!days.has(x.id)) b.delete(x.ref);
+  for (const [id, D] of days) {
+    D.ntx = txs.get(id).size;
+    for (const k of ['gross', 'ret', 'disc', 'sp']) D[k] = CC.r2(D[k]);
+    for (const k of Object.keys(D.h)) D.h[k] = CC.r2(D.h[k]);
+    for (const v of Object.values(D.it)) { v.q = R3(v.q); v.r = R3(v.r); v.a = CC.r2(v.a); v.ds = CC.r2(v.ds); }
+    b.set(db.doc('cxDayP/' + id), Object.assign(D, { pt, upd: now }));
+  }
+  await b.commit();
+  return { n: lines.length, bad: all.length - lines.length, br: days.size };
+}
+// הסנכרון הלילי קלט ימים עד sd (כולל) – התמונות החלקיות שלהם כבר לא נחוצות
+async function partDrop(sd) {
+  if (typeof sd !== 'string' || !DATE_RE.test(sd)) return 0;
+  const db = T.tdb();
+  const x = await db.collection('cxDayP').where('d', '<=', sd).limit(200).get();
+  if (!x.size) return 0;
+  const b = db.batch(); x.docs.forEach((d) => b.delete(d.ref)); await b.commit();
+  return x.size;
+}
+
+// =====================================================================================================
 // A3: מסך "מכירות כספית" (מנהל בלבד, החלטה 5) – סיכומים יומיים, שורות, תיקון כמות "לא בטוח". לא יוצר הכנסות.
 // =====================================================================================================
 // cxSales({ from, to }) – עד 92 ימים → { days:[cxDay בלי it, כולל h – מכירות לפי שעה], items:{ קוד:{ n, cat, sp?, v:{ i:[q,r,a,ds,u] } } }, cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
+//   pt:true (אפליקציה מ-19.11.2026): גם תמונות מצב חלקיות של היום (cxDayP, pt:{ at, hm }) – רק ליום שאין לו אף cxDay. בלי pt – כמו קודם
+//   (אפליקציה ישנה לא תקבל נתון חלקי שייראה לה סופי, למשל בהתאמה לסגירת קופה).
 async function cxSales(w, input) {
-  onlyKeys(input, ['from', 'to']);
+  onlyKeys(input, ['from', 'to', 'pt']);
+  if (input.pt !== undefined && input.pt !== true) throw bad('bad-field', 'שדה לא תקין: pt');
   const from = CC.dateOf(input.from), to = CC.dateOf(input.to);
   if (!from || !to || from !== input.from || to !== input.to || from > to) throw bad('bad-range', 'טווח תאריכים לא תקין');
   if ((Date.parse(to) - Date.parse(from)) / 864e5 > 91) throw bad('bad-range', 'עד 92 ימים בכל בקשה'); // תיקון סבב 1 (הערה 5): טווח ארוך – הטלפון מבקש בחלקים
   const db = T.tdb();
-  const [ds, cs, ct] = await Promise.all([db.collection('cxDay').where('d', '>=', from).where('d', '<=', to).get(), db.doc(CFG).get(), db.collection('cat').select('name').get()]);
+  const [ds, cs, ct, pp] = await Promise.all([db.collection('cxDay').where('d', '>=', from).where('d', '<=', to).get(), db.doc(CFG).get(), db.collection('cat').select('name').get(),
+    input.pt === true ? db.collection('cxDayP').where('d', '>=', from).where('d', '<=', to).get() : null]);
   const cfg = cfgOf(cs);
   const docs = ds.docs.map((d) => { const x = d.data(); delete x.upd; return x; });
+  if (pp) { const have = new Set(docs.map((x) => x.d)); for (const d of pp.docs) { const x = d.data(); if (have.has(x.d)) continue; delete x.upd; docs.push(x); } }
   const { days, items } = CC.packDays(docs); // צורה קומפקטית (CC.unpackDays בטלפון)
   return { days, items, cats: Object.fromEntries(ct.docs.map((d) => [d.id, d.get('name') || ''])), cfg: { reg: cfg.reg, br: stockBr(w, cfg), lastSales: cfg.lastSales }, sa: !!w.superadmin };
 }
@@ -841,4 +916,4 @@ async function phone(k, request) {
   return r;
 }
 for (const k of Object.keys(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, (request) => phone(k, request)));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, cleanTm, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, cleanTm, cxPartial, partDrop, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });

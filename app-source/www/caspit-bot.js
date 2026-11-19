@@ -2,6 +2,8 @@
    חיבור מחשב (קוד שמוצג פעם אחת + העתקה), ניתוק, מצב (סנכרון אחרון ואיך התחיל, 14 הריצות האחרונות, תקלות בעברית פשוטה),
    כמה פריטים חדשים מותר לרובוט לטעון לכספית בכל ריצה (newMax), הורדת התוסף והוראות התקנה, ודוח היכרות (מנהל־על בלבד).
    עדכון אוטומטי (19.11, תוסף 0.1.7): שורת מצב לפי i.dev.upd (תקין / נכשל / הורד וממתין לטעינה / לא מותקן).
+   "עדכון המחשב" (19.11, תוסף 0.1.10): חלון עם הגרסה המותקנת, מתי המחשב בדק עדכון ומצב (i.dev.upd), ובקשה לתוסף (cxBotTok op:'upd', i.ureq)
+   לבדוק אם בדיסק יש גרסה חדשה ולהיטען מחדש אם בטוח. מכירות היום: שורת "עודכנו עד HH:MM" (i.tp).
    "סנכרן עכשיו" (18.11): בקשה למחשב החנות (cxBotTok op:'now'); התוסף 0.1.5 בודק כל דקה. בזמן המתנה / ריצה – רענון כל 20 שניות, רק כשהמסך פתוח וגלוי.
    רכיבי העיצוב הקיימים בלבד (.card .btn .kg .k .li .note .f). משתמש ב: V, ACT, FRM, fnCall, esc, toast, dlg, closeDlg, ask, rerender, cur, fd, saveFile, SY, APP_REPO. */
 (function(){
@@ -35,7 +37,7 @@ const big='style="min-height:48px"';
 
 /* הכרטיס – נקרא מ-V.cxSync (caspit-sync.js) */
 window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
- let h='<div class="card"><h3 style="margin-top:0">רובוט – מחשב החנות</h3><p class="note" style="margin-top:0">תוסף ב-Chrome במחשב החנות מסנכרן לבד כל לילה ב-03:00: קטלוג, מכירות של הימים שעברו, וקבצים לכספית. הקטלוג הראשון – רק כאן באפליקציה.</p>';
+ let h='<div class="card"><h3 style="margin-top:0">רובוט – מחשב החנות</h3><p class="note" style="margin-top:0">תוסף ב-Chrome במחשב החנות מסנכרן לבד כל לילה ב-03:00: קטלוג, מכירות של הימים שעברו, וקבצים לכספית. מכירות היום מתעדכנות כל שעה (07:00–23:00, נתון חלקי). הקטלוג הראשון – רק כאן באפליקציה.</p>';
  if(B.err)h+=`<p class="note">${esc(B.err)}</p><button class="btn g w" ${big} data-a="cxBotRe">נסו שוב</button>`;
  else if(!i)h+='<p class="note">טוען…</p>';
  else{
@@ -57,6 +59,8 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
     else if(!u.ok)h+=`<p class="note" role="alert">⚠ עדכון אוטומטי של התוסף נכשל (${dt(u.at)}${u.fails>1?', '+u.fails+' פעמים ברצף':''})${u.err?': '+esc(u.err):''}. הסנכרון ממשיך בגרסה הנוכחית.</p>`;
     else if(u.ver&&verLt(i.dev.ver,u.ver))h+=`<p class="note" role="alert">⚠ גרסה ${esc(u.ver)} של התוסף הורדה למחשב וממתינה לטעינה. אם זה נמשך – לסגור ולפתוח את Chrome במחשב.</p>`;
     else h+=`<p class="note">עדכון אוטומטי של התוסף: תקין (נבדק ${dt(u.at)}).</p>`;}
+   h+=`<button class="btn g w" ${big} data-a="cxBotUpd" style="min-height:48px;margin-bottom:8px">עדכון המחשב</button>`;
+   if(i.tp&&i.tp.d)h+=`<p class="note">מכירות היום (${dd(i.tp.d)}) עודכנו מהמחשב עד השעה ${esc(String(i.tp.hm||''))} – חלקי, הסכום הסופי נקלט בלילה.</p>`;
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;
@@ -68,6 +72,24 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
  return h};
 
 ACT.cxBotRe=()=>{B.err='';B.i=null;rerender()};
+/* "עדכון המחשב": מצב + בקשה לתוסף לבדוק את הדיסק ולהיטען מחדש. ההורדה עצמה – המשימה ב-Windows (כל 10 דקות, אחרי הרצה חוזרת של install-auto-update.cmd) */
+const UST={reload:'התוסף מצא גרסה חדשה במחשב ונטען מחדש.',same:'אין גרסה חדשה במחשב – התוסף כבר מעודכן לגרסה שהורדה.',copying:'גרסה חדשה בהורדה למחשב – התוסף ייטען לבד כשתסתיים.',busy:'סנכרון רץ עכשיו – התוסף ייטען לבד מיד אחריו.',none:'העדכון האוטומטי לא מותקן במחשב (אין upd.json) – צריך להריץ את install-auto-update.cmd.'};
+function updSt(i){const q=i&&i.ureq;if(!q)return'';const sn=(i.now||Date.now())+(Date.now()-(B.at||Date.now()));if(q.took)return'done';return sn-q.at<(i.reqMs||600000)?'wait':'late'}
+function updH(){const i=B.i||{},d=i.dev||{},u=d.upd,q=i.ureq,us=updSt(i),uv=i.updVer||'0.1.10',old=d.ver&&verLt(d.ver,uv);
+ const stx=!u?'לא מותקן':!u.ok?'נכשל'+(u.err?' ('+esc(u.err)+')':''):u.ver&&verLt(d.ver,u.ver)?'גרסה '+esc(u.ver)+' הורדה וממתינה לטעינה':'תקין';
+ return `<h3>עדכון המחשב</h3><div class="kg"><div class="k"><small>גרסה מותקנת</small><b dir="ltr">${esc(d.ver||'—')}</b></div><div class="k"><small>בדיקת עדכון אחרונה</small><b>${u?dt(u.at):'—'}</b></div><div class="k${u&&!u.ok?' neg':''}"><small>מצב</small><b>${stx}</b></div></div>
+ ${us==='wait'?`<p class="note" role="status">נשלח – ממתין למחשב (${tm(q.at)}). המחשב בודק כל דקה.</p>`:us==='done'?`<p class="note" role="status">המחשב ענה (${tm(q.took)}): ${esc((q.res&&UST[q.res.st])||'')}${q.res&&q.res.disk?' גרסה בדיסק: <bdi dir="ltr">'+esc(q.res.disk)+'</bdi>.':''}</p>`:us==='late'?`<p class="note" role="alert">⚠ המחשב לא ענה לבקשה (${tm(q.at)}) – אולי הוא כבוי, Chrome סגור או שסנכרון רץ.</p>`:''}
+ <button class="btn w" ${big} data-a="cxBotUpdGo"${us==='wait'||old?' disabled':''}>בדיקת עדכון עכשיו</button>
+ ${old?`<p class="note">בתוסף שבמחשב (${esc(d.ver)}) אין עדיין "עדכון המחשב" – צריך גרסה ${esc(uv)} ומעלה. העדכון האוטומטי יביא אותה לבד.</p>`:''}
+ <p class="note">העדכון עצמו מגיע מהמחשב: הוא בודק כל 10 דקות אם פורסמה גרסה חדשה, ולכן גרסה חדשה מגיעה תוך עד 10 דקות מהפרסום. הכפתור רק מבקש מהתוסף לבדוק אם הגרסה כבר במחשב ולהיטען מחדש (רק כשאין סנכרון באמצע).</p>
+ <p class="note"><b>פעם אחת:</b> כדי להפעיל את הבדיקה כל 10 דקות, מריצים שוב במחשב את הקובץ <span dir="ltr">install-auto-update.cmd</span> שבתיקיית התוסף (לחיצה כפולה).</p>
+ <button class="btn g w" ${big} data-a="closeDlg" style="min-height:48px;margin-top:8px">סגור</button>`}
+const updRe=()=>{if(document.querySelector('#dlg[open] [data-a=cxBotUpdGo]'))dlg(updH())};
+ACT.cxBotUpd=()=>{dlg(updH());load().then(updRe)};
+ACT.cxBotUpdGo=async el=>{if(el)el.disabled=true;try{await fnCall('cxBotTok',{op:'upd'});toast('נשלח למחשב החנות')}catch(e){toast(e&&e.reason==='bad-op'?'השרת עוד לא תומך ב"עדכון המחשב". נסו שוב אחרי עדכון השרת.':e&&e.message||'הפעולה נכשלה')}
+ B.ld=0;await load();updRe();updWait()};
+/* בזמן המתנה לתשובת המחשב: רענון כל 20 שניות, רק כשהחלון פתוח והאפליקציה גלויה */
+function updWait(){if(B.ut||updSt(B.i)!=='wait')return;B.ut=setTimeout(async()=>{B.ut=0;if(!document.hidden&&document.querySelector('#dlg[open] [data-a=cxBotUpdGo]')){await load();updRe();updWait()}},20000)}
 /* "סנכרן עכשיו": בקשה אחת בכל פעם (השרת מסרב לבקשה כפולה / בזמן ריצה). אין הגבלה יומית */
 ACT.cxBotNow=async el=>{if(el)el.disabled=true;try{await fnCall('cxBotTok',{op:'now'});toast('נשלח למחשב החנות')}catch(e){toast(e&&e.message||'הפעולה נכשלה')}load()};
 window.cxBotReset=()=>{B.err='';B.i=null};

@@ -1,6 +1,7 @@
 'use strict';
 // סנכרון כספית A2/A3 (caspit-sales.js): קליטת דוח מכירות (windows-1255), תצוגה מקדימה, תיקון "לא בטוח", אישור;
 // מסך "מכירות כספית": תקופה, סיכומים, מוצרים, קופות, קטגוריות, התאמה מול סגירת קופה, שורות "לא בטוח"; בלי הגדרת מקור הכנסות.
+// מכירות היום (19.11): יום חלקי מהרובוט (pt) – תווית "חלקי – עד השעה", לא בהתאמה לסגירת קופה ולא ב-CxHours; שרת ישן (bad-field על pt) – בלי.
 // רשת מדומה, נתונים מומצאים. שימוש: node ui-cx-sales.js <www-dir> [out.json] [shots-dir]. מסך טלפון קטן (360×740).
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +24,9 @@ const DAYS = [
 const CC = require('../../functions/lib/caspit-core.js');
 // C2: יום בלי שעות בכלל (קובץ שבו השעה לא נקראה) – "0%" והפורמט שהתקבל
 const SALES0 = { ...CC.packDays([{ d: '2026-11-18', bk: '6200', bn: 'יהודה הנשיא', gross: 50, ret: 0, disc: 0, ntx: 2, nl: 2, sp: 0, un: 0, h: { na: 50 }, tm: { y: 0, n: 2, p: 'dd/dd/dddd', q: '' }, it: { 400001: it('כוס נייר', 'k1', 5, 0, 50, 0) } }]), cats: {}, cfg: { reg: {}, br: '_' }, sa: false };
-let salesNow = null;
+let salesNow = null, noPt = false;
+// שרת אמיתי מחזיר ימים חלקיים (pt) רק כשמבקשים pt:true
+const stripPt = (x) => Object.assign({}, x, CC.packDays(CC.unpackDays(x).filter((d) => !d.pt)));
 const SALES = { ...CC.packDays(DAYS), cats: { k1: 'כלים', k2: 'נייר' }, cfg: { reg: { 6200: 'i_yh', 7700: 'i_nl' }, br: '_', lastSales: { run: 'r', at: Date.UTC(2026, 10, 17, 10) } }, sa: true };
 const TX = { tx: [{ id: '6200_20261116_9001', d: '2026-11-16', tx: '9001', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 'a', c: '400001', n: 'כוס נייר', a: 20, ds: 0, q: 2, qs: 'sure', t: 14 * 60 + 5 }, { k: 'b', c: '1000', n: 'פריט כללי', a: 23.6, ds: 0, q: null, qs: 'skip' }] }] };
 const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '7700', bn: 'נחל לכיש', lines: [{ k: '400002|13|0|0', c: '400002', n: 'צלחת', a: 13, ds: 0, q: 1, qs: 'unsure', why: 'frac', P: 10 }] }] };
@@ -44,8 +47,9 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
+    if (n === 'cxSales' && d && d.pt !== undefined && noPt) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'שדה לא מוכר: pt', details: { reason: 'bad-field' } } }) });
     const R = { cxCfg: { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa: false }, cxUpload: { ok: true }, cxPreview: PV,
-      cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 }, ix: [0, 1, 2, 3] }, cxSales: salesNow || SALES,
+      cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 }, ix: [0, 1, 2, 3] }, cxSales: d && d.pt ? salesNow || SALES : stripPt(salesNow || SALES),
       cxLines: d && d.un ? UN : TX, cxFix: { ok: true, q: 2, delta: 1, qs: 'own' }, cxSetCfg: { ok: true, reg: d && d.reg }, getCosts: { cost: {} } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
@@ -174,6 +178,29 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   await page.click('[data-a=cxYPer][data-k=custom]'); await H.settle(page, 600);
   const h0 = await q(); await shot('cx-16-hours-none');
   check('27 קובץ בלי שעה: "נמצאה ב-0%" + הפורמט שהתקבל (מוסווה); הלשונית – אין פילוח', /שעת מכירה: נמצאה ב-0% מהפדיון/.test(h0.text) && /הפורמט שהתקבל: dd\/dd\/dddd/.test(h0.text) && /אין פילוח לפי שעה/.test(h0.text) && fine(h0), { small: h0.small, t: h0.text.slice(0, 500) });
+  // 28. מכירות היום – תמונת מצב חלקית מהרובוט (18.11 עד 13:00), עם סגירת קופה של אותו יום
+  const PDAY = { d: '2026-11-18', bk: '6200', bn: 'יהודה הנשיא', gross: 120, ret: 0, disc: 0, ntx: 3, nl: 3, sp: 0, un: 0, h: { '09': 120 }, pt: { at: 1, hm: '13:00' }, it: { 400001: it('כוס נייר', 'k1', 12, 0, 120, 0) } };
+  salesNow = { ...CC.packDays(DAYS.concat([PDAY])), cats: SALES.cats, cfg: SALES.cfg, sa: true };
+  await page.evaluate(() => { S.zc.push({ id: 'zq3', reg: 'i_yh', d: '2026-11-18', tm: '21:00', od: '2026-11-18', no: '57', by: 'דנה', at: 1, tx: ['ztx4'] }); S.tx.push({ id: 'ztx4', t: 'inc', cat: 'i_yh', date: '2026-11-18', amt: 500, note: 'סגירת קופה', pays: [] }); });
+  await page.click('[data-a=cxYPer][data-k=custom]'); await H.settle(page, 300);
+  await page.fill('form[data-f=cxYRange] input[name=from]', '2026-11-16'); await page.fill('form[data-f=cxYRange] input[name=to]', '2026-11-18');
+  await page.click('form[data-f=cxYRange] button'); await H.settle(page, 700);
+  await page.click('[data-a=cxYTab][data-k=prod]'); await H.settle(page, 300);
+  const pt1 = await q(); await shot('cx-17-partial');
+  const lc1 = calls.filter((x) => x.n === 'cxSales').pop();
+  check('28 יום חלקי: cxSales עם pt:true; תווית "חלקי – עד השעה 13:00" והסבר (מוחלף בלילה); מגע ≥44, RTL', lc1 && lc1.d.pt === true && lc1.d.to === '2026-11-18' && /18\/11\/2026\s*חלקי – עד השעה 13:00/.test(pt1.text) && /בלילה הוא מוחלף בסכום הסופי/.test(pt1.text) && /לא נכלל בהתאמה לסגירת קופה/.test(pt1.text) && fine(pt1), { small: pt1.small, t: pt1.text.slice(0, 500) });
+  await page.click('[data-a=cxYTab][data-k=rec]'); await H.settle(page, 300);
+  const pr = await q(); await shot('cx-18-partial-recon');
+  const recDays = await page.evaluate(() => [...document.querySelectorAll('#main .card > .row > b:first-child')].map((b) => b.textContent));
+  check('29 התאמה לסגירת קופה: היום החלקי לא נכלל (גם לא הסגירה שלו), עם הודעה; שאר הימים כרגיל', !recDays.some((t) => /18\/11\/2026/.test(t)) && recDays.some((t) => /16\/11\/2026/.test(t)) && /18\/11\/2026 \(חלקי – עד השעה 13:00\) – לא נכלל בהתאמה עד הסיכום הסופי בלילה/.test(pr.text) && !/דוח Z 57/.test(pr.text) && fine(pr), { recDays, t: pr.text.slice(0, 400) });
+  const hd30 = await page.evaluate(() => CxHours.days('2026-11'));
+  check('30 CxHours (שכר) – בלי היום החלקי', hd30 && hd30['2026-11-16'] != null && hd30['2026-11-18'] === undefined, hd30);
+  // שרת ישן: pt נדחה (bad-field) → האפליקציה מבקשת שוב בלי pt, בלי שגיאה
+  noPt = true;
+  await page.click('[data-a=cxYPer][data-k=custom]'); await H.settle(page, 800);
+  const po = await q(); const sc2 = calls.filter((x) => x.n === 'cxSales').slice(-2);
+  check('31 שרת ישן (bad-field על pt): בקשה חוזרת בלי pt, המסך עובד ובלי יום חלקי', sc2.length === 2 && sc2[0].d.pt === true && sc2[1].d.pt === undefined && !/חלקי – עד השעה/.test(po.text) && /התאמה לסגירת קופה/.test(po.text), { sc2: sc2.map((x) => x.d), t: po.text.slice(0, 300) });
+  noPt = false;
   check('23 בלי שגיאות JavaScript', page.__errors.length === 0, page.__errors.slice(0, 3));
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
