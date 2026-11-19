@@ -210,6 +210,33 @@ for (const E of ENVS) {
       for (const u of [E.off, E.out]) { o = await cur(); ut = nu(); await assertFails(fs(u).doc(R('hsr/h1')).update({ st: 'arr', ub: u, ut, h: o.h.concat([ie(u, ut)]) })); }
     });
 
+    it('hsr: "הוזמן" (od, 19.11.2026) – מנהל ועובד, בשם המבצע, רק od/ub/ut; זיוף, תאריך לא תקין, יצירה עם od ועריכה שמשנה od – נחסמים', async () => {
+      const del = require('firebase/compat/app').default.firestore.FieldValue.delete();
+      let last = 0; const nu = () => { last = Math.max(Date.now(), last + 1); return last; };
+      const od = (u, ut, o) => Object.assign({ u, byN: u, t: ut, sup: 'תנובה', eta: '2026-11-25' }, o);
+      const set = (who, o, x) => { const ut = nu(); return fs(who).doc(R('hsr/h1')).update(Object.assign({ od: od(who, ut, o), ub: who, ut }, x || {})); };
+      for (const u of [E.mgr, E.e2]) {
+        await assertSucceeds(set(u), 'סימון הוזמן – ' + u);
+        await assertSucceeds(set(u, { eta: '', sup: '' }), 'בלי צפי ובלי ספק');
+        await assertSucceeds(fs(u).doc(R('hsr/h1')).update({ od: del, ub: u, ut: nu() }), 'ביטול');
+      }
+      await assertFails(set(E.e2, { byN: E.e1 }), 'byN של אחר');
+      await assertFails(set(E.e2, { u: E.e1 }), 'u של אחר');
+      await assertFails(set(E.e2, { t: 5 }), 't שונה מ-ut');
+      await assertFails(set(E.e2, { eta: '25/11/2026' }), 'תאריך לא תקין');
+      await assertFails(set(E.e2, { sup: 'א'.repeat(61) }), 'ספק ארוך');
+      await assertFails(set(E.e2, { z: 1 }), 'שדה זר ב-od');
+      await assertFails(fs(E.e2).doc(R('hsr/h1')).update({ od: 'כן', ub: E.e2, ut: nu() }), 'od לא מפה');
+      await assertFails(set(E.e2, {}, { ub: E.e1 }), 'ub של אחר');
+      await assertFails(set(E.e2, {}, { st: 'arr' }), 'יחד עם שינוי מצב');
+      await assertFails(set(E.e2, {}, { n: 'אחר' }), 'יחד עם עריכה');
+      await assertSucceeds(set(E.e2));
+      await assertFails(fs(E.e1).doc(R('hsr/h1')).update(upd(E.e1, { n: 'חלב 1%', od: od(E.e2, 1) })), 'עריכה מלאה שמזייפת od');
+      await assertSucceeds(fs(E.e1).doc(R('hsr/h1')).update(Object.assign(upd(E.e1, { n: 'חלב 1%' }), { ut: nu() })), 'עריכה רגילה – od נשאר');
+      await assertFails(fs(E.e1).collection(R('hsr')).doc(fresh('h')).set(item(E.e1, { t: Date.now(), od: od(E.e1, 1) })), 'יצירה עם od');
+      await assertFails(fs(E.out).doc(R('hsr/h1')).update({ od: del, ub: E.out, ut: nu() }), 'מחובר בלי תפקיד');
+    });
+
     it('hsr: מחיקה אמיתית – מנהל בלבד', async () => {
       await assertFails(fs(E.e1).doc(R('hsr/h1')).delete());
       if (E.foreign) await assertFails(fs(E.foreign).doc(R('hsr/h1')).delete());

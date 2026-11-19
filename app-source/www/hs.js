@@ -40,7 +40,11 @@ const st=document.createElement('style');st.textContent=`
 .hs-it .m{flex:1;min-width:0}.hs-it .m b{display:block;overflow-wrap:anywhere}
 .hs-it small{display:block;color:var(--mut);font-size:.8rem;margin-top:2px}
 .hs-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.hs-acts .btn{flex:1 1 auto;min-width:0}
+.hs-pm{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-m,10px);font-size:.9rem}
 .hs-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.hs-thb{padding:0;border:0;background:none;cursor:zoom-in;border-radius:var(--r-m,10px)}
+.hs-zw{max-height:65vh;overflow:auto;border-radius:var(--r-m,10px);-webkit-overflow-scrolling:touch}
+.hs-zi{display:block;width:100%;max-height:65vh;object-fit:contain;cursor:zoom-in}.hs-zi.z{width:250%;max-width:none;max-height:none;cursor:zoom-out}
 .hs-th{width:84px;height:84px;object-fit:cover;border-radius:var(--r-m,10px);border:1px solid var(--line);display:block}
 .hs-sr{padding:6px 0;border-bottom:1px solid var(--line)}.hs-sr:last-child{border:0}
 .hs-bn{position:fixed;inset:auto 10px calc(100px + env(safe-area-inset-bottom)) 10px;z-index:98;max-width:520px;margin:auto;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
@@ -50,12 +54,26 @@ const st=document.createElement('style');st.textContent=`
 function supList(){const o=[],seen=new Set(),put=s=>{if(s&&idOk(String(s.id||''))&&!seen.has(s.id)){seen.add(s.id);o.push({id:s.id,name:String(s.name||'').slice(0,60)})}};
  try{if(isW()){if(typeof wkSubsAll==='function')wkSubsAll().forEach(put)}
   else (S.cats||[]).filter(c=>c.kind==='exp'&&c.beh==='sup'&&!c.hid&&!c.off).forEach(c=>subsOf(c.id).forEach(put))}catch(e){}
+ /* סנכרון ספקים (19.11.2026): ספק מהמלאי (prod.sup) שאין לו כרטיס – גם כאן, עם מזהה לפי השם (C.nameId). המנהל יוצר לו כרטיס באותו מזהה (sup-sync.js) */
+ try{const ks=new Set(o.map(s=>supK(s.name)));(window.supCatNames?window.supCatNames():[]).forEach(n=>{const k=supK(n);if(k&&!ks.has(k)){ks.add(k);put({id:C.nameId(n),name:n})}})}catch(e){}
  return o.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'))}
+const supK=n=>String(n||'').replace(/["'׳״`’]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
 const supName=id=>{const s=supList().find(x=>x.id===id);return s?s.name:''};
+
+/* ---------- שם העובד (19.11.2026) ----------
+   byN / ub / h[].byN הם שם המשתמש (החלק שלפני @ – כך הכללים מאמתים). לתצוגה: המנהל ממפה לשם המלא מרשימת העובדים (staff),
+   עובד רואה את השם שלו (מסמך ה-staff שלו); אחרת – שם המשתמש כמו קודם. בלי שינוי בשרת. */
+const NM={};let nmAt=0;
+async function nmLoad(){if(nmAt&&Date.now()-nmAt<600000)return;nmAt=Date.now();const nm0=JSON.stringify(NM);
+ try{const put=f=>{f=f||{};const em=String(f.email||'').split('@')[0].toLowerCase(),n=String(f.name||'').trim().slice(0,60);if(em&&n)NM[em]=n};
+  if(mgr()){const j=await fsx('/staff?pageSize=300');((j&&j.documents)||[]).forEach(d=>put(fvj({mapValue:d})))}
+  else{const d=await fsx('/staff/'+SY.uid);const f=fvj({mapValue:d})||{};const n=String(f.name||'').trim().slice(0,60);if(n)NM[fbBy().toLowerCase()]=n}}catch(e){}
+ if(JSON.stringify(NM)!==nm0)paint()}
+const nmOf=b=>{const k=String(b||'').toLowerCase();if(!k)return '';return NM[k]||(mgr()&&k===fbBy().toLowerCase()?'מנהל':String(b))};
 
 /* ---------- טעינה ---------- */
 async function hsLoad(){if(HS.busy||!on())return;HS.busy=1;HS.err='';const h=HS;
- try{const L=await qrun(stQ('open',500));h.L=L.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.off=0}
+ try{const L=await qrun(stQ('open',500));h.L=L.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.off=0;/* סנכרון ספקים: ספק שנרשם בחוסר בלי כרטיס – לכרטסת (מנהל, sup-sync.js) */if(mgr()&&window.supSync)window.supSync(h.L.flatMap(x=>(x.supN||[]).concat(x.od&&x.od.sup?[x.od.sup]:[])))}
  catch(e){if(e&&e.code===403)h.off=1;else h.err=tkErr(e)}
  finally{h.busy=0;h.at=Date.now()}
  paint()}
@@ -68,7 +86,7 @@ async function xLoad(force){if(!force&&HS.x&&Date.now()-HS.xat<600000)return;HS.
  try{const j=await fsx('/hsx?pageSize=300');HS.x=((j&&j.documents)||[]).map(DEC).filter(d=>idOk(d.id))}catch(e){HS.x=HS.x||[]}
  HS.xi=null;sugPaint()}
 const xIdx=()=>{if(!HS.xi&&HS.x&&HS.x.length&&PM())HS.xi=C.xIndex(HS.x,PM());return HS.xi};
-const cIdx=()=>{try{const P=ordOn()&&window.__ox&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;if(HS.cP!==P){HS.cP=P;HS.ci=C.catIndex(P,supList(),PM())}return HS.ci}catch(e){return null}};
+const cIdx=()=>{try{const P=ordOn()&&window.__ox&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;const SL=supList(),sk=SL.length;if(HS.cP!==P||HS.cK!==sk){HS.cP=P;HS.cK=sk;HS.ci=C.catIndex(P,SL,PM())}return HS.ci}catch(e){return null}};
 /* המנהל: בניית hsx מחשבוניות התמחור (pinv) – רק חדשות מאז הפעם הקודמת, רק שמות מוצרים (בלי מחירים). כשל (403 וכו') – בשקט */
 async function xBuild(){if(HS.xb||!mgr()||!PM())return;HS.xb=1;const K='hs-xat|'+who();
  try{const last=+localStorage.getItem(K)||0;
@@ -100,19 +118,45 @@ const lastH=(x,ks)=>{const h=Array.isArray(x.h)?x.h:[];for(let i=h.length-1;i>=0
 function itemH(x,mode){
  const c=x.cust&&(x.cust.nm||x.cust.ph)?x.cust:null;
  const det=[x.q?'כמות '+C.fmtQ(x.q):'',c?'לקוח: '+[c.nm,c.ph].filter(Boolean).join(' '):''].filter(Boolean).join(' · ');
- const meta='נוסף ע"י '+(x.byN||'')+' · '+tm(x.t)+(x.ub&&mode==='open'?' · עודכן ע"י '+x.ub+' · '+tm(x.ut):'');
+ const meta='נוסף ע"י '+nmOf(x.byN)+' · '+tm(x.t)+(x.ub&&mode==='open'?' · עודכן ע"י '+nmOf(x.ub)+' · '+tm(x.ut):'');
  const hA=mode==='arr'?lastH(x,['man','inv']):null,hD=mode==='del'?lastH(x,['del']):null,hP=mode==='open'&&C.unpartQ(x)!=null?x.h[x.h.length-1]:null;
  const b=(a,t,cl)=>`<button type="button" class="btn ${cl||'g'} s" data-a="${a}" data-id="${esc(x.id)}">${t}</button>`;
  let acts='';
- if(mode==='open')acts=b('hsArr','✓ הגיע','')+b('hsEdit','עריכה')+b('hsDel','מחיקה')+(hP?b('hsUnp','בטל הגעה חלקית'):'');
+ if(mode==='open')acts=b('hsArr','✓ הגיע','')+b('hsOd',x.od?'📦 עדכון הזמנה':'📦 הוזמן')+b('hsEdit','עריכה')+b('hsDel','מחיקה')+(hP?b('hsUnp','בטל הגעה חלקית'):'');
  else if(mode==='arr')acts=b('hsUndo','החזר לחוסרים')+(c&&c.ph?b('hsCustWa','הודעה ללקוח בוואטסאפ',''):'');
  else acts=b('hsRes','שחזור');
  if(x.np)acts+=b('hsImg','📷 תמונה');
  if(x.ord&&x.ord.id&&ordOn())acts+=`<button type="button" class="btn g s" data-a="go" data-v="oxOrd" data-arg="${esc(x.ord.id)}">להזמנה #${esc(x.ord.no||'')}</button>`;
  return `<div class="card hs-it" data-hs="${esc(x.id)}" style="padding:10px 12px"><div class="m"><b>${esc(x.n)}</b>
- <div class="hs-tg">${supTags(x)}<span class="tag">${esc(WHYT(x.why))}</span>${x.ord&&x.ord.id?`<span class="tag">הזמנה #${esc(x.ord.no||'')}</span>`:''}</div>
- ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t))+' · '+esc(hA.byN||''):`הגיע · ${esc(tm(hA.t))} · ${esc(hA.byN||'')}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · ${esc(hP.byN||'')} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))} (לפי יחידות החשבונית)</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(hD.byN||'')}</small>`:''}</div>
+ <div class="hs-tg">${supTags(x)}<span class="tag">${esc(WHYT(x.why))}</span>${x.ord&&x.ord.id?`<span class="tag">הזמנה #${esc(x.ord.no||'')}</span>`:''}${odTag(x,mode)}</div>
+ ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${odLine(x)}${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t))+' · '+esc(nmOf(hA.byN)):`הגיע · ${esc(tm(hA.t))} · ${esc(nmOf(hA.byN))}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · ${esc(nmOf(hP.byN))} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))} (לפי יחידות החשבונית)</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(nmOf(hD.byN))}</small>`:''}</div>
  <div class="hs-acts">${acts}</div></div>`}
+/* ---------- הוזמן (19.11.2026) ----------
+   od = { u, byN, t, sup, eta }: מי סימן "הוזמן" (u / byN – בשם המבצע, נאכף בכללים), מתי (t = ut), מאיזה ספק (sup, עד 60), צפי הגעה (eta, YYYY-MM-DD או ריק).
+   עדכון שמשנה רק od / ub / ut. ביטול = מחיקת od. בלי הכללים החדשים (403) – הודעה שהכפתור יופעל אחרי עדכון השרת. */
+const dmy=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));return m?(+m[3])+'.'+(+m[2])+'.'+m[1]:''};
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const odLate=x=>!!(x.od&&x.st==='open'&&x.od.eta&&x.od.eta<today());
+const odTag=(x,mode)=>x.od&&mode==='open'?`<span class="tag${odLate(x)?' t1':''}">${odLate(x)?'הוזמן – באיחור':'הוזמן'}</span>`:'';
+const odLine=x=>{const o=x.od;if(!o)return '';return `<small>הוזמן ע"י ${esc(nmOf(o.byN))}${o.sup?' מ'+esc(o.sup):''} · ${esc(tm(o.t))}${o.eta?' · צפי הגעה '+esc(dmy(o.eta)):' · אין צפי הגעה'}</small>`};
+ACT.hsOd=el=>{const x=find(el.dataset.id);if(!x)return;HS.od={id:x.id};
+ const own=(x.supN||[]).map((n,i)=>n||supName((x.sups||[])[i])).filter(Boolean),L=[...new Set(own.concat(supList().map(s=>s.name)))];
+ const cur=x.od&&x.od.sup||own[0]||'';
+ dlg(`<h3>הוזמן: ${esc(x.n)}</h3><form data-f="hsOdSave" autocomplete="off">
+ <label class="f"><span>ממי הוזמן (ספק)</span><input name="sup" list="hsOdL" maxlength="60" value="${esc(cur)}" placeholder="שם הספק"></label><datalist id="hsOdL">${L.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+ <label class="f"><span>צפי הגעה (רשות)</span><input name="eta" type="date" value="${esc(x.od&&x.od.eta||'')}"></label>
+ <p class="note" style="margin:0">יירשם שהזמנת ${esc(nmOf(fbBy()))}, עם התאריך והשעה של עכשיו.</p>
+ <div class="row" style="margin-top:10px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>
+ ${x.od?`<button type="button" class="btn g s w" data-a="hsOdRm" style="margin-top:8px">ביטול הסימון "הוזמן"</button>`:''}</form>`)};
+async function odPut(id,od){const x=find(id);if(!x)return false;const ut=nextUt(x),ub=fbBy().slice(0,100);if(od)od.t=ut;
+ try{await fsx('/hsr/'+id+'?'+mask(['od','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds(od?{od,ub,ut}:{ub,ut})})})}
+ catch(e){if(e&&e.code===403&&!HS.off){toast('לא נשמר. אם זה חוזר – הכפתור "הוזמן" עוד לא הופעל בשרת.');HS.at=0;hsLoad()}else err(e);return false}
+ if(od)x.od=od;else delete x.od;x.ub=ub;x.ut=ut;return true}
+FRM.hsOdSave=async f=>{const o=HS.od;if(!o)return;const sup=String(f.sup.value||'').replace(/\s+/g,' ').trim().slice(0,60),eta=String(f.eta.value||'');
+ if(eta&&!/^\d{4}-\d{2}-\d{2}$/.test(eta))return toast('תאריך לא תקין');
+ const bt=f.querySelector('button:not([type])');if(bt)bt.disabled=true;
+ if(await odPut(o.id,{u:SY.uid,byN:fbBy().slice(0,100),t:0,sup,eta})){HS.od=null;closeDlg();toast('סומן: הוזמן');if(sup&&window.supSync)window.supSync([sup]);rerender()}else if(bt)bt.disabled=false};
+ACT.hsOdRm=()=>{const o=HS.od;if(!o)return;ask('לבטל את הסימון "הוזמן"?',async()=>{if(await odPut(o.id,null)){HS.od=null;closeDlg();toast('הסימון בוטל');rerender()}},'כן, לבטל')};
 function listH(L,mode,empty){return L===null?'<div class="empty">טוען…</div>':L.length?L.map(x=>itemH(x,mode)).join(''):`<div class="empty">${empty}</div>`}
 
 /* ---------- לפי ספק ---------- */
@@ -132,7 +176,7 @@ V.hs=()=>{const T='חוסרים';if(!on())return{t:T,h:'<div class="empty">המ�
  if(!HS.busy&&(HS.L===null||Date.now()-HS.at>20000))hsLoad();
  if(HS.off)return{t:T,h:'<div class="card"><p class="note" style="margin:0">החוסרים יופעלו בקרוב.</p></div>'};
  if(HS.L===null)return{t:T,h:HS.err?`<div class="card"><p class="note" style="margin:0">${esc(HS.err)}</p><button class="btn g w" data-a="hsRe" style="margin-top:10px">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'};
- xBuild();
+ xBuild();nmLoad();
  const k=HS.tab;if((k==='arr'||k==='del')&&!HS.lb&&(HS[k]===null||Date.now()-HS[k+'At']>20000))stLoad(k);
  const t=(v,l)=>`<button type="button" class="chip${k===v?' on':''}" data-a="hsTab" data-v="${v}" aria-pressed="${k===v}">${l}</button>`;
  const body=k==='sup'?supTab():k==='arr'?listH(HS.arr,'arr','עוד לא הגיע שום פריט'):k==='del'?listH(HS.del,'del','אין פריטים מחוקים'):listH(HS.L,'open','אין חוסרים פתוחים 🎉');
@@ -164,27 +208,44 @@ ACT.hsCustWa=el=>{const x=find(el.dataset.id);closeDlg();if(!x||!x.cust||!C.phOk
 const MAXB=300000;
 function shrink(du){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{let mx=1024,q=.6,out='';for(let i=0;i<6;i++){const r=Math.min(1,mx/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.naturalWidth*r));c.height=Math.max(1,Math.round(im.naturalHeight*r));c.getContext('2d').drawImage(im,0,0,c.width,c.height);out=c.toDataURL('image/jpeg',q);if(out.length<MAXB)return ok(out);mx=Math.round(mx*.8);q=Math.max(.35,q-.05)}no(new Error('התמונה גדולה מדי'))};im.onerror=()=>no(new Error('תמונה לא תקינה'));im.src=du})}
 async function imgGet(id){if(HS.img[id])return HS.img[id];try{const d=DEC(await fsx('/hsr/'+id+'/p/1'));if(imgOk(d.img)&&/^data:image\/(jpeg|png|webp);/.test(d.img))HS.img[id]=d.img}catch(e){}return HS.img[id]||''}
-ACT.hsImg=async el=>{const id=el.dataset.id,x=find(id);if(!x)return;if(!HS.img[id])toast('טוען תמונה…');const du=await imgGet(id);if(!du)return toast('התמונה לא נמצאה');
- dlg(`<h3>${esc(x.n)}</h3><img src="${esc(du)}" alt="${esc(x.n)}" style="display:block;width:100%;max-height:60vh;object-fit:contain;border-radius:var(--r-m,10px)"><div class="row" style="margin-top:10px"><button class="btn grow" data-a="hsImgShare" data-id="${esc(id)}">שיתוף</button><button class="btn g grow" data-a="closeDlg">סגור</button></div>`)};
-ACT.hsImgShare=el=>{const du=HS.img[el.dataset.id]||(HS.f&&HS.f.img);if(du)dxShareDU(du,'LargePami_item')};
+/* תצוגה מוגדלת (19.11.2026): נגיעה בתמונה מגדילה פי 2.5 (גוללים בתוך המסגרת), נגיעה נוספת מחזירה. שיתוף – מה שמוצג (HS.big) */
+function imgDlg(t,du){HS.big=du;
+ dlg(`<h3>${esc(t)}</h3><div class="hs-zw"><img src="${esc(du)}" alt="${esc(t)}" data-a="hsZoom" class="hs-zi"></div><p class="note" style="margin:6px 0 0">נגיעה בתמונה – הגדלה / הקטנה</p><div class="row" style="margin-top:10px"><button class="btn grow" data-a="hsImgShare">שיתוף</button><button class="btn g grow" data-a="closeDlg">סגור</button></div>`)}
+ACT.hsZoom=el=>{const z=!el.classList.contains('z');el.classList.toggle('z',z);if(z){const w=el.parentElement;if(w)requestAnimationFrame(()=>{w.scrollLeft=(w.scrollWidth-w.clientWidth)/2*(document.dir==='rtl'?-1:1);w.scrollTop=(w.scrollHeight-w.clientHeight)/2})}};
+ACT.hsImg=async el=>{const id=el.dataset.id,x=find(id);if(!x)return;if(!HS.img[id])toast('טוען תמונה…');const du=await imgGet(id);if(!du)return toast('התמונה לא נמצאה');imgDlg(x.n,du)};
+/* התמונה בטופס (קיימת או חדשה שעוד לא נשמרה) */
+ACT.hsImgBig=()=>{const f=HS.f;if(!f)return;const du=f.img||(!f.imgDel&&f.id?HS.img[f.id]:'');if(du)imgDlg(String(f.n||'').trim()||'תמונת המוצר',du)};
+ACT.hsImgShare=()=>{if(HS.big)dxShareDU(HS.big,'LargePami_item')};
 
 /* ---------- הוספה ועריכה ---------- */
 const blank=()=>({id:'',n:'',sups:[],gen:false,why:'store',q:'',custOn:false,cust:{nm:'',ph:''},ord:null,img:null,imgDel:false,np:0,busy:0,touched:false,auto:false});
-ACT.hsNew=()=>{if(!on())return;HS.f=blank();xLoad();go('hsEd','')};
+ACT.hsNew=()=>{if(!on())return;HS.f=blank();xLoad();catLoad();go('hsEd','')};
 ACT.hsEdit=el=>{const x=find(el.dataset.id);if(!x)return;
  HS.f=Object.assign(blank(),{id:x.id,n:x.n,sups:(Array.isArray(x.sups)?x.sups:[]).map((id,i)=>({id,name:String((x.supN||[])[i]||supName(id)||id)})).filter(s=>typeof s.id==='string'&&idOk(s.id)),gen:!!x.gen,why:x.why||'store',q:x.q?String(x.q):'',
   custOn:!!(x.cust&&(x.cust.nm||x.cust.ph)),cust:Object.assign({nm:'',ph:''},x.cust||{}),ord:x.ord&&x.ord.id?{id:x.ord.id,no:x.ord.no||0}:null,np:x.np?1:0,touched:true});
- xLoad();if(x.np)imgGet(x.id).then(imgPaint);go('hsEd',x.id)};
+ xLoad();catLoad();if(x.np)imgGet(x.id).then(imgPaint);go('hsEd',x.id)};
+/* זיהוי המוצר מהמלאי (19.11.2026): חיפוש בכל מוצרי הקטלוג (שם, כינוי, ברקוד, קוד פריט). הספק של המוצר (prod.sup) מוצע ראשון ונבחר אוטומטית בחוסר חדש */
+const pIdx=()=>{try{const P=window.__ox&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;if(HS.pP!==P){HS.pP=P;HS.pi=PM().index(P)}return HS.pi}catch(e){return null}};
+function prodHit(){const f=HS.f,n=String(f&&f.n||'').trim(),ix=pIdx();if(n.length<2||!ix)return null;try{return PM().search(ix,n,{limit:1,min:0.75})[0]||null}catch(e){return null}}
+/* טעינת המלאי פעם אחת למסך החוסר (אם עוד לא נטען במסך ההזמנות) */
+function catLoad(){try{if(window.__ox&&window.__ox.P||!ordOn()||typeof window.__oxLoadAll!=='function'||HS.cl)return;HS.cl=1;Promise.resolve(window.__oxLoadAll()).catch(()=>{}).then(()=>{HS.cl=0;sugPaint()})}catch(e){HS.cl=0}}
+const supRef=n=>{const k=supK(n);if(!k)return null;const s=supList().find(y=>supK(y.name)===k);return s?{id:s.id,name:s.name}:{id:C.nameId(n),name:String(n).trim().slice(0,60)}};
 function sugList(){const f=HS.f;if(!f)return[];const n=String(f.n||'').trim();if(n.length<2||!PM())return[];
- try{return C.suggest(n,{idx:xIdx(),cidx:cIdx(),items:all(),sups:supList()},PM())}catch(e){return[]}}
-const SRC={prev:'נבחר בעבר',inv:'מחשבונית',cat:'מהקטלוג'};
-function sugH(S){const f=HS.f;if(!f||f.gen)return '';const L=S.filter(s=>!f.sups.some(x=>x.id===s.id));
- if(L.length)return `<p class="note" style="margin:4px 0">ספקים שמביאים את המוצר:</p><div class="hs-tg">${L.map(s=>`<button type="button" class="chip" data-a="hsSupAdd" data-id="${esc(s.id)}">＋ ${esc(s.name)} <small>(${SRC[s.src]||''})</small></button>`).join('')}</div>`;
- return String(f.n||'').trim().length>=2&&!f.sups.length?'<p class="note" style="margin:4px 0">לא זוהה ספק. אפשר לבחור ספק, או לשמור כפריט כללי (יופיע אצל כל הספקים).</p>':''}
+ let L=[];try{L=C.suggest(n,{idx:xIdx(),cidx:cIdx(),items:all(),sups:supList()},PM())}catch(e){}
+ const h=prodHit(),sp=h&&typeof h.p.sup==='string'?supRef(h.p.sup):null;
+ if(sp&&idOk(sp.id))L=[Object.assign({src:'prod',s:9},sp)].concat(L.filter(x=>x.id!==sp.id)).slice(0,5);
+ return L}
+const SRC={prev:'נבחר בעבר',inv:'מחשבונית',cat:'מהקטלוג',prod:'ספק המוצר במלאי'};
+function prodH(){const f=HS.f,h=f&&prodHit();if(!h)return '';const nm=String(h.p.name||''),same=PM().key(nm)===PM().key(String(f.n||''));
+ return `<div class="hs-pm"><span class="grow">זוהה במלאי: <b>${esc(nm)}</b>${h.p.sup?` · ספק: ${esc(h.p.sup)}`:' · אין ספק רשום במוצר'}</span>${same?'':`<button type="button" class="btn g s" data-a="hsPName">השתמש בשם הזה</button>`}</div>`}
+function sugH(S){const f=HS.f;if(!f)return '';const pm=prodH();if(f.gen)return pm;const L=S.filter(s=>!f.sups.some(x=>x.id===s.id));
+ if(L.length)return `<p class="note" style="margin:4px 0">ספקים שמביאים את המוצר:</p><div class="hs-tg">${L.map(s=>`<button type="button" class="chip" data-a="hsSupAdd" data-id="${esc(s.id)}" data-n="${esc(s.name)}">＋ ${esc(s.name)} <small>(${SRC[s.src]||''})</small></button>`).join('')}</div>`+pm;
+ return pm+(String(f.n||'').trim().length>=2&&!f.sups.length?'<p class="note" style="margin:4px 0">לא זוהה ספק. אפשר לבחור ספק, או לשמור כפריט כללי (יופיע אצל כל הספקים).</p>':'')}
+ACT.hsPName=()=>{const f=HS.f,h=f&&prodHit();if(!h)return;f.n=String(h.p.name||'').slice(0,80);const e=document.querySelector('[data-i="hsN"]');if(e)e.value=f.n;sugPaint()};
 function supsH(){const f=HS.f,L=supList().filter(s=>!f.sups.some(x=>x.id===s.id));
  const g=f.gen||!f.sups.length;
  return `${f.gen?'':`<div class="hs-tg">${f.sups.map(s=>`<button type="button" class="chip on" data-a="hsSupRm" data-id="${esc(s.id)}" aria-label="הסר ${esc(s.name)}">${esc(s.name)} ✕</button>`).join('')}</div>
- ${f.auto&&!f.touched&&f.sups.length?'<p class="note" style="margin:2px 0">זוהה אוטומטית לפי חשבוניות והזמנות קודמות – אפשר לשנות.</p>':''}
+ ${f.auto&&!f.touched&&f.sups.length?'<p class="note" style="margin:2px 0">זוהה אוטומטית לפי המלאי, חשבוניות והזמנות קודמות – אפשר לשנות או להוסיף.</p>':''}
  ${L.length?`<select data-c="hsSupPick" aria-label="הוספת ספק" style="margin:4px 0"><option value="">＋ הוספת ספק…</option>${L.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select>`:(supList().length?'':'<p class="note">אין ספקים מוגדרים במערכת.</p>')}`}
  <label class="opt" style="margin:6px 0"><span>פריט כללי – מופיע לכל הספקים</span><input type="checkbox" data-c="hsGen"${f.gen?' checked':''}></label>
  ${g?'<span class="tag t1">יישמר כפריט כללי – מופיע לכל הספקים</span>':''}`}
@@ -193,7 +254,7 @@ function sugPaint(){const f=HS.f;if(!f||cur().v!=='hsEd')return;const S=sugList(
  if(!f.touched&&!f.id&&!f.gen){const nw=S.slice(0,3).map(s=>({id:s.id,name:s.name}));if(JSON.stringify(nw)!==JSON.stringify(f.sups)){f.sups=nw;f.auto=nw.length>0;const e=document.getElementById('hsSups');if(e)e.innerHTML=supsH()}}
  const e=document.getElementById('hsSug');if(e)e.innerHTML=sugH(S)}
 function imgPaint(){const f=HS.f,e=document.getElementById('hsImgP');if(!f||!e)return;const du=f.img||(!f.imgDel&&f.id&&f.np?HS.img[f.id]:'');
- e.innerHTML=du?`<div class="row" style="align-items:center;margin:6px 0"><img class="hs-th" src="${esc(du)}" alt="תמונת המוצר"><button type="button" class="btn g s" data-a="hsImgRm">הסר תמונה</button></div>`:(f.np&&!f.imgDel&&!f.img?'<p class="note">טוען תמונה…</p>':'')}
+ e.innerHTML=du?`<div class="row" style="align-items:center;margin:6px 0"><button type="button" class="hs-thb" data-a="hsImgBig" aria-label="הגדלה ושיתוף של התמונה"><img class="hs-th" src="${esc(du)}" alt="תמונת המוצר"></button><button type="button" class="btn g s" data-a="hsImgRm">הסר תמונה</button></div>`:(f.np&&!f.imgDel&&!f.img?'<p class="note">טוען תמונה…</p>':'')}
 V.hsEd=id=>{const T=id?'עריכת חוסר':'חוסר חדש';const f=HS.f;if(!on()||!f||(f.id||'')!==(id||''))return{t:T,h:'<div class="empty">המסך הזה לא זמין. חזרו לרשימת החוסרים.</div>'};
  const w=(v,l)=>`<button type="button" class="chip${f.why===v?' on':''}" data-a="hsWhy" data-v="${v}" aria-pressed="${f.why===v}">${l}</button>`;
  const oc=ordOn()&&window.__oc&&typeof window.__ocLoad==='function';
@@ -215,7 +276,7 @@ INP.hsQ=el=>{if(HS.f)HS.f.q=el.value};
 INP.hsCN=el=>{if(HS.f){HS.f.cust.nm=el.value;delete HS.f.cust.cid}};
 INP.hsCP=el=>{if(HS.f){HS.f.cust.ph=el.value;delete HS.f.cust.cid}};
 const supsRe=()=>{const e=document.getElementById('hsSups');if(e)e.innerHTML=supsH();sugPaint()};
-ACT.hsSupAdd=el=>{const f=HS.f,id=el.dataset.id;if(!f||!idOk(id)||f.sups.some(x=>x.id===id))return;if(f.sups.length>=C.MAXS)return toast('אפשר עד '+C.MAXS+' ספקים');f.touched=true;f.sups.push({id,name:supName(id)||id});supsRe()};
+ACT.hsSupAdd=el=>{const f=HS.f,id=el.dataset.id;if(!f||!idOk(id)||f.sups.some(x=>x.id===id))return;if(f.sups.length>=C.MAXS)return toast('אפשר עד '+C.MAXS+' ספקים');f.touched=true;f.sups.push({id,name:supName(id)||String(el.dataset.n||'').slice(0,60)||id});supsRe()};
 ACT.hsSupRm=el=>{const f=HS.f;if(!f)return;f.touched=true;f.sups=f.sups.filter(x=>x.id!==el.dataset.id);supsRe()};
 CHG.hsSupPick=el=>{const f=HS.f,id=el.value;if(!f||!idOk(id))return;if(f.sups.length>=C.MAXS)return toast('אפשר עד '+C.MAXS+' ספקים');f.touched=true;if(!f.sups.some(x=>x.id===id))f.sups.push({id,name:supName(id)||id});supsRe()};
 CHG.hsGen=el=>{const f=HS.f;if(!f)return;f.gen=el.checked;f.touched=true;supsRe()};
