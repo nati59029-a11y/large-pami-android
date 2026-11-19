@@ -691,7 +691,7 @@ service cloud.firestore {
       // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
       // grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
       // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
-      // אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
+      // re? (תשובה) ו-fw? (הועברה) – ראו reOk. אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
       match /m/{mid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
         function hasG() { return exists(/databases/$(database)/documents/grp/$(gid)); }
@@ -701,14 +701,23 @@ service cloud.firestore {
           return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
             : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
         }
+        // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
+        function reOk(d) {
+          return !d.keys().hasAny(['re'])
+            || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
+              && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+              && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
+              && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
+              && d.re.get('k', 't') in ['t', 'img', 'vid']);
+        }
         function msgOk(d) {
           return d.keys().hasAll(['by', 'byN', 't', 'k'])
             && d.by == request.auth.uid
             && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-            && nowOk(d.t)
-            && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, true))
-              || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, false) && g().md == true)
-              || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb'])
+            && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
+            && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
+              || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false) && g().md == true)
+              || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
                 && txtOk(d, false) && g().md == true
                 && d.vp == 'grpv/' + gid + '/' + mid
                 && d.vs is int && d.vs >= 1 && d.vs <= 60
@@ -739,6 +748,28 @@ service cloud.firestore {
           allow update: if false;
           allow delete: if lpW() && (isManager());
         }
+      }
+
+      // סימון (אימוג'י) על הודעה (תוספת 19.11): grp/{gid}/x/{mid}_{uid} = { mid, uid, byN, e, t } – סימון אחד לכל משתמש בכל הודעה.
+      // e אחד מהרשימה הקבועה, או '' = הסימון בוטל (עדכון ולא מחיקה, כדי שהסקירה לפי t תראה גם ביטול).
+      // קריאה וכתיבה: מי שרשאי לקרוא את הקבוצה (גם בקבוצה עם ao – החלטת הבעלים 19.11), רק המסמך שלו, ורק להודעה שקיימת. מחיקה: הבעלים או המנהל.
+      match /x/{xid} {
+        function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
+        function canRead() {
+          return exists(/databases/$(database)/documents/grp/$(gid))
+            && (isManager() || (isActiveEmployee() && request.auth.uid in g().mem));
+        }
+        function xOk(d) {
+          return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
+            && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+            && xid == d.mid + '_' + request.auth.uid
+            && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+            && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t)
+            && exists(/databases/$(database)/documents/grp/$(gid)/m/$(d.mid));
+        }
+        allow read: if (canRead());
+        allow create, update: if lpW() && (canRead() && xOk(nw()));
+        allow delete: if lpW() && (isManager() || (canRead() && resource.data.uid == request.auth.uid));
       }
 
       // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
@@ -2241,7 +2272,7 @@ service cloud.firestore {
         // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
         // b/{bizId}/grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
         // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
-        // אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
+        // re? (תשובה) ו-fw? (הועברה) – ראו reOk. אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
         match /m/{mid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
           function hasG() { return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)); }
@@ -2251,14 +2282,23 @@ service cloud.firestore {
             return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
               : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
           }
+          // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
+          function reOk(d) {
+            return !d.keys().hasAny(['re'])
+              || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
+                && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+                && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
+                && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
+                && d.re.get('k', 't') in ['t', 'img', 'vid']);
+          }
           function msgOk(d) {
             return d.keys().hasAll(['by', 'byN', 't', 'k'])
               && d.by == request.auth.uid
               && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-              && nowOk(d.t)
-              && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, true))
-                || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt']) && txtOk(d, false) && g().md == true)
-                || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb'])
+              && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
+              && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
+                || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false) && g().md == true)
+                || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
                   && txtOk(d, false) && g().md == true
                   && d.vp == 'b/' + bizId + '/grpv/' + gid + '/' + mid
                   && d.vs is int && d.vs >= 1 && d.vs <= 60
@@ -2289,6 +2329,28 @@ service cloud.firestore {
             allow update: if false;
             allow delete: if feat('groups') && (bMgr());
           }
+        }
+
+        // סימון (אימוג'י) על הודעה (תוספת 19.11): grp/{gid}/x/{mid}_{uid} = { mid, uid, byN, e, t } – סימון אחד לכל משתמש בכל הודעה.
+        // e אחד מהרשימה הקבועה, או '' = הסימון בוטל (עדכון ולא מחיקה, כדי שהסקירה לפי t תראה גם ביטול).
+        // קריאה וכתיבה: מי שרשאי לקרוא את הקבוצה (גם בקבוצה עם ao – החלטת הבעלים 19.11), רק המסמך שלו, ורק להודעה שקיימת. מחיקה: הבעלים או המנהל.
+        match /x/{xid} {
+          function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
+          function canRead() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid))
+              && (bMgr() || (bEmp() && request.auth.uid in g().mem));
+          }
+          function xOk(d) {
+            return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
+              && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+              && xid == d.mid + '_' + request.auth.uid
+              && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+              && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t)
+              && exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(d.mid));
+          }
+          allow read: if feat('groups') && (canRead());
+          allow create, update: if feat('groups') && (canRead() && xOk(nw()));
+          allow delete: if feat('groups') && (bMgr() || (canRead() && resource.data.uid == request.auth.uid));
         }
 
         // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
