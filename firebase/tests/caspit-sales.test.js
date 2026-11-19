@@ -11,9 +11,10 @@ const { assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
 const A = 'biz-cs', B = 'biz-ct';
-const ALL = { orders: true };
+const ALL = { orders: true, cxSales: true }; // cxSales – תוספת "מכירות כספית" (19.11.2026), כבויה כברירת מחדל
 const MGR = 's_mgr', E1 = 's_e1', SA = 's_sa', MB = 's_mb';
 const FN = path.join(H.ROOT, 'functions');
+const FieldDel = () => require(require.resolve('firebase-admin/firestore', { paths: [FN] })).FieldValue.delete();
 let FX;
 async function call(name, uid, data) {
   FX = FX || require('../functions/index.js');
@@ -82,7 +83,8 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
       assert.notEqual((await call('cxLines', u, { un: true })).status, 'OK');
       assert.notEqual((await call('cxFix', u, { id: '6200_20261116_5001', k: 'x', q: 1 })).status, 'OK');
     }
-    assert.equal((await call('cxSales', E1, { from: '2026-11-16', to: '2026-11-17' })).reason, 'manager-only');
+    assert.equal((await call('cxSales', E1, { from: '2026-11-16', to: '2026-11-17' })).reason, 'no-perm'); // 19.11.2026: עובד בלי סימון cxS (מנהל מסמן – cxSee)
+    assert.equal((await call('cxFix', E1, { id: '6200_20261116_5001', k: 'x', q: 1 })).reason, 'manager-only');
   });
   it('שורת מכירה לא תקינה נדחית; סוג קובץ לא מתערבב', async () => {
     assert.equal((await call('cxUpload', MGR, { run: run(), kind: 'sales', part: 0, parts: 1, lines: [{ d: '2026-13-01', c: '1', tx: '1', bk: '1', a: 1 }] })).reason, 'bad-lines');
@@ -333,5 +335,46 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
     const F3 = [HDR, L('27/11/2026 10:00', 'מוצר ב', '300002', '8205', Y, 4.5)];
     const id3 = await send(MGR, F3); await ok('cxPreview', MGR, { run: id3 }); await ok('cxApply', MGR, { run: id3 });
     assert.deepEqual((await day('6200_20261127')).tm, { y: 1, n: 0, p: '', q: 'dd/dd/dddd dd:dd' });
+  });
+  it('תוספת "מכירות כספית" כבויה: המסך, התיקון וקליטת דוח מכירות נדחים (feature-off); קטלוג ממשיך לעבוד', async () => {
+    const ref = adm().doc('b/' + B);
+    const pend = run(); await ok('cxUpload', MB, { run: pend, kind: 'sales', part: 0, parts: 1, lines: CC.parseSales(FILE1).lines });
+    await ref.update({ 'features.cxSales': false });
+    try {
+      for (const [fn, d] of [['cxSales', { from: '2026-11-16', to: '2026-11-17' }], ['cxLines', { un: true }], ['cxFix', {}], ['cxUpload', { run: run(), kind: 'sales', part: 0, parts: 1, lines: CC.parseSales(FILE1).lines }]]) {
+        const r = await call(fn, MB, d);
+        assert.equal(r.reason, 'feature-off', fn + ': ' + r.text);
+      }
+      for (const fn of ['cxPreview', 'cxApply']) assert.equal((await call(fn, MB, { run: pend })).reason, 'feature-off', fn + ' – דוח מכירות שהועלה לפני הכיבוי');
+      const r = await call('cxUpload', MB, { run: run(), part: 0, parts: 1, items: [] });
+      assert.notEqual(r.reason, 'feature-off');
+      await ref.update({ 'features.cxSales': FieldDel() });
+      assert.equal((await call('cxSales', MB, { from: '2026-11-16', to: '2026-11-17' })).reason, 'feature-off', 'בלי המפתח = כבוי');
+    } finally { await ref.update({ 'features.cxSales': true }); }
+    assert.equal((await call('cxSales', MB, { from: '2026-11-16', to: '2026-11-17' })).status, 'OK');
+  });
+  it('cxSee: מנהל בוחר עובדים שרואים; עובד מסומן – צפייה בלבד (cxSales, cxLines); עובד לא מסומן נחסם', async () => {
+    const R = { from: '2026-11-16', to: '2026-11-17' };
+    assert.equal((await call('cxSales', E1, R)).reason, 'no-perm');
+    assert.equal((await call('cxSee', E1, { uid: E1, on: true })).reason, 'manager-only', 'עובד לא מסמן את עצמו');
+    assert.equal((await call('cxSee', MGR, { uid: MGR, on: true })).reason, 'is-admin');
+    assert.equal((await call('cxSee', MGR, { uid: 'nobody', on: true })).status, 'not-found');
+    assert.equal((await call('cxSee', MGR, { uid: E1, on: 'yes' })).reason, 'bad-on');
+    assert.deepEqual(await ok('cxSee', MGR, { uid: E1, on: true }), { ok: true, uid: E1, on: true });
+    assert.equal((await adm().doc(`b/${A}/staff/${E1}`).get()).get('cxS'), true);
+    assert.equal((await adm().doc(`b/${A}/staff/${E1}`).get()).get('active'), true, 'שאר השדות לא השתנו');
+    const r = await ok('cxSales', E1, R); assert.ok(Array.isArray(r.days));
+    await ok('cxLines', E1, { un: true });
+    for (const [fn, d] of [['cxFix', {}], ['cxUpload', { run: run(), kind: 'sales', part: 0, parts: 1, lines: [] }], ['cxSetCfg', {}], ['cxCfg', {}], ['cxSee', { uid: E1, on: false }]]) {
+      assert.equal((await call(fn, E1, d)).reason, 'manager-only', fn + ' – עובד מסומן לא מנהל');
+    }
+    await ok('cxSee', MGR, { uid: E1, on: false });
+    assert.equal((await call('cxSales', E1, R)).reason, 'no-perm');
+    await adm().doc('b/' + A).update({ 'features.cxSales': false });
+    try {
+      assert.equal((await call('cxSee', MGR, { uid: E1, on: true })).reason, 'feature-off');
+      await adm().doc(`b/${A}/staff/${E1}`).update({ cxS: true });
+      assert.equal((await call('cxSales', E1, R)).reason, 'feature-off', 'תוספת כבויה גוברת גם על עובד מסומן');
+    } finally { await adm().doc('b/' + A).update({ 'features.cxSales': true }); await adm().doc(`b/${A}/staff/${E1}`).update({ cxS: false }); }
   });
 });

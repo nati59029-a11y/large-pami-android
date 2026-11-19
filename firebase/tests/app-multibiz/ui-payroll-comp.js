@@ -42,7 +42,7 @@ const COMP3 = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', t: 
   const AI = { mode: 'ok', calls: [] }; const net = { tasks: 0, sales: 0 };
 
   // ===== 1. מנהל, עסק במבנה החדש =====
-  { const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b', features: {} } }, admins: { 'b/acme/|ma': 1 } };
+  { const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b', features: { cxSales: true } } }, admins: { 'b/acme/|ma': 1 } };
     const x = await H.newPage(browser, www, cfg, [], 'm-comp'); const pg = x.page; await pg.setViewportSize({ width: 412, height: 900 });
     const SD = 'projects/demo-largpeami/databases/(default)/documents/b/acme/staff/';
     await x.ctx.route((u) => { const q = new URL(u); return q.port === '8080' && /\/documents\/b\/acme\/staff$/.test(decodeURIComponent(q.pathname)); },
@@ -261,7 +261,7 @@ const COMP3 = [{ id: 'k1', k: 'tk', m: 'all', a: 200 }, { id: 'k2', k: 'sl', t: 
     await x.ctx.close(); }
 
   // ===== 2. עובד: לא רואה כלום =====
-  { const cfg = { mode: 'new', biz: { [BZ0]: { dataRoot: 'legacy', features: {} } }, staff: { '|w1': 1 } };
+  { const cfg = { mode: 'new', biz: { [BZ0]: { dataRoot: 'legacy', features: { cxSales: true } } }, staff: { '|w1': 1 } };
     const x = await H.newPage(browser, www, cfg, [], 'w-comp'); const pg = x.page; await pg.setViewportSize({ width: 412, height: 900 });
     await H.login(pg, 'w1@x.co'); await sleep(800);
     const r = await pg.evaluate(async () => { const s = { id: 'pcA', name: 'x', pay: { mode: 'hr', rate: 40, uid: 'w1', comp: [{ id: 'k', k: 'tk', m: 'all', a: 1 }] } };

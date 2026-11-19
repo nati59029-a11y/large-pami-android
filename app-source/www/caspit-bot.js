@@ -35,13 +35,13 @@ const big='style="min-height:48px"';
 
 /* הכרטיס – נקרא מ-V.cxSync (caspit-sync.js) */
 window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
- let h='<div class="card"><h3 style="margin-top:0">רובוט – מחשב החנות</h3><p class="note" style="margin-top:0">תוסף ב-Chrome במחשב החנות מסנכרן לבד כל לילה ב-03:00: קטלוג, מכירות של הימים שעברו, וקבצים לכספית. הקטלוג הראשון – רק כאן באפליקציה.</p>';
+ let h='<div class="card"><h3 style="margin-top:0">רובוט – מחשב החנות</h3><p class="note" style="margin-top:0">תוסף ב-Chrome במחשב החנות מסנכרן לבד כל לילה ב-03:00: קטלוג, '+(typeof window.cxSalesOk==='function'&&window.cxSalesOk()?'מכירות של הימים שעברו, ':'')+'וקבצים לכספית. הקטלוג הראשון – רק כאן באפליקציה.</p>';
  if(B.err)h+=`<p class="note">${esc(B.err)}</p><button class="btn g w" ${big} data-a="cxBotRe">נסו שוב</button>`;
  else if(!i)h+='<p class="note">טוען…</p>';
  else{
   if(!i.dev)h+=`<p class="note">אין מחשב מחובר.</p><button class="btn w" ${big} data-a="cxBotNew">חיבור מחשב</button>`;
   else{const lr=i.lr;
-   h+=`<div class="kg"><div class="k"><small>סנכרון אחרון</small><b>${lr?esc(ST[lr.st]||lr.st):'עוד לא'}</b><small>${lr?dt(lr.at)+' · '+(lr.manual?'ידני':'אוטומטי'):''}</small></div><div class="k"><small>מכירות נקלטו עד</small><b>${dd(i.sd)}</b></div><div class="k"><small>המחשב נראה לאחרונה</small><b>${dt(Math.max(i.dev.last||0,i.pl||0))}</b><small>${i.dev.ver?'גרסה '+esc(i.dev.ver):''}</small></div></div>`;
+   h+=`<div class="kg"><div class="k"><small>סנכרון אחרון</small><b>${lr?esc(ST[lr.st]||lr.st):'עוד לא'}</b><small>${lr?dt(lr.at)+' · '+(lr.manual?'ידני':'אוטומטי'):''}</small></div>${typeof window.cxSalesOk==='function'&&window.cxSalesOk()?`<div class="k"><small>מכירות נקלטו עד</small><b>${dd(i.sd)}</b></div>`:''}<div class="k"><small>המחשב נראה לאחרונה</small><b>${dt(Math.max(i.dev.last||0,i.pl||0))}</b><small>${i.dev.ver?'גרסה '+esc(i.dev.ver):''}</small></div></div>`;
    /* "סנכרן עכשיו" – בקשה למחשב החנות */
    const ns=nowSt(i),q=i.req,nv=i.nowVer||'0.1.5';
    h+=`<button class="btn w" data-a="cxBotNow" ${/^(wait|run|retry)$/.test(ns)?'disabled':''} style="min-height:48px;margin-bottom:8px">סנכרן עכשיו</button>`;
@@ -81,7 +81,7 @@ ACT.cxBotCopy=()=>{const e=document.getElementById('cxBotTok');if(!e)return;cons
 ACT.cxBotRev=()=>ask('לנתק את המחשב? הרובוט יפסיק לסנכרן עד שתחברו מחשב מחדש.',async()=>{try{await fnCall('cxBotTok',{op:'revoke'});toast('המחשב נותק');B.i=null;load()}catch(e){toast(e&&e.message||'הפעולה נכשלה')}},'כן, נתק');
 ACT.cxBotRuns=()=>{const R=(B.i&&B.i.runs)||[];
  const imp=x=>!x?'':['new','price'].filter(k=>x[k]).map(k=>`${k==='new'?'פריטים חדשים':'מחירים'} לכספית: ${x[k].n}${x[k].id?` (טעינה ${x[k].id}: נטענו ${x[k].loaded<0?'?':x[k].loaded}, שגויים ${x[k].errors<0?'?':x[k].errors})`:''}${x[k].ok?'':' – לבדוק'}`).join(' · ');
- dlg(`<h3>הריצות האחרונות</h3><div style="max-height:60vh;overflow:auto">${R.map(r=>`<div class="li" style="cursor:default"><div class="m"><b>${dt(r.at)} · ${esc(ST[r.st]||r.st||'')}</b><small>${r.req?'ידני – "סנכרן עכשיו" מהטלפון':r.manual?'ידני – "סנכרן עכשיו"':'אוטומטי'}${r.days&&r.days.length?' · ימי מכירות: '+r.days.map(dd).join(', '):''}</small>${r.err&&r.err.code&&r.st!=='ok'?`<small>⚠ ${esc(errTxt(r.err.code,r.err.msg))}</small>`:''}${imp(r.imp)?`<small>${esc(imp(r.imp))}</small>`:''}</div></div>`).join('')||'<p class="note">עוד לא היו ריצות.</p>'}</div><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>הריצות האחרונות</h3><div style="max-height:60vh;overflow:auto">${R.map(r=>`<div class="li" style="cursor:default"><div class="m"><b>${dt(r.at)} · ${esc(ST[r.st]||r.st||'')}</b><small>${r.req?'ידני – "סנכרן עכשיו" מהטלפון':r.manual?'ידני – "סנכרן עכשיו"':'אוטומטי'}${r.days&&r.days.length&&typeof window.cxSalesOk==='function'&&window.cxSalesOk()?' · ימי מכירות: '+r.days.map(dd).join(', '):''}</small>${r.err&&r.err.code&&r.st!=='ok'?`<small>⚠ ${esc(errTxt(r.err.code,r.err.msg))}</small>`:''}${imp(r.imp)?`<small>${esc(imp(r.imp))}</small>`:''}</div></div>`).join('')||'<p class="note">עוד לא היו ריצות.</p>'}</div><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)};
 FRM.cxBotMaxF=async f=>{const n=Math.round(+fd(f).n);if(!Number.isInteger(n)||n<0||n>50)return toast('מספר בין 0 ל-50');const b=f.querySelector('button');b.disabled=true;
  try{await fnCall('cxSetCfg',{newMax:n});toast('נשמר');if(B.i)B.i.newMax=n;rerender()}catch(e){b.disabled=false;toast(e&&e.message||'הפעולה נכשלה')}};
 /* התוסף: release caspit-ext-v<גרסה> במאגר (ציבורי) – בלי פונקציה בשרת */
