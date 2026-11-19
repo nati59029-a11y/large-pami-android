@@ -127,11 +127,12 @@ function nbRows(){const D=NB.d;if(!D)return[];
  const fb=(Array.isArray(D.fb)?D.fb:[]).map(x=>({p:String(x&&x.p||''),b:!!(x&&x.b),n:String(x&&x.n||''),fb:true}));
  const fr=(Array.isArray(D.free)?D.free:[]).map(p=>({p:String(p||''),fb:false}));
  return fb.concat(fr).filter(r=>r.p).sort((a,b)=>a.p<b.p?-1:a.p>b.p?1:(a.fb?-1:1))}
+const nbFree=()=>new Set((NB.d&&Array.isArray(NB.d.free)?NB.d.free:[]).map(String));
 function nbList(){
- const k=nbKey(NB.q),all=nbRows(),hit=k?all.filter(r=>dig(r.p).includes(k)):all,show=hit.slice(0,NB_MAX);
+ const fs=nbFree(),k=nbKey(NB.q),all=nbRows(),hit=k?all.filter(r=>dig(r.p).includes(k)):all,show=hit.slice(0,NB_MAX);
  const head=k?(hit.length?`נמצאו ${hit.length}${hit.length>NB_MAX?` · מוצגים ${NB_MAX} הראשונים – הקלידו עוד ספרות`:''}`:'לא נמצא מספר כזה בשתי הרשימות.')
   :(all.length>NB_MAX?`${all.length} מספרים · מוצגים ${NB_MAX} הראשונים – הקלידו מספר לחיפוש`:`${all.length} מספרים`);
- return`<p class="note" role="status" style="margin:0 0 8px">${esc(head)}</p>`+show.map(r=>`<div class="li" style="cursor:default"><div class="m"><b dir="ltr" style="text-align:right">${esc(nbFmt(r.p))}</b><small>${r.fb?`לקוחות משוב · ${r.b?'<span style="color:var(--bad);font-weight:700">חסום</span>':'פעיל'}${r.n?' · '+esc(r.n):''}`:'רשימה חינמית · מוציאים דרך שלוחת היציאה בקו או באתר ימות'}</small></div>${r.fb?`<button type="button" class="btn${r.b?'':' g'}" style="min-height:44px;padding:0 12px;flex:none" data-a="ynAsk" data-v="${esc(r.p)}"${NB.busy?' disabled':''}>${r.b?'בטל חסימה':'חסום'}</button>`:''}</div>`).join('')}
+ return`<p class="note" role="status" style="margin:0 0 8px">${esc(head)}</p>`+show.map(r=>`<div class="li" style="cursor:default"><div class="m"><b dir="ltr" style="text-align:right">${esc(nbFmt(r.p))}</b><small>${r.fb?`לקוחות משוב · ${r.b?'<span style="color:var(--bad);font-weight:700">חסום</span>':'פעיל'}${r.n?' · '+esc(r.n):''}${fs.has(r.p)?' · <span style="color:var(--warn);font-weight:700">גם ברשימה החינמית</span>':''}`:'רשימה חינמית · מוציאים דרך שלוחת היציאה בקו או באתר ימות'}</small></div>${r.fb?`<button type="button" class="btn${r.b?'':' g'}" style="min-height:44px;padding:0 12px;flex:none" data-a="ynAsk" data-v="${esc(r.p)}"${NB.busy?' disabled':''}>${r.b?'בטל חסימה':'חסום'}</button>`:''}</div>`).join('')}
 function nbHtml(){
  if(NB.denied)return'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>';
  const D=NB.d;
@@ -141,7 +142,7 @@ function nbHtml(){
  ${D.freeErr?'<p class="note" style="color:var(--bad);margin:8px 0 0">לא הצלחנו לקרוא את הרשימה החינמית מימות.</p>':''}
  ${D.fbErr?'<p class="note" style="color:var(--bad);margin:8px 0 0">לא הצלחנו לקרוא את רשימת לקוחות המשוב מימות.</p>':''}
  ${D.listReady===false?'<p class="note" style="margin:8px 0 0">רשימת לקוחות המשוב עוד לא נוצרה בימות.</p>':''}
- <div class="card" style="margin-top:12px"><p class="note" style="margin:0">חסימה בלקוחות משוב: המספר נשאר ברשימה אבל לא מקבל צינתוקים. אפשר לבטל בכל רגע. ברשימה החינמית אין חסימה מהאפליקציה – הלקוח יוצא בעצמו דרך שלוחת היציאה בקו, או שמוציאים אותו באתר ימות.</p></div>
+ <div class="card" style="margin-top:12px"><p class="note" style="margin:0">חסימה בלקוחות משוב: המספר נשאר ברשימה אבל לא יקבל צינתוקים כלקוח משוב. אפשר לבטל בכל רגע. מספר שרשום גם ברשימה החינמית ימשיך לקבל ממנה צינתוקים. ברשימה החינמית אין חסימה מהאפליקציה – הלקוח יוצא בעצמו דרך שלוחת היציאה בקו, או שמוציאים אותו באתר ימות.</p></div>
  <input type="tel" inputmode="numeric" autocomplete="off" data-i="ynQ" id="ynQ" placeholder="חפש מספר (למשל 0501234567)" aria-label="חפש מספר" style="width:100%;margin:12px 0 8px" value="${esc(NB.q)}">
  <div id="ynRes">${nbList()}</div>
  <button class="btn s g grow" data-a="ynLoad" style="margin-top:8px"${NB.loading||NB.busy?' disabled':''}>רענן מימות</button>`}
@@ -158,9 +159,9 @@ ACT.ynLoad=()=>{if(!NB.busy)nbLoad()};
 INP.ynQ=el=>{NB.q=el.value;nbPaintList()};
 ACT.ynAsk=el=>{
  const p=el&&el.dataset&&el.dataset.v,r=nbRows().find(x=>x.fb&&x.p===p);if(!r||NB.busy)return;
- NB.ask={p:r.p,on:!r.b};
+ NB.ask={p:r.p,on:!r.b};const both=nbFree().has(r.p);
  dlg(r.b?`<h3>לבטל את החסימה?</h3><p style="margin:0 0 6px" dir="ltr"><b>${esc(nbFmt(r.p))}</b></p><p class="note" style="margin:0 0 12px">המספר יחזור לקבל צינתוקים ללקוחות המשוב (בתשלום).</p><div class="row"><button type="button" class="btn grow" data-a="ynOk">כן, בטל חסימה</button><button type="button" class="btn g grow" data-a="ynNo">ביטול</button></div>`
-  :`<h3>לחסום את המספר?</h3><p style="margin:0 0 6px" dir="ltr"><b>${esc(nbFmt(r.p))}</b></p><p class="note" style="margin:0 0 12px">המספר יישאר ברשימת לקוחות המשוב, אבל לא יקבל יותר צינתוקים. אפשר לבטל את החסימה בכל רגע.</p><div class="row"><button type="button" class="btn grow" data-a="ynOk">כן, חסום</button><button type="button" class="btn g grow" data-a="ynNo">ביטול</button></div>`)};
+  :`<h3>לחסום את המספר?</h3><p style="margin:0 0 6px" dir="ltr"><b>${esc(nbFmt(r.p))}</b></p><p class="note" style="margin:0 0 12px">המספר יישאר ברשימת לקוחות המשוב, אבל לא יקבל צינתוקים כלקוח משוב. אפשר לבטל את החסימה בכל רגע.</p>${both?'<p class="note" style="color:var(--warn);font-weight:700;margin:0 0 12px">שימו לב: המספר רשום גם ברשימה החינמית, ומשם ימשיך לקבל צינתוקים חינמיים עד שיוציאו אותו דרך שלוחת היציאה בקו או באתר ימות.</p>':''}<div class="row"><button type="button" class="btn grow" data-a="ynOk">כן, חסום</button><button type="button" class="btn g grow" data-a="ynNo">ביטול</button></div>`)};
 ACT.ynNo=()=>{closeDlg();NB.ask=null};
 ACT.ynOk=async()=>{
  const q=NB.ask;closeDlg();NB.ask=null;if(!q||NB.busy)return;
