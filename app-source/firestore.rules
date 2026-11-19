@@ -762,6 +762,148 @@ service cloud.firestore {
       }
     }
 
+    // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 ----------
+    // hsr/{id}: פריט חוסר. מנהל ועובד פעיל – אותן הרשאות (האפיון): קריאה, יצירה, עריכה, "הגיע" ומחיקה רכה (st 'del', נשמר ואפשר לשחזר).
+    // מחיקה אמיתית – מנהל בלבד (אין כזו בממשק). שדות: n (1..80), nk (מפתח מנורמל, עד 200), gen (פריט כללי), sups / supN (מזהי ושמות ספקים, עד 10;
+    // בפריט כללי – ריקים), why ('store' | 'order' | 'both'), q? (מספר מעל 0 עד 100,000), cust? { nm עד 60, ph ספרות עד 15, cid? },
+    // ord? { id, no }, np (0 | 1 – יש תמונה), st ('open' | 'arr' | 'del'), by (uid), byN (השם – isMyName), t (זמן אמת), ub? / ut? (מי ומתי עדכן), h? (היסטוריה, עד 30).
+    // יצירה: st 'open', by = הכותב, בלי ub / ut / h. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
+    // hsr/{id}/p/1: תמונה { img, t, uid } (jpeg / png / webp, 100 עד 900,000 תווים) – יצירה בלבד, בלי עדכון (החלפה = מחיקה ויצירה). מחיקה – הצוות.
+    // hsph/{supId}: טלפון ספק { ph (9..15 ספרות), n (שם הספק), byN, t } – נשמר בפעם הראשונה ששולחים לספק בוואטסאפ.
+    // hsx/{supId}: שמות מוצרים מחשבוניות ספק { n, it (רשימה, עד 3000), t } – להצעת ספק. קריאה – הצוות; כתיבה – מנהל או עובד עם prc (בלי מחירים).
+    match /hsr/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      // 19.11.2026 (בדיקת אבטחה): כל איבר ב-sups הוא מזהה בתבנית מותרת וכל איבר ב-supN שם עד 60 תווים – בדיקה לפי אינדקס (עד 10).
+      function sidOk(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^[A-Za-z0-9_-]{1,80}$')); }
+      function snOk(l, i) { return l.size() <= i || (l[i] is string && l[i].size() <= 60); }
+      function supsOk(d) {
+        return d.sups is list && d.supN is list && d.sups.size() <= 10 && d.supN.size() == d.sups.size()
+          && sidOk(d.sups, 0) && sidOk(d.sups, 1) && sidOk(d.sups, 2) && sidOk(d.sups, 3) && sidOk(d.sups, 4)
+          && sidOk(d.sups, 5) && sidOk(d.sups, 6) && sidOk(d.sups, 7) && sidOk(d.sups, 8) && sidOk(d.sups, 9)
+          && snOk(d.supN, 0) && snOk(d.supN, 1) && snOk(d.supN, 2) && snOk(d.supN, 3) && snOk(d.supN, 4)
+          && snOk(d.supN, 5) && snOk(d.supN, 6) && snOk(d.supN, 7) && snOk(d.supN, 8) && snOk(d.supN, 9);
+      }
+      // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
+      // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
+      // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
+      // שלב 2 (19.11.2026) – הורדה אוטומטית מחשבונית ספק: רשומה { k, t, byN, u, pinv, inv, sup, q0?, q? } (pinv מזהה החשבונית, inv מספרה עד 30, sup ספק עד 60).
+      // 'inv' ← הגיע כולו (open → arr, הכמות לא משתנה, בלי q0 / q). 'part' ← הגיע חלקית: st נשאר open, q0 = הכמות הקודמת, q = החדשה (קטנה ממנה).
+      // 'unp' ← ביטול 'part' ({ k, t, byN, u }): st נשאר open, הרשומה הקודמת היא 'part', הכמות עדיין q שלה וחוזרת בדיוק ל-q0 שלה.
+      // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
+      function hInv(e) {
+        return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
+          && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60
+          && pinvOk(e.pinv);
+      }
+      // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף (get – לא תלוי בהרשאת הקריאה של pinv).
+      // inv / sup נשמרים כפי שהאפליקציה קיבלה אותם (השרת מנקה אותם אחרת) ולכן לא מושווים; הרשומה תמיד בשם המבצע (u, byN).
+      function pinvOk(p) {
+        let d = get(/databases/$(database)/documents/pinv/$(p)).data;
+        return d.get('st', '') != 'void' && d.get('at', 0) is int && d.get('at', 0) >= resource.data.t;
+      }
+      function hMoveOk(e, st) {
+        return (e.keys().hasOnly(['k', 't', 'byN', 'u']) && ((st == 'arr' && e.k == 'man') || (st == 'del' && e.k == 'del') || (st == 'open' && e.k in ['undo', 'res'])))
+          || (st == 'arr' && e.k == 'inv' && resource.data.st == 'open' && !e.keys().hasAny(['q0', 'q']) && hInv(e)
+            && request.resource.data.get('q', 0) == resource.data.get('q', 0));
+      }
+      function hSameOk(e, o, q0, q1) {
+        return request.resource.data.st == 'open' && (
+          (e.k == 'part' && q0 is number && q1 is number && e.get('q0', -1) == q0 && e.get('q', -1) == q1 && q1 < q0 && hInv(e))
+          || (e.k == 'unp' && e.keys().hasOnly(['k', 't', 'byN', 'u']) && o.size() > 0 && o[o.size() - 1].get('k', '') == 'part'
+            && q0 == o[o.size() - 1].get('q', -1) && q1 == o[o.size() - 1].get('q0', -1)));
+      }
+      function hAppOk(o, n) {
+        return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && n[n.size() - 1] is map
+          && n[n.size() - 1].keys().hasAll(['k', 't', 'byN', 'u']) && n[n.size() - 1].u == request.auth.uid
+          && n[n.size() - 1].t == request.resource.data.ut && isMyName(n[n.size() - 1].byN)
+          && (o.size() == 0 || (o.size() < 30 ? n[0:o.size()] == o : n[0:29] == o[1:30]));
+      }
+      function hUpdOk() {
+        let o = resource.data.get('h', []);
+        let n = request.resource.data.get('h', []);
+        let st = request.resource.data.st;
+        return (st == resource.data.st && n == o)
+          || (hAppOk(o, n) && (st == resource.data.st
+            ? hSameOk(n[n.size() - 1], o, resource.data.get('q', 0), request.resource.data.get('q', 0))
+            : hMoveOk(n[n.size() - 1], st)));
+      }
+      function itOk(d) {
+        return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
+          && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h'])
+          && d.n is string && d.n.size() > 0 && d.n.size() <= 80
+          && d.nk is string && d.nk.size() <= 200
+          && d.gen is bool
+          && supsOk(d)
+          && (d.gen == false || d.sups.size() == 0)
+          && d.why in ['store', 'order', 'both']
+          && (!d.keys().hasAny(['q']) || (d.q is number && d.q > 0 && d.q <= 100000))
+          && (!d.keys().hasAny(['cust']) || (d.cust is map && d.cust.keys().hasOnly(['nm', 'ph', 'cid'])
+            && d.cust.get('nm', '') is string && d.cust.get('nm', '').size() <= 60
+            && d.cust.get('ph', '') is string && d.cust.get('ph', '').matches('^[0-9]{0,15}$')
+            && d.cust.get('cid', '') is string && d.cust.get('cid', '').size() <= 80))
+          && (!d.keys().hasAny(['ord']) || (d.ord is map && d.ord.keys().hasOnly(['id', 'no'])
+            && d.ord.get('id', '') is string && d.ord.get('id', '').matches('^[A-Za-z0-9_-]{1,80}$') && d.ord.get('no', 0) is int))
+          && d.np in [0, 1]
+          && d.st in ['open', 'arr', 'del']
+          && d.by is string && d.byN is string && d.byN.size() <= 100 && d.t is int
+          && (!d.keys().hasAny(['h']) || (d.h is list && d.h.size() <= 30));
+      }
+      // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
+      // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
+      function updDataOk() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['st', 'q', 'h', 'ub', 'ut'])
+          ? (request.resource.data.st in ['open', 'arr', 'del']
+            && (!request.resource.data.keys().hasAny(['q']) || (request.resource.data.q is number && request.resource.data.q > 0 && request.resource.data.q <= 100000))
+            && (!request.resource.data.keys().hasAny(['h']) || (request.resource.data.h is list && request.resource.data.h.size() <= 30))
+            && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
+          : itOk(request.resource.data);
+      }
+      allow read: if (isStaff());
+      allow create: if lpW() && (isStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
+        && !nw().keys().hasAny(['ub', 'ut', 'h']));
+      allow update: if lpW() && (isStaff() && updDataOk() && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
+        && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
+      allow delete: if lpW() && (isManager());
+
+      match /p/{pid} {
+        function imgOk() {
+          return request.resource.data.keys().hasAll(['img', 't', 'uid'])
+            && request.resource.data.keys().hasOnly(['img', 't', 'uid'])
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000
+            && request.resource.data.img is string && request.resource.data.img.size() >= 100 && request.resource.data.img.size() <= 900000
+            && request.resource.data.img.matches('^data:image/(jpeg|png|webp);base64,.*');
+        }
+        allow read: if (isStaff());
+        allow create: if lpW() && (isStaff() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/hsr/$(id)));
+        allow update: if false;
+        allow delete: if lpW() && (isStaff());
+      }
+    }
+    match /hsph/{supId} {
+      allow read: if (isStaff());
+      allow create, update: if lpW() && (isStaff()
+        && request.resource.data.keys().hasAll(['ph', 'n', 'byN', 't'])
+        && request.resource.data.keys().hasOnly(['ph', 'n', 'byN', 't'])
+        && request.resource.data.ph is string && request.resource.data.ph.matches('^[0-9]{9,15}$')
+        && request.resource.data.n is string && request.resource.data.n.size() <= 60
+        && isMyName(request.resource.data.byN)
+        && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000);
+      allow delete: if lpW() && (isManager());
+    }
+    match /hsx/{supId} {
+      allow read: if (isStaff());
+      allow create, update: if lpW() && ((isManager() || (isActiveEmployee() && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('prc', false) == true))
+        && request.resource.data.keys().hasAll(['n', 'it', 't'])
+        && request.resource.data.keys().hasOnly(['n', 'it', 't'])
+        && request.resource.data.n is string && request.resource.data.n.size() <= 60
+        && request.resource.data.it is list && request.resource.data.it.size() <= 3000
+        && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000);
+      allow delete: if lpW() && (isManager());
+    }
+
     // ---------- חשבוניות ספקים לעובד (supinv) ----------
     // טלפון המנהל משקף לכאן רק חשבוניות "ספקים" ו"ספקים אפייה" של החודש הנוכחי (כולל ממתינות לאישור), בלי שום נתון כספי אחר.
     // קריאה: עובד פעיל או מנהל. כתיבה ומחיקה: מנהל בלבד, ורק השדות שהאפליקציה כותבת (supSync).
@@ -2310,6 +2452,148 @@ service cloud.firestore {
           allow create, update: if feat('groups') && (isSelf(uid) && canRead() && rOk(nw()));
           allow delete: if feat('groups') && (bMgr());
         }
+      }
+
+      // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 – העתק של הכלל בשורש (תוספת 'suppliers'), עם התפקידים של העסק ----------
+      // hsr/{id}: פריט חוסר. מנהל ועובד פעיל – אותן הרשאות (האפיון): קריאה, יצירה, עריכה, "הגיע" ומחיקה רכה (st 'del', נשמר ואפשר לשחזר).
+      // מחיקה אמיתית – מנהל בלבד (אין כזו בממשק). שדות: n (1..80), nk (מפתח מנורמל, עד 200), gen (פריט כללי), sups / supN (מזהי ושמות ספקים, עד 10;
+      // בפריט כללי – ריקים), why ('store' | 'order' | 'both'), q? (מספר מעל 0 עד 100,000), cust? { nm עד 60, ph ספרות עד 15, cid? },
+      // ord? { id, no }, np (0 | 1 – יש תמונה), st ('open' | 'arr' | 'del'), by (uid), byN (השם – isMyName), t (זמן אמת), ub? / ut? (מי ומתי עדכן), h? (היסטוריה, עד 30).
+      // יצירה: st 'open', by = הכותב, בלי ub / ut / h. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
+      // hsr/{id}/p/1: תמונה { img, t, uid } (jpeg / png / webp, 100 עד 900,000 תווים) – יצירה בלבד, בלי עדכון (החלפה = מחיקה ויצירה). מחיקה – הצוות.
+      // hsph/{supId}: טלפון ספק { ph (9..15 ספרות), n (שם הספק), byN, t } – נשמר בפעם הראשונה ששולחים לספק בוואטסאפ.
+      // hsx/{supId}: שמות מוצרים מחשבוניות ספק { n, it (רשימה, עד 3000), t } – להצעת ספק. קריאה – הצוות; כתיבה – מנהל או עובד עם prc (בלי מחירים).
+      match /hsr/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        // 19.11.2026 (בדיקת אבטחה): כל איבר ב-sups הוא מזהה בתבנית מותרת וכל איבר ב-supN שם עד 60 תווים – בדיקה לפי אינדקס (עד 10).
+        function sidOk(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^[A-Za-z0-9_-]{1,80}$')); }
+        function snOk(l, i) { return l.size() <= i || (l[i] is string && l[i].size() <= 60); }
+        function supsOk(d) {
+          return d.sups is list && d.supN is list && d.sups.size() <= 10 && d.supN.size() == d.sups.size()
+            && sidOk(d.sups, 0) && sidOk(d.sups, 1) && sidOk(d.sups, 2) && sidOk(d.sups, 3) && sidOk(d.sups, 4)
+            && sidOk(d.sups, 5) && sidOk(d.sups, 6) && sidOk(d.sups, 7) && sidOk(d.sups, 8) && sidOk(d.sups, 9)
+            && snOk(d.supN, 0) && snOk(d.supN, 1) && snOk(d.supN, 2) && snOk(d.supN, 3) && snOk(d.supN, 4)
+            && snOk(d.supN, 5) && snOk(d.supN, 6) && snOk(d.supN, 7) && snOk(d.supN, 8) && snOk(d.supN, 9);
+        }
+        // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
+        // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
+        // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
+        // שלב 2 (19.11.2026) – הורדה אוטומטית מחשבונית ספק: רשומה { k, t, byN, u, pinv, inv, sup, q0?, q? } (pinv מזהה החשבונית, inv מספרה עד 30, sup ספק עד 60).
+        // 'inv' ← הגיע כולו (open → arr, הכמות לא משתנה, בלי q0 / q). 'part' ← הגיע חלקית: st נשאר open, q0 = הכמות הקודמת, q = החדשה (קטנה ממנה).
+        // 'unp' ← ביטול 'part' ({ k, t, byN, u }): st נשאר open, הרשומה הקודמת היא 'part', הכמות עדיין q שלה וחוזרת בדיוק ל-q0 שלה.
+        // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
+        function hInv(e) {
+          return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
+            && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60
+            && pinvOk(e.pinv);
+        }
+        // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף (get – לא תלוי בהרשאת הקריאה של pinv).
+        // inv / sup נשמרים כפי שהאפליקציה קיבלה אותם (השרת מנקה אותם אחרת) ולכן לא מושווים; הרשומה תמיד בשם המבצע (u, byN).
+        function pinvOk(p) {
+          let d = get(/databases/$(database)/documents/b/$(bizId)/pinv/$(p)).data;
+          return d.get('st', '') != 'void' && d.get('at', 0) is int && d.get('at', 0) >= resource.data.t;
+        }
+        function hMoveOk(e, st) {
+          return (e.keys().hasOnly(['k', 't', 'byN', 'u']) && ((st == 'arr' && e.k == 'man') || (st == 'del' && e.k == 'del') || (st == 'open' && e.k in ['undo', 'res'])))
+            || (st == 'arr' && e.k == 'inv' && resource.data.st == 'open' && !e.keys().hasAny(['q0', 'q']) && hInv(e)
+              && request.resource.data.get('q', 0) == resource.data.get('q', 0));
+        }
+        function hSameOk(e, o, q0, q1) {
+          return request.resource.data.st == 'open' && (
+            (e.k == 'part' && q0 is number && q1 is number && e.get('q0', -1) == q0 && e.get('q', -1) == q1 && q1 < q0 && hInv(e))
+            || (e.k == 'unp' && e.keys().hasOnly(['k', 't', 'byN', 'u']) && o.size() > 0 && o[o.size() - 1].get('k', '') == 'part'
+              && q0 == o[o.size() - 1].get('q', -1) && q1 == o[o.size() - 1].get('q0', -1)));
+        }
+        function hAppOk(o, n) {
+          return n is list && n.size() == (o.size() < 30 ? o.size() + 1 : 30) && n[n.size() - 1] is map
+            && n[n.size() - 1].keys().hasAll(['k', 't', 'byN', 'u']) && n[n.size() - 1].u == request.auth.uid
+            && n[n.size() - 1].t == request.resource.data.ut && isMyName(n[n.size() - 1].byN)
+            && (o.size() == 0 || (o.size() < 30 ? n[0:o.size()] == o : n[0:29] == o[1:30]));
+        }
+        function hUpdOk() {
+          let o = resource.data.get('h', []);
+          let n = request.resource.data.get('h', []);
+          let st = request.resource.data.st;
+          return (st == resource.data.st && n == o)
+            || (hAppOk(o, n) && (st == resource.data.st
+              ? hSameOk(n[n.size() - 1], o, resource.data.get('q', 0), request.resource.data.get('q', 0))
+              : hMoveOk(n[n.size() - 1], st)));
+        }
+        function itOk(d) {
+          return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
+            && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h'])
+            && d.n is string && d.n.size() > 0 && d.n.size() <= 80
+            && d.nk is string && d.nk.size() <= 200
+            && d.gen is bool
+            && supsOk(d)
+            && (d.gen == false || d.sups.size() == 0)
+            && d.why in ['store', 'order', 'both']
+            && (!d.keys().hasAny(['q']) || (d.q is number && d.q > 0 && d.q <= 100000))
+            && (!d.keys().hasAny(['cust']) || (d.cust is map && d.cust.keys().hasOnly(['nm', 'ph', 'cid'])
+              && d.cust.get('nm', '') is string && d.cust.get('nm', '').size() <= 60
+              && d.cust.get('ph', '') is string && d.cust.get('ph', '').matches('^[0-9]{0,15}$')
+              && d.cust.get('cid', '') is string && d.cust.get('cid', '').size() <= 80))
+            && (!d.keys().hasAny(['ord']) || (d.ord is map && d.ord.keys().hasOnly(['id', 'no'])
+              && d.ord.get('id', '') is string && d.ord.get('id', '').matches('^[A-Za-z0-9_-]{1,80}$') && d.ord.get('no', 0) is int))
+            && d.np in [0, 1]
+            && d.st in ['open', 'arr', 'del']
+            && d.by is string && d.byN is string && d.byN.size() <= 100 && d.t is int
+            && (!d.keys().hasAny(['h']) || (d.h is list && d.h.size() <= 30));
+        }
+        // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
+        // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
+        function updDataOk() {
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['st', 'q', 'h', 'ub', 'ut'])
+            ? (request.resource.data.st in ['open', 'arr', 'del']
+              && (!request.resource.data.keys().hasAny(['q']) || (request.resource.data.q is number && request.resource.data.q > 0 && request.resource.data.q <= 100000))
+              && (!request.resource.data.keys().hasAny(['h']) || (request.resource.data.h is list && request.resource.data.h.size() <= 30))
+              && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
+            : itOk(request.resource.data);
+        }
+        allow read: if feat('suppliers') && (bStaff());
+        allow create: if feat('suppliers') && (bStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
+          && !nw().keys().hasAny(['ub', 'ut', 'h']));
+        allow update: if feat('suppliers') && (bStaff() && updDataOk() && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
+          && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
+        allow delete: if feat('suppliers') && (bMgr());
+
+        match /p/{pid} {
+          function imgOk() {
+            return request.resource.data.keys().hasAll(['img', 't', 'uid'])
+              && request.resource.data.keys().hasOnly(['img', 't', 'uid'])
+              && request.resource.data.uid == request.auth.uid
+              && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000
+              && request.resource.data.img is string && request.resource.data.img.size() >= 100 && request.resource.data.img.size() <= 900000
+              && request.resource.data.img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          allow read: if feat('suppliers') && (bStaff());
+          allow create: if feat('suppliers') && (bStaff() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/b/$(bizId)/hsr/$(id)));
+          allow update: if false;
+          allow delete: if feat('suppliers') && (bStaff());
+        }
+      }
+      match /hsph/{supId} {
+        allow read: if feat('suppliers') && (bStaff());
+        allow create, update: if feat('suppliers') && (bStaff()
+          && request.resource.data.keys().hasAll(['ph', 'n', 'byN', 't'])
+          && request.resource.data.keys().hasOnly(['ph', 'n', 'byN', 't'])
+          && request.resource.data.ph is string && request.resource.data.ph.matches('^[0-9]{9,15}$')
+          && request.resource.data.n is string && request.resource.data.n.size() <= 60
+          && isMyName(request.resource.data.byN)
+          && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000);
+        allow delete: if feat('suppliers') && (bMgr());
+      }
+      match /hsx/{supId} {
+        allow read: if feat('suppliers') && (bStaff());
+        allow create, update: if feat('suppliers') && (perm('prc')
+          && request.resource.data.keys().hasAll(['n', 'it', 't'])
+          && request.resource.data.keys().hasOnly(['n', 'it', 't'])
+          && request.resource.data.n is string && request.resource.data.n.size() <= 60
+          && request.resource.data.it is list && request.resource.data.it.size() <= 3000
+          && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000);
+        allow delete: if feat('suppliers') && (bMgr());
       }
 
       // supinv: העתק של הכלל בשורש (תוספת 'suppliers')
