@@ -67,7 +67,7 @@ describe('ימות: כל התוכן בשלוחה אחת (yemot_state/layout)', (
     for (const [k, v] of Object.entries(SAVED)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     await M.stop();
   });
-  beforeEach(async () => { await H.seed(env); M.reset(); });
+  beforeEach(async () => { await H.seed(env); await H.grantLine(env); M.reset(); });
 
   it('index.js מייצא את setLineLayout', () => {
     assert.equal(typeof require('../functions/index.js').setLineLayout, 'function');
