@@ -10,8 +10,8 @@ const S = require('../functions/lib/pos-cfg-schema');
 const SPEC = require('./fixtures/pos-cfg-spec-keys.json');
 
 describe('pos-cfg-schema – מול פרק 2', () => {
-  it('מספר המפתחות בסכמה = מספר המפתחות בפרק 2 (313), ואותם שמות', () => {
-    assert.equal(SPEC.count, 313);
+  it('מספר המפתחות בסכמה = מספר המפתחות בפרק 2 (313) + rcptBizRc (החלטת בעל העסק, 19.11.2026) = 314, ואותם שמות', () => {
+    assert.equal(SPEC.count, 314);
     assert.equal(S.ROWS.length, SPEC.count);
     assert.equal(S.COUNT, SPEC.count);
     assert.deepEqual(S.ROWS.map((r) => r.k).sort(), SPEC.keys.map((x) => x[0]).sort());

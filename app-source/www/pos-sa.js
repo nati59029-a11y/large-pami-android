@@ -1,17 +1,35 @@
 /* POS:M4 – מסך מנהל־העל לקופה של העסק הנוכחי (אפיון ה 3.2). רק SY.sa (מנהל־על שנכנס לעסק); השרת בודק שוב (posSa: not-superadmin).
    פתיחה (סוג עסק + תבנית + מגבלות) · מצב (פתוחה / ניסיון / פעילה / מושעית) · סוג העסק · מודולים · מגבלות · נעילות ו"מי משנה"
    · "החל תבנית מחדש" עם רשימת הבדלים (רק מה שסומן) · עריכת תבניות (גלובלי) · דיווחי בעיה מכל העסקים.
-   כל כתיבה – posSa / posCfgSet (מפתחות sa.* נכתבים בשרת גם ל-saPub באותה טרנזקציה). */
+   כל כתיבה – posSa / posCfgSet (מפתחות sa.* נכתבים בשרת גם ל-saPub באותה טרנזקציה).
+   גל 3 (19.11.2026): אשראי במסוף מחובר – מצב (כבוי / מסוף מדומה / CardCom) ופרטי חיבור (posCardCfg). הפרטים נשמרים מוצפנים בשרת ולא מוצגים
+   אחרי השמירה – רק "נשמר ✓". שדה ריק = בלי שינוי. */
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||!window.PosCfgSchema)return;
 const SC=window.PosCfgSchema,TP=window.PosCfgTpl||{TPL:{}};
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const ok=()=>{try{return !!(SY&&SY.sa)&&bzB()&&!SY.mg}catch(e){return false}};
-const X={d:null,diff:null,bugs:null,err:'',busy:0,tpl:''};
+const X={d:null,diff:null,bugs:null,err:'',busy:0,tpl:'',card:null,cardBusy:0};
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');
-const reload=()=>{X.d=null;X.diff=null;X.err='';try{window.PosAdm&&PosAdm.reset()}catch(e){}rerender()};
+const reload=()=>{X.d=null;X.diff=null;X.err='';X.card=null;try{window.PosAdm&&PosAdm.reset()}catch(e){}rerender()};
 function load(){if(X.busy||X.err)return;X.busy=1;fnCall('posSa',{op:'get'}).then(r=>{X.d=r}).catch(e=>{X.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{X.busy=0;if(cur().v==='posSa'&&!document.querySelector('#dlg[open]'))rerender()})}
+function cardLoad(){if(X.cardBusy||X.card)return;X.cardBusy=1;fnCall('posCardCfg',{op:'get'}).then(r=>{X.card=r}).catch(e=>{X.card={err:e&&e.message||'הטעינה נכשלה'}}).finally(()=>{X.cardBusy=0;if(cur().v==='posSa'&&!document.querySelector('#dlg[open]'))rerender()})}
+function cardHtml(){if(!X.card){cardLoad();return'<div class="card"><h3 style="margin-top:0">אשראי במסוף מחובר</h3><div class="empty">טוען…</div></div>'}
+ if(X.card.err)return`<div class="card"><h3 style="margin-top:0">אשראי במסוף מחובר</h3><p class="note">${esc(X.card.err)}</p><button class="btn g w" data-a="posSaCardRe">נסה שוב</button></div>`;
+ const c=X.card;return`<div class="card"><h3 style="margin-top:0">אשראי במסוף מחובר (CardCom)</h3><form data-f="posSaCard" autocomplete="off">
+   <label class="f"><span>מצב</span><select name="mode">${[['off','כבוי'],['mock','מסוף מדומה (בדיקה, בלי חיוב אמיתי)'],['cardcom','CardCom']].map(([v,n])=>`<option value="${v}"${c.mode===v?' selected':''}>${n}</option>`).join('')}</select></label>
+   <p class="note">פרטי חיבור: ${c.saved?'נשמר ✓'+(c.at?' ('+esc(new Date(c.at).toLocaleDateString('he-IL'))+')':''):'לא נשמרו'}. שדה ריק = בלי שינוי.</p>
+   <label class="f"><span>מספר מסוף</span><input name="term" inputmode="numeric" dir="ltr" autocomplete="off"></label>
+   <label class="f"><span>שם משתמש API</span><input name="user" dir="ltr" autocomplete="off"></label>
+   <label class="f"><span>סיסמת API</span><input name="pass" type="password" dir="ltr" autocomplete="new-password"></label>
+   ${c.saved?'<label class="chip"><input type="checkbox" name="del"> מחיקת פרטי החיבור</label>':''}
+   <button class="btn w">שמירה</button></form>
+   <p class="note">החיבור ל-CardCom עדיין לא הושלם – ממתין לתיעוד. עד אז מצב CardCom יחזיר בקופה הודעה מתאימה, ו"אשראי ידני (מסוף חיצוני)" ממשיך לעבוד.</p></div>`}
+ACT.posSaCardRe=()=>{X.card=null;rerender()};
+FRM.posSaCard=async f=>{const fd=new FormData(f),g=k=>String(fd.get(k)||'');const d={op:'set',mode:g('mode')};
+ if(fd.get('del'))d.cred=null;else{const c={};for(const k of['term','user','pass'])if(g(k).trim())c[k]=k==='pass'?g(k):g(k).trim();if(Object.keys(c).length)d.cred=c}
+ try{const r=await fnCall('posCardCfg',d);f.reset();X.card={mode:r.mode,on:r.on,saved:r.saved,at:r.saved?Date.now():null};toast('נשמר');rerender()}catch(e){err(e)}};
 const tname=t=>{const x=(X.d&&X.d.tpls||[]).find(z=>z.type===t)||TP.TPL[t];return x?x.name:t};
 const typeSel=(nm,v)=>`<select name="${nm}">${SC.TYPES.map(t=>`<option value="${t}"${t===v?' selected':''}>${esc(tname(t))}</option>`).join('')}</select>`;
 const val=v=>v===undefined||v===null?'—':typeof v==='object'?JSON.stringify(v):String(v);
@@ -37,6 +55,7 @@ V.posSa=()=>{const T='קופה – מנהל־על';if(!ok())return{t:T,h:'<div c
    <label class="f"><span>"מי משנה" לעסק הזה – {"מפתח":"sa|own|mgr"}</span><textarea name="who" dir="ltr" rows="2">${esc(JSON.stringify(sa.who||{}))}</textarea></label>
    <button class="btn w">שמירה</button></form>
    <p class="note">תבנית: ${esc(tname(sa.tpl||e.type))} (גרסה ${esc(String(sa.tplVer||''))}) · נפתח ${esc(new Date(sa.openedAt).toLocaleDateString('he-IL'))}</p></div>
+  ${cardHtml()}
   <div class="card"><h3 style="margin-top:0">החל תבנית מחדש</h3>${X.diff?diffHtml():'<button class="btn g w" data-a="posSaDiff">הצג הבדלים מול התבנית</button>'}</div>`;
  h+=`<div class="card"><h3 style="margin-top:0">תבניות (לכל העסקים)</h3><form data-f="posSaTpl"><label class="f"><span>סוג</span>${typeSel('type',X.tpl||'grocery')}</label>
    <label class="f"><span>ערכים (JSON: {"מפתח": ערך})</span><textarea name="vals" dir="ltr" rows="4">${esc(JSON.stringify(((X.d.tpls||[]).find(z=>z.type===(X.tpl||'grocery'))||{}).vals||{}))}</textarea></label>
@@ -64,5 +83,5 @@ FRM.posSaApply=async f=>{const fd=new FormData(f),keys=fd.getAll('k'),mods=fd.ge
 FRM.posSaTpl=async f=>{const fd=new FormData(f);let vals;try{vals=JSON.parse(String(fd.get('vals')||'{}'))}catch(e){return toast('JSON לא תקין')}
  X.tpl=String(fd.get('type'));try{await fnCall('posSa',{op:'tplSet',type:X.tpl,vals});toast('התבנית נשמרה');reload()}catch(e){err(e)}};
 document.addEventListener('change',e=>{const t=e.target;if(t&&t.name==='type'&&t.closest('[data-f=posSaTpl]')){X.tpl=t.value;rerender()}});
-window.addEventListener('lp-biz-change',()=>{X.d=null;X.diff=null;X.bugs=null;X.err=''});
+window.addEventListener('lp-biz-change',()=>{X.d=null;X.diff=null;X.bugs=null;X.err='';X.card=null});
 })();

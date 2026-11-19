@@ -199,8 +199,10 @@ async function finish(t,r){const{cfg,toast,fmt}=UI();S.busy=1;const s=S.sess||{}
   sub:t.sub,sdisc:t.sdisc||0,gross:t.gross,net:t.net,vat:t.vat,pays:r.pays,chg:r.chg,debt:r.debt};if(S.manDisc)sale.manDisc=S.manDisc;
  let res;try{res=await D().saveSale(sale)}catch(e){S.busy=0;toast('המכירה לא נשמרה: '+(e&&e.message||'נסו שוב'),'bad');return}
  const doc=Object.assign({},sale,res,{cashierNo:(s.cashier||{}).no,custObj:S.cust,fmt:S.cust&&S.cust.biz?cfg('rcptBizFmt'):'r'+(cfg('rcptWidth')||80)});
- S.last=doc;if(cfg('rcptPrint')==='always')UI().Dev.print({kind:'sale',doc});if(r.pays.some(p=>p.m==='cash'))UI().Dev.openDrawer('cash');
+ /* קופה גל 3: לקוח עסקי – לפי הכרטיס (PosBizDoc: A4 / שליחה / חלון בחירה). לקוח פרטי – קבלה בקופה כמו היום */
+ const BD=root.PosBizDoc,bc=S.cust;S.last=doc;if(cfg('rcptPrint')==='always'&&(!BD||BD.thermalNow(bc,doc)))UI().Dev.print({kind:'sale',doc});if(r.pays.some(p=>p.m==='cash'))UI().Dev.openDrawer('cash');
  S.cart=[];S.cust=null;S.note='';S.manDisc=null;S.undo=null;S.chg=r.chg||0;S.busy=0;cart();cust();refresh();focusQ();
+ if(BD&&cfg('rcptPrint')==='always')BD.after(doc,bc);
  UI().say('המכירה נשמרה. '+(r.chg?'עודף '+fmt(r.chg):''))}
 /* מכירה אחרונה (ס17): עותק, קבלת מתנה, שליחה */
 /* POS:W2: מספר המסמך הרשמי מהשרת (docs), לא מספר המכירה הפנימי (ב מ8). עוד אין – "ממתין למסמך" */
@@ -212,10 +214,11 @@ function rcptHtml(d,gift){const{E,fmt,hm,dmy,M_NAME}=UI();return`<div class="pos
  ${d.pays.map(p=>`<div class="pos-kv"><span>${E(M_NAME[p.m])}</span><b>${fmt(p.amt)}</b></div>`).join('')}${d.debt?`<div class="pos-kv"><span>הקפה</span><b>${fmt(d.debt)}</b></div>`:''}${d.chg?`<div class="pos-kv"><span>עודף</span><b>${fmt(d.chg)}</b></div>`:''}`}
  ${d.note?`<p class="pos-note">${E(d.note)}</p>`:''}<p class="pos-note">${UI().cfg('rcptQr')?'[QR להורדת הקבלה] ':''}${UI().cfg('rcptBarcode')?'[ברקוד מסמך '+E(((UI().cfg('bc.prefixes')||{}).rcpt||'')+d.no)+']':''}</p></div>`}
 async function last(){const{modal}=UI();const d=S.last;if(!d)return;
- const v=await modal(`<div class="pos-sh"><h2>מכירה אחרונה</h2></div>${rcptHtml(d,false)}<div class="pos-grid2"><button class="pos-b g" data-v="copy">הדפסת עותק</button>${UI().cfg('giftRcpt')?'<button class="pos-b g" data-v="gift">קבלת מתנה</button>':''}<button class="pos-b g" data-v="send">שליחה ללקוח</button><button class="pos-b" data-v="no" data-def>סגירה</button></div>`,{label:'מכירה אחרונה',cls:'wide'});
+ const v=await modal(`<div class="pos-sh"><h2>מכירה אחרונה</h2></div>${rcptHtml(d,false)}<div class="pos-grid2"><button class="pos-b g" data-v="copy">הדפסת עותק</button>${UI().cfg('giftRcpt')?'<button class="pos-b g" data-v="gift">קבלת מתנה</button>':''}<button class="pos-b g" data-v="send">שליחה ללקוח</button>${root.PosBizDoc&&d.custObj&&d.custObj.biz?'<button class="pos-b g" data-v="a4">הדפסת A4</button>':''}<button class="pos-b" data-v="no" data-def>סגירה</button></div>`,{label:'מכירה אחרונה',cls:'wide'});
  if(v==='copy'){UI().Dev.print({kind:'sale',doc:d,copy:true});D().log('reprint',{no:d.no});UI().toast('נשלח להדפסה')}
  if(v==='gift'){UI().Dev.print({kind:'gift',doc:d});D().log('giftRcpt',{no:d.no});await modal(`<div class="pos-sh"><h2>קבלת מתנה</h2></div>${rcptHtml(d,true)}<button class="pos-b w" data-v="no" data-def>סגירה</button>`,{label:'קבלת מתנה'})}
- if(v==='send'){D().log('send',{no:d.no});UI().toast('השליחה הדיגיטלית תגיע עם מודול הקבלות')}}
+ if(v==='a4'&&root.PosBizDoc)await root.PosBizDoc.a4Again(d);
+ if(v==='send'){D().log('send',{no:d.no});if(root.PosBizDoc)await root.PosBizDoc.resend(d);else UI().toast('השליחה הדיגיטלית תגיע עם מודול הקבלות')}}
 async function ret(prefill){const r=await root.PosRet.open({role:role(),prefill});if(!r)return;
  /* POS:W2: החזרה שעוד לא אושרה בשרת (בלי רשת) – בתור: בלי קבלה, בלי מגירה ובלי כסף עד שהשרת מאשר (ב ה15). האישור מגיע בהודעה (pos-w2.js) */
  if(r.r&&r.r.pend){UI().toast('אין רשת – ההחזרה ממתינה לאישור השרת. אין להחזיר כסף עד שתופיע הודעה שאושרה','warn');refresh();return}

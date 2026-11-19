@@ -1,7 +1,7 @@
 /* POS:M4 – סכמת ההגדרות של הקופה (poscfg). קובץ אחד, זהה בדיוק בשני המקומות:
      app-source/www/pos-cfg-schema.js  (דפדפן: window.PosCfgSchema)
      firebase/functions/lib/pos-cfg-schema.js  (שרת: module.exports)
-   מקור: האפיון הסופי (06-אפיון-סופי.md), פרק 2 – כל שורה בטבלה = שורה כאן (313 מפתחות). פורמט השורה: אפיון ה 0.4.
+   מקור: האפיון הסופי (06-אפיון-סופי.md), פרק 2 – כל שורה בטבלה = שורה כאן (313 מפתחות; + rcptBizRc – החלטת בעל העסק 19.11.2026 = 314). פורמט השורה: אפיון ה 0.4.
    כללים (פרק 2):
      - נקודה בשם = אובייקט מקונן בתוך poscfg/main (למשל cat.nameMax נשמר כ-main.cat.nameMax).
      - מפתחות sa.* נשמרים ב-poscfg/sa (בלי הקידומת). sa.on, sa.st, sa.type, sa.mods מועתקים בשרת, באותה טרנזקציה, ל-poscfg/saPub.
@@ -204,6 +204,7 @@ R('pay','mgr','payLinkOn','bool',true,'תשלום בקישור (רק עם ספק
 R('rcpt','mgr','rcptPrint','enum','always','הדפסת קבלה',{vals:['always','ask','never']});
 R('rcpt','mgr','rcptWidth','enum',80,'רוחב נייר (מ"מ)',{vals:[58,80]});
 R('rcpt','mgr','rcptBizFmt','enum','a4','מסמך ללקוח עסקי',{vals:['a4','roll']});
+R('rcpt','mgr','rcptBizRc','enum','print','קבלה ללקוח עסקי שמקבל רק חשבוניות',{vals:['print','send','none'],help:'כרטיס הלקוח: שליחת חשבוניות בלי קבלות, והמכירה הפיקה חשבונית + קבלה. print – הקבלה מודפסת בקופה · send – נשלחת גם היא באותו ערוץ · none – לא נשלחת ולא מודפסת'}); /* קופה גל 3 (19.11.2026, החלטת בעל העסק) – לא בפרק 2 */
 R('rcpt','sa','rcptSend','list',['wa','mail'],'שליחת קבלה',{vals:['wa','mail','sms']});
 R('rcpt','mgr','mailBizOnly','bool',true,'מייל רק ללקוח עסקי');
 R('rcpt','mgr','rcptLogo','enum','bw','לוגו בקבלה',{vals:['off','bw']});

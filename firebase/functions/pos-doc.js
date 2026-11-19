@@ -8,11 +8,18 @@
 // פונקציה (onCall):
 //   posDoc({ op:'get', sale })              → { sale, pays, docs, hdr } – נתוני הקבלה להדפסה חוזרת / שליחה (pos-receipt.js בונה את הקבלה).
 //   posDoc({ op:'printed', sale, ok })      → { prn } – ok:true = הודפסה ('ok'); false = נייר נגמר / תקלה ('pend', ד H7). הדפסה שנייה = reprint ביומן.
-//   posDoc({ op:'gift' | 'send', sale, ch? }) → { ok } – קבלת מתנה / שליחה דיגיטלית: רק רישום ביומן (giftRcpt / send). השליחה עצמה – גל 3.
-// שגיאות (details.reason): bad-input, bad-op, bad-sale, no-sale, not-pos.
+//   posDoc({ op:'gift', sale })            → { ok } – קבלת מתנה: רישום ביומן (giftRcpt).
+//   posDoc({ op:'send', sale, ch })         → { ok, sent:[{ch,to,at,ok,why?,doc,t,no,auto:false,by}] } – קופה גל 3 (19.11.2026): שליחת מסמכי המכירה
+//                                             ללקוח (ch: 'wa' | 'mail' | 'both') בלחיצה – "שלח שוב" / בחירה בסוף מכירה. אותו מנוע כמו חשבוניות ההזמנות
+//                                             (ar.js sendDoc → lib/ar-send.js: תבנית וואטסאפ מאושרת, מונה יומי, מונה מיילים). רישום: ardoc.sent + possale.sent.
+//   posDoc({ op:'pdf', sale })              → { files:[{ id, t, no, name, b64 }] } – קובץ ה-PDF של מסמכי המכירה (הדפסת A4 באנדרואיד – PdfPrint).
+// טריגר posSaleSend (onDocumentCreated b/{biz}/possale/{id}) – שליחה אוטומטית מיד אחרי שהמכירה נשמרה, ללקוח עסקי (cust.wholesale)
+//   שבכרטיס שלו ערוץ (cust.snd.ch). לא חוסם את המכירה ולא מבטל אותה; "עצור הכל" עוצר (auto). פעם אחת למכירה (possale.autoSnd).
+// שגיאות (details.reason): bad-input, bad-op, bad-sale, bad-ch, no-sale, no-doc, not-pos.
 
 const { HttpsError } = require('firebase-functions/v2/https');
-const { onCall } = require('./lib/region');
+const { onCall, NEW_REGION } = require('./lib/region');
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
 const ARD = require('./lib/ar-doc');
@@ -143,7 +150,8 @@ async function docIn(request) {
   if (!who.superadmin) T.requireFeature(who.biz, 'pos');
   if (!(hasPerm(who, 'pos') || hasPerm(who, 'posMgr'))) throw deny('not-pos', 'אין לך הרשאת קופה'); // 18.11.2026: גם מנהל רק עם pos / posMgr (מנהל־על מדליק; hasPerm).
   for (const k of Object.keys(input)) if (!['op', 'sale', 'ok', 'ch'].includes(k)) throw bad('bad-input', 'קלט לא תקין');
-  if (!['get', 'printed', 'gift', 'send'].includes(input.op)) throw bad('bad-op', 'פעולה לא מוכרת');
+  if (!['get', 'printed', 'gift', 'send', 'pdf'].includes(input.op)) throw bad('bad-op', 'פעולה לא מוכרת');
+  if (input.op === 'send' && !SEND_CH.includes(input.ch)) throw bad('bad-ch', 'ערוץ: וואטסאפ, מייל או שניהם');
   if (typeof input.sale !== 'string' || !SALE_RE.test(input.sale)) throw bad('bad-sale', 'מספר מכירה לא תקין');
   const db = T.tdb();
   const ref = db.doc('possale/' + input.sale);
@@ -168,9 +176,21 @@ async function docIn(request) {
     if (!input.ok) await log('prnFail', 'הקבלה ממתינה להדפסה');
     return { ok: true, prn };
   }
-  if (input.op === 'gift' || input.op === 'send') {
-    await log(LOG_ACT[input.op], input.op === 'send' ? String(input.ch || '') : '');
+  if (input.op === 'gift') {
+    await log(LOG_ACT.gift, '');
     return { ok: true };
+  }
+  if (input.op === 'send' || input.op === 'pdf') {
+    if (!Array.isArray(sale.docs) || !sale.docs.length) throw pre('no-doc', 'למכירה עוד אין מסמך – נסו שוב כשהרשת תחזור');
+    const w = { bizId: who.bizId, uid: who.uid };
+    if (input.op === 'pdf') {
+      const AR = arCore(), cfg = await AR.cfgOf(db), files = [];
+      for (const d of sale.docs) { const doc = await AR.docOf(db, d.id); const b = await AR.docBuf(db, w, doc, cfg, false); files.push({ id: d.id, t: doc.t, no: doc.no, name: AR.docName(doc, false), b64: b.toString('base64') }); }
+      return { ok: true, files };
+    }
+    const sent = await sendSale(w, input.sale, sale, input.ch, false);
+    await log(LOG_ACT.send, input.ch + ':' + (sent.some((r) => r.ok) ? 'ok' : (sent[0] && sent[0].why) || 'fail'));
+    return { ok: true, sent };
   }
   // get
   const pq = await db.collection('pospay').where('sale', '==', input.sale).get();
@@ -183,6 +203,89 @@ async function docIn(request) {
   return { ok: true, sale, pays, docs, hdr: await hdrOf(db, sale.br) };
 }
 
+// ---------- שליחה ללקוח (קופה גל 3) ----------
+const SEND_CH = ['wa', 'mail', 'both'];
+const POS_SENT_MAX = 30;
+const arCore = () => require('./ar')._core; // טעינה מאוחרת: ar.js טוען את orders.js
+// ערוצים לפי הבחירה (ch) או לפי הכרטיס (snd.ch); כרטיס בלי ערוץ תקין – אין שליחה אוטומטית
+function chsOf(ch, snd) {
+  const c = ch || (snd && typeof snd === 'object' && SEND_CH.includes(snd.ch) ? snd.ch : '');
+  return c === 'both' ? ['wa', 'mail'] : c ? [c] : [];
+}
+// לקוח עסקי (כמו kinds/posSale: cust.wholesale) שבכרטיס שלו ערוץ – שליחה אוטומטית. אחרת – [] (פרטי / בלי הגדרה: כמו היום)
+// t = סוג המסמך: נשלח רק מה שהכרטיס ביקש (snd.inv / snd.rc – אותו כלל בדיוק כמו חשבוניות ההזמנות, ar.js wantDoc). כרטיס עם oc בלבד – כלום
+function autoChs(c, t) { return c && c.wholesale === true && arCore().wantDoc(c.snd, t) ? chsOf('', c.snd) : []; }
+const autoAny = (c, docs) => (docs || []).some((d) => autoChs(c, d.t).length > 0);
+// rcptBizRc (poscfg, מנהל): כרטיס עם חשבוניות בלבד (snd.inv בלי snd.rc) ומכירה עם חשבונית + קבלה – 'send' = הקבלה נשלחת גם היא באותו ערוץ.
+// 'print' (ברירת המחדל) / 'none' – הקבלה לא נשלחת (בקופה: מודפסת / לא כלום – pos-bizdoc.js)
+const invOnly = (c, docs) => !!(c && c.snd && c.snd.inv === true && c.snd.rc !== true && (docs || []).some((d) => d.t === 'inv') && (docs || []).some((d) => d.t === 'rc'));
+function autoChsSale(c, t, docs, rcMode) {
+  const x = autoChs(c, t);
+  if (x.length || t !== 'rc' || rcMode !== 'send' || !invOnly(c, docs)) return x;
+  return autoChs(c, 'inv');
+}
+async function rcModeOf(db) { try { const v = (await require('./pos-sale')._core.cfgOf(db)).rcptBizRc; return ['print', 'send', 'none'].includes(v) ? v : 'print'; } catch (e) { return 'print'; } }
+// שולח כל מסמך של המכירה בכל ערוץ. כשל לא זורק – נרשם (why). deps – לבדיקות בלבד ({ send, mail })
+async function sendSale(w, saleId, sale, ch, auto, deps) {
+  const AR = arCore();
+  const db = T.tdb();
+  const c = sale.cust ? await AR.custOf(db, { custId: sale.cust }) : null;
+  const out = [];
+  if (ch ? !chsOf(ch).length : !autoAny(c, sale.docs)) return out;
+  const cfg = await AR.cfgOf(db);
+  const rcMode = !ch && invOnly(c, sale.docs) ? await rcModeOf(db) : 'print';
+  for (const d of sale.docs || []) {
+    const chs = ch ? chsOf(ch) : autoChsSale(c, d.t, sale.docs, rcMode); // אוטומטי – לכל מסמך לפי הדגלים בכרטיס (+ rcptBizRc לקבלה)
+    if (!chs.length) continue;
+    let doc, buf;
+    try { doc = await AR.docOf(db, d.id); buf = await AR.docBuf(db, w, doc, cfg, false); } catch (e) {
+      const why = String((e && e.details && e.details.reason) || 'pdf').slice(0, 40);
+      for (const x of chs) out.push({ ch: x, to: '', at: Date.now(), ok: false, why, doc: d.id, t: d.t, no: d.no, auto: !!auto, by: w.uid });
+      continue;
+    }
+    const recs = [];
+    for (const [x, to] of AR.targets({ ch: ch || (c && c.snd && c.snd.ch) }, { cust: doc.custSnap || {} }, c).filter(([x]) => chs.includes(x))) {
+      let r;
+      try { r = to ? await AR.sendDoc(db, w, doc, x, to, !!auto, buf, cfg, false, deps) : { ch: x, to: '', at: Date.now(), ok: false, why: 'no-to' }; } catch (e) {
+        r = { ch: x, to: String(to || '').slice(0, 254), at: Date.now(), ok: false, why: String((e && e.details && e.details.reason) || 'error').slice(0, 40) };
+      }
+      recs.push(Object.assign({}, r, { auto: !!auto, by: w.uid }));
+    }
+    try { await AR.docRecord(db, d.id, recs); } catch (e) { /* הרישום במסמך לא מבטל את השליחה */ }
+    for (const r of recs) out.push(Object.assign({}, r, { doc: d.id, t: d.t, no: d.no }));
+  }
+  if (out.length) {
+    const ref = db.doc('possale/' + saleId);
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      if (!s.exists) return;
+      tx.update(ref, { sent: (Array.isArray(s.get('sent')) ? s.get('sent') : []).concat(out).slice(-POS_SENT_MAX) });
+    });
+  }
+  return out;
+}
+// הטריגר: פעם אחת למכירה (autoSnd נכתב בטרנזקציה לפני השליחה – אירוע כפול לא שולח פעמיים)
+async function autoSend(bizId, saleId, deps) {
+  const db = T.tdb();
+  const ref = db.doc('possale/' + saleId);
+  const s0 = await ref.get();
+  if (!s0.exists) return { skip: 'no-sale' };
+  const sale = s0.data() || {};
+  if (!sale.cust || !Array.isArray(sale.docs) || !sale.docs.length || sale.chk) return { skip: 'no-doc' };
+  const c = await arCore().custOf(db, { custId: sale.cust });
+  if (!autoAny(c, sale.docs)) return { skip: 'no-snd' };
+  let first = false;
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists || s.get('autoSnd')) return;
+    first = true;
+    tx.update(ref, { autoSnd: Date.now() });
+  });
+  if (!first) return { skip: 'dup' };
+  const sent = await sendSale({ bizId, uid: sale.cashier || '' }, saleId, sale, '', true, deps);
+  return { sent };
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -190,7 +293,19 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-exports.posDoc = onCall(wrap('posDoc', docIn));
+// שליחה מחייבת את סודות הוואטסאפ והמייל (כמו arDoc / arIssue ב-ar.js)
+const SEND_SECRETS = () => [arCore().WA_ACCESS_TOKEN].concat(require('./lib/ar-send').MAIL_SECRETS);
+exports.posDoc = onCall({ secrets: SEND_SECRETS(), timeoutSeconds: 120, memory: '512MiB' }, wrap('posDoc', docIn));
+exports.posSaleSend = onDocumentCreated({ document: 'b/{bizId}/possale/{id}', region: NEW_REGION, retry: false, timeoutSeconds: 120, memory: '512MiB', maxInstances: 5, secrets: SEND_SECRETS() }, async (ev) => {
+  const bizId = String(ev.params.bizId || '');
+  if (!T.BIZ_RE.test(bizId) || !SALE_RE.test(String(ev.params.id || ''))) return null;
+  const d = ev.data && typeof ev.data.data === 'function' ? ev.data.data() : null;
+  if (!d || !d.cust || !Array.isArray(d.docs) || !d.docs.length) return null; // לקוח מזדמן / בלי מסמך – בלי קריאות נוספות
+  try { return await T.runInBiz({ bizId, prefix: 'b/' + bizId + '/' }, () => autoSend(bizId, ev.params.id)); } catch (e) {
+    require('firebase-functions/logger').error('pos: posSaleSend failed', { name: e && e.name, msg: String(e && e.message || '').slice(0, 200) });
+    return null;
+  }
+});
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  kinds, needAlloc, docLines, paySum, prep, issueSale, issueRc, issueCr, hdrOf, docIn, call: { posDoc: () => wrap('posDoc', docIn) },
+  kinds, needAlloc, docLines, paySum, prep, issueSale, issueRc, issueCr, hdrOf, docIn, chsOf, autoChs, autoAny, autoChsSale, invOnly, sendSale, autoSend, call: { posDoc: () => wrap('posDoc', docIn) },
 } });
