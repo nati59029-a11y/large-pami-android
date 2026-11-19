@@ -13,6 +13,8 @@
      display.info()/show(html)/showCart(cart)/clear()   מסך לקוח שני (Presentation)
      on(name,cb) -> off()                'scan' | 'rejected' | 'change' | 'display' | 'usb'
      openPanel()                         חלון "בדיקת ציוד" (בחירת מדפסת, הדפסת בדיקה, מגירה, סורק, מסך לקוח)
+     a4() / setA4(p) / a4Print(html)     קופה גל 3: "מדפסת A4" של המכשיר (מסמכים ללקוח עסקי). במחשב בלבד: {type:'win'} = מדפסת ברירת המחדל
+                                         של Windows (window.print, ב-kiosk-printing בלי חלון). באנדרואיד A4 יוצא בחלון ההדפסה (PdfPrint, pos-bizdoc.js).
    אין כאן שום טיפול בכרטיסי אשראי: קלט שנראה כמו פס מגנטי או מספר כרטיס נזרק (לא נשמר, לא מועבר, לא מוצג).
    ב-Node: require(...)(root) – לבדיקות עם Capacitor מדומה (tools/pos-hw-test/pos-hw.test.js). */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory;else root.LpPosHw=factory(root)})(typeof self!=='undefined'?self:this,function(root){
@@ -52,6 +54,15 @@ function cleanPrinter(p){if(!p||typeof p!=='object')return null;
 function printer(){return cleanPrinter(cfg().printer)}
 function setPrinter(p){const c=cfg();if(p==null){delete c.printer}else{const x=cleanPrinter(p);if(!x)throw new Error('הגדרת מדפסת לא תקינה');c.printer=x}
  saveCfg(c);const P=plug();if(P&&P.disconnect)P.disconnect().catch(()=>{});emit('change',{printer:printer()})}
+/* ---------- מדפסת A4 (קופה גל 3) ---------- */
+function a4(){const a=cfg().a4;return a&&a.type==='win'?{type:'win'}:null}
+function setA4(p){const c=cfg();if(p&&p.type==='win')c.a4={type:'win'};else delete c.a4;saveCfg(c);emit('change',{a4:a4()})}
+/* HTML בגודל A4 מתוך iframe נסתר. "נשלח למדפסת" – הדפדפן לא מדווח אם הדף יצא */
+function a4Print(html){const d=root.document;if(!d||!d.body)return Promise.reject(new Error('אין דפדפן'));
+ return new Promise((ok,no)=>{const f=d.createElement('iframe');f.setAttribute('aria-hidden','true');f.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px';d.body.append(f);
+  const w=f.contentWindow;if(!w){f.remove();return no(new Error('ההדפסה נכשלה'))}
+  w.document.open();w.document.write('<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>@page{size:A4;margin:12mm}body{margin:0;color:#000;background:#fff}</style></head><body>'+String(html||'')+'</body></html>');w.document.close();
+  setTimeout(()=>{try{w.focus();w.print();ok({ok:true,via:'win'})}catch(e){no(e)}setTimeout(()=>f.remove(),60000)},50)})}
 function pDesc(p){if(!p)return'לא נבחרה מדפסת';const w=p.width===384?'58 מ"מ':'80 מ"מ';
  return(p.type==='net'?'רשת '+p.host+':'+p.port:p.type==='bt'?'בלוטות\' '+(p.name||p.address):p.type==='usb'?'USB '+(p.name||''):p.type==='win'?'מדפסת Windows (מנהל התקן)':p.type==='serial'?'כבל Serial/USB · '+p.baud:'מדפסת מדומה (בלי חומרה)')+' · '+w}
 
@@ -189,6 +200,11 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
    '<div>מגירה: <button data-k=pin2 '+btn+'>'+(p.drawerPin===2?'✓ ':'')+'פין 2</button><button data-k=pin5 '+btn+'>'+(p.drawerPin===5?'✓ ':'')+'פין 5</button></div>'+
    '<button data-k=test '+btn+'>הדפסת קבלת בדיקה</button><button data-k=drawer '+btn+'>פתיחת מגירה</button><button data-k=forget '+btn+'>ביטול המדפסת</button>':'')+
   '<div id=phDev></div><div id=phMsg aria-live=polite style="margin:8px 0;font-weight:bold"></div><div id=phPrev></div>'+
+  '<h3>מדפסת A4 (מסמכים ללקוח עסקי)</h3>'+(W?'<div>'+(a4()?'מדפסת ברירת המחדל של Windows':'לא נבחרה – לקוח עסקי עם "הדפסת A4" יקבל קבלה בקופה')+'</div>'+
+   '<button data-k=a4win '+btn+'>'+(a4()?'✓ ':'')+'מדפסת ברירת המחדל של Windows</button>'+(a4()?'<button data-k=a4test '+btn+'>הדפסת דף בדיקה A4</button><button data-k=a4off '+btn+'>ביטול מדפסת A4</button>':'')+
+   (p&&p.type==='win'?'<div role=alert style="margin:6px 0;padding:8px;border-radius:8px;background:#ed6c0222;border:1px solid #ed6c02">שימו לב: גם מדפסת הקבלות מוגדרת כ"מדפסת Windows", ולכן מסמכי A4 וקבלות ייצאו לאותה מדפסת (ברירת המחדל של Windows). '+
+    'חברו את מדפסת הקופה בכבל ובחרו למעלה "מדפסת בכבל Serial/USB (Chrome)", וקבעו את מדפסת ה-A4 כברירת המחדל של Windows.</div>':'')
+   :'<div>באנדרואיד מסמך A4 נפתח בחלון ההדפסה של הטלפון – שם בוחרים את המדפסת.</div>')+
   '<h3>סורק ברקודים</h3><div>סרקו ברקוד כשהחלון פתוח (הסורק במצב מקלדת, עם Enter בסוף).</div><div id=phScan aria-live=polite style="font-size:20px;margin:6px 0">—</div>'+
   '<h3>מסך לקוח</h3><button data-k=dshow '+btn+'>הצגת בדיקה במסך הלקוח</button><button data-k=dclear '+btn+'>ניקוי מסך הלקוח</button>';
   check()}
@@ -215,6 +231,9 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
   if(k==='baud'&&p&&p.type==='serial')return act(async()=>{setPrinter(Object.assign({},p,{baud:+b.dataset.b}));render();msg('מהירות: '+b.dataset.b)});
   if(k==='mock')return act(async()=>{setPrinter({type:'mock',width:p?p.width:576});render();msg('נבחרה מדפסת מדומה – ההדפסה מוצגת כתמונה בלבד')});
   if(k==='forget')return act(async()=>{setPrinter(null);render()});
+  if(k==='a4win')return act(async()=>{setA4({type:'win'});render();msg('נבחרה מדפסת A4: ברירת המחדל של Windows')});
+  if(k==='a4off')return act(async()=>{setA4(null);render();msg('בוטלה מדפסת A4')});
+  if(k==='a4test')return act(async()=>{await a4Print('<div style="font-family:Arial,sans-serif;font-size:16pt;text-align:center;margin-top:40mm"><b>דף בדיקה – מדפסת A4</b><p>אם הדף הזה יצא במדפסת ה-A4 (ולא במדפסת הקבלות) – ההגדרה תקינה.</p></div>');msg('נשלח דף בדיקה למדפסת ברירת המחדל של Windows – בדקו שיצא במדפסת ה-A4')});
   if(/^w(58|80)$/.test(k)&&p)return act(async()=>{setPrinter(Object.assign({},p,{width:k==='w58'?384:576}));render()});
   if(/^pin[25]$/.test(k)&&p)return act(async()=>{setPrinter(Object.assign({},p,{drawerPin:k==='pin5'?5:2}));render()});
   if(k==='test')return act(async()=>{msg('מדפיס…');const r=await printTest();msg(r.via==='win'?'נשלח למדפסת Windows – בדקו שהקבלה יצאה':'הודפס ('+r.bytes+' בתים, '+r.ms+'ms)');
@@ -232,5 +251,5 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
 /* רטט (P9): קודם התוסף (navigator.vibrate לא עובד בכל WebView), ואם אין – navigator.vibrate */
 async function vibrate(ms){ms=Math.max(10,Math.min(1000,+ms||40));const P=plug();if(P&&typeof P.vibrate==='function'){try{const r=await P.vibrate({ms});if(r&&r.ok)return true}catch(e){}}
  try{return!!(root.navigator&&root.navigator.vibrate&&root.navigator.vibrate(ms))}catch(e){return false}}
-return{available,plug,web,requestSerial,vibrate,printer,setPrinter,cleanPrinter,pDesc,listDevices,requestUsb,requestBt,print,printTest,testReceipt,openDrawer,status,printerState,
+return{available,plug,web,requestSerial,vibrate,printer,setPrinter,a4,setA4,a4Print,cleanPrinter,pDesc,listDevices,requestUsb,requestBt,print,printTest,testReceipt,openDrawer,status,printerState,
  onScan,ScanDetector,looksLikeCard,display,cartHtml,on,openPanel}});

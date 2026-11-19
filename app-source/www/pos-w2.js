@@ -95,7 +95,7 @@ PD.getLog=async()=>jget(K('log'))||[];
 let CU=null,cuAt=0;
 async function custList(){if(CU&&Date.now()-cuAt<5*60000)return CU;const out=[];let tok='';
  for(let i=0;i<5;i++){const j=await root.fsx('/cust?pageSize=1000'+(tok?'&pageToken='+encodeURIComponent(tok):''));
-  for(const d of(j&&j.documents)||[]){const o=fvj0({mapValue:d});const id=String(d.name||'').split('/').pop();if(o&&!o.mv)out.push({id,name:String(o.bn||o.name||''),phone:String(o.phone||''),phx:Array.isArray(o.phx)?o.phx.map(String):[],biz:o.wholesale===true,taxId:o.vat||'',addr:'',limit:typeof o.lim==='number'?Math.round(o.lim*100):0,bal:0})}
+  for(const d of(j&&j.documents)||[]){const o=fvj0({mapValue:d});const id=String(d.name||'').split('/').pop();if(o&&!o.mv)out.push({id,name:String(o.bn||o.name||''),phone:String(o.phone||''),phx:Array.isArray(o.phx)?o.phx.map(String):[],biz:o.wholesale===true,taxId:o.vat||'',addr:'',limit:typeof o.lim==='number'?Math.round(o.lim*100):0,bal:0,mail:String(o.mail||''),snd:o.snd&&typeof o.snd==='object'?{ch:String(o.snd.ch||''),a4:o.snd.a4===true}:null})} /* mail, snd – קופה גל 3 (PosBizDoc) */
   tok=j&&j.nextPageToken;if(!tok)break}
  CU=out;cuAt=Date.now();return CU}
 const nrm=s=>(PD.normalize?PD.normalize(s):String(s||'').toLowerCase());
