@@ -336,6 +336,7 @@ FRM.oxPF=async f=>{const x=fd(f),price=num(x.price);if(!x.name.trim())return toa
  if(x.cost&&x.cost.trim()){const c=num(x.cost);if(!(c>=0))return toast('עלות לא תקינה');if(!x.id||c!==costOf(x.id))d.cost=c}
  if(x.id){d.id=x.id;d.on=!x.off}else{d.reqId=x.req;if(x.qty&&x.qty.trim()){const v=num(x.qty);if(!(v>=0))return toast('כמות לא תקינה');d.qty=v;d.br=sbr()}else if(hasBr())d.br=SBR}
  try{Object.assign(d,pExtRead(f,x,!x.id))}catch(e){return toast(e.message)}
+ if(d.sup&&window.supSync)window.supSync([d.sup]);/* סנכרון ספקים: ספק חדש מהמוצר – לכרטסת (מנהל) */
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveProduct',d);closeDlg();toast('המוצר נשמר');await load(true)}catch(e){b.disabled=false;err(e)}};
 // הכנסת מלאי – כמה שורות בבת אחת
 ACT.oxIn=()=>{O.inL=[{pid:'',qty:''}];O.inReq=rid();dlg(inH())};
@@ -445,12 +446,13 @@ const pExtH=p=>{const T=topC(),c=p&&p.cat||'',B=brs(),bp=p&&p.bp||{};
  const bh=B.length>1?`<details${Object.keys(bp).length?' open':''}><summary class="note" style="min-height:44px;display:flex;align-items:center">מחיר שונה לסניף (ריק = מחיר המכירה)</summary>${B.map(b=>fld('מחיר ב'+esc(b.name)+' ₪','bp_'+b.id,bp[b.id]!=null?bp[b.id]:'','text','inputmode="decimal"')).join('')}</details>`:'';
  return cs+bh+`<div class="row"><label class="f grow"><span>כמות במארז</span><input name="pk" inputmode="numeric" value="${esc(p&&p.pk||'')}"></label><label class="f grow"><span>כמות בקרטון</span><input name="ct" inputmode="numeric" value="${esc(p&&p.ct||'')}"></label></div>`
  +(B.length>1?`<label class="f"><span>סניף הבית של הפריט</span><select name="home"><option value="">לא נקבע</option>${B.map(b=>`<option value="${esc(b.id)}"${p&&p.home===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:'')
- +fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"')}; // 00:13: גם עובד עם ord
+ +fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"')
+ +/* סנכרון ספקים (19.11.2026): ספק המוצר, עם רשימת כל הספקים (כרטסת + מלאי). ריק = בלי ספק */`<label class="f"><span>ספק (רשות)</span><input name="sup" maxlength="60" list="oxPSupDL" autocomplete="off" value="${esc(p&&p.sup||'')}" placeholder="שם הספק"></label>${window.supDL?window.supDL('oxPSupDL'):''}`}; // 00:13: גם עובד עם ord
 function pExtRead(f,x,isNew){const d={},T=topC();if(T.length){d.cat=x.cat||null;d.sub=x.sub||null;if(d.sub){const s=(O.C||[]).find(c=>c.id===d.sub);if(s&&!d.cat)d.cat=s.parent;if(s&&d.cat!==s.parent)throw new Error('תת־הקטגוריה לא שייכת לקטגוריה שנבחרה')}}
  const B=brs();if(B.length>1){const bp={};let any=false;for(const b of B){const v=String(x['bp_'+b.id]||'').trim();if(v){const n=num(v);if(!(n>=0))throw new Error('מחיר לסניף לא תקין');bp[b.id]=n;any=true}else if(!isNew)bp[b.id]=''}if(any||!isNew)d.bp=bp;d.home=x.home||null}
  for(const k of['pk','ct']){const v=String(x[k]||'').trim();if(v){const n=num(v);if(!(n>0)||!Number.isInteger(n))throw new Error('מארז/קרטון: מספר שלם');d[k]=n}else if(!isNew)d[k]=null}
  if(x.wp&&x.wp.trim()){const n=num(x.wp);if(!(n>=0))throw new Error('מחיר סיטונאי לא תקין');d.wp=n}
- for(const k of['sku','sup']){const v=String(x[k]||'').trim();if(v)d[k]=v;else if(!isNew)d[k]=null}
+ /* 19.11.2026: שדה שלא קיים בטופס (קוד פריט) – לא נשלח, כדי שעריכה לא תמחק ערך מהייבוא */for(const k of['sku','sup']){if(!(k in x))continue;const v=String(x[k]||'').replace(/\s+/g,' ').trim();if(v)d[k]=v;else if(!isNew)d[k]=null}
  {const nt=String(x.note||'').trim();if(nt.length>500)throw new Error('הערות: עד 500 תווים');if(nt)d.note=nt;else if(!isNew)d.note=null}return d}
 
 /* קטגוריות (מנהל) */
@@ -639,5 +641,5 @@ const dayH=()=>{const D=DAY();if(!D.b&&(!D.r||!D.at||D.br!==(OBR||'')))setTimeou
 ACT.oxDayK=el=>{const D=DAY();D.k=el.dataset.k;if(D.k!=='custom'){[D.from,D.to]=pfRange(D.k);D.r=null;dayLoad()}else rerender()};
 FRM.oxDayF=f=>{const x=fd(f),D=DAY(),ok=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'');if(!ok(x.from)||!ok(x.to))return toast('בחר תאריכים');if(x.to<x.from)return toast('תאריך הסיום לפני תאריך ההתחלה');if(dAdd(x.from,366)<x.to)return toast('תקופה של עד שנה');D.from=x.from;D.to=x.to;D.r=null;dayLoad()};
 ACT.oxDayProf=()=>{if(!prOk())return;const D=DAY(),P=PF();P.k=D.k==='today'||D.k==='yest'?D.k:'custom';P.from=D.from;P.to=D.to;P.br=OBR||'';P.r=null;P.err='';P.b=0;go('oxProf')};
-window.__ox=O;window.__oxAfter=after;/* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__payKind=payKind;window.__oxAuthH=o=>afterOn()?authH(o):''; /* החלטה 32 */window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
+window.__ox=O;window.__oxAfter=after;/* חוסרים (19.11.2026): טעינת המלאי לזיהוי מוצר */window.__oxLoadAll=()=>load();window.__pExtRead=pExtRead;/* לבדיקה (ui-hs.js 47) *//* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__payKind=payKind;window.__oxAuthH=o=>afterOn()?authH(o):''; /* החלטה 32 */window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
 })();

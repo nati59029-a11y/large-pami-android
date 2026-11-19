@@ -234,10 +234,10 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   await mp.evaluate((d) => window.hsOnInv(d), INV1); await sleep(800);
   check('24 אותה חשבונית שוב – אין שום עדכון נוסף', LOG.filter((l) => l.m === 'PATCH').length === n0, LOG.filter((l) => l.m === 'PATCH').length - n0);
   mt = await mainT(mp);
-  check('24א רשימת הפתוחים מתעדכנת: קוטג עם "הגיע חלקית בחשבונית #5001 … נשארו 2 מתוך 4" וכפתור ביטול', /הגיע חלקית בחשבונית #5001 · [^\n]* · m · נשארו 2 מתוך 4/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUnp][data-id=a1]') && !document.querySelector('[data-hs=b1]')), mt.slice(0, 400));
+  check('24א רשימת הפתוחים מתעדכנת: קוטג עם "הגיע חלקית בחשבונית #5001 … נשארו 2 מתוך 4" וכפתור ביטול', /הגיע חלקית בחשבונית #5001 · [^\n]* · מנהל · נשארו 2 מתוך 4/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUnp][data-id=a1]') && !document.querySelector('[data-hs=b1]')), mt.slice(0, 400));
   await mp.click('[data-a=hsTab][data-v=arr]'); await waitFor(() => mp.evaluate(() => /ירד אוטומטית/.test(document.getElementById('main').innerText)), 4000);
   mt = await mainT(mp);
-  check('24ב "הגיעו": "ירד אוטומטית מחשבונית #5001 של תנובה" עם "החזר לחוסרים"', /ירד אוטומטית מחשבונית #5001 של תנובה · [^\n]* · m/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUndo][data-id=b1]')), mt.slice(0, 300));
+  check('24ב "הגיעו": "ירד אוטומטית מחשבונית #5001 של תנובה" עם "החזר לחוסרים"', /ירד אוטומטית מחשבונית #5001 של תנובה · [^\n]* · מנהל/.test(mt) && await mp.evaluate(() => !!document.querySelector('[data-a=hsUndo][data-id=b1]')), mt.slice(0, 300));
   // "בטל" בהודעה: הכול חוזר בדיוק למצב הקודם (הכמות 4, open), עם רשומות undo / unp
   LOG.length = 0; await mp.click('#hsBn [data-a=hsInvUndo]'); await waitFor(async () => stOf('b1') === 'open' && stOf('g1') === 'open' && qOf('a1') === 4, 4000);
   check('25 "בטל": חלב ושקיות חזרו לפתוחים (undo), קוטג חזר לכמות 4 (unp); ההודעה נסגרה', stOf('b1') === 'open' && hv('b1').slice(-1)[0].k === 'undo' && stOf('g1') === 'open' && qOf('a1') === 4 && hv('a1').slice(-1)[0].k === 'unp' && u2m(pt('a1')[0].q) === 'h,q,ub,ut' && await mp.evaluate(() => !document.getElementById('hsBn')), { b1: stOf('b1'), a1: qOf('a1'), h: hv('a1').slice(-1) });
@@ -310,6 +310,60 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   // הכללים לא פורסמו (403) – אין חלון, בלי שגיאות
   F403 = true; LOG.length = 0; await mp.evaluate((a) => { window.hsAskSo(a[0], a[1]); }, [Object.assign({}, O5, { id: 'o6' }), R5]); await sleep(800); F403 = false;
   check('31 403 (הכללים לא פורסמו) – אין חלון ואין יצירה, בלי שגיאות JS', !posts().length && await mp.evaluate(() => !document.querySelector('#dlg[open]')) && mp.__errors.length === 0, mp.__errors);
+  await x.ctx.close();
+
+  // ================= 19.11.2026: שם העובד, "הוזמן", זיהוי מהמלאי, סנכרון ספקים, הגדלת תמונה =================
+  seed(); x = await open('m-hs3', 'm@x.co'); mp = x.page;
+  await x.ctx.route((u) => { const q = new URL(u); return q.port === '8080' && /\/documents\/staff$/.test(decodeURIComponent(q.pathname)); },
+    (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ documents: [docOf('staff/w1', { name: S('יוסי כהן'), email: S('w1@x.co'), active: B(true) })] }) }));
+  await mp.evaluate((L) => { S.subs = S.subs.filter((s) => !/^s\d$/.test(s.id)); L.forEach((s) => S.subs.push({ id: s.id, cat: 'e_sup', name: s.name })); save(); go('hs'); }, SUPS);
+  await waitFor(async () => /יוסי כהן/.test(await mainT(mp)), 5000);
+  mt = await mainT(mp);
+  check('40 שם העובד: "נוסף ע"י יוסי כהן" (מרשימת העובדים) במקום w1', /נוסף ע"י יוסי כהן/.test(mt) && !/נוסף ע"י w1/.test(mt), mt.slice(0, 300));
+  // הוזמן
+  await mp.click('[data-a=hsOd][data-id=a1]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('#dlg[open] form[data-f=hsOdSave]')));
+  check('41 "הוזמן": חלון עם ספק (ברירת מחדל – ספק הפריט) וצפי הגעה', await mp.evaluate(() => document.querySelector('#dlg input[name=sup]').value === 'תנובה' && !!document.querySelector('#dlg input[name=eta][type=date]')));
+  await mp.fill('#dlg input[name=eta]', '2026-11-25');
+  LOG.length = 0; await mp.click('#dlg form[data-f=hsOdSave] button:not([type])');
+  await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.R === '/hsr/a1'), 4000);
+  const od1 = LOG.find((l) => l.m === 'PATCH' && l.R === '/hsr/a1'), of1 = od1 && od1.body.fields, odm = of1 && of1.od.mapValue.fields;
+  check('42 "הוזמן" נשמר: רק od, ub, ut; od = u, byN, t, sup, eta בשם המבצע, t = ut', od1 && u2m(od1.q) === 'od,ub,ut' && Object.keys(odm).sort().join() === 'byN,eta,sup,t,u' && odm.u.stringValue === 'm' && odm.byN.stringValue === 'm' && odm.sup.stringValue === 'תנובה' && odm.eta.stringValue === '2026-11-25' && odm.t.integerValue === of1.ut.integerValue, of1);
+  await waitFor(async () => /הוזמן ע"י/.test(await mainT(mp)));
+  mt = await mainT(mp);
+  check('42א ברשימה: "הוזמן ע"י מנהל מתנובה · … · צפי הגעה 25.11.2026" ותווית "הוזמן"', /הוזמן ע"י מנהל מתנובה · [^\n]* · צפי הגעה 25\.11\.2026/.test(mt) && /עדכון הזמנה/.test(mt), mt.slice(0, 500));
+  await shot(mp, shots, 'hs-6-הוזמן');
+  await mp.click('[data-a=hsOd][data-id=a1]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('#dlg [data-a=hsOdRm]')));
+  LOG.length = 0; await mp.click('#dlg [data-a=hsOdRm]'); await mp.click('#dlg [data-a=yes]');
+  await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.R === '/hsr/a1'), 4000);
+  const od2 = LOG.find((l) => l.m === 'PATCH' && l.R === '/hsr/a1');
+  check('43 ביטול "הוזמן": PATCH עם od במסכה ובלי od בגוף (מחיקה)', od2 && u2m(od2.q) === 'od,ub,ut' && !od2.body.fields.od && !DB.hsr.a1.od, od2 && od2.body.fields);
+  // זיהוי מהמלאי + סנכרון ספקים
+  await mp.evaluate(() => { window.__ox.P = [{ id: 'p1', name: 'חומוס אחלה 400 גרם', sup: 'אחלה', al: [] }, { id: 'p2', name: 'במבה אסם', sup: 'אסם' }]; });
+  const nidA = await mp.evaluate(() => HsCore.nameId('אחלה'));
+  await mp.click('[data-a=hsNew]'); await waitFor(() => mp.evaluate(() => cur().v === 'hsEd'));
+  await mp.fill('input[data-i=hsN]', 'חומוס אחלה');
+  await waitFor(() => mp.evaluate((id) => !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`), nidA), 3000);
+  check('44 זיהוי מהמלאי: "זוהה במלאי: חומוס אחלה 400 גרם · ספק: אחלה" והספק נבחר אוטומטית', await mp.evaluate((id) => /זוהה במלאי: חומוס אחלה 400 גרם · ספק: אחלה/.test(document.getElementById('hsSug').innerText) && !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`), nidA));
+  await shot(mp, shots, 'hs-7-זיהוי-מלאי');
+  await mp.click('[data-a=hsPName]'); await sleep(200);
+  check('44א "השתמש בשם הזה" – שם המוצר מהמלאי', await mp.evaluate(() => document.querySelector('input[data-i=hsN]').value === 'חומוס אחלה 400 גרם'));
+  check('44ב אפשר לשנות: הספק ניתן להסרה ויש בחירת ספק נוסף', await mp.evaluate(() => !!document.querySelector('#hsSups select[data-c=hsSupPick]')));
+  const sy = await mp.evaluate((id) => { const n1 = window.supSync(window.supCatNames()), n2 = window.supSync(['אחלה', ' תנובה ', 'אסם']); const c = S.subs.filter((s) => s.name === 'אחלה'); return { n1, n2, c: c.length, id: c[0] && c[0].id === id, cat: c[0] && c[0].cat, tn: S.subs.filter((s) => s.name === 'תנובה').length }; }, nidA);
+  check('45 סנכרון: ספק מהמלאי בלי כרטיס ("אחלה") נוסף לכרטסת "ספקים" פעם אחת, במזהה לפי השם; ספקים קיימים לא שוכפלו', sy.n1 === 1 && sy.n2 === 0 && sy.c === 1 && sy.id && sy.cat === 'e_sup' && sy.tn === 1, sy);
+  check('45א הספק החדש מופיע ברשימת כל הספקים (למלאי ולבחירה)', await mp.evaluate(() => window.supAll().includes('אחלה') && window.supAll().includes('תנובה')));
+  // תמונה בטופס – נגיעה מגדילה, עם שיתוף
+  await mp.setInputFiles('input[data-c=hsFile]:not([capture])', { name: 'a.png', mimeType: 'image/png', buffer: Buffer.from(PNG.split(',')[1], 'base64') });
+  await waitFor(() => mp.evaluate(() => !!document.querySelector('#hsImgP [data-a=hsImgBig]')), 4000);
+  await mp.click('#hsImgP [data-a=hsImgBig]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('#dlg[open] img.hs-zi')));
+  await mp.click('#dlg img.hs-zi'); await sleep(150);
+  check('46 נגיעה בתמונה בטופס: תצוגה מוגדלת, נגיעה נוספת מגדילה עוד, וכפתור שיתוף', await mp.evaluate(() => document.querySelector('#dlg img.hs-zi').classList.contains('z') && !!document.querySelector('#dlg [data-a=hsImgShare]')));
+  await shot(mp, shots, 'hs-8-תמונה-מוגדלת');
+  check('46א החלון בלי גלילה לרוחב (360px)', await noOverflow(mp));
+  await mp.evaluate(() => closeDlg());
+  // מוצר במלאי: עריכה לא מוחקת קוד פריט, ושדה ספק נשמר
+  const px = await mp.evaluate(() => { try { return { a: JSON.stringify(window.__pExtRead(null, { name: 'x' }, false)), b: JSON.stringify(window.__pExtRead(null, { sup: ' אחלה ' }, false)) }; } catch (e) { return { e: String(e) }; } });
+  check('47 טופס מוצר: שדה שלא בטופס (קוד פריט) לא נשלח כמחיקה; ספק נשלח מנוקה', px.a && !/sku|sup/.test(px.a) && /"sup":"אחלה"/.test(px.b) && !/sku/.test(px.b), px);
+  check('48 אין שגיאות JS', mp.__errors.length === 0, mp.__errors);
   await x.ctx.close();
 
   // ================= כללים שלא פורסמו (403) =================

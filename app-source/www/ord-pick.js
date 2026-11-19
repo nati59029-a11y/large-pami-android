@@ -63,7 +63,7 @@ function lineH(o,s,i){const it=s.it[i],x=s.l[i],p=it.pid?prod(it.pid):null;
    if(x.pid){const np=prod(x.pid);h+=`<div class="li" style="cursor:default"><div class="m"><b>במקום: ${esc(np?np.name:x.pid)}</b><small>${n3(it.qty)} יח' · מחיר משוער ${ils(estP(o,x.pid))} (המחיר הסופי לפי כללי המחיר)</small></div></div><button type="button" class="btn g s" data-a="oxPkRepX" data-id="${esc(o.id)}" data-n="${i}">בחירת מוצר אחר</button>`}
    else h+=`<label class="f" style="margin-top:6px"><span>חיפוש מוצר חלופי</span><input data-i="oxPkQ" data-id="${esc(o.id)}" data-n="${i}" value="${esc(x.q)}" autocomplete="off"></label><div id="oxpkh${i}">${hitsH(o,i,x.q)}</div>`}
   if(x.act==='ord'){const sp=supOf(it);
-   h+=`<label class="f" style="margin-top:6px"><span>ספק${sp?' (זוהה לפי המוצר – אפשר לשנות)':' (לא זוהה – כתבו את שם הספק)'}</span><input data-i="oxPkF" data-k="sup" data-id="${esc(o.id)}" data-n="${i}" maxlength="60" value="${esc(x.sup)}"></label>
+   h+=`<label class="f" style="margin-top:6px"><span>ספק${sp?' (זוהה לפי המוצר – אפשר לשנות)':' (לא זוהה – כתבו את שם הספק)'}</span><input data-i="oxPkF" data-k="sup" data-id="${esc(o.id)}" data-n="${i}" maxlength="60" value="${esc(x.sup)}" list="oxSupDL" autocomplete="off"></label>${window.supDL?window.supDL('oxSupDL'):''}
    <div class="row" style="gap:8px"><label class="f grow"><span>כמות</span><input data-i="oxPkF" data-k="qty" data-id="${esc(o.id)}" data-n="${i}" inputmode="decimal" value="${esc(x.qty)}"></label><label class="f grow"><span>תאריך צפי (רשות)</span><input type="date" data-i="oxPkF" data-k="eta" data-id="${esc(o.id)}" data-n="${i}" value="${esc(x.eta)}"></label></div>
    <p class="note" style="margin:0">נכנס לרשימה "להזמין מספקים". לא נשלח לספק, והמוצר נשאר בהזמנה.</p>`}
  }
@@ -157,7 +157,7 @@ ACT.oxPkGo=el=>{const o=ordOf(el.dataset.id);if(!o||!canPick(o))return toast('א
  if(s==='work'){const n=ordOf(id);if(n&&n.status==='work'&&canPick(n)&&cur().v==='oxOrd'&&cur().a===id)go('oxPick',id)}}}
 
 /* ---------- להזמין מספקים ---------- */
-const SO={L:null,busy:0,err:''};
+const SO={L:null,busy:0,err:''};window.__so=SO;/* סנכרון ספקים (sup-sync.js) */
 async function soLoad(){if(SO.busy)return;SO.busy=1;SO.err='';
  try{const m=brMineIds(),vs=a=>({arrayValue:{values:a.map(v=>({stringValue:v}))}});
   // עובד משויך לסניפים – השאילתה חייבת לסנן לפי סניף (החוקים); אחרת – רק פתוחות
