@@ -176,13 +176,13 @@ function secFin(o){o=o||{};
   const ms=[1,2,3].map(k=>addMon(m0,-k)),wk=ms.map(m=>{const[y,mm]=m.split('-').map(Number);return monthIncome(m)*7/new Date(y,mm,0).getDate()});
   f.wk={start:td,out,inLo:rnd(Math.min(...wk)),inHi:rnd(Math.max(...wk)),inAvg:rnd(sum(wk,x=>x)/3)};
   if(o.pay){f.pay={};const emp=t=>(cat(t.cat)||{}).beh==='emp';
-   for(let i=0;i<=MONTHS;i++){const m=addMon(m0,-i),G={};L.filter(t=>t.t==='exp'&&emp(t)&&pmon(t)===m).forEach(t=>{const n=String(subName(t)).slice(0,60);G[n]=rnd((G[n]||0)+num(t.amt))});
+   for(let i=0;i<=MONTHS;i++){const m=addMon(m0,-i),G={};L.filter(t=>t.t==='exp'&&emp(t)&&!t.ec&&pmon(t)===m).forEach(t=>{const n=String(subName(t)).slice(0,60);G[n]=rnd((G[n]||0)+num(t.amt))});
     const r=Object.entries(G);if(r.length)f.pay[m]=r}}
   /* 15.11.2026: o.rec – הפעולות האחרונות שנרשמו (רק לשאלה בצ'אט, לא למראה): מהאחרונה שנרשמה (t.ts), 30 יום, עד 80.
      [זמן רישום, תאריך, i/e, קטגוריה, שם, סכום, מס' חשבונית, אמצעי תשלום, שולם] – כדי לענות על "לאיזה ספק הכנסתי עכשיו חשבונית של 50 באשראי" */
   if(o.rec){const lo=now-30*864e5,tsOf=t=>{const x=t.ts?Date.parse(t.ts):NaN;return Number.isFinite(x)?x:0},key=t=>tsOf(t)||Date.parse((t.date||'')+'T12:00:00')||0;
    /* שכר (beh emp) – רק כשמתג השכר של המנהל פעיל (o.pay), ומסומן [9]=1 כדי שהשרת יסנן גם הוא */const isEmp=t=>(cat(t.cat)||{}).beh==='emp';
-   f.rec=L.filter(t=>(t.t==='exp'||t.t==='inc')&&key(t)>=lo&&(o.pay||!isEmp(t))).sort((x,y)=>key(y)-key(x)).slice(0,80).map(t=>{const P=(t.pays||[]).filter(p=>p&&!p.crof);
+   f.rec=L.filter(t=>(t.t==='exp'||t.t==='inc')&&!t.ec&&key(t)>=lo&&(o.pay||!isEmp(t))).sort((x,y)=>key(y)-key(x)).slice(0,80).map(t=>{const P=(t.pays||[]).filter(p=>p&&!p.crof);
     return [Math.round(tsOf(t)),t.date||'',t.t==='inc'?'i':'e',String((cat(t.cat)||{}).name||'').slice(0,40),String(subName(t)).slice(0,60),rnd(num(t.amt)),String(t.inv||'').slice(0,30),[...new Set(P.map(p=>p.m).filter(Boolean))].join(', ').slice(0,40),rnd(sum(P,p=>num(p.a))),isEmp(t)?1:0]})}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
