@@ -146,15 +146,51 @@ test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה
   assert.equal(await page.evaluate(() => window.CxSel.isLogin(document, window, { hash: ['#/login'] })), false);
 });
 
-test('selectors.json: דפי ההיכרות – זרימות קיימות; דוחות הנוכחות בכתובת ישירה, בלי זרימה (בלי שום צעד/לחיצה)', () => {
+test('selectors.json: דפי ההיכרות – זרימות קיימות; עובדים לקריאה בלבד; שעות לעובד – זרימה בטוחה שרצה רק בהיכרות', () => {
   for (const pg of SEL.disc) if (pg.flow) assert.ok(Array.isArray(SEL.flows[pg.flow]), pg.name);
-  for (const [name, hash] of [['hours', '#/hours-reports'], ['on-shift', '#/report-active-employee-on-stores']]) {
-    const att = SEL.disc.find((p) => p.name === name);
-    assert.ok(att, name);
-    assert.equal(att.flow, undefined); assert.equal(att.peek, undefined); assert.equal(att.hash, hash); assert.equal(att.btn, true);
-  }
-  assert.ok(!SEL.disc.some((p) => p.name === 'attendance'));
-  assert.ok(SEL.v >= 4);
+  const emp = SEL.disc.find((p) => p.name === 'employees');
+  assert.ok(emp);
+  assert.equal(emp.flow, undefined); assert.equal(emp.peek, undefined); assert.equal(emp.hash, '#/employees'); assert.equal(emp.btn, true);
+  for (const n of ['hours', 'on-shift', 'attendance']) assert.ok(!SEL.disc.some((p) => p.name === n), n);
+  const eh = SEL.disc.find((p) => p.name === 'emp-hours');
+  assert.equal(eh.flow, 'empHours'); assert.equal(eh.priv, true);
+  const F = SEL.flows.empHours;
+  assert.equal(F[0].op, 'nav'); assert.equal(F[0].hash, '#/employees');
+  // אסור ללחוץ: עריכה, עובד חדש, הוספת כניסה ויציאה; "יצוא לאקסל" רק בדף השעות (at) ורק אחרי שהגענו אליו (stop)
+  const words = JSON.stringify(F.filter((x) => x.op === 'click').map((x) => x.t));
+  for (const w of ['עריכה', 'עובד חדש', 'הוספת כניסה ויציאה', 'הצג רק מנהלים']) assert.ok(!words.includes(w), w);
+  assert.ok(F.every((x) => x.op !== 'click' || (x.safe && !x.submit)));
+  const xl = F.find((x) => x.capture);
+  assert.equal(xl.at, '#/employee-time-tracks/'); assert.equal(xl, F[F.length - 1]);
+  assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
+  // פרטיות: לא מחכים על הכותרת עם שם העובד
+  assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
+  assert.equal(SEL.v, 5);
+});
+
+test('click עם check: תיבת סימון דרך התווית – מסמנים רק אם לא מסומנת; at/stop עוצרים גם בהיכרות', async () => {
+  await page.evaluate(() => {
+    const d = document.createElement('div');
+    d.innerHTML = '<div class="custom-control"><input type="checkbox" id="cb1" class="custom-control-input"><label class="custom-control-label" for="cb1">הצג רק עובדים פעילים</label></div><span id="s2"><input type="checkbox" id="cb2"><span>תיבה ב</span></span>';
+    document.body.appendChild(d);
+    document.getElementById('cb1').addEventListener('change', () => window.ev.push('cb1'));
+  });
+  const T = { op: 'click', t: { textAny: ['הצג רק עובדים פעילים'], tag: 'label,span,div' }, check: true, safe: true };
+  let r = await run([T], { probe: true });
+  assert.equal(r.ok, true); assert.equal(await page.evaluate(() => document.getElementById('cb1').checked), true);
+  r = await run([T], { probe: true });
+  assert.equal(r.steps[0].already, true);
+  assert.equal(await page.evaluate(() => document.getElementById('cb1').checked), true, 'לחיצה שנייה לא מבטלת את הסימון');
+  assert.deepEqual(await ev(), ['cb1']);
+  await run([{ op: 'click', t: { text: 'תיבה ב', tag: 'span' }, check: true, safe: true }], { probe: true });
+  assert.equal(await page.evaluate(() => document.getElementById('cb2').checked), true, 'תיבה ליד טקסט (בלי label)');
+  // stop: רכיב חסר עוצר; הצעד שאחריו (ייצוא) לא רץ
+  r = await run([{ op: 'waitFor', t: { text: 'הוספת כניסה ויציאה' }, ms: 100, stop: true }, { op: 'click', t: { text: 'ייצוא לאקסל' }, safe: true }], { probe: true });
+  assert.equal(r.ok, false); assert.equal(r.steps.length, 1);
+  // at: לא בדף הנכון – לא לוחצים
+  r = await run([{ op: 'click', at: '#/employee-time-tracks/', t: { text: 'ייצוא לאקסל' }, safe: true }], { probe: true });
+  assert.equal(r.steps[0].err, 'wrong-hash');
+  assert.deepEqual(await ev(), ['cb1'], 'הייצוא לא נלחץ');
 });
 
 test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, בלי aria ובלי אפשרויות – רק מספרן', async () => {

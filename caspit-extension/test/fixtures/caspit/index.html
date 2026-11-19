@@ -137,6 +137,31 @@ function render() {
       drawQ(); drawH();
     };
     document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
+  } else if (h === '#/employees') {
+    // רשימת עובדים (כמו בכספית, הסבר בעל העסק 19.11): העובד הראשון לא פעיל – רק אחרי "הצג רק עובדים פעילים" השורה הראשונה היא של עובד פעיל.
+    // שמות וטלפונים אסור שיגיעו לדוח; "עריכה", "עובד חדש", "הצג רק מנהלים" ו"יצוא לאקסל" של הרשימה – אסור ללחוץ (נרשם ב-attHits)
+    const E = [[11, 'גלעד שפרינצק', '050-7654321', false], [12, 'מיכל רוזנצוויג', '054-7654322', true], [13, 'עומר טננבאום', '053-7654323', true]];
+    app.innerHTML = '<div class="employees"><h2>עובדים</h2><div class="custom-control custom-checkbox"><input type="checkbox" id="onlyAct" class="custom-control-input"><label class="custom-control-label" for="onlyAct">הצג רק עובדים פעילים</label></div>'
+      + '<div class="custom-control custom-checkbox"><input type="checkbox" id="onlyMgr" class="custom-control-input"><label class="custom-control-label" for="onlyMgr">הצג רק מנהלים</label></div>'
+      + '<button class="btn btn-primary" id="empNew">עובד חדש</button><button class="btn" id="empX">יצוא לאקסל</button>'
+      + '<table class="table"><thead><tr><th>שם</th><th>כרטיס מגנטי</th><th>טלפון נייד</th><th>מנהל</th><th>סטטוס</th><th>פעולות</th></tr></thead><tbody id="empRows"></tbody></table></div>';
+    const draw = () => {
+      const act = document.getElementById('onlyAct').checked;
+      document.getElementById('empRows').innerHTML = E.filter((e) => !act || e[3]).map((e) => '<tr><td>' + e[1] + '</td><td>77' + e[0] + '</td><td>' + e[2] + '</td><td>לא</td><td>' + (e[3] ? 'פעיל' : 'לא פעיל') + '</td><td><button class="btn" data-a="show" data-id="' + e[0] + '">הצגה</button><button class="btn" data-a="edit" data-id="' + e[0] + '">עריכה</button><button class="btn" data-a="hours" data-id="' + e[0] + '">שעות לעובד</button></td></tr>').join('');
+      document.querySelectorAll('#empRows button').forEach((b) => { b.onclick = () => { if (b.dataset.a === 'hours') { localStorage.setItem('empVisit', b.dataset.id); location.hash = '#/employee-time-tracks/' + b.dataset.id; } else hit('emp-' + b.dataset.a); }; });
+    };
+    document.getElementById('onlyAct').addEventListener('change', draw);
+    document.getElementById('onlyMgr').addEventListener('change', () => hit('emp-mgr'));
+    document.getElementById('empNew').onclick = () => hit('emp-new');
+    document.getElementById('empX').onclick = () => hit('emp-x');
+    draw();
+  } else if (h.startsWith('#/employee-time-tracks/')) {
+    // דוח שעות עובד: כותרת עם השם, "בחר חודש" (MM/YYYY), "יצוא לאקסל" (מוריד CSV קטן עם שם ושעות – אסור שיגיעו לדוח), "הוספת כניסה ויציאה" (אסור ללחוץ)
+    const id = h.split('/').pop(), nm = id === '12' ? 'מיכל רוזנצוויג' : 'עובד אחר', d = new Date(), mm = pad(d.getMonth() + 1) + '/' + d.getFullYear();
+    app.innerHTML = '<div class="time-tracks"><h2>דוח שעות עובד - ' + nm + '</h2><label>בחר חודש</label><input id="month" value="' + mm + '"><button class="btn" id="ttX">יצוא לאקסל</button><button class="btn btn-primary" id="ttAdd">הוספת כניסה ויציאה</button><button class="btn">בחר עמודות</button>'
+      + '<table class="table"><thead><tr><th>תאריך</th><th>כניסה</th><th>יציאה</th><th>שעות רגילות</th><th>125%</th><th>150%</th><th>175%</th><th>200%</th><th>225%</th><th>250%</th><th>פעולות</th></tr></thead><tbody><tr><td>03/' + mm + '</td><td>07:41</td><td>15:58</td><td>8:17</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td><button class="btn">עריכה</button></td></tr></tbody></table></div>';
+    document.getElementById('ttAdd').onclick = () => hit('tt-add');
+    document.getElementById('ttX').onclick = () => { ev.push('tt-x:' + id); dl(new Blob(['﻿דוח שעות עובד - ' + nm + '\nתאריך,כניסה,יציאה,שעות רגילות,125%,150%\n03/' + mm + ',07:41,15:58,8:17,0,0\n04/' + mm + ',07:39,16:05,8:26,0,0\n'], { type: 'text/csv' }), 'time_tracks_' + id + '.csv'); };
   } else if (h.startsWith('#/attendance-report') || h.startsWith('#/hours-reports') || h.startsWith('#/report-active-employee-on-stores')) {
     // מסך נוכחות מדומה: טבלה עם שמות ושעות (אסור שיגיעו לדוח), וכפתורי פעולה (אסור ללחוץ)
     // גם מחוץ לטבלה: מסנן "עובד" עם שמות, וכרטיסי עובדים (קישור, תווית, כפתור עם שם) – אסור שהשמות יגיעו לדוח
