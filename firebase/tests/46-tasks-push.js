@@ -294,6 +294,53 @@ describe('tkPush – התראות משימות (שרת, שליחה מדומה)',
     assert.equal((await run('tpz', null, base({ owner: 'sa', by: 'sa', role: 'w' }), 'sa')).calls.length, 0, 'משימת "עובד" של מנהל־על');
   });
 
+  // "שליחת משימות" (19.11.2026): משימה שעובד מורשה שלח (dg '1', owner = השולח)
+  it('dg: שליחה – רק לנמענים (לא למנהלים ולא לשולח); ממתינה / בוצעה / תגובת עובד – למנהלים וגם לשולח; תגובת השולח – למטפל', async () => {
+    await prep(async (d) => {
+      await d.doc('b/tpz/staff/es').set({ name: 'שולחת', active: true, pushTokens: [tok('tpz', 'es')], perms: { tkS: true } });
+    });
+    const dg = (o) => base(Object.assign({ owner: 'es', by: 'es', dg: '1', to: ['e1'], toN: ['x'], ow: 'e1' }, o));
+    let r = await run('tpz', null, dg({ to: ['e1', 'e2'], toN: ['a', 'b'], ow: '' }), 'es');
+    assert.equal(r.out.k, 'new');
+    assert.deepEqual(r.to, ['e1', 'e2'], 'שליחה – לנמענים בלבד');
+    const o = dg({});
+    r = await run('tpz', o, Object.assign({}, o, { st: 'wait', doneBy: 'e1' }), 'e1');
+    assert.equal(r.out.k, 'wait');
+    assert.deepEqual(r.to, ['es', 'm1', 'm2']);
+    r = await run('tpz', o, Object.assign({}, o, { st: 'done', open: '', doneBy: 'e1' }), 'e1');
+    assert.deepEqual(r.to, ['es', 'm1', 'm2']);
+    r = await run('tpz', o, Object.assign({}, o, { cAt: 9, cBy: 'e1', cN: 'e1x', cT: 'אין מלאי' }), 'e1');
+    assert.deepEqual(r.to, ['es', 'm1', 'm2']);
+    // תגובת השולח – למטפל, כותרת עם שם השולח (לא "מהמנהל"), ולא למנהלים
+    r = await run('tpz', o, Object.assign({}, o, { cAt: 9, cBy: 'es', cN: 'es', cT: 'צריך עד הצהריים' }), 'es');
+    assert.equal(r.out.k, 'cm');
+    assert.deepEqual(r.to, ['e1']);
+    assert.deepEqual(r.calls[0].msg, { id: r.id, title: 'תגובה חדשה משולחת', body: 'צריך עד הצהריים' });
+    // השולח מחזיר (wait → open) – למטפל; השולח מאשר (wait → done) – בלי התראה
+    const w = dg({ st: 'wait', doneBy: 'e1' });
+    assert.deepEqual((await run('tpz', w, Object.assign({}, w, { st: 'open', note: 'שוב', rt: '1' }), 'es')).to, ['e1']);
+    assert.equal((await run('tpz', w, Object.assign({}, w, { st: 'done', open: '' }), 'es')).calls.length, 0);
+    // המתג כובה / עובד מושבת – השולח לא מקבל (המנהלים כן)
+    await prep((d) => d.doc('b/tpz/staff/es').update({ 'perms.tkS': false }));
+    assert.deepEqual((await run('tpz', o, Object.assign({}, o, { st: 'wait' }), 'e1')).to, ['m1', 'm2']);
+    await prep((d) => d.doc('b/tpz/staff/es').update({ 'perms.tkS': true, active: false }));
+    assert.deepEqual((await run('tpz', o, Object.assign({}, o, { st: 'wait' }), 'e1')).to, ['m1', 'm2']);
+    // משימה בלי dg (גם של עובד, למשל משימת משמרת) – כמו היום, בלי שולח
+    const sh = base({ owner: 'e2', by: 'e2', to: ['e1'], toN: ['x'], ow: 'e1' });
+    assert.deepEqual((await run('tpz', sh, Object.assign({}, sh, { st: 'wait' }), 'e1')).to, ['m1', 'm2']);
+  });
+
+  it('dg – evOf (פונקציה טהורה): plus רק לשולח שאינו מנהל ושאינו המבצע', () => {
+    const A = new Set(['m1']);
+    const o = base({ owner: 'es', dg: '1', to: ['e1'], ow: 'e1' });
+    assert.deepEqual(G.evOf(o, Object.assign({}, o, { st: 'wait' }), 'e1', A).plus, ['es']);
+    assert.equal(G.evOf(o, Object.assign({}, o, { st: 'wait' }), 'es', A).plus, undefined, 'השולח הוא המבצע');
+    const m = Object.assign({}, o, { owner: 'm1' });
+    assert.equal(G.evOf(m, Object.assign({}, m, { st: 'wait' }), 'e1', A).plus, undefined, 'owner מנהל');
+    const n = Object.assign({}, o, { dg: '' });
+    assert.equal(G.evOf(n, Object.assign({}, n, { st: 'wait' }), 'e1', A).plus, undefined, 'בלי dg');
+  });
+
   it('runTk / runPtk: המבצע לפי authType/authId; שגיאה לא יוצאת החוצה', async () => {
     const calls = [];
     const opts = { now: WED, send: async (toks, msg, tag) => { calls.push({ toks, msg, tag }); return toks.map((t) => ({ token: t, ok: true })); } };
