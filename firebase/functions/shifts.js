@@ -5,7 +5,7 @@
 //                   st: wait (ממתינה) / rel (נשלחה – tasks/sh-<id>) / cx (בוטלה כשהמשמרת נמחקה) / orph (לא נשלחה: המופע לא קיים / אין עובד –
 //                   מוצגת למנהל בטבלה, לא נעלמת בשקט).
 //   shfcfg/main   – { late, at, hrs, ub, ua }. shfcfg/map – { m: { '<שם עובד בכספית>': uid } } (ישמש בשלב הנוכחות).
-//   shfsent/{day} – { rem: { occ: ts }, holes: ts } – מונע שליחה כפולה.
+//   shfsent/{day} – { rem: { occ: ts }, holes: ts, att: { '<occ>_<uid>': ts } } – מונע שליחה כפולה (day = יום תחילת המשמרת).
 // shApi({ op, ... }) – תוספת tasks. מנהל, או עובד עם perms.shf: הכול חוץ מ-cfg/setCfg (מנהל בלבד). עובד בלי shf: רק week, ורק המשמרות שלו.
 //   week{from}  – 7 ימים מ-from: מופעים, חורים (לפי שעות הפעילות), משימות (משימות שממתינות במשמרות של המשתמש עצמו – מוסתרות ממנו).
 //   save{id?, day?, mode?, u, d, s, e, fx, nt} – חדשה / עריכה. עריכה רק מהיום והלאה (מופע שעבר – bad-day). משמרת קבועה: mode 'one'
@@ -18,6 +18,9 @@
 // shTick – כל 10 דקות (us-central1 בלבד): פרסום משימות שהגיע זמנן (בטרנזקציה: המשמרת נקראת מחדש, והמופע חייב להיות תקף);
 //   תזכורת לעובד שעה לפני המשמרת (פעם אחת); התראה למנהלים על זמנים בלי עובדים, פעם ביום אחרי שעת ההתראה (07:00).
 //   שבת וחג (SC.quiet – מערב 14:00 עד מוצאי 21:00): אין התראות. תזכורת שנופלת בחלון נשלחת לפניו (משמרת בשישי/שבת) או בסופו (מוצאי שבת).
+//   "שכחת להחתים יציאה" (שלב G, 19.11.2026): 15 דק' אחרי סוף משמרת (גם חוצה חצות), אם לעובד יש כניסה פתוחה שחופפת למשמרת (attOpen) –
+//   התראה לעובד ולמנהלים, פעם אחת (shfsent.att). מקור לא ידוע / אין מקור – לא נשלח כלום. בשבת וחג – במוצאי החלון. לא על משמרת שהסתיימה
+//   לפני יותר מ-12 שעות (SC.attDue). אין רשימת התראות בתוך האפליקציה של העובד – push בלבד (k:'sh').
 // שגיאות (details.reason): not-allowed, not-manager, bad-op, bad-field, bad-time, bad-day, bad-fx, bad-note, bad-user, bad-id, bad-mode,
 //   no-shift, no-occ, no-user, too-many, past, bad-text, released, bad-cfg, bad-late, bad-at, bad-hrs, bad-map, feature-off.
 
@@ -365,17 +368,43 @@ async function api(request) {
 }
 
 // ---------- shTick: עסק אחד (בתוך T.runInBiz). opts: { now, send } ----------
-// תפיסה בטרנזקציה – שתי ריצות במקביל לא שולחות פעמיים. key: 'rem' + occ / 'holes'
+// תפיסה בטרנזקציה – שתי ריצות במקביל לא שולחות פעמיים. key: 'rem' + occ / 'att' + '<occ>_<uid>' / 'holes'
 async function claim(db, day, key, occ, now) {
   const ref = db.doc('shfsent/' + day);
   return db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     const d = s.exists ? s.data() || {} : {};
     if (key === 'holes') { if (d.holes) return false; tx.set(ref, { holes: now, day }, { merge: true }); return true; }
-    if (d.rem && d.rem[occ]) return false;
-    tx.set(ref, { rem: { [occ]: now }, day }, { merge: true });
+    const k = key === 'att' ? 'att' : 'rem';
+    if (d[k] && d[k][occ]) return false;
+    tx.set(ref, { [k]: { [occ]: now }, day }, { merge: true });
     return true;
   });
+}
+
+// ---------- מקור נוכחות: האם לעובד יש כניסה פתוחה (נכנס ולא יצא) שחופפת למשמרת [start, end). true / false / null (לא ידוע) ----------
+// כל מקור: on(biz) – האם חל בעסק; open(db, uid, start, end) → true / false / null. התוצאה: true אם מקור כלשהו אמר true; false אם לפחות
+// מקור אחד ענה false ואף אחד לא true; אחרת null – ואז לא שולחים כלום.
+const ATT_SRC = [
+  // קופה חדשה (pos-clock.js): posclock/{uid}_{in}, out:null = כניסה פתוחה. רק בעסק במבנה החדש עם תוספת הקופה
+  { id: 'posclock', on: (biz) => !!biz && !!biz.features && biz.features.pos === true && T.bizPrefix(biz) !== '',
+    open: async (db, uid, start, end) => {
+      const s = await db.collection('posclock').where('who', '==', uid).where('out', '==', null).limit(1).get();
+      return !s.empty && SC.attHit(s.docs[0].data(), start, end);
+    } },
+  // כספית (שעון נוכחות דרך תוסף הדפדפן, docs/caspit-handoff.md – "שלב הנוכחות"): עוד לא קיים. ייושם בשלב הנוכחות לפי shfcfg/map
+  // (שם עובד בכספית → uid). עד אז – תמיד "לא ידוע" (null), כך שלא נשלחת התראה על סמך מקור שאין לו נתונים.
+  { id: 'caspit', on: () => false, open: async () => null },
+];
+async function attOpen(db, biz, uid, start, end, srcs) {
+  let r = null;
+  for (const x of srcs || ATT_SRC) {
+    if (!x.on(biz)) continue;
+    const v = await x.open(db, uid, start, end);
+    if (v === true) return true;
+    if (v === false) r = false;
+  }
+  return r;
 }
 
 const DN = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -423,6 +452,20 @@ async function tickBiz(o) {
       }
     }
   }
+  // 4. "שכחת להחתים יציאה": משמרות שהסתיימו (עד 4 ימים אחורה – חג ושבת רצופים), לפי SC.attDue; רק כשמקור הנוכחות אומר בוודאות שהכניסה פתוחה
+  if (!quiet) {
+    for (const oc of SC.expand(defs, SC.addDays(today, -4), 5)) {
+      if (!SC.attDue(oc, now)) continue;
+      if ((await attOpen(db, sc && sc.biz, oc.u, oc.start, oc.end)) !== true) continue;
+      const nm = await userName(db, oc.u);
+      if (nm === null) continue;
+      if (!(await claim(db, oc.day, 'att', oc.id + '_' + oc.u, now))) continue;
+      res.att = (res.att || 0) + 1;
+      const ed = SC.todayOf(oc.end), endTxt = oc.e + (ed === today ? '' : ed === SC.addDays(today, -1) ? ' (אתמול)' : ' (יום ' + DN[SC.weekdayOf(ed)] + ')');
+      await DR.pushTo(db, [oc.u], { k: 'sh', id: 'a' + oc.id, title: 'החתמת יציאה', body: 'אם שכחת להחתים אצבע, נא לפנות בהקדם למנהל' }, o, sc && sc.bizId);
+      await DR.pushMgrs(db, { uid: 'shtick', bizId: sc && sc.bizId }, 'am' + oc.id, '', Object.assign({}, o, { msg: { k: 'sh', id: 'am' + oc.id, title: 'לא הוחתמה יציאה', body: (nm || 'עובד') + ' – המשמרת הסתיימה ב-' + endTxt + ', ואין החתמת יציאה' } }));
+    }
+  }
   return res;
 }
 async function runTick(opts) {
@@ -450,8 +493,8 @@ exports.shApi = onCall(wrap(api));
 // מתוזמנת – אזור אחד בלבד (אסור להריץ כפול)
 exports.shTick = onSchedule({ region: LEGACY_REGION, schedule: 'every 10 minutes', timeZone: TK.TZ, timeoutSeconds: 120, memory: '256MiB' }, async () => {
   const r = await runTick({});
-  if (Object.values(r).some((x) => x.rel || x.orph || x.rem || x.holes || x.error)) logger.info('shTick', r);
+  if (Object.values(r).some((x) => x.rel || x.orph || x.rem || x.holes || x.att || x.error)) logger.info('shTick', r);
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, ATT_SRC, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });
