@@ -52,7 +52,7 @@ function loadTasks(m){const c=TC[m];if(c&&(c.L||c.p)&&Date.now()-c.at<TTL)return
   o.L=L;o.p=null;return L}).catch(e=>{delete TC[m];throw e});
  TC[m]=o;return o.p}
 function loadSales(m){const c=SC[m];if(c&&(c.v||c.p)&&Date.now()-c.at<TTL)return c.v?Promise.resolve(c.v):c.p;
- if(!window.CxHours||typeof CxHours.get!=='function'||(typeof window.cxSalesOk==='function'&&!window.cxSalesOk()))return Promise.resolve({day:null,hours:null,na:1});
+ if(!window.CxHours||typeof CxHours.get!=='function'||(typeof window.cxSalesPay==='function'&&!window.cxSalesPay()))return Promise.resolve({day:null,hours:null,na:1});
  const o={at:Date.now(),v:null};o.p=Promise.resolve(CxHours.get(m)).then(v=>{o.v=v&&typeof v==='object'?v:{day:{},hours:{}};o.p=null;return o.v}).catch(e=>{delete SC[m];throw e});
  SC[m]=o;return o.p}
 const ownT=(L,u)=>u?(L||[]).filter(t=>t&&(t.ow?t.ow===u:Array.isArray(t.to)&&t.to.includes(u))).map(t=>({id:t.id,n:str(t.txt).slice(0,40),dl:t.dl,due:t.due,st:t.st,sub:t.sub,late:t.late})):[];
@@ -103,10 +103,11 @@ function cfgH(s,p){if(!p.comp)return'';let h=`<div class="sec"><h3>רכיבי ש
 
 /* ---- עורך רכיב (חלון) ---- */
 const ED={i:-1,c:null};
+const cxOn=()=>typeof window.cxSalesPay==='function'&&window.cxSalesPay(); // 19.11.2026: בלי התוספת "מכירות כספית" – אין בונוס מכירות חדש
 const blank=k=>k==='tk'?{k,m:'all',a:''}:k==='sl'?{k,t:[{min:'',a:''}],ss:'day'}:k==='pc'?{k,p:'',th:'',ss:'day'}:{k:'man'};
 function edH(){const c=ED.c,ch=(k,l)=>`<button type="button" class="chip${c.k===k?' on':''}" aria-pressed="${c.k===k}" data-a="payCompK" data-v="${k}">${l}</button>`;
  const G='style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:end"';
- let h=`<h3>${ED.i>=0?'עריכת רכיב':'רכיב שכר חדש'}</h3><form data-f="payCompF" novalidate><div class="chips" role="group" aria-label="סוג רכיב" style="margin-bottom:10px;flex-wrap:wrap">${ch('tk','משימות בזמן')}${ch('sl','מדרגות מכירות')}${ch('pc','אחוז ממכירות')}${ch('man','ידני')}</div>`;
+ let h=`<h3>${ED.i>=0?'עריכת רכיב':'רכיב שכר חדש'}</h3><form data-f="payCompF" novalidate><div class="chips" role="group" aria-label="סוג רכיב" style="margin-bottom:10px;flex-wrap:wrap">${ch('tk','משימות בזמן')}${cxOn()||c.k==='sl'?ch('sl','מדרגות מכירות'):''}${cxOn()||c.k==='pc'?ch('pc','אחוז ממכירות'):''}${ch('man','ידני')}</div>`;
  h+=fld('שם (לא חובה)','n',str(c.n),'text',`maxlength="60" autocomplete="off" placeholder="${esc(KN[c.k])}"`);
  const tiers=(a,b,la,lb)=>(c.t||[]).map((u,i)=>`<div ${G}>${fld(la,'t'+i+'x',str(u[a]),'text','inputmode="decimal" autocomplete="off"')}${fld(lb,'t'+i+'a',str(u.a),'text','inputmode="decimal" autocomplete="off"')}<button type="button" class="btn g s" style="min-height:44px;margin-bottom:10px" data-a="payCompTD" data-i="${i}" aria-label="מחיקת מדרגה">✕</button></div>`).join('')+((c.t||[]).length<MAXT?`<button type="button" class="btn g w" ${big} data-a="payCompTA">＋ מדרגה</button>`:'');
  const ss=()=>selO('על אילו מכירות','ss',[['day',SSN.day],['hrs',SSN.hrs]],c.ss==='hrs'?'hrs':'day')+`<label class="cb"><input type="checkbox" name="amt" value="1"${c.amt?' checked':''}> להציג לעובד סכומים (אחרת – רק אחוז מהיעד)</label>`;

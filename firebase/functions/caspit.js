@@ -828,11 +828,37 @@ async function lockFree(bizId, owner) {
 }
 const LOCKED = ['cxApply', 'cxExport'];
 const SALES_FNS = ['cxSales', 'cxLines', 'cxFix'];
-const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix };
+const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix, cxSee };
 const BIG = ['cxPreview', 'cxApply', 'cxExport']; // ~9,000 מוצרים
+// 19.11.2026: מנהל מסמן עובדים שרואים את "מכירות כספית" (staff/{uid}.cxS = true). עובד כזה – צפייה בלבד: cxSales ו-cxLines.
+// cxSee({ uid, on }) – מנהל בלבד, רק כשהתוספת cxSales מופעלת. לא נוגע ב-perms (שמנהל־על קובע).
+const VIEW_FNS = ['cxSales', 'cxLines'];
+async function cxSee(w, input) {
+  onlyKeys(input, ['uid', 'on']);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  if (typeof input.on !== 'boolean') throw bad('bad-on', 'ערך לא תקין');
+  const db = T.tdb();
+  const sRef = db.doc('staff/' + uid), aRef = db.doc('admins/' + uid);
+  await db.runTransaction(async (tx) => {
+    const [s, a] = await Promise.all([tx.get(sRef), tx.get(aRef)]);
+    if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+    if (a.exists || s.get('role') === 'manager') throw pre('is-admin', 'מנהל רואה את המסך תמיד');
+    tx.update(sRef, { cxS: input.on });
+  });
+  if (w.biz && w.biz.exists && w.bizId) await require('firebase-admin/firestore').getFirestore().collection(`b/${w.bizId}/audit`).add({ by: w.uid, t: Date.now(), act: 'cxSee', note: uid + '=' + input.on }).catch(() => {});
+  return { ok: true, uid, on: input.on };
+}
+async function viewW(request) {
+  const w = await O.who(request);
+  if (w.role === 'manager') return w;
+  if (w.staff && typeof w.staff.get === 'function' && w.staff.get('cxS') === true) return w;
+  throw O.deny('no-perm', 'אין לך הרשאה למכירות כספית. פנה למנהל.');
+}
 async function phone(k, request) {
-  const w = await mgrW(request);
+  const w = VIEW_FNS.includes(k) ? await viewW(request) : await mgrW(request);
   const input = k === 'cxCfg' ? {} : inputObject(request);
+  if (k === 'cxSee') T.requireFeature(w.biz, 'cxSales');
   // 19.11.2026: "מכירות כספית" – תוספת נפרדת (cxSales), כבויה כברירת מחדל; רק מנהל־על מפעיל. הרובוט (caspit-bot.js) לא עובר כאן ולא מושפע.
   if (SALES_FNS.includes(k) || (k === 'cxUpload' && input.kind === 'sales')) T.requireFeature(w.biz, 'cxSales');
   if (!LOCKED.includes(k) || !w.bizId) return FNS[k](w, input);

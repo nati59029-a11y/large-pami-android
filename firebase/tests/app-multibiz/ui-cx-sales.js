@@ -7,7 +7,7 @@ const path = require('path');
 const H = require('./harness');
 const out = {}; let fail = 0;
 const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
-const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
+const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cxSales'].map((k) => [k, true])); // cxSales – תוספת "מכירות כספית" (19.11.2026)
 // windows-1255 (אותיות עבריות בלבד – מספיק לכותרות ולשמות המומצאים)
 const w1255 = (t) => Buffer.from([...t].map((ch) => { const c = ch.codePointAt(0); return c >= 0x5d0 && c <= 0x5ea ? c - 0x5d0 + 0xe0 : c < 128 ? c : 0x3f; }));
 const SH = 'תאריך מכירה,שם פריט,מספר ברקוד,מספר עסקה,שם סניף,מספר סניף,משקל,הנחה,פדיון';
