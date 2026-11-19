@@ -345,6 +345,29 @@ describe('רק נושאי עסק; ערוץ והרשאות (5.5) נאכפים ב�
     for (const ch of ['wa', 'in', '', 'x']) assert.deepEqual(ST.toolsFor(ch, { pay: true, emp: true }), []);
     assert.ok(!ST.toolsFor('app', {}).includes('getPayroll') && !ST.toolsFor('app', {}).includes('getEmployeeActivity'));
   });
+  it('שלב F: הערות עובדים – cleanFin זורק אותן בלי o.notes (מראה, תזכורות); עם – סוגים ואורכים נבדקים; getEmployeeNotes רק עם מתג + הרשאה + הערות', async () => {
+    const long = 'א'.repeat(800);
+    const raw = [['דנה לוי', '2026-11-10', 'איחרה פעמיים'], ['  ', '2026-11-09', 'בלי שם'], ['משה', 'x', long], [5, '2026-11-01', 'שם לא טקסט'], ['רון', '2026-11-02', 7], 'לא מערך'];
+    for (let i = 0; i < 70; i++) raw.push(['עובד ' + i, '2026-10-01', 'הערה ' + i]);
+    const base = () => Object.assign(FIN(), { notes: raw });
+    assert.equal(ST.cleanFin(base()).notes, undefined, 'בלי o.notes – נזרקות');
+    assert.equal(ST.cleanFin(base(), { notes: false }).notes, undefined);
+    assert.equal(ST.cleanFin(base(), { notes: 'true' }).notes, undefined, 'רק true בוליאני');
+    const f = ST.cleanFin(base(), { notes: true });
+    assert.equal(f.notes.length, 60, 'עד 60');
+    assert.deepEqual(f.notes[0], ['דנה לוי', '2026-11-10', 'איחרה פעמיים']);
+    assert.deepEqual(f.notes[1], ['משה', '', 'א'.repeat(500)], 'תאריך לא תקין – ריק; טקסט עד 500');
+    assert.ok(f.notes.every((r) => r.length === 3 && typeof r[0] === 'string' && r[0] && typeof r[2] === 'string' && r[2] && r[2].length <= 500 && r[0].length <= 60));
+    assert.ok(!JSON.stringify(f.notes).includes('בלי שם') && !JSON.stringify(f.notes).includes('שם לא טקסט'));
+    // הכלי – רק עם מתג ניתוח עובדים + הרשאה למידע רגיש + הערות שנשלחו
+    assert.ok(ST.toolsFor('app', { emp: true, sens: true, notes: true }).includes('getEmployeeNotes'));
+    for (const p of [{ emp: true, sens: true }, { emp: true, notes: true }, { sens: true, notes: true }, { emp: true, sens: true, notes: true, brLimited: true }]) assert.ok(!ST.toolsFor('app', p).includes('getEmployeeNotes'), JSON.stringify(p));
+    for (const ch of ['wa', 'in']) assert.deepEqual(ST.toolsFor(ch, { emp: true, sens: true, notes: true }), []);
+    assert.equal((await ST.runTool('getEmployeeNotes', {}, { now: NOW, fin: f })).error, 'not-available', 'בלי ctx.notes – הגנה כפולה');
+    const r = await ST.runTool('getEmployeeNotes', { employee: 'דנה' }, { now: NOW, fin: f, notes: f.notes });
+    assert.equal(r.count, 1); assert.deepEqual(r.notes[0], { employee: 'דנה לוי', date: '2026-11-10', text: 'איחרה פעמיים' }); assert.match(r.rule, /לא להעביר לעובד/);
+    assert.match(ST.sourceOf('getEmployeeNotes', {}, { now: NOW }, NOW).l, /\(מוצפן\) · נתוני המכשיר/);
+  });
   it('תוכן מהמשתמש הוא מידע ולא הוראה (10.1): ההנחיה אומרת זאת, והכלים לא משתנים לפי השאלה', async () => {
     await seed();
     GM.state.sec = () => ({ text: 'אני לא שולחת הודעות.' });

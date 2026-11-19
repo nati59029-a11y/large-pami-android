@@ -45,6 +45,8 @@ const COPY = [
   's3br', 's3set', 'smap', 's3draft', 'sround', 'srun', 's3sum', 's3fix', 's3appeal', 's3short', 's3use', 's3perf', 's3qid', 's3ntf',
   // הקמת חנות (17.11.2026, שלב 3): תתי-האוספים n ו-cap מועתקים עם s3setup. התמונות כבר תחת b/largpeami/store3d/ ב-Storage.
   's3setup', 's3look',
+  // משמרות (שלב 3, 18.11.2026, functions/shifts.js): השרת בלבד כותב דרך T.tdb(); ב-legacy בשורש, באותם שמות כמו ב-b/{bizId}
+  'shf', 'shft', 'shfcfg', 'shfsent',
   // השלמה לפני ההעברה (15.11.2026): כל אוסף שהשרת כותב דרך T.tdb()/bizPrefix, או שיש לו כלל ב-b/{bizId} – ב-legacy נמצא בשורש.
   // תתי-האוספים (cust/p, pinv/p, rq/c, mq/p, sec_chat/m, sec_inv/p, sec_note/n, custBak/items, stockBak/items) מועתקים עם ההורה.
   'ptk', 'rtk', 'rq', 'mq', // משימות פרטיות, משימות חוזרות, בקשות, בקשות מנהל
@@ -58,6 +60,12 @@ const COPY = [
   // המזכירה העסקית: SEC_COLLS ב-functions/secretary.js + sec_ord (הזמנות מהמייל, secretary-google.js)
   'sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log',
   'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', // sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה
+  // קופה – pos (גל 2, 18.11.2026): קיימת רק במבנה b/{bizId} (השרת דוחה עסק legacy), ולכן אין לה מקור בשורש וההעתקה לא עושה בהם דבר.
+  // נוספו כמו rv – כדי שהרשימה תכסה כל כלל ב-b/{bizId} וכל אוסף שהשרת כותב דרך T.tdb() (posalert, poslbl, poscnt, posbc, posbr – בלי כלל).
+  // תתי-אוספים (prod/{id}/ph) מועתקים עם ההורה. postpl ו-posbug הם טבלאות שרת משותפות לכל העסקים – ב-SHARED.
+  'possale', 'pospay', 'posret', 'posshift', 'posz', 'posdev', 'poscfg', 'promo', 'clubcfg', 'clublog', 'poslog', 'poserr', 'posconf',
+  'posbk', 'posgift', 'posgiftlog', 'posclock', 'posimp', 'pos_income_daily', 'posreq', 'poscfglog', 'pospark', 'poscpn', 'pospin',
+  'posalert', 'poslbl', 'poscnt', 'posbc', 'posbr', 'poscard', // poscard: גל 3 (19.11.2026) – חיובי אשראי במסוף מחובר
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
@@ -68,7 +76,8 @@ const DEFERRED = [
 ];
 // טבלאות שרת משותפות לכל העסקים (מפתח לפי bizId, נכתבות תמיד ב-getFirestore() בשורש): נשארות בשורש.
 // מגובות, לא מועתקות, לא "לא ידוע", ולא מכשילות אימות. ב-compare-backup לא מושוות (עסקים אחרים כותבים אליהן כל הזמן).
-const SHARED = ['sec_route', 'sec_mailroute', 'sec_oauth', 'sec_mailq', 'sec_waq', 'mailRate', 'impQ'];
+// postpl (תבניות קופה לפי סוג עסק) ו-posbug (דיווחי תקלות קופה מכל העסקים) – קופה ש4, pos-cfg.js, נכתבות בשורש לכל העסקים.
+const SHARED = ['sec_route', 'sec_mailroute', 'sec_oauth', 'sec_mailq', 'sec_waq', 'mailRate', 'impQ', 'postpl', 'posbug'];
 // אוספים חדשים של ריבוי העסקים: לא מקור להעתקה. b לא נכלל אפילו בגיבוי (זה היעד)
 const NEW_ROOT = ['users', 'superadmins'];
 const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'];

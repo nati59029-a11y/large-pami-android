@@ -1,8 +1,8 @@
 // תוסף כספית – service worker: תזמון, ריצת סנכרון (מכונת מצבים שממשיכה אחרי הפסקה), מצב היכרות, והודעות מהחלון הקופץ.
 // כל הבקשות לכספית רצות בתוך לשונית ייעודית של התוסף (מוצמדת, לא פעילה) – לא בלשונית של בעל העסק, ולא מהשרת.
 // התוסף לעולם לא ממלא שם משתמש או סיסמה: אם כספית מבקשת התחברות – מדווחים "צריך התחברות" ומנסים שוב בבדיקה הבאה.
-importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js');
-const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi;
+importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js', 'lib/upd.js');
+const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi, UP = self.CxUpd;
 const VER = chrome.runtime.getManifest().version;
 const CASPIT = 'https://caspit.valu.co.il/';
 const CASPIT_APP = CASPIT + 'bo';
@@ -13,6 +13,7 @@ const GUARD = { origin: 'https://caspit.valu.co.il', path: '/bo' };
 const HASH_RE = /^#\/[\w\-/?=&.%]*$/; // מערכת הניהול של כספית נמצאת ב-/bo (נבדק מול צילום מסך של בעל העסק, 18.11) – בכתובת אחרת האתר נתקע ב"טוען תוכנה"
 const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות לפני ריצה (רשת, Chrome)
 const TICK_MIN = 15;
+const POLL_MIN = 1, POLL_SLOW_MIN = 15; // "סנכרן עכשיו" מהטלפון: בדיקה כל דקה (שרת ישן בלי poll – כל 15 דקות)
 
 // האסימון ב-storage.local: מגבילים את האחסון להקשרים של התוסף בלבד (לא לסקריפטי התוכן בלשונית כספית), אם הדפדפן תומך
 // (setAccessLevel נתמך בוודאות ב-storage.session; ב-local – לא מאומת, ולכן בניסיון בלבד). סקריפטי התוכן (bridge.js, selectors.js) לא קוראים אחסון בכלל.
@@ -37,16 +38,68 @@ async function setupAlarms() {
   const s = await sched();
   await chrome.alarms.create('daily', { when: D.nextAt(Date.now(), s.at, s.tz) }); // נוצר מחדש אחרי כל הפעלה – נכון גם במעבר שעון
   if (!(await chrome.alarms.get('tick'))) await chrome.alarms.create('tick', { periodInMinutes: TICK_MIN, delayInMinutes: 1 });
+  if (!(await chrome.alarms.get('poll'))) await chrome.alarms.create('poll', { periodInMinutes: POLL_MIN, delayInMinutes: POLL_MIN });
 }
 chrome.runtime.onInstalled.addListener(() => { setupAlarms(); trigger('install'); });
 chrome.runtime.onStartup.addListener(() => { setupAlarms(); trigger('startup'); });
 if (chrome.idle && chrome.idle.onStateChanged) chrome.idle.onStateChanged.addListener((s) => { if (s === 'active') trigger('idle'); });
 chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === 'tick' || a.name === 'poll') updTick().catch(() => {});
   if (a.name === 'daily') { setupAlarms(); trigger('daily'); }
   else if (a.name === 'tick') tick().catch(() => {});
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
+  else if (a.name === 'poll') pollOnce().catch(() => {});
 });
+// ---------- עדכון אוטומטי (0.1.7) ----------
+// הסקריפט במחשב החנות מחליף את קבצי התיקייה וכותב upd.json. כאן – רק קריאה מהדיסק והחלטה (lib/upd.js); אין הורדה מהתוסף.
+async function diskFile(name) {
+  try { const r = await fetch(chrome.runtime.getURL(name), { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+async function updInfo() {
+  const [m, u] = await Promise.all([diskFile('manifest.json'), diskFile('upd.json')]);
+  return { disk: m && typeof m.version === 'string' ? m.version.slice(0, 20) : '', upd: UP.cleanUpd(u) };
+}
+async function updTick() {
+  if (busy) return false;
+  const d = await updInfo();
+  await set({ upd: Object.assign({ cur: VER, chk: Date.now() }, d) });
+  const last = await get('updReload');
+  if (!UP.wantReload({ cur: VER, disk: d.disk, upd: d.upd, busy, last, now: Date.now() })) return false;
+  const run = await get('run');
+  if (run && !P.isTerminal(run) && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return false; // ריצה באמצע (או ממתינה לניסיון חוזר) – אחרי שתסתיים
+  await set({ updReload: { to: d.disk, at: Date.now() } });
+  if (busy) return false;
+  (self.__cxTest.reload || (() => chrome.runtime.reload()))(); // בבדיקות אפשר להחליף (Playwright לא טוען מחדש תוסף מהשורת פקודה)
+  return true;
+}
+// "סנכרן עכשיו" מהטלפון: שואלים את השרת אם יש בקשה (בלי לפתוח את כספית). רק כשמחוברים, יש רשת ואין ריצה.
+// שרת ישן (bad-op) → בדיקה כל 15 דקות, בלי להציג תקלה. החיבור בוטל (auth) → מפסיקים לבדוק עד חיבור מחדש / הפעלה של Chrome.
+async function pollEvery(min) {
+  const a = await chrome.alarms.get('poll');
+  if (!a || a.periodInMinutes !== min) await chrome.alarms.create('poll', { periodInMinutes: min, delayInMinutes: min });
+}
+async function pollOnce() {
+  if (busy || !navigator.onLine || !(await get('token'))) return null;
+  let r;
+  // ריצה שממתינה לניסיון חוזר: מדווחים מתי (wait) – הטלפון מציג "ינסה שוב ב-HH:MM" ולא "לא הגיב"
+  const run0 = await get('run');
+  const wait = run0 && run0.st === 'wait' && !P.isTerminal(run0) && +run0.retryAt > 0 ? +run0.retryAt : 0;
+  try { r = await (await api()).call('poll', wait ? { wait } : {}); } catch (e) {
+    // שרת ישן (bad-op) / העסק כבוי זמנית (403) → כל 15 דקות; האסימון בוטל (401) → מפסיקים עד חיבור מחדש / הפעלת Chrome
+    if (e.code === 'bad-op' || (e.code === 'auth' && e.status === 403)) await pollEvery(POLL_SLOW_MIN);
+    else if (e.code === 'auth') await chrome.alarms.clear('poll');
+    return null; // רשת / שרת – הבדיקה הבאה תנסה שוב
+  }
+  await pollEvery(POLL_MIN);
+  const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
+  const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
+  if (!id || busy) return null; // עסוק – לא מסמנים את הבקשה; הבדיקה הבאה תיקח אותה
+  const p = startRun({ manual: true, req: id }); // לוקח את הנעילה מיד (בלי await לפני כן)
+  await set({ lastReq: id }); // גם אם ה-service worker נסגר באמצע – לא מתחילים פעמיים לאותה בקשה
+  p.catch(() => {});
+  return id;
+}
 async function tick() {
   if (!(await chrome.alarms.get('daily'))) await setupAlarms();
   const run = await get('run');
@@ -173,19 +226,113 @@ async function runFlow(tabId, name, vars, files, probe) {
       if (!ok) { out.ok = false; if (out.miss == null) out.miss = i; if (!probe) return out; }
       i++; continue;
     }
+    // בחירת קובץ (0.1.6): מתוך הדף עצמו (MAIN world), עם ניסיונות חלופיים ואבחון – ראו putFile
+    if (s.op === 'setFile' && !probe) {
+      const q = (steps[i + 1] || {}).op === 'queue' ? steps[i + 1] : null;
+      const r = await putFile(tabId, s, q, vars || {}, files && files[s.file]);
+      out.steps.push(Object.assign({ i, op: 'setFile' }, r.rec));
+      if (!r.ok) { out.ok = false; if (out.miss == null) out.miss = i; out.diag = r.diag || ''; return out; }
+      i++; continue;
+    }
     let j = i;
-    while (j < steps.length && (steps[j] || {}).op !== 'nav') j++;
+    while (j < steps.length && (steps[j] || {}).op !== 'nav' && ((steps[j] || {}).op !== 'setFile' || probe || j === i)) j++;
     await guardBo(tabId);
     const r = await inIso(tabId, runFlowIn, [steps.slice(i, j), vars || {}, files || null, !!probe, GUARD]);
     if (!r) { out.ok = false; if (out.miss == null) out.miss = i; return out; }
     for (const x of r.steps || []) out.steps.push(Object.assign(x, { i: x.i + i }));
     if (r.text) out.text = r.text;
     if (r.wrong) throw wrongPage();
+    if (r.code) out.code = r.code;
+    if (r.hmax !== undefined) out.hmax = r.hmax;
+    if (r.already) { out.already = r.already; return out; }
     if (!r.ok) { out.ok = false; if (out.miss == null && r.miss != null) out.miss = r.miss + i; if (!probe) return out; }
     i = j;
   }
   await guardBo(tabId);
   return out;
+}
+// ---------- בחירת קובץ בשדה ההעלאה של כספית (0.1.6) ----------
+// תקלה 19.11: מהעולם המבודד הקובץ לא נכנס ל"ממתין לטעינה" (ידנית – כן). עכשיו: (1) בתוך הדף (MAIN world) עם הבנאים של הדף,
+// (2) אם לא נכנס – אירוע גרירה (dragenter/dragover/drop) על השדה, (3) אם עדיין לא – אותו קובץ בסוג application/vnd.ms-excel
+// (כמו ש-Windows מסמן CSV בבחירה ידנית). ניסיון נוסף רק כשהתור עדיין ריק; כל שורה אחרת בתור עוצרת (צעד queue שאחרי).
+// בכישלון: אבחון (כמה שדות קובץ, כמה קבצים נבחרו, accept, הודעות גלויות בדף – מסוננות) בהודעה לשרת ובחלון התוסף.
+const FILE_TRIES = [['change', 'text/csv'], ['drop', 'text/csv'], ['change', 'application/vnd.ms-excel']];
+const setFileMain = (t, f, mode, mime, guard) => {
+  try { const L = location, p = String(L.pathname || ''); if (L.origin !== guard.origin || !(p === guard.path || p.startsWith(guard.path + '/'))) return { wrong: true }; } catch (e) { return { wrong: true }; }
+  const pick = (x) => { if (!x || !x.css) return []; try { return Array.from(document.querySelectorAll(x.css)).filter((e) => String(e.type).toLowerCase() === 'file'); } catch (e) { return []; } };
+  let els = pick(t);
+  if (!els.length) els = pick(t && t.alt);
+  const vis = (e) => e.getClientRects().length > 0;
+  const el = els.find(vis) || els[0];
+  if (!el) return { found: false, n: 0 };
+  const bin = atob(f.b64), u = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+  const dt = new DataTransfer();
+  dt.items.add(new File([u], f.name, { type: mime }));
+  if (mode === 'drop') {
+    for (const ty of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(ty, { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+  } else {
+    try { el.focus(); } catch (e) { /* */ }
+    el.files = dt.files;
+    el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  }
+  return { found: true, n: els.length, vis: vis(el), files: (el.files || []).length };
+};
+// התור "ממתין לטעינה": null = אין כותרת; אחרת [[שם, סוג]]
+const queueIn = (s, guard) => { const S = self.CxSel; if (!S.onPath(window, guard)) return { wrong: true }; const R = S.queueRows(document, s); return { rows: R ? R.map((r) => r.slice(0, 2)) : null }; };
+// אבחון: רק מבנה ומספרים, והודעות גלויות (התראה / שגיאה) – קצרות, מסוננות לפני היציאה
+const fileDiagIn = (t, guard) => {
+  const S = self.CxSel;
+  if (!S.onPath(window, guard)) return { wrong: true };
+  const ins = Array.from(document.querySelectorAll('input[type=file]'));
+  const el = S.find(document, t);
+  const msgs = Array.from(document.querySelectorAll('[role=alert],.alert,.toast,.toasted,.v-toast,.swal2-popup,.invalid-feedback,.text-danger,.error,.el-message,.notification,.noty_body'))
+    .filter((x) => x.getClientRects().length && !(x.closest && x.closest('table'))).map((x) => S.norm(x.textContent).slice(0, 80)).filter(Boolean).slice(0, 3);
+  return { ins: ins.length, vis: ins.filter((x) => x.getClientRects().length).length, files: el ? (el.files || []).length : -1, val: el ? !!el.value : false, accept: el ? String(el.getAttribute('accept') || '').slice(0, 60) : '', multi: !!(el && el.multiple), msgs };
+};
+async function putFile(tabId, s, q, vars, f) {
+  const rec = { found: false, done: false };
+  if (!f) return { ok: false, rec: Object.assign(rec, { err: 'no-file' }) };
+  const tries = q ? FILE_TRIES : FILE_TRIES.slice(0, 1);
+  const log = [];
+  for (let k = 0; k < tries.length; k++) {
+    await guardBo(tabId);
+    if (k) {
+      const Q = await inIso(tabId, queueIn, [q, GUARD]);
+      if (Q && Q.wrong) throw wrongPage();
+      if (Q && Q.rows && Q.rows.length) break; // משהו כבר בתור – לא מוסיפים; הצעד queue יחליט
+    }
+    const [mode, mime] = tries[k];
+    const r = await inMain(tabId, setFileMain, [s.t, f, mode, mime, GUARD]);
+    if (r && r.wrong) throw wrongPage();
+    if (!r || !r.found) return { ok: false, rec: Object.assign(rec, { err: 'no-input' }), diag: 'לא נמצא שדה בחירת קובץ' };
+    rec.found = true; rec.done = true; rec.n = r.n; rec.try = k + 1;
+    log.push(mode + '/' + (mime === 'text/csv' ? 'csv' : 'xls') + ':' + r.files);
+    if (!q) return { ok: true, rec };
+    const end = Date.now() + (k === tries.length - 1 ? 8000 : 6000);
+    for (;;) {
+      await sleep(400);
+      const Q = await inIso(tabId, queueIn, [q, GUARD]);
+      if (Q && Q.wrong) throw wrongPage();
+      const rows = (Q && Q.rows) || [];
+      if (rows.length) { if (k) rec.via = mode + '/' + mime; return { ok: true, rec }; } // שלנו או לא – הצעד queue שאחרי בודק
+      if (Date.now() > end) break;
+    }
+  }
+  // לא נכנס לתור – אבחון. אם בינתיים משהו הופיע בתור – ממשיכים לצעד queue (הוא יאשר או יעצור)
+  const Q = await inIso(tabId, queueIn, [q, GUARD]).catch(() => null);
+  if (Q && Q.rows && Q.rows.length) return { ok: true, rec };
+  const d = (await inIso(tabId, fileDiagIn, [s.t, GUARD]).catch(() => null)) || {};
+  if (d.wrong) throw wrongPage();
+  // כל חלק מסונן בנפרד (scrub חותך ל-200), וההודעות מהדף ראשונות – כדי שייכנסו גם אחרי הקיצור ל-290 בהודעה
+  const diag = [
+    (d.msgs || []).length ? 'הודעה בדף: ' + d.msgs.map((m) => S.scrub(m)).join(' | ') : '',
+    `הקובץ לא נכנס ל"ממתין לטעינה" אחרי ${log.length} ניסיונות (${log.join(', ')})`,
+    `שדות קובץ: ${d.ins} (גלויים ${d.vis}) · נבחרו: ${d.files}${d.val ? ' (יש ערך)' : ''}${Q && Q.rows === null ? ' · אין כותרת ממתין' : ''}${d.multi ? ' · multiple' : ''}`,
+    'accept: ' + (S.scrub(d.accept || '') || '—'),
+  ].filter(Boolean).join(' · ');
+  return { ok: false, rec: Object.assign(rec, { err: 'no-queue' }), diag };
 }
 async function isLoginTab(tabId) {
   const L = (await sel()).login || {};
@@ -251,7 +398,19 @@ function rowsOf(f) {
 // ---------- שלבי הריצה ----------
 const STEP = {
   async hello(run) {
-    const r = await (await api()).call('hello', { mode: run.mode, manual: run.manual });
+    // העלאה לכספית (פריטים חדשים / מחירים) כבויה עד שנדע בוודאות איך מסך הייבוא מעלה קובץ – בלי export לשרת (לא מסמנים pd) ובלי ייבוא
+    if ((await sel()).importEnabled !== true) run.flags.noImp = true;
+    const cl = await api(), body = Object.assign({ mode: run.mode, manual: run.manual }, run.req ? { req: run.req } : {});
+    // מצב העדכון האוטומטי (upd.json) – לשרת: התראה למנהל אם הסקריפט נכשל / הפסיק לרוץ / גרסה שהורדה לא נטענה. שרת ישן מתעלם מהשדה
+    const ui = await updInfo().catch(() => null);
+    if (ui && ui.upd) body.upd = ui.upd;
+    let r;
+    try { r = await cl.call('hello', body); } catch (e) {
+      // ניסיון חוזר אחרי שהבקשה כבר נלקחה (התשובה הקודמת לא הגיעה) – ממשיכים כסנכרון ידני רגיל
+      if (e.code !== 'req-gone' || !run.attempt) throw e;
+      run.req = null; delete body.req;
+      r = await cl.call('hello', body);
+    }
     if (r.minVer && cmpVer(VER, r.minVer) < 0) throw P.err('min-ver');
     if (r.enabled === false && !run.manual) throw P.err('disabled');
     if (r.schedule && typeof r.schedule === 'object') {
@@ -361,29 +520,54 @@ async function exportImport(run, kind) {
   const done = (await get('impHash')) || {};
   if (done[hash] === today) return { n, skip: 'same' };
   const tab = await ownTab(false);
-  const name = (kind === 'new' ? 'caspit-new-items-' : 'caspit-price-update-') + today.replace(/-/g, '') + '.csv';
-  const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', {}, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
-  if (!res || !res.ok) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
-  const text = String(res.text || '').slice(0, 500);
-  await cl.call('importResult', { run: run.srv, kind, n, ok: !/שגיא/.test(text), text, hash });
+  // שם ייחודי לריצה – כך מוצאים את השורה שלנו בטבלת "טעינות קודמות" (וניסיון חוזר של אותה ריצה לא מעלה פעמיים)
+  const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
+  const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
+  if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty');
+  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); if (res && res.diag) throw P.err('selector-miss', ((kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים') + ': ' + res.diag).slice(0, 290)); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
+  // אחרי "העלה קבצים והרץ טעינה": שורה חדשה (מזהה גדול מהקודם) עם השם שלנו, עד סטטוס סופי. קריאה בלבד, כל 3 שניות
+  const r2 = await waitImport(tab, name, res.already ? res.already - 1 : res.hmax || 0, (await sel()).importWaitMs || 600e3);
+  const text = `מזהה ${r2.id || '—'} · ${r2.st || ''} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`;
+  const out = { run: run.srv, kind, n, ok: r2.fin === 'ok' && !r2.err, text, hash, id: r2.id || 0, status: String(r2.st || '').slice(0, 40), errors: r2.err == null ? -1 : r2.err, loaded: r2.ok == null ? -1 : r2.ok };
+  await cl.call('importResult', out);
   done[hash] = today;
   const keep = Object.entries(done).sort((a, b) => (a[1] < b[1] ? 1 : -1)).slice(0, 20);
   await set({ impHash: Object.fromEntries(keep) });
-  return { n, text: text.slice(0, 120) };
+  if (r2.fin === 'timeout') throw P.err('import-timeout', `כספית לא סיימה את הטעינה (מזהה ${r2.id || '—'}, ${r2.st || 'לא נמצאה שורה'}) תוך ${Math.round(((await sel()).importWaitMs || 600e3) / 60e3)} דקות`);
+  if (r2.fin === 'fail' || r2.err) throw P.err('import-errors', `טעינה ${r2.id} בכספית: ${r2.st} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`);
+  return { n, id: r2.id, loaded: r2.ok, errors: r2.err };
+}
+const histIn = (head) => { const H = self.CxSel.histRows(document, head); return H ? { rows: H.rows.slice(0, 200), maxId: H.maxId } : null; };
+async function waitImport(tab, name, after, ms) {
+  const end = Date.now() + ms;
+  let last = null;
+  for (;;) {
+    await guardBo(tab);
+    const H = await inIso(tab, histIn, ['טעינות קודמות']).catch(() => null);
+    const row = H && H.rows.filter((r) => r.id > after && r.name === name).sort((a, b) => b.id - a.id)[0];
+    if (row) {
+      last = row;
+      if (/בוצע/.test(row.st)) return Object.assign({ fin: 'ok' }, row);
+      if (/שגיא|נכשל|בוטל/.test(row.st)) return Object.assign({ fin: 'fail' }, row);
+    }
+    if (Date.now() > end) return Object.assign({ fin: 'timeout' }, last || {});
+    await sleep(3000);
+  }
 }
 function summary(run) {
   const i = run.info || {};
-  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, flags: run.flags };
+  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags };
 }
 
 // ---------- ריצה ----------
+// נעילה: busy נקבע מיד אחרי הבדיקה, לפני כל await – כך בדיקת בקשה מהטלפון והתחלה אוטומטית שמגיעות יחד לא מתחילות שתי ריצות
 async function startRun(o) {
   if (busy) return { ok: false, code: 'busy' };
-  if (!(await get('token'))) return { ok: false, code: 'auth' };
   busy = true;
   try {
+    if (!(await get('token'))) return { ok: false, code: 'auth' };
     const s = await sched();
-    const run = P.newRun({ id: U.rid('r'), now: Date.now(), manual: !!o.manual, slot: D.slotDay(Date.now(), s.at, s.tz) });
+    const run = P.newRun({ id: U.rid('r'), now: Date.now(), manual: !!o.manual, req: o.req || null, slot: D.slotDay(Date.now(), s.at, s.tz) });
     await chrome.alarms.clear('start');
     await loop(run);
     return { ok: true };
@@ -391,11 +575,13 @@ async function startRun(o) {
 }
 async function resume() {
   if (busy) return;
-  let run = await get('run');
-  if (!P.canResume(run, Date.now())) return;
-  if (!navigator.onLine && run.st === 'wait') { await chrome.alarms.create('retry', { delayInMinutes: 5 }); return; }
   busy = true;
-  try { run = P.resumeFrom(run); await loop(run); } finally { busy = false; }
+  try {
+    let run = await get('run');
+    if (!P.canResume(run, Date.now())) return;
+    if (!navigator.onLine && run.st === 'wait') { await chrome.alarms.create('retry', { delayInMinutes: 5 }); return; }
+    run = P.resumeFrom(run); await loop(run);
+  } finally { busy = false; }
 }
 async function loop(run0) {
   let run = run0;
@@ -421,18 +607,55 @@ async function loop(run0) {
 async function finalize(run) {
   const st = (await get('st')) || {};
   const s = await sched(), today = D.dayStr(Date.now(), s.tz);
-  st.lastRun = { id: run.id, at: Date.now(), st: run.st, manual: run.manual, code: run.err && run.err.code, msg: run.err && run.err.msg, step: run.err && run.err.step, sum: summary(run) };
+  const code = run.err && run.err.code;
+  st.lastRun = { id: run.id, at: Date.now(), st: run.st, manual: run.manual, req: !!run.req, code, msg: run.err && run.err.msg, step: run.err && run.err.step, sum: summary(run) };
   if (run.st === 'ok') { if (!st.lastOkDay || run.slot > st.lastOkDay) st.lastOkDay = run.slot; st.loginDay = null; st.failSlot = null; }
-  else if (run.st === 'fail') st.failSlot = run.slot;
+  else if (run.st === 'fail' && code !== 'req-gone') st.failSlot = run.slot; // בקשה מהטלפון שכבר טופלה – לא חוסמת את הסנכרון האוטומטי
   await set({ st });
   if (run.st === 'ok') return;
-  const code = run.err && run.err.code;
-  if (code === 'auth') return; // החיבור בוטל – אין למי לדווח
+  if (code === 'auth' || code === 'req-gone') return; // החיבור בוטל – אין למי לדווח; בקשה שכבר טופלה – אין מה לדווח
   if (code === 'needs-login') { if (st.loginDay === today) return; st.loginDay = today; await set({ st }); } // הודעה אחת ביום
   try { await (await api()).call('report', { run: run.srv || run.id, kind: 'run', st: run.st, err: run.err, steps: run.log, info: summary(run) }); } catch (e) { /* ננסה בריצה הבאה */ }
 }
 
 // ---------- מצב היכרות ----------
+// קישורי התפריט (טקסט + hash), גם של תפריטים סגורים: קודם "מעבר עכבר" (mouseover, בלי לחיצה) על כותרות התפריט שבהגדרה.
+// רק קישורים פנימיים (#/...) מחוץ לטבלאות ולרשימות נתונים. רץ בעולם המבודד של התוסף (selectors.js כבר בדף); בודק /bo לפני הכול.
+const menuIn = async (heads, max, guard) => {
+  const S = self.CxSel;
+  if (!S.onPath(window, guard)) return { wrong: true };
+  for (const t of heads || []) {
+    const el = S.find(document, { text: t }) || S.find(document, { textAny: [t] });
+    if (!el) continue;
+    for (const ty of ['mouseover', 'mouseenter']) el.dispatchEvent(new MouseEvent(ty, { bubbles: ty === 'mouseover' }));
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  const out = [], seen = new Set();
+  for (const a of Array.from(document.querySelectorAll('a[href]'))) {
+    if (out.length >= (max || 200)) break;
+    const h = String(a.getAttribute('href') || '');
+    if (!/^#\//.test(h) || (a.closest && a.closest('table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]'))) continue;
+    const t = S.norm(a.textContent).slice(0, 40);
+    if (!t || seen.has(t + '|' + h)) continue;
+    seen.add(t + '|' + h);
+    out.push({ t, h: h.slice(0, 80) });
+  }
+  return { links: out };
+};
+// מסך לקריאה בלבד: כתובת, כותרת, פקדים וכותרות הטבלאות (בלי תוכן השורות) – בקריאה אחת, רק אם הדף ב-/bo
+const roIn = (guard, btn) => {
+  const S = self.CxSel;
+  if (!S.onPath(window, guard)) return { wrong: true };
+  const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
+  // פרטיות: בדף לקריאה בלבד (למשל נוכחות) – בלי טקסט של פקדים ובלי אפשרויות של רשימות בחירה (שמות עובדים); רק תגית/סוג/מזהה ומספר אפשרויות
+  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn }), heads };
+};
+// הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
+function menuPick(links, find) {
+  const f = String(find || '').trim();
+  if (!f) return null;
+  return links.find((l) => l.t === f) || links.find((l) => l.t.includes(f)) || null;
+}
 async function runDisc() {
   if (busy) return { ok: false, code: 'busy' };
   busy = true;
@@ -448,9 +671,27 @@ async function runDisc() {
     await inMain(tab, () => window.__cxHook && window.__cxHook.discover(true));
     if (await isLoginTab(tab)) { rep.login = true; throw P.err('needs-login'); }
     await guardBo(tab);
+    // קישורי התפריט – גם אם הניווט למסך מסוים ייכשל, לומדים מהם את הכתובות
+    const heads = [...new Set((S0.disc || []).flatMap((p) => (Array.isArray(p.menu) ? p.menu : [])).map(String))];
+    const mr = await inIso(tab, menuIn, [heads, 200, GUARD]);
+    if (mr && mr.wrong) throw wrongPage();
+    const links = (mr && mr.links) || [];
+    rep.menu = links.map((l) => ({ t: l.t, h: l.h.replace(/\d+/g, '{n}') }));
     for (const pg of S0.disc || []) {
-      if (pg.hash) await navTo(tab, pg.hash, false, 3000);
+      // מסך בלי hash קבוע (למשל נוכחות תחת "עובדים"): הכתובת מקישור התפריט לפי הטקסט. רק #/... בתוך /bo (navTo + guardBo)
+      if (pg.find) {
+        const l = menuPick(links, pg.find);
+        if (!l || !(await navTo(tab, l.h, false, 3000))) { rep.pages.push({ name: pg.name, ok: false, nav: l ? 'bad-hash' : 'not-found', find: String(pg.find).slice(0, 40) }); continue; }
+      } else if (pg.hash) await navTo(tab, pg.hash, false, 3000);
       await guardBo(tab);
+      if (!pg.flow) {
+        // מסך לקריאה בלבד: בלי צעדים ובלי שום לחיצה – רק פקדים, כותרות טבלה, כתובת וכותרת
+        const r = (await inIso(tab, roIn, [GUARD, !!pg.btn])) || {};
+        if (r.wrong) throw wrongPage();
+        await guardBo(tab);
+        rep.pages.push({ name: pg.name, ok: true, ro: true, hash: String(r.hash || '').replace(/\d+/g, '{n}').slice(0, 80), title: String(r.title || '').slice(0, 60), controls: r.controls || [], heads: r.heads || [] });
+        continue;
+      }
       // היכרות v2: פותחים רשימות / לוח שנה רק כדי לראות אותם (בלי לבחור), לפני הצעדים
       const pk = [];
       for (const p of Array.isArray(pg.peek) ? pg.peek : []) { await guardBo(tab); const r = await inIso(tab, peekIn, [p, GUARD]); if (r && r.wrong) throw wrongPage(); pk.push(Object.assign({ name: String(p.name || '') }, r || {})); }
@@ -510,8 +751,8 @@ async function handle(m) {
   if (m.t === 'status') {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
-      run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null };
+      run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }
@@ -538,4 +779,4 @@ async function handle(m) {
   return { ok: false, code: 'bad-msg' };
 }
 // לבדיקות (Playwright): הפעלת טריגר ידנית
-self.__cxTest = { trigger, tick, startAuto, resume, setupAlarms, startRun };
+self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, reload: null, isBusy: () => busy };

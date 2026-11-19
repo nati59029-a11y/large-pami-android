@@ -220,8 +220,8 @@ ACT.piRe=()=>{LS.err='';lload(true)};
 ACT.piOpen=el=>{const id=el.dataset.id;if(ID_OK(id))go('piEd',id)};
 const lsGet=id=>(LS.L||[]).find(x=>x.id===id);
 let SUPQ='';const supList=()=>{try{return typeof usSupSubs==='function'?usSupSubs().sort((a,b)=>heCmp(a.name,b.name)):[]}catch(e){return[]}};
-const supItems=id=>{const q=SUPQ.trim(),L=supList().filter(s=>!q||String(s.name||'').includes(q)).slice(0,200);
- return L.length?L.map(s=>`<button type="button" class="li" data-a="piSup2" data-id="${esc(id)}" data-v="${esc(s.id)}"><div class="m"><b>${esc(s.name)}</b></div></button>`).join(''):'<div class="empty">לא נמצא ספק</div>'};
+const supItems=id=>{const q=SUPQ.trim(),L=supList().filter(s=>!q||String(s.name||'').includes(q)||(s.al||[]).some(a=>String(a).includes(q))).slice(0,200);
+ return L.length?L.map(s=>`<button type="button" class="li" data-a="piSup2" data-id="${esc(id)}" data-v="${esc(s.id)}"><div class="m"><b>${esc(s.name)}</b>${(s.al||[]).length?`<small>גם: ${esc(s.al.join(', '))}</small>`:''}</div></button>`).join(''):'<div class="empty">לא נמצא ספק</div>'};
 ACT.piSup=el=>{const x=lsGet(el.dataset.id);if(!x)return;if(!supList().length)return toast('אין ספקים ברשימה');SUPQ='';
  dlg(`<h3>שינוי ספק</h3><p class="note">עכשיו: ${esc(x.sup||'ספק לא ידוע')}</p><input data-i="piSupQ" data-id="${esc(x.id)}" placeholder="חיפוש ספק" autocomplete="off" style="width:100%"><div class="pi-sl" id="piSl">${supItems(x.id)}</div><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
 INP.piSupQ=el=>{SUPQ=String(el.value||'');const b=document.getElementById('piSl');if(b)b.innerHTML=supItems(el.dataset.id)};
@@ -256,8 +256,20 @@ function link(e,i,p){const l=e.L[i];l.pid=p.pid;delete l.nw;
  if(l.price==null&&p.price!=null)l.price=p.price;
  if(e.ord){if((l.wp==null||l.wpSrc==='auto')&&p.wp!=null){l.wp=p.wp;l.wpSrc='stock'}if(l.cto==null&&typeof p.cto==='boolean')l.cto=p.cto}}
 function unlink(e,i){const l=e.L[i];delete l.pid;l.nw=true;if(l.wpSrc==='stock'){delete l.wp;l.wpSrc='auto';autoWp(e,l)}}
+/* שמות נוספים לאותו ספק (19.11.2026): בכרטיס הספק (s.al) אפשר לרשום שמות נוספים – למשל "פלאס" (השם בכספית) לספק "נטו".
+   השרת משווה ספק לפי השם בלבד, ולכן מוצר עם אותו ברקוד שרשום על "פלאס" חוזר כ"קיים אצל ספק אחר" (k:'otherSup').
+   כאן: אם הספק של המוצר הוא שם של אותו ספק – ההצעה הופכת ל"מוצר קיים" (k:'bc') ומקושרת כברירת מחדל (אפשר לבטל). */
+const normSup=v=>String(v||'').toLowerCase().replace(/בע["'״׳]?מ/g,'').replace(/\bltd\b/g,'').replace(/[^\p{L}\p{N}]/gu,'');
+function supSet(inv){const out=new Set(),n0=normSup(inv&&inv.sup),id=inv&&inv.supId;let L=[];
+ try{L=L.concat(typeof usSupSubs==='function'?usSupSubs():[])}catch(x){}try{L=L.concat(typeof wkSubsAll==='function'?wkSubsAll():[])}catch(x){} /* כרטיסי המנהל + מה שפורסם לעובדים */
+ for(const s of L){const g=[s.name].concat(Array.isArray(s.al)?s.al:[]).map(normSup).filter(Boolean);if(g.length<2)continue;
+  if((id&&s.id===id)||(n0&&g.includes(n0)))g.forEach(x=>out.add(x))}
+ return out}
+function supAlias(M,inv){try{const set=supSet(inv);if(!set.size)return;
+ for(const m of M){if(!m||m.m||m.k!=='otherSup'||!Array.isArray(m.oth))continue;const j=m.oth.findIndex(o=>o&&set.has(normSup(o.sup)));if(j<0)continue;
+  m.m=m.oth[j];m.k='bc';m.oth=m.oth.filter((o,k)=>k!==j)}}catch(x){}}
 function init(e,r){const inv=r.inv||{};e.inv=inv;e.rev=Number.isInteger(r.rev)&&r.rev>=0?r.rev:0;e.gen=(e.gen||0)+1;e.vat=typeof r.vat==='number'?r.vat:PC.VAT0;e.ord=r.ord!==false;e.until=r.until||0;
- e.M=Array.isArray(r.m)?r.m:[];e.S0=[];e.B=[];
+ e.M=Array.isArray(r.m)?r.m:[];e.S0=[];e.B=[];supAlias(e.M,inv);
  e.L=[];(Array.isArray(inv.lines)?inv.lines:[]).forEach((l0,i)=>{const l={};for(const k of KEYS)if(l0&&l0[k]!=null)l[k]=l0[k];e.L[i]=l;const m=e.M[i]||{};
   e.S0[i]=m.m&&['bc','sku','name','al'].includes(m.k)?m.k:(m.k==='pid'?'pid':'');
   if(!l.pid&&!l.nw&&m.m&&['bc','sku','name','al'].includes(m.k))link(e,i,m.m);/* הצעה – מקושרת כברירת מחדל; אפשר לבטל ("מוצר חדש") */

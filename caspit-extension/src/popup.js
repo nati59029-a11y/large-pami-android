@@ -11,6 +11,8 @@ async function load() {
   $('biz').textContent = (s.biz && s.biz.name) || '—';
   $('last').textContent = s.st && s.st.lastOkDay ? dayHe(s.st.lastOkDay) : '—';
   $('next').textContent = s.connected ? when(s.next) : '—';
+  $('impN').classList.toggle('hide', s.imp !== false);
+  $('upd').textContent = updTxt(s);
   $('sync').disabled = !s.connected || s.busy;
   $('disc').disabled = s.busy;
   $('dl').classList.toggle('hide', !s.disc);
@@ -39,4 +41,12 @@ $('send').addEventListener('click', async () => {
   msg(r.ok ? 'הדוח נשלח לאפליקציה' : 'השליחה נכשלה: ' + self.CxPlan.msgOf(r.code), r.ok ? 'ok' : 'bad');
 });
 $('opt').addEventListener('click', () => chrome.runtime.openOptionsPage());
+// גרסה + מצב העדכון האוטומטי (upd.json שהסקריפט במחשב כותב)
+function updTxt(s) {
+  const u = s.upd && s.upd.upd, t = 'גרסה ' + s.ver;
+  if (!u) return t + ' · עדכון אוטומטי לא מותקן';
+  const at = new Date(u.at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (!u.ok) return t + ' · העדכון נכשל (' + at + ')' + (u.err ? ': ' + u.err : '');
+  return t + (s.upd.disk && s.upd.disk !== s.ver ? ' · גרסה ' + s.upd.disk + ' הורדה וממתינה לטעינה' : ' · עדכון אוטומטי תקין') + ' (נבדק ' + at + ')';
+}
 load();

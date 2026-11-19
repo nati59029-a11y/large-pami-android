@@ -1,7 +1,8 @@
 'use strict';
 // בדיקת קצה-לקצה: התוסף נטען (unpacked) ל-Chromium, כספית מדומה (context.route) ושרת cxBot מדומה (127.0.0.1).
 // מכסה: חיבור עם קוד, חיבור שפג בכספית (needs-login) והמשך אחרי התחברות, ריצה מלאה (קטלוג, מכירות לכל יום, קבצים לכספית),
-// טריגר כפול, אותו קובץ לא נשלח פעמיים, כפתור שהשתנה (selector-miss), מגבלת 500 מחירים, מצב היכרות + הורדת דוח בלי סודות.
+// טריגר כפול, אותו קובץ לא נשלח פעמיים, כפתור שהשתנה (selector-miss), מגבלת 500 מחירים, מצב היכרות + הורדת דוח בלי סודות,
+// "סנכרן עכשיו" מהטלפון (poll: ריצה אחת לכל בקשה, לא בזמן ריצה, שרת ישן), והיכרות עם מסך הנוכחות לפי התפריט (בלי לחיצות).
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -74,6 +75,7 @@ test.before(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cxext-'));
   ext = path.join(tmp, 'ext');
   execFileSync(process.execPath, [path.join(__dirname, '../build.js'), '--backend', 'local', '--api', `http://127.0.0.1:${srv.port}/cxBot`, '--out', ext], { stdio: 'pipe' });
+  impOn(ext);
   ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     channel: 'chromium', headless: true, acceptDownloads: true,
     // כספית האמיתית לא נגישה בבדיקה: בלשונית שהתוסף פותח, הבקשה הראשונה לפעמים יוצאת לפני שה-route מחובר. בסביבת הפיתוח
@@ -84,6 +86,13 @@ test.before(async () => {
   await ctx.route('https://caspit.valu.co.il/**', caspitRoute);
   sw = ctx.serviceWorkers()[0] || (await ctx.waitForEvent('serviceworker'));
 });
+// במוצר העלאה לכספית כבויה (selectors.json importEnabled:false) – כדי לבדוק את זרימת הייבוא על כספית המדומה, מדליקים אותה בעותק של הבדיקה
+function impOn(dir) {
+  const f = path.join(dir, 'selectors.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.equal(j.importEnabled, true, 'במוצר – פעיל (מ-0.1.4)');
+  j.importEnabled = true;
+  fs.writeFileSync(f, JSON.stringify(j));
+}
 test.after(async () => {
   if (ctx) await ctx.close();
   if (srv) await srv.close();
@@ -95,8 +104,8 @@ test('התוסף נטען עם המזהה הקבוע (key), הרשאות מינ�
   const m = await sw.evaluate(() => chrome.runtime.getManifest());
   assert.deepEqual(m.permissions.sort(), ['alarms', 'idle', 'scripting', 'storage']);
   assert.deepEqual(m.host_permissions, ['https://caspit.valu.co.il/*', 'http://127.0.0.1/*']);
-  const al = await waitFor(async () => { const a = await sw.evaluate(async () => (await chrome.alarms.getAll()).map((x) => x.name)); return a.includes('daily') && a.includes('tick') ? a : null; }, 10e3, 'alarms');
-  assert.ok(al.length >= 2);
+  const al = await waitFor(async () => { const a = await sw.evaluate(async () => (await chrome.alarms.getAll()).map((x) => x.name)); return a.includes('daily') && a.includes('tick') && a.includes('poll') ? a : null; }, 10e3, 'alarms');
+  assert.ok(al.length >= 3);
 });
 
 test('חיבור: קוד שגוי נדחה, קוד נכון מתחבר (עמוד ההגדרות)', async () => {
@@ -158,7 +167,9 @@ test('חיבור לכספית פג → "צריך התחברות", בלי למל�
   assert.match(imports[1].text, /101,5\.5/);
   const ir = srv.ops('importResult');
   assert.deepEqual(ir.map((r) => [r.kind, r.n, r.ok]), [['new', 1, true], ['price', 2, true]]);
-  assert.match(ir[0].text, /הסתיימה/);
+  assert.deepEqual(ir.map((r) => [r.id, r.status, r.errors, r.loaded]), [[25521, 'בוצע', 0, 1], [25522, 'בוצע', 0, 2]], 'השורה החדשה בטבלת "טעינות קודמות" (מזהה גדול מהקודם, השם שלנו)');
+  assert.ok(imports.every((i) => /^lp-(new|price)-[\w-]+\.csv$/.test(i.name)), 'שם ייחודי לריצה: ' + imports.map((i) => i.name));
+  { const evs = await caspitPage().evaluate(() => window.ev || []); assert.ok(!evs.includes('cancel') && !evs.includes('histlink'), 'לא נלחץ שום דבר בטבלת "טעינות קודמות"'); }
   assert.equal(srv.ops('export').find((e) => e.kind === 'price').max, 500);
   assert.equal(srv.ops('export').find((e) => e.kind === 'new').max, 50);
   const last = srv.ops('report').at(-1);
@@ -179,6 +190,64 @@ test('טריגר כפול אחרי הצלחה – לא רץ שוב; ריצה י�
   assert.equal(srv.ops('upload').filter((c) => c.kind === 'sales').length, nSales, 'same sales file not uploaded twice');
   assert.equal(imports.length, nImp, 'same CSV not imported twice the same day');
   assert.deepEqual(Object.values(s.st.lastRun.sum.sales).map((x) => x.skip), ['same', 'same']);
+});
+
+test('"סנכרן עכשיו" מהטלפון: בקשה → ריצה אחת (manual, req); poll נוסף לא מתחיל שוב; בזמן ריצה – לא; שרת ישן → כל 15 דקות', async () => {
+  const pollOnce = () => sw.evaluate(() => self.__cxTest.pollOnce());
+  const helloReq = (id) => srv.ops('hello').filter((h) => h.req === id);
+  // בלי בקשה – כלום
+  assert.equal(await pollOnce(), null);
+  srv.req = 'qtest0001aa'; srv.taken = false;
+  let t0 = Date.now();
+  if (!(await pollOnce())) await pollOnce(); // (ה-alarm של כל דקה יכול להקדים את הבדיקה)
+  let s = await waitFor(async () => { const x = await store(); return x.st && x.st.lastRun && x.st.lastRun.at > t0 && x.st.lastRun.req ? x : null; }, 240e3, 'remote run');
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(s.lastReq, 'qtest0001aa');
+  assert.equal(helloReq('qtest0001aa').length, 1, 'hello אחד עם הבקשה');
+  assert.equal(helloReq('qtest0001aa')[0].manual, true);
+  // שלוש בדיקות נוספות – גם אם השרת עדיין מחזיר את אותה בקשה – לא מתחילות ריצה נוספת
+  srv.taken = false;
+  const nHello = srv.ops('hello').length;
+  for (let i = 0; i < 3; i++) assert.equal(await pollOnce(), null);
+  assert.equal(srv.ops('hello').length, nHello);
+  srv.taken = true;
+  // בזמן ריצה (busy) – לא מתחילים, וגם לא פונים לשרת
+  await sw.evaluate(() => { self.__cxTest.startRun({ manual: true }); });
+  await waitFor(() => sw.evaluate(() => self.__cxTest.isBusy()), 10e3, 'busy');
+  srv.req = 'qtest0002bb'; srv.taken = false;
+  const nPoll = srv.ops('poll').length;
+  assert.equal(await pollOnce(), null);
+  assert.equal(srv.ops('poll').length, nPoll, 'בזמן ריצה – בלי פנייה לשרת');
+  await waitFor(() => sw.evaluate(() => !self.__cxTest.isBusy()), 240e3, 'run end');
+  t0 = Date.now();
+  if (!(await pollOnce())) await pollOnce();
+  s = await waitFor(async () => { const x = await store(); return x.st && x.st.lastRun && x.st.lastRun.at > t0 && x.st.lastRun.req ? x : null; }, 240e3, 'remote run 2');
+  assert.equal(helloReq('qtest0002bb').length, 1);
+  srv.req = null;
+  // שרת ישן (bad-op) → הבדיקה מאטה ל-15 דקות, בלי תקלה בחלון; שרת חדש → חזרה לכל דקה
+  srv.noPoll = true;
+  assert.equal(await pollOnce(), null);
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 15);
+  srv.noPoll = false;
+  await pollOnce();
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 1);
+  // העסק כבוי זמנית (403) → לא מפסיקים לבדוק, רק כל 15 דקות
+  srv.bizOff = true;
+  assert.equal(await pollOnce(), null);
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 15);
+  srv.bizOff = false;
+  await pollOnce();
+  assert.equal(await sw.evaluate(async () => (await chrome.alarms.get('poll')).periodInMinutes), 1);
+  // ריצה שממתינה לניסיון חוזר: הבקשה לא מתחילה ריצה, ו-poll מדווח מתי הניסיון הבא (wait)
+  const saved = await sw.evaluate(async () => (await chrome.storage.local.get('run')).run);
+  await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ run: Object.assign({}, run, { st: 'wait', retryAt: Date.now() + 600e3, touchedAt: Date.now() }) }); });
+  srv.req = 'qtest0003cc'; srv.taken = false;
+  assert.equal(await pollOnce(), null);
+  assert.ok(srv.ops('poll').at(-1).wait > Date.now(), JSON.stringify(srv.ops('poll').at(-1)));
+  assert.equal(helloReq('qtest0003cc').length, 0);
+  assert.notEqual((await store()).lastReq, 'qtest0003cc', 'בקשה שלא התחילה – לא מסומנת');
+  await sw.evaluate(async (r) => chrome.storage.local.set({ run: r }), saved);
+  srv.req = null;
 });
 
 test('כפתור שהשתנה בכספית → selector-miss, דיווח לשרת, בלי ניסיון חוזר', async () => {
@@ -220,13 +289,28 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const txt = JSON.stringify(rep);
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales']);
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'hours', 'on-shift']);
+  // נוכחות (0.1.6): "דוח שעות מרוכז" ו"דוח עובדים במשמרת" בכתובת ישירה, בלי שום לחיצה; כותרות הטבלה בלי השורות
+  const att = rep.pages[3];
+  assert.equal(att.ok, true, JSON.stringify(att));
+  assert.equal(att.hash, '#/hours-reports');
+  assert.equal(rep.pages[4].ok, true); assert.equal(rep.pages[4].hash, '#/report-active-employee-on-stores');
+  assert.deepEqual(att.heads, [['שם עובד', 'תאריך', 'שעת כניסה', 'שעת יציאה', 'סה"כ שעות']]);
+  assert.ok(att.controls.some((c) => c.id === 'attIn' && c.tag === 'button'), 'הפקדים נאספו (תגית/מזהה)');
+  assert.ok(att.controls.every((c) => (c.text === undefined || c.text === 'ייצוא לאקסל') && c.options === undefined && c.aria === undefined), 'דף לקריאה בלבד – רק טקסט של כפתורי פעולה, בלי אפשרויות: ' + JSON.stringify(att.controls));
+  assert.ok(att.controls.some((c) => c.text === 'ייצוא לאקסל'), 'טקסט כפתור פעולה נאסף');
+  assert.ok(!att.controls.some((c) => c.id === 'attIn' && c.text), 'כפתור בלי מילת פעולה – בלי טקסט');
+  assert.equal(att.controls.find((c) => c.id === 'empSel').optN, 3, 'רשימת בחירה – רק מספר האפשרויות');
+  for (const nm of ['כהנוביץ', '08:02', 'מזרחיאן', 'בלומנפלד', 'אבוטבולי', 'קרליבך', 'זילברשטיין']) assert.ok(!txt.includes(nm), 'שם / שעה של עובד בדוח: ' + nm);
+  assert.ok(rep.menu.some((l) => l.t === 'דוח שעות מרוכז' && l.h === '#/hours-reports') && rep.menu.some((l) => l.t === 'רשימת עובדים'), JSON.stringify(rep.menu));
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור (גם לא "עובדים")');
   const imp = rep.pages[1];
   assert.ok(!imp.controls.some((c) => c.type === 'password'));
-  assert.ok(imp.probe.every((p) => !p.done || ['nav', 'waitFor', 'text', 'select'].includes(p.op)), 'no change made on csv-imports: ' + JSON.stringify(imp.probe));
+  assert.ok(imp.probe.every((p) => !p.done || ['nav', 'waitFor', 'text', 'select', 'histMark'].includes(p.op)), 'no change made on csv-imports: ' + JSON.stringify(imp.probe));
   // היכרות v2: אפשרויות רשימת סוג הקובץ, ואחרי בחירה (רק לחשיפה) – שדה הקובץ וכפתור הטעינה; אף קובץ לא הועלה
   assert.deepEqual(imp.peek[0].items, ['טעינת פריטים חדשים', 'טעינת מועדון לקוחות', 'טעינת לקוחות הקפה', 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים', 'עדכון מחיר בחנות', 'עדכון פריטים', 'טעינת פריטים חדשים מנטפוס']);
-  assert.ok(imp.controls.some((c) => c.text === 'טען קובץ'), 'כפתור הטעינה נחשף');
+  assert.ok(imp.controls.some((c) => c.id === 'positive-file-uploader' && c.type === 'file') && imp.controls.some((c) => c.text === 'הורד קובץ דוגמה'), 'שדה הקובץ נחשף אחרי בחירת הסוג');
+  assert.ok(!imp.controls.some((c) => c.text === 'טען קובץ'), 'בלי קובץ – אין כפתור טעינה (לא נבחר קובץ)');
   assert.ok(!imp.probe.some((p) => (p.op === 'setFile' || p.op === 'click') && p.done), 'בלי קובץ ובלי לחיצה על טעינה');
   const sp = rep.pages[2];
   assert.equal(sp.peek[0].found, true); assert.ok(sp.peek[0].struct && /vdp-datepicker__calendar/.test(sp.peek[0].struct.cls), JSON.stringify(sp.peek[0]));
@@ -302,6 +386,222 @@ test('היכרות לא יוצאת מהמשרד האחורי: מסך שמעבי�
   for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
   await anyPage.evaluate(() => localStorage.removeItem('redir')).catch(() => {});
   await pop.close();
+});
+
+test('היכרות נוכחות: הקישור מוביל אל מחוץ למשרד האחורי → wrong-page, בלי לאסוף מהקופה ובלי לחיצות', async () => {
+  const cp = caspitPage() || ctx.pages().find((p) => p.url().startsWith('https://caspit.valu.co.il/'));
+  await cp.evaluate(() => { localStorage.setItem('redir', '#/hours-reports'); localStorage.setItem('posHits', '0'); localStorage.removeItem('attHits'); });
+  await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
+  const pop = await ctx.newPage();
+  await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+  await pop.click('#disc');
+  const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 240e3, 'discovery');
+  assert.equal(s.discSt.st, 'fail');
+  assert.equal(s.disc.rep.err.code, 'wrong-page');
+  assert.deepEqual(s.disc.rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales'], 'עצר לפני שאסף משהו מהקופה');
+  assert.ok(s.disc.rep.menu.some((l) => l.h === '#/hours-reports'), 'רשימת הקישורים נשמרה גם כשהניווט נכשל');
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
+  const bo = ctx.pages().find((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  if (bo) assert.equal(await bo.evaluate(() => localStorage.getItem('attHits')), null);
+  await cp.evaluate(() => localStorage.removeItem('redir')).catch(() => {});
+  await pop.close();
+});
+
+test('ייבוא: בתור "ממתין לטעינה" כבר יש קובץ של מישהו אחר → import-queue-not-empty; לא מעלים, לא מסירים', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.setItem('preq', 'someone-else.csv'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'import-queue-not-empty', JSON.stringify(s.st.lastRun));
+  assert.equal(s.st.lastRun.step, 'exportNew');
+  assert.equal(imports.length, nImp, 'שום קובץ לא הועלה');
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+  assert.ok(!evs.includes('run') && !evs.includes('rm'), 'לא נלחץ "העלה קבצים והרץ טעינה" ולא "הסר": ' + evs.join('|'));
+  assert.equal(srv.ops('report').at(-1).err.code, 'import-queue-not-empty');
+  await cp.evaluate(() => localStorage.removeItem('preq'));
+});
+
+test('ניסיון חוזר: הקובץ של הריצה כבר ב"טעינות קודמות" → לא מעלים שוב, התוצאה נקראת מהשורה הקיימת', async () => {
+  const cp = caspitPage();
+  srv.runId = 'retryrun1';
+  await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); const L = JSON.parse(localStorage.getItem('hist') || '[]'); const mx = Math.max(25520, ...L.map((x) => x.id)); L.push({ id: mx + 1, name: 'lp-new-retryrun1.csv', tn: 'טעינת פריטים חדשים', st: 'בוצע', c: 'שגויים: 0, נטענו: 1' }); localStorage.setItem('hist', JSON.stringify(L)); window.ev = []; });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1; srv.exportN.price = 0;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp, 'לא הועלה קובץ נוסף');
+  const ir = srv.ops('importResult').at(-1);
+  assert.equal(ir.kind, 'new'); assert.equal(ir.ok, true); assert.equal(ir.loaded, 1);
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+  assert.ok(!evs.includes('run'), 'לא נלחץ "העלה קבצים והרץ טעינה": ' + evs.join('|'));
+  delete srv.runId; srv.exportN.price = 2;
+});
+
+test('"טעינות קודמות" נטענת באיחור → מחכים לה ומעלים פעם אחת; לא מופיעה בכלל → selector-miss בלי העלאה ובלי קובץ בתור', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.setItem('histlate', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1; srv.exportN.price = 0;
+  let nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  let s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  await cp.evaluate(() => { localStorage.removeItem('histlate'); localStorage.setItem('histnone', '1'); });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ impHash: {} }); });
+  nImp = imports.length; t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'selector-miss', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp, 'לא הועלה כלום');
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const q = (await Promise.all(tabs.map((p) => p.evaluate(() => document.querySelectorAll('#queue tr').length).catch(() => 0)))).reduce((a, b) => a + b, 0);
+  assert.equal(q, 0, 'הקובץ שלנו לא נוסף לתור');
+  await cp.evaluate(() => localStorage.removeItem('histnone'));
+  srv.exportN.price = 2;
+});
+
+// 0.1.6 – התקלה של 19.11: הקובץ לא נכנס ל"ממתין לטעינה" בבחירה הרגילה. ניסיונות חלופיים: גרירה, ואז סוג קובץ של Excel
+for (const [mode, evx] of [['drop', 'drop'], ['xls', 'add:application/vnd.ms-excel']]) {
+  test(`העלאה: בחירה רגילה לא נקלטת (${mode}) → ניסיון חלופי, קובץ אחד בדיוק בתור ומועלה פעם אחת`, async () => {
+    const cp = caspitPage();
+    await cp.evaluate((m) => { localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.setItem('upmode', m); }, mode);
+    await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
+    await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+    srv.exportN.new = 0; srv.exportN.price = 2;
+    const nImp = imports.length, t0 = Date.now();
+    await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+    const s = await waitRun(t0);
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+    assert.equal(imports.at(-1).type, 'price');
+    const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+    const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+    assert.ok(evs.includes(evx), evs.join('|'));
+    assert.equal(evs.filter((e) => e.startsWith('add:')).length, 1, 'נוסף לתור פעם אחת בלבד: ' + evs.join('|'));
+    await cp.evaluate(() => localStorage.removeItem('upmode'));
+  });
+}
+
+test('העלאה: הקובץ לא נקלט בשום דרך → selector-miss עם אבחון (מסונן), בלי לחיצה על "העלה קבצים והרץ טעינה"', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.setItem('upmode', 'none'); window.ev = []; });
+  await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'selector-miss', JSON.stringify(s.st.lastRun));
+  assert.equal(s.st.lastRun.step, 'exportPrice');
+  const msg = s.st.lastRun.msg;
+  assert.match(msg, /לא נכנס ל"ממתין לטעינה" אחרי 3 ניסיונות/, msg);
+  assert.match(msg, /שדות קובץ: 1/, msg);
+  assert.match(msg, /הקובץ לא נקלט/, 'ההודעה הגלויה בדף: ' + msg);
+  assert.match(msg, /יש לבחור קובץ מסוג CSV/, 'ההודעה לא נחתכה גם עם accept ארוך: ' + msg);
+  assert.ok(!msg.includes('0521234567'), 'מספר טלפון סונן: ' + msg);
+  assert.equal(srv.ops('report').at(-1).err.code, 'selector-miss');
+  assert.equal(imports.length, nImp, 'לא הועלה כלום');
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+  assert.ok(!evs.includes('run'), 'לא נלחץ "העלה קבצים והרץ טעינה": ' + evs.join('|'));
+  await cp.evaluate(() => localStorage.removeItem('upmode'));
+});
+
+test('ייבוא עם שגויים בכספית → import-errors (עם המספרים), בלי ניסיון חוזר; זמן קצוב → import-timeout', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.setItem('imperr', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1;
+  let t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  let s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'import-errors', JSON.stringify(s.st.lastRun));
+  assert.match(s.st.lastRun.msg, /שגויים 1/);
+  const ir = srv.ops('importResult').at(-1);
+  assert.equal(ir.errors, 1); assert.equal(ir.ok, false); assert.ok(ir.id > 25521);
+  assert.equal(await sw.evaluate(async () => !!(await chrome.alarms.get('retry'))), false);
+  await cp.evaluate(() => { localStorage.removeItem('imperr'); localStorage.setItem('imphang', '1'); });
+  await sw.evaluate(async () => { const S = await self.__cxTest.sel(); S.importWaitMs = 8000; await chrome.storage.local.set({ impHash: {} }); });
+  t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'import-timeout', JSON.stringify(s.st.lastRun));
+  assert.match(s.st.lastRun.msg, /בתהליך/);
+  await cp.evaluate(() => localStorage.removeItem('imphang'));
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importWaitMs = 600000; });
+});
+
+test('העלאה לכספית כבויה (importEnabled:false): קטלוג ומכירות בלבד – בלי export לשרת ובלי ייבוא; הריצה "הצליחה" עם imp:off; הודעה בחלון', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = false; await chrome.storage.local.set({ impHash: {}, salesHash: {} }); });
+  const nExp = srv.ops('export').length, nImp = imports.length, nUp = srv.ops('upload').length;
+  const t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(s.st.lastRun.sum.imp, 'off');
+  assert.equal(srv.ops('export').length, nExp, 'בלי export – שום שורה לא מסומנת pd');
+  assert.equal(imports.length, nImp, 'בלי ייבוא לכספית');
+  assert.ok(srv.ops('upload').length > nUp, 'קטלוג ומכירות כן נשלחו');
+  const rep = srv.ops('report').at(-1);
+  assert.equal(rep.st, 'ok'); assert.equal(rep.info.imp, 'off');
+  assert.ok(!rep.steps.some((x) => x.s === 'exportNew' || x.s === 'exportPrice'));
+  const pop = await ctx.newPage();
+  await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+  await pop.waitForFunction(() => !document.getElementById('impN').classList.contains('hide'));
+  assert.match(await pop.textContent('#impN'), /ידנית בינתיים/);
+  await pop.close();
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; });
+});
+
+test('עדכון אוטומטי (0.1.7): upd.json נקרא מהדיסק ונשלח ב-hello; גרסה חדשה בדיסק → רענון רק כשהסקריפט סיים, לא בזמן ריצה, פעם אחת לשעה', async () => {
+  const mf = path.join(ext, 'manifest.json'), uf = path.join(ext, 'upd.json'), orig = fs.readFileSync(mf, 'utf8');
+  const VER = JSON.parse(orig).version;
+  await sw.evaluate(() => { self.__rl = 0; self.__cxTest.reload = () => { self.__rl++; }; return chrome.storage.local.remove(['updReload', 'upd']); });
+  try {
+    // בלי upd.json: "לא מותקן", בלי רענון
+    assert.deepEqual(await sw.evaluate(() => self.__cxTest.updInfo()), { disk: VER, upd: null });
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    // הסקריפט רץ ולא היה מה לעדכן → נשלח ב-hello
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: 1763500000000, ok: true, ver: VER, err: '', fails: 0 }));
+    srv.exportN.new = 0; srv.exportN.price = 0;
+    const t0 = Date.now();
+    await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+    await waitRun(t0);
+    const h = srv.ops('hello').at(-1);
+    assert.deepEqual(h.upd, { at: 1763500000000, ok: true, ver: VER, err: '', fails: 0 }, JSON.stringify(h));
+    // גרסה חדשה בדיסק, אבל upd.json עוד מהגרסה הקודמת (הסקריפט באמצע) → לא מרעננים
+    fs.writeFileSync(mf, orig.replace(`"version": "${VER}"`, '"version": "9.9.9"'));
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    // הסקריפט סיים (ok + אותה גרסה) → רענון אחד; ניסיון נוסף לאותה גרסה תוך שעה – לא
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: Date.now(), ok: true, ver: '9.9.9', err: '', fails: 0 }));
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), true);
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    assert.equal(await sw.evaluate(() => self.__rl), 1);
+    // כישלון של הסקריפט (גרסה בדיסק שלא אושרה) → לא מרעננים, והמצב מוצג בחלון
+    await sw.evaluate(() => chrome.storage.local.remove('updReload'));
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: Date.now(), ok: false, ver: VER, err: 'bad-hash <x>', fails: 2 }));
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    const pop = await ctx.newPage();
+    await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+    await pop.waitForFunction(() => /העדכון נכשל/.test(document.getElementById('upd').textContent));
+    assert.match(await pop.textContent('#upd'), /bad-hash x/);
+    await pop.close();
+  } finally {
+    fs.writeFileSync(mf, orig);
+    fs.rmSync(uf, { force: true });
+    await sw.evaluate(() => { self.__cxTest.reload = null; return chrome.storage.local.remove(['updReload', 'upd']); });
+    srv.exportN.price = 2;
+  }
 });
 
 test('ניתוק: הקוד נמחק', async () => {

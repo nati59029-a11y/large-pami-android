@@ -2,7 +2,8 @@
 // הקמת חנות – שלב 5 (17.11.2026, משימה 2026-11-17_תהליך-הקמת-חנות): "בדיקה חכמה" לפריט בתוכנית הצילום ו"המערכת מציעה".
 // חוזה: תוצרים/0-חוזה-נתונים.md – 3.3 (cap, ph, ai, prods, diff), 3.5 (fx.st), 3.7 (s3use/s_{mapId}), 4. הלוגיקה הטהורה: lib/store3d-capai.js,
 // ההנחיה והבדיקה הקפדנית של התשובה: lib/prompts-bayscan.js.
-//   s3CapCheck { qid, mapId, key } – מנהל או s3m. התמונות נקראות מ-Storage לפי cap/{key}.ph (לא off), עד 13MB מלאות (השאר – מוקטנות).
+//   s3CapCheck { qid, mapId, key } – מנהל או s3m. התמונות נקראות מ-Storage לפי cap/{key}.ph (לא off) – כולן, עד 40.
+//     עד 13MB בסך הכול: מלאות כל עוד נשאר מקום למוקטנות (th, עד 150KB) של כל התמונות שאחריהן; השאר – מוקטנות (18.11.2026).
 //     מכסה: s3use/s_{mapId} – חד-פעמית למפה (2 × מקטעים + 50, גדלה לבד, לא יורדת; מנהל־על – s3SetupLim), + הבלם היומי לעובד (s3use/u_).
 //     המכסה החודשית של הסניף (b_) לא נספרת. ההזמנה ו-s3qid – בטרנזקציה אחת לפני Gemini. Gemini ענה (גם תשובה שבורה) = נספר;
 //     לא ענה (429, ניתוק, timeout) = מוחזר. qid חוזר אחרי הצלחה = אותה תשובה, בלי ספירה ובלי Gemini. 80% – push למנהלים פעם אחת למפה.
@@ -40,7 +41,7 @@ const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const GEMINI_API_BASE = defineString('GEMINI_API_BASE', { default: 'https://generativelanguage.googleapis.com', description: 'כתובת השירות של Gemini' });
 const S3_USER_DAILY = defineInt('S3_USER_DAILY', { default: 400, description: 'סריקת חנות: מספר תמונות מרבי ביום לכל משתמש (בלם בטיחות)' });
 
-const QID_DAYS = 30, D1 = 86400000, BUSY_MS = 5 * 60000, IMG_BUDGET = 13000000;
+const QID_DAYS = 30, D1 = 86400000, BUSY_MS = 5 * 60000, IMG_BUDGET = 13000000, TH_MAX = 150000; // TH_MAX – כמו LIM.th.max ב-s3cap.js
 const TIMES = { timeoutMs: 120000, budgetMs: 200000 }, MAX_OUT = 32768;
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const CODE = { 's3-setup-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 'too-big': 'failed-precondition', 'kind-sides': 'failed-precondition', 'bad-kind': 'invalid-argument', 'bad-answer': 'internal' };
@@ -85,7 +86,9 @@ async function ask(deps, prompt, b64s, deadline) {
   const r = await scan.callGemini(String(deps.base).replace(/\/+$/, ''), deps.key, body, TIMES.timeoutMs, false, { deadline, stats: { sent: 0 }, maxOut: MAX_OUT });
   return { obj: scan.parseLikeApp(r.text), finish: r.finish || '', len: String(r.text || '').length };
 }
-// התמונות שבשימוש (לא off), לפי הגובה (עליון, תחתון, רגיל) ואז לפי n. מלאות עד IMG_BUDGET, ואחר כך מוקטנות. קובץ חסר – מדלגים
+// התמונות שבשימוש (לא off), לפי הגובה (עליון, תחתון, רגיל) ואז לפי n. כולן נשלחות (עד 40 – PH_MAX). מלאה רק אם אחריה נשאר
+// ב-IMG_BUDGET מקום שמור למוקטנת (TH_MAX) של כל תמונה שעוד לא נקראה – אחרת מוקטנת. כך 40 × 1.5MB לא חורגות ואף תמונה לא נופלת.
+// (40 × 150KB = 6MB < 13MB.) קובץ חסר – מדלגים
 // pre = התחילית המותרת של הנתיב (b/{biz}/store3d/{br}/cap/{mapId}/{key}_) – הגנה נוספת: לא קוראים ולא מוחקים קובץ מחוץ לפריט
 const inPre = (p, pre) => !pre || [p.p, p.th].every((x) => typeof x === 'string' && x.startsWith(pre) && !x.includes('..'));
 async function readPhotos(bucket, ph, pre) {
@@ -93,10 +96,11 @@ async function readPhotos(bucket, ph, pre) {
     .sort((a, b) => (LV_ORD[a.lv] || 0) - (LV_ORD[b.lv] || 0) || a.n - b.n);
   const out = [];
   let total = 0;
-  for (const p of L) {
+  for (let j = 0; j < L.length; j++) {
+    const p = L[j], rest = (L.length - j - 1) * TH_MAX; // מקום שמור למוקטנות של התמונות שאחרי זו
     let buf = null;
     for (const path of [p.p, p.th]) {
-      try { const [b] = await bucket.file(path).download(); if (total + b.length <= IMG_BUDGET || path === p.th) { buf = b; break; } } catch (e) { logger.warn('s3CapCheck: photo read failed', { n: p.n, code: e && e.code }); }
+      try { const [b] = await bucket.file(path).download(); if (total + b.length + rest <= IMG_BUDGET || path === p.th) { buf = b; break; } } catch (e) { logger.warn('s3CapCheck: photo read failed', { n: p.n, code: e && e.code }); }
     }
     if (!buf || total + buf.length > IMG_BUDGET) continue;
     total += buf.length;

@@ -26,6 +26,8 @@ const ANSWERS = {
   transfer: { document_type: 'bank_transfer', transfers: [{ amount: 1234.56, date: '2026-11-02', payee_name: 'ספק דמה בע"מ', payee_account: { bank: '12', branch: '345', account: '67890' }, reference: 'R-1001' }] },
   cashout: { register: '6346053', store: 'לארג\' פעמי-יהודה הנשיא', date: '2026-10-20', time: '09:02', amount: 4650 },
   // צילום רשימת הזמנה (ordlist, 14.11.2026)
+  // POS:M6 – מחירון מצילום (pos-ocr.js): 3 שורות לדוגמה, אחת בלי מחיר
+  posocr: { rows: [{ name: 'צלחות 20 יח׳ (דוגמה)', price: 12.9, bc: '7290000001012' }, { name: 'כוסות 50 יח׳ (דוגמה)', price: 9.9, bc: '' }, { name: 'מפיות (דוגמה)', price: null, bc: '' }] },
   ordlist: { lines: [{ name: 'צלחות עמוקות', qty: 5, unit: 'ct' }, { name: 'מפיות', qty: 2, unit: null }, { name: 'כוס חד פעמית', qty: null, unit: null }] },
   recipe: { title: 'עוגת שמרים', text: 'עוגת שמרים. המצרכים: שתי כוסות קמח. אופן ההכנה: לערבב ולאפות.' },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
@@ -94,14 +96,31 @@ const BAY_DEF = { retake: '', per: [], kind: 'dfr', kc: 0.9, lvl: 5, bays: 1, co
   prods: [{ n: 'כוסות קרטון 250 מ"ל', brand: 'תבניכל', size: '50 יח\'', cat: 'כוסות', bc: '7290000000011', lv: 2, xr: { a: 100, b: 400 }, conf: 0.92 },
     { n: 'מפיות לבנות', cat: 'מפיות', bc: '12345', conf: 0.6 }],
   diff: [{ k: 'prod', was: 'צלחות', got: 'כוסות קרטון', conf: 0.85 }], conf: 0.88 };
-const state = { bayscan: null, bayscanSeq: [], dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.bayscan = null; state.bayscanSeq = []; state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+// כלל שכר בכתב חופשי (payRuleAi, שלב D 19.11.2026): הנחיית מערכת שמתחילה ב-PAY-RULE-V1 (lib/pay-ai.js).
+// state.payrule = שם תשובה קבועה מ-PAYRULE ('ok' | 'base' | 'broken' | 'bad' | 'empty'), אובייקט, פונקציה(body), או מחרוזת גולמית. ברירת מחדל: 'ok'.
+const PAYRULE = {
+  ok: { comp: [{ k: 'tk', m: 'all', a: 150, n: 'כל המשימות בזמן' }, { k: 'pc', p: 2, th: 20000, ss: 'hrs' }], base: null, explain: 'בונוס 150 ש"ח אם כל המשימות בזמן, ו-2% מהמכירות שמעל 20,000 ש"ח בשעות שעבד.', unsure: '' },
+  base: { comp: [], base: { mode: 'hr', rate: 45, add: [{ n: 'נסיעות', k: 'day', a: 20 }], rules: [{ d: [5], s: '14:00', e: '24:00', r: 60 }] }, explain: 'שכר שעתי 45 ש"ח, 20 ש"ח נסיעות ליום, ו-60 ש"ח לשעה בשישי אחה"צ.', unsure: '' },
+  broken: '{"comp":[{"k":"tk","m":"all","a":15',
+  bad: { comp: [{ k: 'zz', a: 5 }, { k: 'pc', p: 250 }, { k: 'sl', t: [] }], base: { mode: 'week', rate: -3 }, explain: 'ניסיתי', unsure: 'לא ברור' },
+  empty: { comp: [], base: null, explain: 'הטקסט אינו כלל שכר.', unsure: '' },
+};
+function payAnswer(body) {
+  let r = state.payrule == null ? 'ok' : state.payrule;
+  try { if (typeof r === 'function') r = r(body); } catch (e) { r = 'mock error'; }
+  if (typeof r === 'string' && Object.hasOwn(PAYRULE, r)) r = PAYRULE[r];
+  return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
+}
+const state = { payrule: null, bayscan: null, bayscanSeq: [], dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.payrule = null; state.bayscan = null; state.bayscanSeq = []; state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
   if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
   if (typeof si === 'string' && si.startsWith('ORD-PARSE-V1')) return 'ordparse';
   if (typeof si === 'string' && si.startsWith('DR-REP-V1')) return 'dr'; // דיווח יומי (lib/prompts-dr.js)
+  if (typeof si === 'string' && si.startsWith('PAY-RULE-V1')) return 'payrule'; // כלל שכר בכתב חופשי (lib/pay-ai.js)
+  if (typeof si === 'string' && si.startsWith('POS-OCR-V1')) return 'posocr'; // POS:M6 – מחירון מצילום (functions/pos-ocr.js)
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('אתה בודק פריט אחד בהקמת חנות')) return 's3bay'; // lib/prompts-bayscan.js (הקמת חנות שלב 5)
@@ -151,6 +170,7 @@ function drAnswer(body) {
 }
 function rawAnswer(kind, body) {
   if (kind === 'dr') return drAnswer(body || {});
+  if (kind === 'payrule') return payAnswer(body || {});
   if (kind === 'sec') return secAnswer(body || {});
   if (kind === 'ordparse') return ordAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
@@ -222,4 +242,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { BAY_DEF, QS_DEF, inlineOf, DR_DEF, ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
+module.exports = { PAYRULE, BAY_DEF, QS_DEF, inlineOf, DR_DEF, ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };

@@ -226,6 +226,12 @@ describe('setArCfg וחוקים', () => {
     assert.equal((await call('setArCfg', E1, { cust: PR, snd: { ch: 'fax', oc: true } })).reason, 'bad-snd');
     assert.equal((await call('setArCfg', E1, { cust: 'nope', snd: { ch: 'wa', oc: true } })).reason, 'no-cust');
     assert.equal((await call('setArCfg', NOORD, { cust: PR, snd: { ch: 'wa', oc: true } })).reason, 'no-perm');
+    // קופה גל 3: a4 – הדפסת A4 בקופה; ערוץ ריק רק עם a4; a4 עם ערוץ נשמר לצדו
+    assert.equal((await call('setArCfg', E1, { cust: PR, snd: { ch: '', a4: true } })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/cust/${PR}`)).snd, { oc: false, inv: false, rc: false, a4: true });
+    assert.equal((await call('setArCfg', E1, { cust: PR, snd: { ch: '' } })).reason, 'bad-snd');
+    assert.equal((await call('setArCfg', E1, { cust: PR, snd: { ch: 'mail', inv: true, a4: true } })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/cust/${PR}`)).snd, { ch: 'mail', oc: false, inv: true, rc: false, a4: true });
     assert.equal((await call('setArCfg', E1, { cust: PR, snd: null })).status, 'OK');
     assert.equal((await get(`b/${A}/cust/${PR}`)).snd, undefined);
     assert.equal((await get(`b/${A}/cust/${PR}`)).name, 'דנה', 'שאר שדות הלקוח לא השתנו');

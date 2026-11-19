@@ -5,6 +5,7 @@
 //   - קטלוג ראשון → first-manual. אישור אוטומטי: האפליקציה מנצחת. מכירות: העלאה חוזרת לא מורידה פעמיים; "לא בטוח" לא עוצר.
 //   - מנעול משותף עם הטלפון. export מעל המגבלה – סירוב לפני סימון pd / קוד חדש. דיווח ריצה → היום האחרון שנקלט (days ב-hello).
 //   - cxBotWatch: התראות + פעם ביום לכל סוג + "לא סנכרן" רק אחרי 10:00. דוח היכרות – מנהל־על בלבד.
+//   - "סנכרן עכשיו": רק מנהל, pending / running / no-dev, poll פטור מהמונה, hello לוקח בקשה פעם אחת, בלי הגבלה יומית.
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -214,6 +215,12 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     assert.deepEqual((await okb(TOK, { op: 'hello', mode: 'sync' })).days, []);
     await okb(TOK, { op: 'importResult', run: h.runId, kind: 'price', n: 2, ok: true, text: 'נטענו 2 פריטים', hash: 'a'.repeat(64) });
     assert.equal((await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).get('imp.price.n'), 2);
+    // תוסף 0.1.4: השורה ב"טעינות קודמות" של כספית – נשמרת בריצה ובכרטיס (li)
+    await okb(TOK, { op: 'importResult', run: h.runId, kind: 'new', n: 1, ok: false, text: 'מזהה 25522', hash: 'b'.repeat(64), id: 25522, status: 'בוצע', errors: 1, loaded: 0 });
+    const im = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).get('imp.new');
+    assert.deepEqual([im.id, im.status, im.errors, im.loaded], [25522, 'בוצע', 1, 0]);
+    assert.equal((await dev()).li.id, 25522);
+    assert.equal((await bot(TOK, { op: 'importResult', run: h.runId, kind: 'new', n: 1, ok: true, id: 'x', ver: '0.1.0' })).body.reason, 'bad-import');
     const i = await ok('cxBotTok', MGR, { op: 'info' });
     assert.ok(i.runs.length >= 2); assert.equal(i.sd, yday);
     // info גדול: נשמרים רק ימים תקינים; דיווח פגום – המנעול משתחרר בכל זאת
@@ -345,6 +352,122 @@ describe('רובוט כספית – חוזה מול הלקוח של התוסף (
   });
 });
 
+describe('רובוט כספית – "סנכרן עכשיו" מהטלפון (cxBotTok op:now, poll, hello עם req)', () => {
+  const U = () => adm().doc(`b/${A}/private/cxbot.use`);
+  const runsOf = async (id) => (await adm().collection(`b/${A}/cxBotRun`).where('req', '==', id).get()).size;
+  it('רק מנהל; בקשה נכתבת; בקשה שנייה בזמן המתנה → pending (בלי כתיבה); עסק בלי מחשב → no-dev', async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null, lr: null }, { merge: true });
+    assert.equal((await call('cxBotTok', E1, { op: 'now' })).reason, 'manager-only');
+    assert.notEqual((await call('cxBotTok', null, { op: 'now' })).status, 'OK');
+    assert.equal((await call('cxBotTok', MB, { op: 'now' })).reason, 'no-dev');
+    const r = await ok('cxBotTok', MGR, { op: 'now' });
+    assert.match(r.req.id, /^q[a-z0-9]{6,30}$/);
+    const d = await dev();
+    assert.equal(d.req.id, r.req.id); assert.equal(d.req.by, MGR); assert.equal(d.req.took, undefined);
+    const r2 = await call('cxBotTok', MGR, { op: 'now' });
+    assert.equal(r2.reason, 'pending'); assert.match(r2.text, /[א-ת]/);
+    assert.equal((await dev()).req.id, r.req.id, 'הבקשה הקיימת לא נדרסה');
+    const i = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.equal(i.req.id, r.req.id); assert.equal(i.nowVer, BOT.NOW_VER); assert.ok(i.now > 0);
+  });
+
+  it('poll: פטור מהמונה היומי (גם כשהמונה מלא); pl נכתב פעם ב-5 דקות; אסימון שגוי → 401 ונספר במונה ה-IP; שדה לא מוכר נדחה', async () => {
+    const day = BOT.ilDay(Date.now());
+    await U().set({ day, n: 0, runs: 0 });
+    const want = (await dev()).req.id;
+    const first = await okb(TOK, { op: 'poll', ver: '0.1.5' });
+    assert.equal(first.want, true); assert.equal(first.id, want);
+    const pl = (await dev()).pl;
+    assert.ok(pl > 0); assert.equal((await dev()).ver, '0.1.5');
+    for (let k = 0; k < 40; k += 10) await Promise.all(Array.from({ length: 10 }, () => okb(TOK, { op: 'poll', ver: '0.1.5' })));
+    assert.equal((await U().get()).get('n'), 0, 'poll לא נספר');
+    assert.equal((await dev()).pl, pl, 'pl לא נכתב שוב בתוך 5 דקות');
+    await U().set({ day, n: 600, runs: 0 });
+    assert.equal((await bot(TOK, { op: 'cfg', ver: '0.1.5' })).code, 429, 'המונה מלא');
+    await okb(TOK, { op: 'poll', ver: '0.1.5' }); // גם אז poll עובד
+    await U().set({ day, n: 0, runs: 0 });
+    assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.5', x: 1 })).body.reason, 'bad-field');
+    // אסימון שגוי: 401, והניסיון נספר במונה של ה-IP (הדלי של הכתובת)
+    const ip = '203.0.113.77', bucket = parseInt(crypto.createHash('sha256').update('cxip:' + ip, 'utf8').digest('hex').slice(0, 8), 16) % BOT.FAIL_BUCKETS;
+    await adm().doc('cxbot_fail/b' + bucket).set({ day, n: 0 });
+    const bad = await bot(A + '.' + 'C'.repeat(43), { op: 'poll', ver: '0.1.5' }, { ip });
+    assert.equal(bad.code, 401);
+    assert.equal((await adm().doc('cxbot_fail/b' + bucket).get()).get('n'), 1);
+  });
+
+  it('hello עם req לוקח את הבקשה פעם אחת; hello שני → req-gone בלי ריצה; בזמן הריצה → running; אחרי הדיווח – בקשה חדשה מותרת', async () => {
+    const id = (await dev()).req.id;
+    assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.5', req: '../x' })).body.reason, 'bad-req');
+    const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true, req: id });
+    let d = await dev();
+    assert.ok(d.req.took > 0); assert.equal(d.req.run, h.runId);
+    const run = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).data();
+    assert.equal(run.manual, true); assert.equal(run.req, id);
+    const again = await bot(TOK, { op: 'hello', mode: 'sync', manual: true, ver: '0.1.5', req: id });
+    assert.equal(again.code, 409); assert.equal(again.body.reason, 'req-gone');
+    assert.equal(await runsOf(id), 1, 'ריצה אחת לבקשה');
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5' })).want, false, 'הבקשה נלקחה');
+    assert.equal((await call('cxBotTok', MGR, { op: 'now' })).reason, 'running');
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
+    const r = await ok('cxBotTok', MGR, { op: 'now' });
+    assert.notEqual(r.req.id, id);
+    d = await dev();
+    assert.equal(d.req.id, r.req.id);
+    assert.ok(!d.req.took && !d.req.run && !d.req.wait, 'בקשה חדשה לא יורשת took/run/wait מהקודמת: ' + JSON.stringify(d.req));
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5' })).want, true, 'הבקשה השנייה פעילה ונלקחת');
+    const i = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.equal(i.runs.find((x) => x.id === h.runId).req, true);
+  });
+
+  it('בלי הגבלה יומית: ריצה מבקשה בטלפון לא נספרת במגבלת 10 הריצות; בקשה שפגה (10 דקות) לא נלקחת ולא חוסמת בקשה חדשה', async () => {
+    const day = BOT.ilDay(Date.now());
+    await U().set({ day, n: 0, runs: 10 });
+    assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.5' })).code, 429, 'ריצה רגילה – מעל המגבלה');
+    const id = (await dev()).req.id;
+    const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true, req: id });
+    assert.equal((await U().get()).get('runs'), 10, 'לא נספרה');
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
+    await U().set({ day, n: 0, runs: 0 });
+    // בקשה ישנה (11 דקות) – poll לא מחזיר אותה, hello לא לוקח אותה, ובקשה חדשה מותרת
+    const old = await ok('cxBotTok', MGR, { op: 'now' });
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: { id: old.req.id, at: Date.now() - BOT.REQ_MS - 60e3, by: MGR } }, { merge: true });
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5' })).want, false);
+    assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.5', req: old.req.id })).body.reason, 'req-gone');
+    const nw = await ok('cxBotTok', MGR, { op: 'now' });
+    assert.notEqual(nw.req.id, old.req.id);
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null }, { merge: true });
+  });
+
+  it('במקביל: שתי בקשות "סנכרן עכשיו" → אחת נכתבת, השנייה pending; שני hello עם אותה בקשה → ריצה אחת בלבד', async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null, lr: null }, { merge: true });
+    const two = await Promise.all([call('cxBotTok', MGR, { op: 'now' }), call('cxBotTok', MGR, { op: 'now' })]);
+    assert.equal(two.filter((r) => r.status === 'OK').length, 1, JSON.stringify(two));
+    assert.equal(two.filter((r) => r.reason === 'pending').length, 1, JSON.stringify(two));
+    const id = (await dev()).req.id;
+    assert.equal(two.find((r) => r.status === 'OK').result.req.id, id);
+    const day = BOT.ilDay(Date.now());
+    await U().set({ day, n: 0, runs: 0 });
+    const hs = await Promise.all([1, 2].map(() => bot(TOK, { op: 'hello', mode: 'sync', manual: true, ver: '0.1.5', req: id })));
+    assert.equal(hs.filter((r) => r.code === 200).length, 1, JSON.stringify(hs.map((r) => r.body)));
+    assert.equal(hs.filter((r) => r.body.reason === 'req-gone').length, 1);
+    assert.equal(await runsOf(id), 1, 'ריצה אחת לבקשה');
+    const h = hs.find((r) => r.code === 200).body;
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'ok', steps: [], info: { days: h.days, sales: {} } });
+  });
+
+  it('poll עם wait (ריצה שממתינה לניסיון חוזר) נרשם על הבקשה ומוצג ב-info; wait לא תקין נדחה', async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null, lr: null }, { merge: true });
+    const r = await ok('cxBotTok', MGR, { op: 'now' });
+    const w = Date.now() + 240e3;
+    assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.5', wait: 'x' })).body.reason, 'bad-field');
+    assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.5', wait: w })).want, true);
+    assert.equal((await dev()).req.wait, w);
+    assert.equal((await dev()).req.id, r.req.id, 'שאר שדות הבקשה נשמרו');
+    assert.equal((await ok('cxBotTok', MGR, { op: 'info' })).req.wait, w);
+    await adm().doc(`b/${A}/private/cxbot`).set({ req: null }, { merge: true });
+  });
+});
+
 describe('רובוט כספית – cxBotWatch', () => {
   const at = (day, hh) => { const [y, m, d] = day.split('-').map(Number); return TK.zoned(y, m - 1, d, hh, 5); };
   it('needs-login – התראה מיד בדיווח, פעם אחת ביום', async () => {
@@ -373,6 +496,11 @@ describe('רובוט כספית – cxBotWatch', () => {
     r = await BOT.runWatch({ now: t11 + 3600e3, send });
     assert.deepEqual(r[A], [], 'פעם ביום');
     assert.equal(r[B], undefined, 'עסק בלי מחשב מחובר – לא נבדק');
+    // טעינה לכספית עם שגויים – התראה
+    await adm().doc(`b/${A}/private/cxbot`).set({ lr: { id: 'r4', at: t11 + 2 * 3600e3, st: 'fail', code: 'import-errors', msg: '', step: 'exportNew' } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual((await BOT.runWatch({ now: t11 + 2.5 * 3600e3, send }))[A], ['import-errors']);
+    assert.match(PUSH[0].body, /שורות שגויות/);
     // התוסף עצר בדף שאינו המשרד האחורי (wrong-page) – התראה, פעם ביום
     await adm().doc(`b/${A}/private/cxbot`).set({ lr: { id: 'r3', at: t11 + 2 * 3600e3, st: 'fail', code: 'wrong-page', msg: '', step: 'exportNew' } }, { merge: true });
     PUSH.length = 0;
@@ -384,5 +512,46 @@ describe('רובוט כספית – cxBotWatch', () => {
     assert.deepEqual((await BOT.runWatch({ now: at('2026-11-21', 11), send }))[A].filter((k) => k.startsWith('nosync')), []);
     await adm().doc(`b/${A}/private/cxbot`).set({ sd: '2026-11-20' }, { merge: true });
     assert.deepEqual((await BOT.runWatch({ now: at('2026-11-22', 11), send }))[A].filter((k) => k.startsWith('nosync')), ['nosync']);
+  });
+  it('עדכון אוטומטי (0.1.7): upd ב-hello נשמר מסונן (לא תקין – מתעלמים); התראות: נכשל פעמיים / לא רץ 48 שעות / הורד ולא נטען; בלי upd – אין התראה', async () => {
+    const ref = adm().doc(`b/${A}/private/cxbot`);
+    await ref.set({ upd: null }, { merge: true });
+    await okb(TOK, { op: 'hello', mode: 'connect', upd: 'x' });
+    assert.equal((await ref.get()).get('upd'), null, 'upd לא תקין – מתעלמים, hello עובר');
+    const fut = Date.now() + 864e5;
+    await okb(TOK, { op: 'hello', mode: 'connect', upd: { at: fut, ok: false, ver: '0.1.7', err: 'bad <hash>', fails: 2, z: 1 } });
+    const u = (await ref.get()).get('upd');
+    assert.ok(u.at <= Date.now() && u.rx >= u.at, 'at לא בעתיד');
+    assert.deepEqual({ ok: u.ok, ver: u.ver, err: u.err, fails: u.fails, z: u.z }, { ok: false, ver: '0.1.7', err: 'bad hash', fails: 2, z: undefined });
+    const upd = () => (r) => r[A].filter((x) => x.startsWith('upd'));
+    const day = (dd) => at(dd, 11);
+    // נכשל פעמיים ברצף → updfail (פעם ביום)
+    let t = day('2026-12-01');
+    await ref.set({ sd: '2026-11-30', lr: null, last: t - 3600e3, ver: '0.1.7', upd: { at: t - 7200e3, ok: false, ver: '0.1.7', err: 'bad-hash', fails: 2, rx: t } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updfail']);
+    assert.match(PUSH.find((x) => x.id === 'updfail').body, /נכשל/);
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t + 3600e3, send })), [], 'פעם ביום');
+    // כישלון אחד – עוד לא
+    t = day('2026-12-02');
+    await ref.set({ sd: '2026-12-01', upd: { at: t - 7200e3, ok: false, ver: '0.1.7', err: 'x', fails: 1, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
+    // לא רץ 48 שעות, והמחשב פעיל → updstale; המחשב כבוי (לא נראה 24 שעות) → לא (יש "לא סנכרן")
+    t = day('2026-12-03');
+    await ref.set({ sd: '2026-12-02', last: t - 3600e3, upd: { at: t - 50 * 3600e3, ok: true, ver: '0.1.7', err: '', fails: 0, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updstale']);
+    t = day('2026-12-04');
+    await ref.set({ sd: '2026-12-03', last: t - 30 * 3600e3, pl: null, upd: { at: t - 50 * 3600e3, ok: true, ver: '0.1.7', err: '', fails: 0, rx: t } }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
+    // הורד 0.1.8 אבל נטען 0.1.7 → updlag
+    t = day('2026-12-05');
+    await ref.set({ sd: '2026-12-04', last: t - 3600e3, ver: '0.1.7', upd: { at: t - 5 * 3600e3, ok: true, ver: '0.1.8', err: '', fails: 0, rx: t } }, { merge: true });
+    PUSH.length = 0;
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), ['updlag']);
+    assert.match(PUSH.find((x) => x.id === 'updlag').body, /Chrome/);
+    // בלי upd (העדכון האוטומטי לא הותקן) – אין התראת עדכון
+    t = day('2026-12-06');
+    await ref.set({ sd: '2026-12-05', upd: null }, { merge: true });
+    assert.deepEqual(upd()(await BOT.runWatch({ now: t, send })), []);
   });
 });

@@ -5,7 +5,7 @@
 // לעולם לא ממלא סיסמה או שם משתמש: setDate/setFile מסרבים לשדות סיסמה, ואין צעד "הקלדה" כללי.
 (function (root) {
 'use strict';
-const OPS = new Set(['nav', 'waitFor', 'click', 'select', 'setDate', 'setFile', 'text']);
+const OPS = new Set(['nav', 'waitFor', 'click', 'select', 'setDate', 'setFile', 'text', 'queue', 'queueGone', 'queueEmpty', 'histMark']);
 const CLICKABLE = 'button,a,[role=button],[role=menuitem],[role=tab],[role=option],li,input[type=button],input[type=submit],label,span,div';
 const norm = (s) => String(s == null ? '' : s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\u00a0/g, ' ').replace(/[”“״"]/g, '"').replace(/\s+/g, ' ').trim();
 const own = (el) => norm(el.innerText != null && el.innerText !== '' ? el.innerText : el.textContent);
@@ -115,6 +115,73 @@ async function choose(doc, el, option, ctx) {
   await ctx.sleep(300);
   return true;
 }
+// טבלת "ממתין לטעינה" במסך הייבוא של כספית: הטבלה הראשונה אחרי הכותרת (head). → שורות [[שם, סוג]] או null אם אין כותרת
+function queueRows(doc, s) {
+  const h = byText(doc, [s.head || 'ממתין לטעינה'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
+  if (!h) return null;
+  const F = 4; // Node.DOCUMENT_POSITION_FOLLOWING
+  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & F) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
+  if (!tb) return [];
+  return all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+}
+// טבלת "טעינות קודמות" (קריאה בלבד – לעולם לא לוחצים בה, גם לא על "ביטול טעינה" או על קישור): עמודות לפי הכותרות.
+// → { rows:[{ id, name, type, st, err, ok }], maxId } או null אם אין טבלה
+function histRows(doc, head) {
+  const h = byText(doc, [head || 'טעינות קודמות'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
+  if (!h) return null;
+  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & 4);
+  if (!tb) return null;
+  const H = all(tb, 'thead th, tr:first-child th').map((x) => own(x));
+  const col = (f) => H.findIndex(f);
+  const ci = { id: col((t) => t === 'מזהה'), name: col((t) => t === 'שם'), type: col((t) => t === 'סוג קובץ'), st: col((t) => t === 'סטטוס'), cnt: col((t) => /שגויים/.test(t) && /שורות|נטענו|סה"?כ/.test(t)) };
+  if (ci.id < 0 || ci.name < 0 || ci.st < 0) return { rows: [], maxId: 0, bad: true };
+  const rows = all(tb, 'tr').filter((r) => r.querySelectorAll('td').length).map((r) => {
+    const td = Array.from(r.querySelectorAll('td')).map((x) => own(x));
+    const c = ci.cnt >= 0 ? td[ci.cnt] || '' : '';
+    const num = (re) => { const m = re.exec(c); return m ? +m[1] : null; };
+    return { id: +(String(td[ci.id] || '').replace(/\D/g, '')) || 0, name: td[ci.name] || '', type: ci.type >= 0 ? td[ci.type] || '' : '', st: td[ci.st] || '', err: num(/שגויים\s*:?\s*(\d+)/), ok: num(/נטענו\s*:?\s*(\d+)/) };
+  });
+  return { rows, maxId: rows.reduce((m, r) => Math.max(m, r.id), 0) };
+}
+// שמירה לפני "העלה קבצים והרץ טעינה": בטבלה רק השורות שלנו (שם הקובץ + סוג). שורה של מישהו אחר – עוצרים, לא מסירים ולא מעלים
+async function queueCheck(doc, s, C) {
+  const name = norm(fill(s.name, C.vars)), type = norm(s.type || '');
+  const end = C.now() + (s.ms || 15000);
+  for (;;) {
+    const R = queueRows(doc, s);
+    if (R && R.length) {
+      const mine = (r) => norm(r[0]) === name && (!type || norm(r[1]) === type);
+      // רק שורה אחת בדיוק, והיא שלנו (שתי שורות "שלנו" = שארית מניסיון קודם → לא מעלים)
+      if (R.some(mine)) return R.length === 1 ? { ok: true, n: 1 } : { ok: false, code: 'import-queue-not-empty', n: R.length };
+    }
+    if (C.now() >= end) return { ok: false, code: R ? (R.length ? 'import-queue-not-empty' : 'no-row') : 'no-queue' };
+    await C.sleep(300);
+  }
+}
+// לפני setFile: התור "ממתין לטעינה" חייב להיות ריק (אין טבלה / אין שורות). אחרת עוצרים לפני שמוסיפים את הקובץ שלנו
+function queueEmpty(doc, s) {
+  const R = queueRows(doc, s);
+  return !R || !R.length ? { ok: true } : { ok: false, code: 'import-queue-not-empty', n: R.length };
+}
+// "טעינות קודמות" חייבת להיות קריאה לפני העלאה (בלי זה אי אפשר לדעת אם הקובץ כבר הועלה): מחכים לה, ואם לא – null
+async function histWait(doc, s, C) {
+  const end = C.now() + (s.ms || 15000);
+  for (;;) {
+    const H = histRows(doc, s.head);
+    if (H && !H.bad) return H;
+    if (C.now() >= end) return null;
+    await C.sleep(300);
+  }
+}
+async function queueGone(doc, s, C) {
+  const name = norm(fill(s.name, C.vars)), end = C.now() + (s.ms || 300000);
+  for (;;) {
+    const R = queueRows(doc, s);
+    if (!R || !R.some((r) => norm(r[0]) === name)) return true;
+    if (C.now() >= end) return false;
+    await C.sleep(500);
+  }
+}
 // guard = { origin, path }: הדף חייב להיות באותו מקור, ובנתיב path (או מתחתיו)
 function onPath(win, g) {
   try { const L = win.location, p = String(L.pathname || ''); return L.origin === g.origin && (p === g.path || p.startsWith(g.path + '/')); } catch (e) { return false; }
@@ -203,6 +270,35 @@ async function runSteps(steps, ctx) {
     if (!OPS.has(s.op)) { rec.err = 'bad-op'; res.ok = false; res.miss = i; break; }
     // שמירה (בעל העסק, 18.11): רק במערכת הניהול של כספית (/bo). קופת המכירה (שורש האתר) – לא נוגעים בכלל
     if (ctx.guard && !onPath(ctx.win, ctx.guard)) { rec.err = 'wrong-page'; res.ok = false; res.wrong = true; res.miss = i; break; }
+    if (s.op === 'histMark') {
+      // לפני ההעלאה: המזהה הגבוה בטבלת "טעינות קודמות"; ואם הקובץ שלנו (שם ייחודי לריצה) כבר שם – הועלה בניסיון קודם: לא מעלים שוב
+      const H = ctx.probe ? histRows(doc, s.head) : await histWait(doc, s, C);
+      if (!H || H.bad) {
+        if (ctx.probe) continue;
+        // לא קוראים את הטבלה → לא יודעים אם כבר הועלה → לא מעלים (selector-miss)
+        rec.err = H ? 'hist-cols' : 'no-hist'; res.ok = false; res.miss = i; break;
+      }
+      const name = norm(fill(s.name, C.vars));
+      res.hmax = H.maxId;
+      const prev = H.rows.find((r) => norm(r.name) === name);
+      rec.found = rec.done = true;
+      if (prev) { res.already = prev.id; break; }
+      continue;
+    }
+    if (s.op === 'queue' || s.op === 'queueGone' || s.op === 'queueEmpty') {
+      if (ctx.probe) continue; // היכרות: אין קובץ בתור
+      if (s.op === 'queueEmpty') {
+        const q = queueEmpty(doc, s);
+        rec.found = q.ok; rec.n = q.n;
+        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; res.code = q.code; break; }
+      } else if (s.op === 'queue') {
+        const q = await queueCheck(doc, s, C);
+        rec.found = q.ok; rec.n = q.n;
+        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; if (q.code === 'import-queue-not-empty') res.code = q.code; break; }
+      } else if (!(await queueGone(doc, s, C))) { rec.err = 'queue-stuck'; res.ok = false; res.miss = i; break; }
+      rec.found = rec.done = true;
+      continue;
+    }
     if (s.op === 'nav') {
       const h = fill(s.hash || '', ctx.vars);
       if (!/^#\/[\w\-/?=&.%]*$/.test(h)) { rec.err = 'bad-hash'; res.ok = false; res.miss = i; break; }
@@ -242,8 +338,13 @@ async function runSteps(steps, ctx) {
   }
   return res;
 }
-// היכרות: רשימת הפקדים בדף – בלי ערכים, בלי שדות סיסמה
-function controls(doc, max) {
+// היכרות: רשימת הפקדים בדף – בלי ערכים, בלי שדות סיסמה. o.noText (דף לקריאה בלבד): בלי טקסט, בלי aria, בלי אפשרויות בחירה
+// (רק מספרן), ו-href רק כסימן לקישור פנימי – כדי ששמות (למשל עובדים במסך הנוכחות) לא ייכנסו לדוח
+// מילות פעולה של כפתורים (היכרות מסך לקריאה בלבד, o.btn)
+const ACT = new Set(['הצג', 'חפש', 'חיפוש', 'יצוא', 'ייצוא', 'יצא', 'אקסל', 'לאקסל', 'excel', 'pdf', 'csv', 'הדפס', 'הדפסה', 'רענן', 'סנן', 'סינון', 'צור', 'הפק', 'נקה', 'אפס', 'קובץ', 'דוח', 'היום', 'אתמול', 'שבוע', 'חודש', 'תאריך', 'טווח', 'search', 'export', 'print', 'show', 'filter']);
+const DATA = 'table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]';
+function controls(doc, max, o) {
+  const noText = !!(o && o.noText);
   const out = [];
   const els = all(doc, 'button,a,input,select,textarea,[role=button],[role=menuitem],[role=tab],[role=link],label').filter(visible);
   for (const el of els) {
@@ -254,9 +355,22 @@ function controls(doc, max) {
     const type = g('type'); if (type) c.type = type;
     for (const k of ['name', 'id', 'aria-label', 'placeholder', 'role', 'href']) { const v = g(k); if (v) c[k === 'aria-label' ? 'aria' : k] = String(v).slice(0, 80); }
     if (c.href && !/^#/.test(c.href)) c.href = '(ext)';
+    if (noText) {
+      delete c.aria; delete c.placeholder;
+      if (c.href && c.href !== '(ext)') c.href = '(int)';
+      if (tag === 'select') c.optN = (el.options || []).length;
+      // o.btn: גם טקסט של כפתורים שמחוץ לטבלאות ולרשימות (למשל "הצג", "יצוא לאקסל") – לא תוויות, לא אפשרויות, לא שדות
+      if (o.btn && (tag === 'button' || g('role') === 'button' || (tag === 'input' && /^(button|submit)$/i.test(type || ''))) && !(el.closest && el.closest(DATA))) {
+        // רק המילים שהן מילות פעולה (התאמה מלאה של מילה) – שם עובד, שעה או מספר על הכפתור לא נכנסים
+        const w = [...new Set((tag === 'input' ? norm(el.value) : own(el)).toLowerCase().split(/[^a-z\u05d0-\u05ea]+/).filter((x) => ACT.has(x)))];
+        if (w.length) c.text = w.join(' ').slice(0, 40);
+      }
+      out.push(c);
+      continue;
+    }
     // פרטיות (בדיקת אבטחה סבב 1): טקסט רק לכפתורים ולקישורים שמחוץ לטבלאות ולרשימות נתונים (שם יש שמות פריטים ולקוחות);
     // אפשרויות של רשימת בחירה – רק ברשימה קצרה (עד 30, כמו "סוג ייבוא"), אחרת רק המספר. הכול עובר גם את הסינון (sanitize) לפני היציאה
-    const inData = el.closest && el.closest('table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell],[role=listbox],[role=option]');
+    const inData = el.closest && el.closest(DATA);
     if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') { const t = inData ? '' : own(el).slice(0, 40); if (t) c.text = t; else if (inData) c.inData = true; }
     if (tag === 'select') { const op = Array.from(el.options || []); if (op.length <= 30) c.options = op.map((o) => norm(o.textContent).slice(0, 60)); else c.optN = op.length; }
     out.push(c);
@@ -272,6 +386,6 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, norm, find, onPath, runSteps, peek, monthYear, pickCal, controls, isLogin, dateFor, fill, cssPath, b64bytes };
+const api = { OPS, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, isLogin, dateFor, fill, cssPath, b64bytes };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);

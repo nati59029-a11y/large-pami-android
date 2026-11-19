@@ -11,12 +11,12 @@ function view(s) {
   if (!s.connected) return { cls: 'warn', t: 'לא מחובר לאפליקציה', n: 'פתחו "חיבור לאפליקציה והגדרות" והדביקו את הקוד מהאפליקציה (סנכרון כספית → רובוט).' };
   if (s.busy && s.discSt && s.discSt.st === 'run') return { cls: 'run', t: 'מצב היכרות רץ', n: 'אל תסגרו את הלשונית של כספית עד הסיום.' };
   const r = s.run;
-  if (r && r.st === 'run' && s.busy) return { cls: 'run', t: M.run, n: r.day ? 'מכירות של ' + dayHe(r.day) : '' };
+  if (r && r.st === 'run' && s.busy) return { cls: 'run', t: M.run, n: [r.req ? M.remote : '', r.day ? 'מכירות של ' + dayHe(r.day) : ''].filter(Boolean).join(' · ') };
   if (r && r.st === 'wait') return { cls: 'warn', t: M.wait, n: 'ניסיון חוזר: ' + when(r.retryAt) + (r.err ? ' · ' + r.err.msg : '') };
   const L = s.st && s.st.lastRun;
   if (L && L.st === 'needs-login') return { cls: 'bad', t: 'צריך להתחבר לכספית', n: M['needs-login'] };
   if (L && L.st === 'fail') return { cls: 'bad', t: 'הסנכרון האחרון נכשל', n: L.msg || M.fail };
-  if (L && L.st === 'ok') return { cls: 'ok', t: M.ok, n: when(L.at) };
+  if (L && L.st === 'ok') return { cls: 'ok', t: M.ok, n: when(L.at) + (L.req ? ' · מבקשה בטלפון' : '') };
   return { cls: '', t: 'עוד לא היה סנכרון', n: 'הסנכרון הראשון ירוץ בשעה ' + (s.sched && s.sched.at || '03:00') + ', או לחצו "סנכרן עכשיו".' };
 }
 async function downloadDisc() {

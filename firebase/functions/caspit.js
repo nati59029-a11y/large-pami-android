@@ -106,7 +106,7 @@ async function cxUpload(w, input) {
   if (!['cat', 'sales'].includes(kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
   const parts = input.parts, part = input.part;
   if (!Number.isInteger(parts) || parts < 1 || parts > (kind === 'sales' ? MAX_SPARTS : MAX_PARTS) || !Number.isInteger(part) || part < 0 || part >= parts) throw bad('bad-part', 'חלק לא תקין');
-  let items = null, lines = null, nBad = 0;
+  let items = null, lines = null, nBad = 0, tm = null;
   if (kind === 'cat') {
     if (input.lines !== undefined) throw bad('bad-field', 'שדה לא מוכר: lines');
     if (!Array.isArray(input.items) || !input.items.length || input.items.length > CC.PART) throw bad('bad-items', `פריטים: 1 עד ${CC.PART} בכל חלק`);
@@ -118,6 +118,9 @@ async function cxUpload(w, input) {
     const all = input.lines.map(cleanLine);
     lines = all.filter(Boolean); nBad = all.length - lines.length;
     if (!lines.length) throw bad('bad-lines', 'שורת מכירה לא תקינה');
+    // C2: סטטיסטיקת שעת המכירה של הקובץ מגיעה בתוך שורה (line.tm – CC.parseSales), לא כשדה חדש בבקשה: תוסף/טלפון ישן לא שולח, שרת ישן מתעלם
+    const f = input.lines.find((x) => x && typeof x === 'object' && !Array.isArray(x) && x.tm != null);
+    tm = f ? cleanTm(f.tm) : null;
   }
   const db = T.tdb();
   const ref = db.doc('cxRun/' + run);
@@ -127,7 +130,7 @@ async function cxUpload(w, input) {
     if (r.exists && r.get('parts') !== parts) throw bad('bad-part', 'מספר החלקים השתנה');
     if (r.exists && (r.get('kind') || 'cat') !== kind) throw bad('bad-kind', 'סוג הקובץ השתנה');
     if (!r.exists) tx.set(ref, { st: 'up', kind, parts, by: w.uid, at: Date.now() });
-    tx.set(ref.collection('in').doc(String(part)), kind === 'cat' ? { items, n: items.length } : { lines, n: lines.length, bad: nBad });
+    tx.set(ref.collection('in').doc(String(part)), kind === 'cat' ? { items, n: items.length } : Object.assign({ lines, n: lines.length, bad: nBad }, tm ? { tm } : {}));
   });
   return { ok: true, n: (items || lines).length, bad: nBad };
 }
@@ -441,10 +444,12 @@ async function cxHist(w, input) {
 // =====================================================================================================
 // A2 (17.11.2026): דוח מכירות לפריטים מכספית → מלאי.
 //   cxTx/{bk}_{yyyymmdd}_{עסקה}  { d, tx, bk, bn, bd: מזהה היום, dc:[d|קוד] (חיפוש שורות של מוצר), sb: סניף המלאי, un: יש שורה "לא בטוח",
-//                                   lines:[{ k, c, n, a, ds, w?, q, qs, why?, pid?, P? }], run, at, upd }
+//                                   lines:[{ k, c, n, a, ds, w?, t?, q, qs, why?, pid?, P? }], run, at, upd }   (t = שעת המכירה בדקות, C1)
 //       k = קוד|פדיון|הנחה|מופע (CC.salesGroup) – מפתח השורה בתוך העסקה. שורה שהמפתח שלה כבר שמור – לא נספרת שוב (העלאה חוזרת / דוח חופף).
 //       qs: sure / disc / unsure (כמות מוצעת – יורדת מהמלאי ומסומנת לבדיקה) / own (תוקן) / ok (אושר) / skip (קוד מיוחד) / nolink (קוד לא מוכר).
-//   cxDay/{bk}_{yyyymmdd}        { d, bk, bn, gross, ret, disc, ntx, nl, sp, un, it:{ קוד:{ n, cat, q, r, a, ds, u, sp? } } } – סיכום יומי לכל סניף בכספית (A3).
+//   cxDay/{bk}_{yyyymmdd}        { d, bk, bn, gross, ret, disc, ntx, nl, sp, un, it:{ קוד:{ n, cat, q, r, a, ds, u, sp? } }, h?:{ 'HH'|'na': נטו } } – סיכום יומי לכל סניף בכספית (A3).
+//       h (C1, 19.11.2026): פדיון נטו לפי שעת המכירה (שורה בלי שעה → 'na'). רק לשורות שנקלטו מאז; ימים ישנים – בלי h (CC.salesHours).
+//       tm? (C2): { y, n, p, q } – כמה שורות בדוח האחרון שעדכן את היום היו עם/בלי שעה, ודפוס מוסווה של תא התאריך (לאבחון הפורמט של כספית).
 //   prod/{id}.q.<br> יורד/עולה ב-FieldValue.increment; stockLog { why:'cx', src:'caspit', d, note: עסקה + סניף, run }.
 //   שורת "לא בטוח" לא עוצרת את שאר השורות: הכמות המוצעת יורדת מהמלאי, ובעל העסק מאשר או מתקן (cxFix – ההפרש נרשם בתנועות).
 // =====================================================================================================
@@ -464,8 +469,17 @@ function cleanLine(x) {
   if (!d || !c || !tx || !BK_RE.test(bk) || a == null || ds == null) return null;
   const w = x.w == null ? null : nOr(x.w, 0, 100000);
   const o = { d, c, n: s(x.n, 80), tx, bk, bn: s(x.bn, 60), w: w > 0 ? w : null, ds: CC.r2(ds), a: CC.r2(a) };
+  if (Number.isInteger(x.t) && x.t >= 0 && x.t < 1440) o.t = x.t; // C1: שעת המכירה (דקות) – רשות. חסר/לא תקין → בלי שעה (סל 'na'), השורה לא נדחית
   if (x.bkn === true) o.bkn = true; // מפתח הסניף לפי השם (אין מספר סניף בקובץ) – previewSales ממיר
   return o;
+}
+// C2: סטטיסטיקת שעת המכירה מהטלפון/תוסף { y, n, p, q } (CC.parseSales) – מספרים שלמים ודפוס מוסווה בלבד (בלי ספרות). לא תקין → null (לא נכשל)
+function cleanTm(x) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const y = nOr(x.y, 0, 10000000), n = nOr(x.n, 0, 10000000);
+  if (y == null || n == null || !Number.isInteger(y) || !Number.isInteger(n)) return null;
+  const pm = (v) => (typeof v === 'string' ? v.slice(0, 30).replace(/[^dah #@:/.,+\-()'"_|?]/g, '?') : '');
+  return { y, n, p: pm(x.p), q: pm(x.q) };
 }
 // תיקון סבב 1 (הערה 7): מפתח סניף יציב. cxcfg.bkn = { <מפתח לפי שם>: <מספר סניף> } נלמד מכל דוח שיש בו גם שם וגם מספר.
 // שורה בלי מספר סניף מקבלת את המספר המוכר לפי השם; אם אין – ואם ידוע סניף אחד בלבד (בהגדרות ובקובץ) – אותו סניף.
@@ -488,6 +502,7 @@ function bkFix(lines, map) {
 async function previewSales(db, w, ref, ins) {
   const lines = ins.docs.sort((a, b) => +a.id - +b.id).flatMap((d) => d.get('lines') || []);
   const badSrv = ins.docs.reduce((t, d) => t + (d.get('bad') || 0), 0);
+  const tmd = ins.docs.find((d) => d.get('tm')), tm = tmd ? cleanTm(tmd.get('tm')) : null; // C2
   const [cs, xs, ps] = await Promise.all([db.doc(CFG).get(), db.collection('cxItem').select('pid', 'pr').get(), db.collection('prod').select('price', 'name', 'cat').get()]);
   const cfg = cfgOf(cs), skip = new Set(cfg.skip.map(String));
   const bkr = bkFix(lines, cs.exists && cs.get('bkn') && typeof cs.get('bkn') === 'object' ? cs.get('bkn') : {});
@@ -522,6 +537,7 @@ async function previewSales(db, w, ref, ins) {
       if (sv && sv.has(l.k)) { cnt.dup++; rows.push([idx, l.d, l.tx, l.c, l.n, l.a, l.ds, l.bk, 'dup', null, null, '']); continue; }
       const o = { i: idx, k: l.k, c: l.c, n: l.n, a: l.a, ds: l.ds };
       if (l.w) o.w = l.w;
+      if (typeof l.t === 'number') o.t = l.t; // C1: שעת המכירה
       const x = X.get(l.c), pid = x && x.pid && P.has(x.pid) ? x.pid : null;
       if (skip.has(l.c)) Object.assign(o, { qs: 'skip', q: null });
       else if (!pid) Object.assign(o, { qs: 'nolink', q: null });
@@ -543,6 +559,7 @@ async function previewSales(db, w, ref, ins) {
   }
   for (const k of ['gross', 'retA', 'discA']) cnt[k] = CC.r2(cnt[k]);
   cnt.days = [...days].sort();
+  if (tm) cnt.tm = tm; // C2: נשמר במסמך הריצה (cnt) ומשם לכל cxDay שמתעדכן באישור
   // חלקים של עד SPV שורות (עסקה גדולה מתפצלת – כל חלק בודק מחדש את המפתחות השמורים, אז אין ספירה כפולה)
   const pv = []; let cur = [], n = 0;
   for (const g of groups) {
@@ -587,7 +604,7 @@ async function applySales(db, w, run, ref, r, input, t0) {
     if (doneIds.has(String(k))) continue;
     if (Date.now() - t0 > BUDGET) return { done: false, next: k, res: (await ref.get()).get('res') || {} };
     const groups = (await ref.collection('pv').doc(String(k)).get()).get('rows') || [];
-    try { await applySalesPart(db, w, run, ref, k, groups, sel.qty || {}, br); } catch (e) {
+    try { await applySalesPart(db, w, run, ref, k, groups, sel.qty || {}, br, cleanTm((r.get('cnt') || {}).tm)); } catch (e) {
       // תיקון סבב 1 (הערה 8): קישור קוד→מוצר השתנה מאז התצוגה. מה שכבר נשמר נשאר (המפתחות ב-cxTx); ההרצה חוזרת לתצוגה מקדימה,
       // והטלפון מציג אותה מחדש (שורות שנשמרו יופיעו "כבר נקלטו")
       if (e && e.details && e.details.reason === 'stale') {
@@ -614,7 +631,8 @@ async function appliedIx(ref) { const d = await ref.collection('done').get(); re
 const ymdIL = (t) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t)); } catch (e) { return ''; } };
 
 // חלק אחד בטרנזקציה: קורא את העסקאות השמורות ואת המוצרים, מוסיף רק שורות חדשות, מעדכן מלאי, תנועות וסיכום יומי.
-async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
+// tm (C2, רשות) = סטטיסטיקת שעת המכירה של הקובץ – נכתב לכל cxDay שמתעדכן (מחליף את הקודם: כל השדות תמיד נשלחים)
+async function applySalesPart(db, w, run, ref, k, groups, qty, br, tm) {
   const mark = ref.collection('done').doc(String(k));
   await db.runTransaction(async (tx) => {
     if ((await tx.get(mark)).exists) return;
@@ -646,13 +664,14 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
       const cur = txw.get(g.id) || { lines: s0 && s0.exists ? (s0.get('lines') || []).slice() : [], fresh: !(s0 && s0.exists), g, logs: new Map() };
       txw.set(g.id, cur);
       const have = new Set(cur.lines.map((l) => l.k));
-      const did = dayIdOf(g), D = day.get(did) || { d: g.d, bk: g.bk, bn: g.bn, gross: 0, ret: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, it: {} };
+      const did = dayIdOf(g), D = day.get(did) || { d: g.d, bk: g.bk, bn: g.bn, gross: 0, ret: 0, disc: 0, ntx: 0, nl: 0, sp: 0, un: 0, it: {}, h: {} };
       day.set(did, D);
       for (const l0 of g.L) {
         if (have.has(l0.k)) { res.dup++; continue; }
         have.add(l0.k);
         const l = { k: l0.k, c: l0.c, n: l0.n, a: l0.a, ds: l0.ds || 0, q: l0.q, qs: l0.qs };
         if (l0.w) l.w = l0.w;
+        if (typeof l0.t === 'number') l.t = l0.t;
         if (l0.why) l.why = l0.why;
         if (l0.P != null) l.P = l0.P;
         if (l0.pid) l.pid = l0.pid;
@@ -672,6 +691,7 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
         D.disc += l.ds; D.nl++;
         if (l.qs === 'skip') D.sp += l.a - l.ds;
         if (l.qs === 'unsure') D.un++;
+        const hk = CC.hourKey(l.t); D.h[hk] = (D.h[hk] || 0) + l.a - l.ds; // C1: פדיון נטו לפי שעה (בלי שעה → 'na'); סכום השעות = gross − ret − disc
         const key = fkey(l.c), it = D.it[key] || (D.it[key] = { n: l.n || (p && p.name) || '', cat: (p && p.cat) || '', q: 0, r: 0, a: 0, ds: 0, u: 0, sp: l.qs === 'skip' });
         const q = typeof l.q === 'number' ? l.q : 0;
         if (q > 0) it.q += q; else it.r += -q;
@@ -695,7 +715,8 @@ async function applySalesPart(db, w, run, ref, k, groups, qty, br) {
       if (!D.nl && !D.ntx) continue;
       const it = {};
       for (const [c, v] of Object.entries(D.it)) it[c] = Object.assign({ n: v.n, cat: v.cat, q: FV().increment(O.r3(v.q)), r: FV().increment(O.r3(v.r)), a: inc(v.a), ds: inc(v.ds), u: FV().increment(v.u) }, v.sp ? { sp: true } : {});
-      tx.set(db.doc('cxDay/' + id), { d: D.d, bk: D.bk, bn: D.bn || '', gross: inc(D.gross), ret: inc(D.ret), disc: inc(D.disc), ntx: FV().increment(D.ntx), nl: FV().increment(D.nl), sp: inc(D.sp), un: FV().increment(D.un), it, upd: now }, { merge: true });
+      const h = Object.fromEntries(Object.entries(D.h).map(([k, v]) => [k, inc(v)]));
+      tx.set(db.doc('cxDay/' + id), Object.assign({ d: D.d, bk: D.bk, bn: D.bn || '', gross: inc(D.gross), ret: inc(D.ret), disc: inc(D.disc), ntx: FV().increment(D.ntx), nl: FV().increment(D.nl), sp: inc(D.sp), un: FV().increment(D.un), it, upd: now }, Object.keys(h).length ? { h } : {}, tm ? { tm } : {}), { merge: true });
     }
     tx.set(mark, { at: now, res, ix });
     tx.update(ref, Object.fromEntries(Object.entries(res).map(([kk, v]) => ['res.' + kk, FV().increment(v)])));
@@ -706,7 +727,7 @@ const dayIdOf = (g) => CC.dayId(g.bk, g.d);
 // =====================================================================================================
 // A3: מסך "מכירות כספית" (מנהל בלבד, החלטה 5) – סיכומים יומיים, שורות, תיקון כמות "לא בטוח". לא יוצר הכנסות.
 // =====================================================================================================
-// cxSales({ from, to }) – עד 92 ימים → { days:[cxDay בלי it], items:{ קוד:{ n, cat, sp?, v:{ i:[q,r,a,ds,u] } } }, cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
+// cxSales({ from, to }) – עד 92 ימים → { days:[cxDay בלי it, כולל h – מכירות לפי שעה], items:{ קוד:{ n, cat, sp?, v:{ i:[q,r,a,ds,u] } } }, cats:{ id: שם }, cfg:{ reg, inc, br }, sa }
 async function cxSales(w, input) {
   onlyKeys(input, ['from', 'to']);
   const from = CC.dateOf(input.from), to = CC.dateOf(input.to);
@@ -740,7 +761,7 @@ async function cxLines(w, input) {
   } else if (input.un === true) {
     docs = (await db.collection('cxTx').where('un', '==', true).limit(500).get()).docs;
   } else throw bad('bad-query', 'חסר מה להציג');
-  const tx = docs.map((d) => { const x = d.data(); return { id: d.id, d: x.d, tx: x.tx, bk: x.bk, bn: x.bn, lines: (x.lines || []).filter((l) => (!c || l.c === c) && (input.un !== true || l.qs === 'unsure')).map((l) => ({ k: l.k, c: l.c, n: l.n, a: l.a, ds: l.ds, q: l.q, qs: l.qs, why: l.why, P: l.P })) }; })
+  const tx = docs.map((d) => { const x = d.data(); return { id: d.id, d: x.d, tx: x.tx, bk: x.bk, bn: x.bn, lines: (x.lines || []).filter((l) => (!c || l.c === c) && (input.un !== true || l.qs === 'unsure')).map((l) => ({ k: l.k, c: l.c, n: l.n, a: l.a, ds: l.ds, q: l.q, qs: l.qs, why: l.why, P: l.P, t: l.t })) }; })
     .filter((x) => x.lines.length).sort((a, b) => (a.d === b.d ? (a.tx < b.tx ? 1 : -1) : a.d < b.d ? 1 : -1));
   return { tx };
 }
@@ -806,11 +827,45 @@ async function lockFree(bizId, owner) {
   await ref.firestore.runTransaction(async (tx) => { const x = await tx.get(ref); if (x.exists && x.get('o') === owner) tx.delete(ref); });
 }
 const LOCKED = ['cxApply', 'cxExport'];
-const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix };
+const SALES_FNS = ['cxSales', 'cxLines', 'cxFix'];
+const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix, cxSee };
 const BIG = ['cxPreview', 'cxApply', 'cxExport']; // ~9,000 מוצרים
+// 19.11.2026: מנהל מסמן עובדים שרואים את "מכירות כספית" (staff/{uid}.cxS = true). עובד כזה – צפייה בלבד: cxSales ו-cxLines.
+// cxSee({ uid, on }) – מנהל בלבד, רק כשהתוספת cxSales מופעלת. לא נוגע ב-perms (שמנהל־על קובע).
+const VIEW_FNS = ['cxSales', 'cxLines'];
+async function cxSee(w, input) {
+  onlyKeys(input, ['uid', 'on']);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  if (typeof input.on !== 'boolean') throw bad('bad-on', 'ערך לא תקין');
+  const db = T.tdb();
+  const sRef = db.doc('staff/' + uid), aRef = db.doc('admins/' + uid);
+  await db.runTransaction(async (tx) => {
+    const [s, a] = await Promise.all([tx.get(sRef), tx.get(aRef)]);
+    if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+    if (a.exists || s.get('role') === 'manager') throw pre('is-admin', 'מנהל רואה את המסך תמיד');
+    tx.update(sRef, { cxS: input.on });
+  });
+  if (w.biz && w.biz.exists && w.bizId) await require('firebase-admin/firestore').getFirestore().collection(`b/${w.bizId}/audit`).add({ by: w.uid, t: Date.now(), act: 'cxSee', note: uid + '=' + input.on }).catch(() => {});
+  return { ok: true, uid, on: input.on };
+}
+async function viewW(request) {
+  const w = await O.who(request);
+  if (w.role === 'manager') return w;
+  if (w.staff && typeof w.staff.get === 'function' && w.staff.get('cxS') === true) return w;
+  throw O.deny('no-perm', 'אין לך הרשאה למכירות כספית. פנה למנהל.');
+}
 async function phone(k, request) {
-  const w = await mgrW(request);
+  const w = VIEW_FNS.includes(k) ? await viewW(request) : await mgrW(request);
   const input = k === 'cxCfg' ? {} : inputObject(request);
+  if (k === 'cxSee') T.requireFeature(w.biz, 'cxSales');
+  // דוח מכירות שהועלה לפני שהתוספת כובתה – לא מוצג ולא נשמר מהטלפון (הרובוט לא עובר כאן)
+  if ((k === 'cxPreview' || k === 'cxApply') && typeof input.run === 'string' && RUN_RE.test(input.run) && !(w.biz && w.biz.features && w.biz.features.cxSales === true)) {
+    const r = await T.tdb().doc('cxRun/' + input.run).get();
+    if (r.exists && r.get('kind') === 'sales') T.requireFeature(w.biz, 'cxSales');
+  }
+  // 19.11.2026: "מכירות כספית" – תוספת נפרדת (cxSales), כבויה כברירת מחדל; רק מנהל־על מפעיל. הרובוט (caspit-bot.js) לא עובר כאן ולא מושפע.
+  if (SALES_FNS.includes(k) || (k === 'cxUpload' && input.kind === 'sales')) T.requireFeature(w.biz, 'cxSales');
   if (!LOCKED.includes(k) || !w.bizId) return FNS[k](w, input);
   const me = 'u:' + w.uid;
   await lockTake(w.bizId, me);
@@ -820,4 +875,4 @@ async function phone(k, request) {
   return r;
 }
 for (const k of Object.keys(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, (request) => phone(k, request)));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, cleanTm, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });

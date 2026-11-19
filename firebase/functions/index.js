@@ -307,6 +307,12 @@ Object.assign(exports, require('./secretary'));
 Object.assign(exports, require('./secretary-know'));
 // ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
 Object.assign(exports, require('./imports'));
+// POS:M6 – קופה ש6: ייבוא מכספיט (posImp*), קטלוג (posProdSave, posProdQuick, posBcGen, posPriceBulk, posLbl, posAlert), ספירת מלאי (posCnt), מחירון מצילום (posOcr)
+Object.assign(exports, require('./pos-import'));
+Object.assign(exports, require('./pos-catalog'));
+Object.assign(exports, require('./pos-inv'));
+Object.assign(exports, require('./pos-ocr'));
+// /POS:M6
 // המזכירה שלב 4 (2026-11-11): secNotes, secReports, secHistory (מנהל העסק), secRemind (מתוזמנת – תזכורות, דוחות, התראות), secDaily (מתוזמנת – שמירה ומחיקה 9.5). secretary-remind.js
 Object.assign(exports, require('./secretary-remind'));
 // המזכירה שלב 5 (2026-11-11): secWaHook (webhook ווצאפ, us-central1 בלבד – כתובת קבועה אצל Meta), secWaWork (טריגר תור, europe-west1),
@@ -334,6 +340,27 @@ Object.assign(exports, require('./grp-notify'));
 Object.assign(exports, require('./tasks-push'));
 // דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./daily-rep'));
+// קופה (POS) שלב 0 (17.11.2026): posCfg, posCfgSet (מנהל / מנהל־על), posDev (קופות: הוספה, רישום מכשיר, פרישה, השבתה), posSale (שלד מכירה עם reqId).
+// pos.js + lib/pos-calc.js (חישוב באגורות) + lib/pos-cfg.js (הגדרות לכל עסק) + lib/pos-core.js (מזהים ומספור). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pos'));
+// POS:M4 – קופה ש4 (17.11.2026): הגדרות לכל עסק לפי הסכמה המלאה (lib/pos-cfg-schema.js, 313 מפתחות), מנהל־על ודיווח בעיה.
+// posCfg, posCfgSet (מחליפים את השלד של שלב 0 – לכן אחרי require('./pos')), posCfgUndo, posSa (מנהל־על), posBug. pos-cfg.js. לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pos-cfg'));
+// /POS:M4
+// POS:M2 – קופה גל 2, ש2 (17.11.2026): שרת מכירה, החזרה, השהיה, תשלום חוב, קופונים, כרטיס מתנה, מבצעים (pos-sale.js) ומסמכים (pos-doc.js).
+// נטען אחרי pos.js, ולכן posSale המלא כאן מחליף את השלד של שלב 0.
+Object.assign(exports, require('./pos-sale'), require('./pos-doc'));
+// /POS:M2
+// POS:M5 – קופה, משמרת (ש5): posAuth (PIN ואישור אחראי), posCash (משמרת ומזומן), posZ (דוח X/Z), posClock (שעון נוכחות). lib/pos-agg.js – החישובים
+Object.assign(exports, require('./pos-auth'), require('./pos-cash'), require('./pos-z'), require('./pos-clock'));
+// /POS:M5
+// POS:M7 – קופה ש7: תפעול מכשירים (posOps: אישור/ניתוק מרחוק/מצב ציוד/יומן תקלות/התנגשויות/הזנה ידנית, posOpsWatch) וגיבוי (posBackup, posBackupDaily)
+Object.assign(exports, require('./pos-ops'));
+Object.assign(exports, require('./pos-backup'));
+// POS:W3 – קופה גל 3 (19.11.2026): אשראי במסוף מחובר – posCardCfg (מנהל־על), posCardStart, posCardStatus, posCardCancel (pos-card.js).
+// הספק מופשט (lib/pos-card-prov.js): מסוף מדומה עכשיו, CardCom אחרי שיגיע תיעוד. לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pos-card'));
+// /POS:M7
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
 // מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js
@@ -367,3 +394,7 @@ Object.assign(exports, require('./biz-apk'));
 Object.assign(exports, require('./caspit'));
 // רובוט כספית – שלב B (18.11.2026): cxBotTok, cxBotDisc (מנהל / מנהל־על), cxBot (HTTP לתוסף Chrome, europe-west1), cxBotWatch (מתוזמנת, us-central1) – caspit-bot.js
 Object.assign(exports, require('./caspit-bot'));
+// משמרות – שלב 3 (18.11.2026): shApi (טבלה שבועית, עריכה, משימות למשמרת, הגדרות), shTick (מתוזמנת כל 10 דקות, us-central1) – shifts.js
+Object.assign(exports, require('./shifts'));
+// כלל שכר בכתב חופשי – שלב D (19.11.2026): payRuleAi – מנהל בלבד, עסק במבנה b, 50 פענוחים ביום לעסק; מחזיר רכיבים לאישור, לא שומר (payroll-ai.js + lib/pay-ai.js)
+Object.assign(exports, require('./payroll-ai'));

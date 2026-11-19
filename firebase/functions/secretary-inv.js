@@ -71,9 +71,12 @@ async function ingest(db, o) {
     // קובץ חשוד / לא נתמך: לא נשמר, לא נפתח ולא נשלח לזיהוי. כרטיס עם שם השולח
     const id = 'x' + SI.sha(src.ch + '|' + src.in + '|' + (o.idx || 0) + '|' + fn).slice(0, 40);
     const ref = db.doc('sec_inv/' + id);
-    try { await ref.create(Object.assign({ st: 'new', k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }, histF)); } catch (e) { if (e && e.code === 6) return { id, dup: true, bad: true }; throw e; }
-    await db.collection('sec_log').doc().set(ilog('', 'sec', 'invBad', { tgt: id, note: chk.why }));
-    return { id, bad: true };
+    // 19.11.2026 (בעל העסק): קובץ שבטוח אינו חשבונית (הזמנה ליומן, טקסט, HTML, קובץ הפעלה, קובץ ריק, ארכיון, Word/Excel) – לא מוצג ב"ממתינות": נדחה אוטומטית
+    const no = SI.NOT_INV_BAD.includes(chk.why);
+    const st = no ? { st: 'rej', rejAt: now, rejBy: 'auto', notInv: chk.why, purgeAt: now + SI.KEEP_DAYS * 864e5 } : { st: 'new' };
+    try { await ref.create(Object.assign({ k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }, st, histF)); } catch (e) { if (e && e.code === 6) return { id, dup: true, bad: true }; throw e; }
+    await db.collection('sec_log').doc().set(ilog('', 'sec', no ? 'invNotInv' : 'invBad', { tgt: id, note: chk.why }));
+    return no ? { id, bad: true, notInv: true } : { id, bad: true };
   }
   const id = 'f' + SI.sha(o.buf).slice(0, 40);
   const ref = db.doc('sec_inv/' + id);
@@ -177,7 +180,15 @@ async function workIn(id, o) {
     if (usage) await scan.refundScan(SEC_SCAN_UID, usage.day); // כמו בסריקה האחידה: זיהוי שנכשל לא נספר
     return fail('ai');
   }
-  const m = SI.mapClassify(CL.shapeClassify(raw, CL.TYPES, {}));
+  const sh = CL.shapeClassify(raw, CL.TYPES, {});
+  const m = SI.mapClassify(sh);
+  // 19.11.2026 (בעל העסק): המזכירה מביאה רק חשבוניות. בטוח שזה לא מסמך ספק ולא צ'ק – נדחה אוטומטית, בלי התראה. בספק – ממשיך כרגיל וממתין
+  const no = SI.sureNotInv(sh, raw);
+  if (no) {
+    if (!(await live({ st: 'rej', k: 'unk', t0: m.t0, tc: sh.typeConfidence, unr: false, notInv: no, rejAt: now, rejBy: 'auto', el: false, why: ['type'], wk: FieldValue.delete(), qwt: FieldValue.delete(), purgeAt: now + SI.KEEP_DAYS * 864e5 }))) return { skip: 'rej' };
+    await db.collection('sec_log').doc().set(ilog('', 'sec', 'invNotInv', { tgt: id, note: no }));
+    return { k: 'unk', notInv: no };
+  }
   const [cs, stop] = await Promise.all([db.doc('sec_cfg/inv').get(), stopOn(db)]);
   const cfg = SI.invCfgOf(cs);
   const s0 = (x.src || [])[0] || {};
@@ -185,6 +196,8 @@ async function workIn(id, o) {
   // מייל לא מאומת: השולח לא משמש לזיהוי הספק (אין 'snd'), והחשבונית לא זכאית ל"נכנס ישר" (why 'auth')
   const ua = s0.ch === 'mail' && s0.ua === true;
   const up = { st: 'new', k: m.k, t0: m.t0, f: m.f, unsure: m.unsure, wk: FieldValue.delete(), ua };
+  if (typeof sh.typeConfidence === 'number') up.tc = sh.typeConfidence;
+  if (m.k === 'unk') up.unr = !(raw && raw.fields && raw.fields.unreadable === false);
   if (x.qwt) up.qwt = FieldValue.delete();
   if (['inv', 'rcpt', 'dn', 'cr'].includes(m.k)) {
     const sm = SI.matchSup(m.f, cfg, ua ? '' : skey);
@@ -252,6 +265,22 @@ function outOf(id, x, uid, now) {
   if (x.st === 'ok') Object.assign(o, { okAt: x.okAt || 0, auto: x.auto === true, mineOk: x.okBy === uid, okDev: x.okBy === uid ? x.dev || '' : '', purged: x.purged === true });
   return o;
 }
+// מנקה מהתור רשומות ממתינות שבטוח אינן חשבונית (SI.staleNotInv). טרנזקציה לכל רשומה – רק אם עדיין ממתינה ולא נגעו בה. מחזירה את המזהים שנדחו
+async function dropStale(db, docs, now) {
+  const out = [];
+  for (const d of docs.filter((z) => SI.staleNotInv(z.data()))) {
+    const ok = await db.runTransaction(async (tx) => {
+      const s = await tx.get(d.ref);
+      if (!s.exists || !SI.staleNotInv(s.data())) return false;
+      const x = s.data();
+      tx.update(d.ref, { st: 'rej', rejAt: now, rejBy: 'auto', notInv: x.k === 'bad' ? (x.why || [])[0] || 'bad' : x.t0, el: false, purgeAt: now + SI.KEEP_DAYS * 864e5 });
+      return true;
+    }).catch(() => false);
+    if (ok) out.push(d.id);
+  }
+  if (out.length) await db.collection('sec_log').doc().set(ilog('', 'auto', 'invNotInv', { note: 'stale=' + out.length })).catch(() => {});
+  return out;
+}
 async function secInv(request) {
   const input = inputObject(request);
   const op = ['list', 'file', 'cfg', 'sups'].includes(input.op) ? input.op : null;
@@ -265,7 +294,9 @@ async function secInv(request) {
       db.collection('sec_inv').where('okAt', '>', now - 3 * 864e5).limit(100).get(),
       db.doc('sec_cfg/inv').get(), stopOn(db),
     ]);
-    const seen = new Set(), items = [];
+    // 19.11.2026 (בעל העסק): מה שכבר ממתין ובטוח אינו חשבונית (נקלט לפני התיקון) – נדחה אוטומטית ויוצא מהרשימה (נשמר 30 יום כמו כל דחייה)
+    const drop = new Set(await dropStale(db, a.docs.filter((d) => brAllowed(g, d.data())), now));
+    const seen = new Set(drop), items = [];
     for (const d of a.docs.concat(r.docs)) { if (seen.has(d.id)) continue; seen.add(d.id); const x = d.data(); if (brAllowed(g, x)) items.push(outOf(d.id, x, who.uid, now)); }
     items.sort((p, q) => q.t - p.t);
     const cfg = SI.invCfgOf(cs);

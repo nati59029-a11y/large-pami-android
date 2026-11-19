@@ -149,6 +149,7 @@ if "LpMessagingService" not in s:
            '\n            </intent-filter>'
            '\n        </service>'
            '\n        <receiver android:name="' + P + 'LpActReceiver" android:exported="false" />'
+           '\n        <service android:name="' + P + 'LpActJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />'
            '\n        <receiver android:name="' + P + 'LpBootReceiver" android:exported="false">'
            '\n            <intent-filter>'
            '\n                <action android:name="android.intent.action.BOOT_COMPLETED" />'
@@ -166,6 +167,7 @@ if "LpMessagingService" not in s:
 assert s.count("com.google.firebase.MESSAGING_EVENT") == 1, "notif buttons: expected exactly 1 MESSAGING_EVENT service in the app manifest"
 assert s.count("LpMessagingService") == 1 and s.count('tools:node="remove"') >= 1
 assert s.count("LpActReceiver") == 1 and s.count("LpActActivity") == 1 and s.count("LpBootReceiver") == 1
+assert s.count("LpActJob") == 1 and 'LpActJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE"' in s, "notif buttons: LpActJob service"
 print("notif buttons manifest: OK (LpMessagingService, plugin service removed)")
 PY3
 # Android backup (16.11.2026): the button tokens of local snoozes (lp_notif_snz) and the cached FCM token (lp_notif_tok) are not
@@ -295,6 +297,69 @@ print("bg work manifest: OK (LpWorkService dataSync, FOREGROUND_SERVICE, FOREGRO
 PY5
 # --- BG-WORK END ---
 
+# --- POS-HW BEGIN ---
+# POS hardware (17.11.2026, LpPosPlugin): receipt printer (USB / Bluetooth / network), cash drawer through the printer,
+# customer second screen. Minimal permissions: Bluetooth only to talk to an already PAIRED printer (no scanning, no
+# location): BLUETOOTH up to Android 11 (no prompt), BLUETOOTH_CONNECT from Android 12 (asked only when a Bluetooth printer
+# is chosen). USB needs no manifest permission (Android asks per device). Network printers use INTERNET (already there).
+# The hardware is optional: the app still installs on phones without USB host / Bluetooth. Running twice adds nothing twice.
+python3 - "$M" <<'PY6'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+add = []
+if 'android.permission.BLUETOOTH"' not in s:
+    add.append('<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />')
+if 'android.permission.BLUETOOTH_CONNECT"' not in s:
+    add.append('<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />')
+if 'android.hardware.usb.host"' not in s:
+    add.append('<uses-feature android:name="android.hardware.usb.host" android:required="false" />')
+if 'android.hardware.bluetooth"' not in s:
+    add.append('<uses-feature android:name="android.hardware.bluetooth" android:required="false" />')
+if 'android.permission.VIBRATE"' not in s:
+    add.append('<uses-permission android:name="android.permission.VIBRATE" />')
+if add:
+    i = s.find("<application")
+    if i < 0:
+        sys.exit("::error::pos hw: <application> not found")
+    s = s[:i] + "\n    ".join(add) + "\n    " + s[i:]
+    open(p, "w", encoding="utf-8").write(s)
+# P1: a USB receipt printer (interface class 7) plugged in opens the app, and Android offers "always use for this device",
+# so the permission survives unplug/replug and the print queue reconnects by itself. One intent-filter on MainActivity.
+import re
+if "lp_usb_printer" not in s:
+    m = re.search(r'<activity\b[^>]*?android:name="(?:\.|com\.largepami\.finance\.)MainActivity"[^>]*>', s, re.S)
+    if not m or m.group(0).endswith("/>"):
+        sys.exit("::error::pos hw: MainActivity not found")
+    ins = ('\n            <intent-filter>\n                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />\n            </intent-filter>'
+           '\n            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/lp_usb_printer" />')
+    s = s[:m.end()] + ins + s[m.end():]
+    open(p, "w", encoding="utf-8").write(s)
+for x in ('android.permission.BLUETOOTH"', 'android.permission.BLUETOOTH_CONNECT"', 'android.hardware.usb.host"', 'android.hardware.bluetooth"', 'android.permission.VIBRATE"', 'lp_usb_printer'):
+    assert s.count(x) == 1, "pos hw: " + x
+for bad in ("BLUETOOTH_SCAN", "BLUETOOTH_ADMIN", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"):
+    assert bad not in s, "pos hw: unexpected permission " + bad
+print("pos hw manifest: OK (BLUETOOTH<=30, BLUETOOTH_CONNECT, VIBRATE, usb.host/bluetooth optional, USB printer intent-filter)")
+PY6
+mkdir -p android/app/src/main/res/xml
+cat > android/app/src/main/res/xml/lp_usb_printer.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<!-- POS (patch-android.sh): USB receipt printers (USB printer class 7) -->
+<resources>
+    <usb-device class="7" />
+</resources>
+XML
+# Barcode / QR on the receipt: ZXing core (Apache License 2.0), pure Java, ~550 KB.
+grep -q 'lp-pos-hw' android/app/build.gradle || cat >> android/app/build.gradle <<'GRADLE'
+
+// lp-pos-hw (patch-android.sh)
+dependencies {
+    implementation "com.google.zxing:core:3.5.3"
+}
+GRADLE
+grep -q 'lp-pos-hw' android/app/build.gradle || { echo "::error::pos hw: gradle block missing"; exit 1; }
+# --- POS-HW END ---
+
 J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java
 cp android-plugin/AppUpdatePlugin.java $J/AppUpdatePlugin.java
@@ -310,11 +375,14 @@ cp android-plugin/PanoStitchCore.java $J/PanoStitchCore.java
 cp android-plugin/PanoStitchPlugin.java $J/PanoStitchPlugin.java
 # Live dictation in the secretary chat (16.11.2026): the phone's own speech recognizer
 cp android-plugin/LpSpeechPlugin.java $J/LpSpeechPlugin.java
-# Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot
-for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver; do cp android-plugin/$f.java $J/$f.java; done
+# Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot,
+# background sending of a button press (LpActJob, JobScheduler, 19.11.2026)
+for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver LpActJob; do cp android-plugin/$f.java $J/$f.java; done
 # Background work (17.11.2026): customer feedback queues keep running outside the app
 cp android-plugin/LpWorkService.java $J/LpWorkService.java
 cp android-plugin/LpWorkPlugin.java $J/LpWorkPlugin.java
+# POS hardware (17.11.2026): printer (ESC/POS over USB/Bluetooth/network), drawer, customer display
+for f in LpPosEscPos LpPosTransport LpPosBtUsb LpPosRender LpPosDisplay LpPosPlugin; do cp android-plugin/$f.java $J/$f.java; done
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -339,6 +407,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LpSpeechPlugin.class);
         // Background work: feedback queues keep running when the user leaves the app (foreground service)
         registerPlugin(LpWorkPlugin.class);
+        // POS hardware: receipt printer, cash drawer, customer display (www/pos-hw.js)
+        registerPlugin(LpPosPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them
