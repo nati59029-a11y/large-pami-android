@@ -36,7 +36,7 @@ V.cxSync=()=>{const T='סנכרון כספית';if(!ok())return{t:T,h:'<div clas
  const c=X.cfg&&X.cfg.cfg,last=c&&c.last;
  return{t:T,s:'קטלוג ומחירים מול כספית',h:`<div class="card"><h3 style="margin-top:0">קובץ מכספית</h3><p class="note" style="margin-top:0">מוציאים מכספית את "קטלוג פריטים" או "דוח מכירות לפריטים" (Excel או CSV) ובוחרים אותו כאן. הסוג מזוהה לבד. לפני שמשהו נשמר תוצג תצוגה מקדימה לאישור.</p>
  <label class="btn w" style="display:flex;align-items:center;justify-content:center;min-height:48px">בחירת קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="cxFile" style="position:absolute;opacity:0;width:1px;height:1px"></label>
- <button class="btn g w" style="min-height:48px;margin-top:8px" data-a="go" data-v="cxSales">מכירות כספית והתאמה לסגירת קופה</button>
+ ${typeof window.cxSalesOk==='function'&&window.cxSalesOk()?'<button class="btn g w" style="min-height:48px;margin-top:8px" data-a="go" data-v="cxSales">מכירות כספית והתאמה לסגירת קופה</button>':''}
  <p class="note">${X.cfg?X.cfg.err?esc(X.cfg.err):last?'סנכרון אחרון: '+esc(new Date(last.at).toLocaleString('he-IL'))+' · '+nf(X.cfg.items)+' קודים מקושרים':'עוד לא היה סנכרון. בסנכרון הראשון כל הקטלוג נקלט כמוצרים, עם כמות 0 ("לא נספר").':'טוען…'}</p></div>
  ${expH(!!last)}
  ${typeof window.cxBotCardH==='function'?window.cxBotCardH():''}
@@ -51,7 +51,7 @@ const expH=has=>`<div class="card"><h3 style="margin-top:0">קבצים לכספ�
 async function readF(f){if(/\.csv$/i.test(f.name||'')||f.type==='text/csv')return parseCsv(C.decode(await f.arrayBuffer()));return readTable(f)}
 CHG.cxFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f)return;X.st='busy';prog('קורא את הקובץ…');rerender();
  try{const T=await readF(f);const rows=(T||[]).filter(r=>Array.isArray(r));const d=C.detect(rows);
-  if(d.kind==='sales'){if(typeof window.cxSalesFile!=='function')throw new Error('קליטת מכירות לא נטענה');await window.cxSalesFile(f,rows,d,prog);X.st='pick';return}
+  if(d.kind==='sales'){if(typeof window.cxSalesOk!=='function'||!window.cxSalesOk())throw new Error('קליטת דוח מכירות כבויה בעסק הזה (תוספת “מכירות כספית”). פנו למנהל־העל.');if(typeof window.cxSalesFile!=='function')throw new Error('קליטת מכירות לא נטענה');await window.cxSalesFile(f,rows,d,prog);X.st='pick';return}
   if(d.kind!=='cat')throw new Error('הקובץ לא מזוהה כקובץ של כספית ("קטלוג פריטים" או "דוח מכירות לפריטים").');
   const g=C.groupCat(rows,d),P=C.parts(g.items),run=rid();
   for(let k=0;k<P.length;k++){prog(`זוהה קטלוג: ${nf(g.items.length)} קודים. שולח חלק ${k+1} מתוך ${P.length}…`);await fnCall('cxUpload',{run,part:k,parts:P.length,items:P[k]})}

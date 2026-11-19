@@ -11,9 +11,10 @@ const { assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
 const A = 'biz-cs', B = 'biz-ct';
-const ALL = { orders: true };
+const ALL = { orders: true, cxSales: true }; // cxSales – תוספת "מכירות כספית" (19.11.2026), כבויה כברירת מחדל
 const MGR = 's_mgr', E1 = 's_e1', SA = 's_sa', MB = 's_mb';
 const FN = path.join(H.ROOT, 'functions');
+const FieldDel = () => require(require.resolve('firebase-admin/firestore', { paths: [FN] })).FieldValue.delete();
 let FX;
 async function call(name, uid, data) {
   FX = FX || require('../functions/index.js');
@@ -333,5 +334,20 @@ describe('סנכרון כספית A2/A3 – דוח מכירות', () => {
     const F3 = [HDR, L('27/11/2026 10:00', 'מוצר ב', '300002', '8205', Y, 4.5)];
     const id3 = await send(MGR, F3); await ok('cxPreview', MGR, { run: id3 }); await ok('cxApply', MGR, { run: id3 });
     assert.deepEqual((await day('6200_20261127')).tm, { y: 1, n: 0, p: '', q: 'dd/dd/dddd dd:dd' });
+  });
+  it('תוספת "מכירות כספית" כבויה: המסך, התיקון וקליטת דוח מכירות נדחים (feature-off); קטלוג ממשיך לעבוד', async () => {
+    const ref = adm().doc('b/' + B);
+    await ref.update({ 'features.cxSales': false });
+    try {
+      for (const [fn, d] of [['cxSales', { from: '2026-11-16', to: '2026-11-17' }], ['cxLines', { un: true }], ['cxFix', {}], ['cxUpload', { run: run(), kind: 'sales', part: 0, parts: 1, lines: CC.parseSales(FILE1).lines }]]) {
+        const r = await call(fn, MB, d);
+        assert.equal(r.reason, 'feature-off', fn + ': ' + r.text);
+      }
+      const r = await call('cxUpload', MB, { run: run(), part: 0, parts: 1, items: [] });
+      assert.notEqual(r.reason, 'feature-off');
+      await ref.update({ 'features.cxSales': FieldDel() });
+      assert.equal((await call('cxSales', MB, { from: '2026-11-16', to: '2026-11-17' })).reason, 'feature-off', 'בלי המפתח = כבוי');
+    } finally { await ref.update({ 'features.cxSales': true }); }
+    assert.equal((await call('cxSales', MB, { from: '2026-11-16', to: '2026-11-17' })).status, 'OK');
   });
 });

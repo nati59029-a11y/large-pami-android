@@ -827,11 +827,14 @@ async function lockFree(bizId, owner) {
   await ref.firestore.runTransaction(async (tx) => { const x = await tx.get(ref); if (x.exists && x.get('o') === owner) tx.delete(ref); });
 }
 const LOCKED = ['cxApply', 'cxExport'];
+const SALES_FNS = ['cxSales', 'cxLines', 'cxFix'];
 const FNS = { cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist, cxDnOk, cxSales, cxLines, cxFix };
 const BIG = ['cxPreview', 'cxApply', 'cxExport']; // ~9,000 מוצרים
 async function phone(k, request) {
   const w = await mgrW(request);
   const input = k === 'cxCfg' ? {} : inputObject(request);
+  // 19.11.2026: "מכירות כספית" – תוספת נפרדת (cxSales), כבויה כברירת מחדל; רק מנהל־על מפעיל. הרובוט (caspit-bot.js) לא עובר כאן ולא מושפע.
+  if (SALES_FNS.includes(k) || (k === 'cxUpload' && input.kind === 'sales')) T.requireFeature(w.biz, 'cxSales');
   if (!LOCKED.includes(k) || !w.bizId) return FNS[k](w, input);
   const me = 'u:' + w.uid;
   await lockTake(w.bizId, me);

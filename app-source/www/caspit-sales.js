@@ -11,7 +11,9 @@
 if(typeof ACT==='undefined'||typeof V==='undefined'||typeof CaspitCore==='undefined')return;
 const C=CaspitCore;
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
-const ok=()=>typeof window.oxImpOk==='function'&&window.oxImpOk();
+/* 19.11.2026: תוספת נפרדת “מכירות כספית” (cxSales) – כבויה כברירת מחדל, רק מנהל־על מפעיל (השרת אוכף ב-caspit.js) */
+const ok=()=>{try{const b=SY&&SY.biz;return typeof window.oxImpOk==='function'&&window.oxImpOk()&&!!(b&&b.features&&b.features.cxSales===true)&&bzF('cxSales')}catch(e){return false}};
+window.cxSalesOk=ok;
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 const nf=n=>Number(n||0).toLocaleString('he-IL',{maximumFractionDigits:3});
 const pz=v=>v==null?'—':ils(v);
@@ -241,6 +243,7 @@ function hDays(mon){
  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mon||'')))return Promise.reject(new Error('חודש לא תקין (YYYY-MM)'));
  const f=mon+'-01',l=new Date(Date.UTC(+mon.slice(0,4),+mon.slice(5,7),0)).toISOString().slice(0,10),t0=ymd(new Date()),need=l<t0?l:t0;
  if(Y.D&&Y.D.f<=f&&Y.D.t>=need)return Promise.resolve(Y.D.days.filter(x=>x&&x.d>=f&&x.d<=l));
+ if(!ok())return Promise.resolve([]);
  const c=HC.get(mon);if(c&&Date.now()-c.at<HTTL)return c.p;
  const p=fnCall('cxSales',{from:f,to:l}).then(x=>C.unpackDays(x).map(d=>{delete d.it;return d}));
  HC.set(mon,{at:Date.now(),p});p.catch(()=>{if(HC.get(mon)&&HC.get(mon).p===p)HC.delete(mon)});

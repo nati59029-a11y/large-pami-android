@@ -52,7 +52,7 @@ function loadTasks(m){const c=TC[m];if(c&&(c.L||c.p)&&Date.now()-c.at<TTL)return
   o.L=L;o.p=null;return L}).catch(e=>{delete TC[m];throw e});
  TC[m]=o;return o.p}
 function loadSales(m){const c=SC[m];if(c&&(c.v||c.p)&&Date.now()-c.at<TTL)return c.v?Promise.resolve(c.v):c.p;
- if(!window.CxHours||typeof CxHours.get!=='function')return Promise.resolve({day:null,hours:null,na:1});
+ if(!window.CxHours||typeof CxHours.get!=='function'||(typeof window.cxSalesOk==='function'&&!window.cxSalesOk()))return Promise.resolve({day:null,hours:null,na:1});
  const o={at:Date.now(),v:null};o.p=Promise.resolve(CxHours.get(m)).then(v=>{o.v=v&&typeof v==='object'?v:{day:{},hours:{}};o.p=null;return o.v}).catch(e=>{delete SC[m];throw e});
  SC[m]=o;return o.p}
 const ownT=(L,u)=>u?(L||[]).filter(t=>t&&(t.ow?t.ow===u:Array.isArray(t.to)&&t.to.includes(u))).map(t=>({id:t.id,n:str(t.txt).slice(0,40),dl:t.dl,due:t.due,st:t.st,sub:t.sub,late:t.late})):[];
