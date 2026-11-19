@@ -1,6 +1,7 @@
 'use strict';
 // חוסרים, שלב 1 (www/hs.js + hs-core.js). רשת מדומה, בלי אמולטור.
-// משבצת ומונה (מנהל ב-+, עובד בבית וב-+), הוספה (שדות החוזה בדיוק), זיהוי ספק מחשבוניות, פריט כללי, לפי ספק ("מופיע לכל הספקים" ו"מהזמנת לקוח"),
+// משבצת ומונה (מנהל ב-+, עובד בבית וב-+), הוספה (שדות החוזה בדיוק), זיהוי ספק מחשבוניות, פריט כללי, לפי ספק ("מופיע לכל הספקים"; "להזמין מספקים" כבר לא מוצג אוטומטית),
+// חלון "להוסיף גם לרשימת החוסרים?" אחרי סימון "להזמין מספק" בליקוט (window.hsAskSo – הוסף / לא עכשיו / בלי כפילות / 403 / תוספת כבויה),
 // וואטסאפ לספק (טלפון נשמר בפעם הראשונה), הגיע / החזר / מחיקה רכה / שחזור, הודעה ללקוח, תמונה, 403 ← "יופעלו בקרוב", תוספת כבויה = אין משבצת ואין בקשות.
 // שימוש: node ui-hs.js <www-dir> [shots-dir]      בדיקה הפוכה: MUTATE=gen (פריט כללי לא מופיע אצל הספק) – הבדיקה חייבת להיכשל.
 const fs = require('fs'); const path = require('path'); const H = require('./harness');
@@ -122,11 +123,11 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   check('7 כמות שלילית נדחית בלי שליחה', !posts().length && /כמות לא תקינה/.test(await toasts(mp)), await toasts(mp));
   await mp.evaluate(() => goBack()); await sleep(300);
   // לפי ספק
-  await mp.click('[data-a=hsTab][data-v=sup]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-hsg=s2]') && /יוגורט פרי/.test(document.getElementById('main').innerText)), 4000);
+  await mp.click('[data-a=hsTab][data-v=sup]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-hsg=s2]')), 4000); await sleep(600);
   const g = await mp.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-hsg]')].map((e) => [e.dataset.hsg, e.innerText])));
   check('8 לפי ספק: תנובה – קוטג, חלב והפריטים הכלליים עם "מופיע לכל הספקים"', g.s1 && /קוטג 5%/.test(g.s1) && /חלב 3% ליטר/.test(g.s1) && /שקיות גדולות[\s\S]*מופיע לכל הספקים/.test(g.s1) && /מברג חשמלי/.test(g.s1), g.s1);
   check('8א הפריט עם 2 ספקים מופיע גם אצל שטראוס, וגם הכלליים', g.s2 && /חלב 3% ליטר/.test(g.s2) && /שקיות גדולות/.test(g.s2) && !/קוטג/.test(g.s2), g.s2);
-  check('8ב איחוד: "להזמין מספקים" מופיע אצל שטראוס עם "מהזמנת לקוח #41" ו"הוזמן"', g.s2 && /יוגורט פרי/.test(g.s2) && /מהזמנת לקוח #41/.test(g.s2) && /הוזמן/.test(g.s2), g.s2);
+  check('8ב "להזמין מספקים" לא נכנס לבד: יוגורט פרי (supord) לא מוצג, ואין שאילתה ל-supord', !Object.values(g).some((t) => /יוגורט פרי|מהזמנת לקוח/.test(t)) && !LOG.some((l) => l.coll === 'supord'), { g, so: LOG.filter((l) => l.coll === 'supord').length });
   check('8ג אסם (רק פריט שהגיע) – לא מוצג', !g.s3, Object.keys(g));
   await shot(mp, shots, 'hs-3-לפי-ספק');
   // וואטסאפ: פעם ראשונה מבקש טלפון ושומר
@@ -277,6 +278,40 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   check('28ב אין שגיאות JS', mp.__errors.length === 0, mp.__errors);
   await x.ctx.close();
 
+  // ================= חלון "להוסיף גם לרשימת החוסרים?" אחרי "להזמין מספק" בליקוט (window.hsAskSo) =================
+  seed(); x = await open('m-hsask', 'm@x.co'); mp = x.page;
+  await mp.evaluate((L) => { S.subs = S.subs.filter((s) => !/^s\d$/.test(s.id)); L.forEach((s) => S.subs.push({ id: s.id, cat: 'e_sup', name: s.name })); save(); }, SUPS);
+  const O5 = { id: 'o5', no: 5, cust: { name: 'רותי', phone: '052-1112233' }, custId: 'c7' };
+  const R5 = [{ n: 'שמנת 15%', qty: 2, sup: 'תנובה' }, { n: 'מלח ים', qty: 1, sup: 'ספק לא מוכר' }, { n: 'סוכר', qty: 3, sup: 'שטראוס' }];
+  const dlgRows = () => mp.evaluate(() => [...document.querySelectorAll('#dlg[open] input[data-hso]')].map((i) => ({ c: i.checked, t: i.closest('label').innerText.replace(/\s+/g, ' ').trim() })));
+  LOG.length = 0; await mp.evaluate((a) => { window.hsAskSo(a[0], a[1]); }, [O5, R5]);
+  await waitFor(async () => (await dlgRows()).length === 3);
+  let dr = await dlgRows();
+  check('28 אחרי סימון "להזמין מספק": חלון "להוסיף גם לרשימת החוסרים?" עם 3 המוצרים, כולם מסומנים, ספק לכל מוצר (לא מוכר = כללי)', dr.length === 3 && dr.every((r) => r.c) && /להוסיף גם לרשימת החוסרים/.test(await mp.evaluate(() => document.getElementById('dlg').innerText)) && /שמנת 15% · כמות 2 ספק: תנובה/.test(dr[0].t) && /מלח ים[\s\S]*פריט כללי/.test(dr[1].t) && await mp.evaluate(() => !!document.querySelector('#dlg [data-a=hsSoAdd]') && !!document.querySelector('#dlg [data-a=hsSoNo]')), dr);
+  check('28א עד הלחיצה – שום דבר לא נשמר', !posts().length);
+  await shot(mp, shots, 'hs-6-חלון-אחרי-ליקוט');
+  check('28ב החלון בלי גלילה לרוחב (360px)', await noOverflow(mp));
+  await mp.uncheck('#dlg input[data-hso="2"]'); await mp.click('#dlg [data-a=hsSoAdd]'); await waitFor(async () => posts().length >= 2 && await mp.evaluate(() => !document.querySelector('#dlg[open]')));
+  const pf = posts().map((l) => l.body.fields), fsh = pf.find((f) => f.n.stringValue === 'שמנת 15%'), fml = pf.find((f) => f.n.stringValue === 'מלח ים');
+  check('29 "הוסף": נוצרו רק 2 המסומנים (סוכר לא), בשדות החוזה בלבד + ord', pf.length === 2 && fsh && fml && !pf.some((f) => f.n.stringValue === 'סוכר') && Object.keys(fsh).sort().join() === 'by,byN,cust,gen,n,nk,np,ord,q,st,sups,supN,t,why'.split(',').sort().join(), pf.map((f) => Object.keys(f).sort().join()));
+  check('29א שמנת: ספק תנובה (s1), why=order, כמות 2, מקושר להזמנה #5 (o5), פרטי הלקוח (טלפון ספרות, cid)', fsh && fsh.sups.arrayValue.values.map((v) => v.stringValue).join() === 's1' && fsh.supN.arrayValue.values[0].stringValue === 'תנובה' && fsh.gen.booleanValue === false && fsh.why.stringValue === 'order' && fsh.q.integerValue === '2'
+    && fsh.ord.mapValue.fields.id.stringValue === 'o5' && fsh.ord.mapValue.fields.no.integerValue === '5' && fsh.cust.mapValue.fields.nm.stringValue === 'רותי' && fsh.cust.mapValue.fields.ph.stringValue === '0521112233' && fsh.cust.mapValue.fields.cid.stringValue === 'c7' && fsh.st.stringValue === 'open' && fsh.by.stringValue === 'm', fsh);
+  check('29ב מלח ים (ספק לא מוכר) – פריט כללי, בלי ספקים, מקושר להזמנה', fml && fml.gen.booleanValue === true && !(fml.sups.arrayValue.values || []).length && fml.ord.mapValue.fields.id.stringValue === 'o5', fml);
+  check('29ג הודעה "נוספו 2 פריטים לחוסרים" והמונה מתעדכן (4)', /נוספו 2 פריטים לחוסרים/.test(await toasts(mp)) && (await sheetTile(mp) || {}).n === '4', await toasts(mp));
+  await mp.evaluate(() => sheetClose());
+  // שוב אותה הזמנה: רק סוכר מוצע (שמנת ומלח כבר פתוחים ומקושרים); "לא עכשיו" – לא נוצר כלום
+  LOG.length = 0; await mp.evaluate((a) => { window.hsAskSo(a[0], a[1]); }, [O5, R5]);
+  await waitFor(async () => (await dlgRows()).length > 0); dr = await dlgRows();
+  check('30 בלי כפילות: פריט פתוח שמקושר לאותה הזמנה ולאותו מוצר – לא מוצע שוב (רק סוכר)', dr.length === 1 && /סוכר/.test(dr[0].t), dr);
+  await mp.click('#dlg [data-a=hsSoNo]'); await sleep(500);
+  check('30א "לא עכשיו": החלון נסגר ולא נוצר שום פריט', !posts().length && await mp.evaluate(() => !document.querySelector('#dlg[open]')));
+  LOG.length = 0; await mp.evaluate((a) => { window.hsAskSo(a[0], a[1].slice(0, 2)); }, [O5, R5]); await sleep(800);
+  check('30ב כל המוצרים כבר בחוסרים – אין חלון ואין יצירה', !posts().length && await mp.evaluate(() => !document.querySelector('#dlg[open]')));
+  // הכללים לא פורסמו (403) – אין חלון, בלי שגיאות
+  F403 = true; LOG.length = 0; await mp.evaluate((a) => { window.hsAskSo(a[0], a[1]); }, [Object.assign({}, O5, { id: 'o6' }), R5]); await sleep(800); F403 = false;
+  check('31 403 (הכללים לא פורסמו) – אין חלון ואין יצירה, בלי שגיאות JS', !posts().length && await mp.evaluate(() => !document.querySelector('#dlg[open]')) && mp.__errors.length === 0, mp.__errors);
+  await x.ctx.close();
+
   // ================= כללים שלא פורסמו (403) =================
   seed(); F403 = true; x = await open('m-hs403', 'm@x.co'); mp = x.page;
   t = await sheetTile(mp); await sleep(800); t = await sheetTile(mp);
@@ -289,6 +324,8 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   seed(); x = await open('m-hsoff', 'm@x.co', FT({ suppliers: false })); mp = x.page;
   t = await sheetTile(mp); await sleep(600);
   check('21 תוספת כבויה: אין משבצת ואין שום בקשה ל-hsr/hsx/hsph', !t && !LOG.length, { t, n: LOG.length });
+  LOG.length = 0; await mp.evaluate(() => { window.hsAskSo({ id: 'o5', no: 5 }, [{ n: 'שמנת', qty: 1, sup: 'תנובה' }]); }); await sleep(600);
+  check('21ב תוספת כבויה: אחרי ליקוט אין חלון "להוסיף לחוסרים" ואין בקשות', !LOG.length && await mp.evaluate(() => !document.querySelector('#dlg[open]')), LOG.length);
   check('21א ניווט ישיר: "המסך הזה לא זמין", בלי שגיאות JS', await mp.evaluate(() => { go('hs'); return /לא זמין/.test(document.getElementById('main').innerText); }) && mp.__errors.length === 0, mp.__errors);
   await x.ctx.close();
 

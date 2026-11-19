@@ -1,6 +1,7 @@
 'use strict';
 // 14.11.2026 (משוב בעל הפרויקט סעיף 6, משוב סבב 3): מסך טיפול/ליקוט – "בטיפול" פותח את המסך, יש/אין, 3 אפשרויות, "הכול במלאי",
-// סיכום לפני/אחרי + חיוג + "הלקוח אישר", חסימת "ממתין לתשלום" עד אישור (מנהל עוקף עם force), ו"להזמין מספקים". רשת מדומה (השרת מדומה כאן; השרת האמיתי – ord-pick.test.js).
+// סיכום לפני/אחרי + חיוג + "הלקוח אישר", חסימת "ממתין לתשלום" עד אישור (מנהל עוקף עם force), ו"להזמין מספקים".
+// 19.11.2026: אחרי "להזמין מספק" – חלון "להוסיף גם לרשימת החוסרים?" (עובד: "לא עכשיו" – לא נוצר; מנהל: "הוסף" – hsr מקושר להזמנה). רשת מדומה (השרת מדומה כאן; השרת האמיתי – ord-pick.test.js).
 // שימוש: node ui-ord-pick.js <www-dir> [out.json] [shots-dir]
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,8 @@ async function open(browser, www, who, calls, S) {
     const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
     const J = (st, b) => route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(b) });
     if (/:runQuery$/.test(u.pathname)) { let c = ''; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
-      return J(200, c === 'ord' ? Object.values(S.ord).map((o) => doc('ord/' + o.id, o)) : c === 'prod' ? PROD : c === 'supord' ? SUP : [{ readTime: '2026-11-14T09:00:00Z' }]); }
+      return J(200, c === 'ord' ? Object.values(S.ord).map((o) => doc('ord/' + o.id, o)) : c === 'prod' ? PROD : c === 'supord' ? SUP : c === 'hsr' ? S.hsr.map((f, k) => ({ document: { name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/hsr/h' + k, fields: f } })) : [{ readTime: '2026-11-14T09:00:00Z' }]); }
+    if (/\/hsr$/.test(u.pathname) && req.method() === 'POST') { const f = JSON.parse(body).fields; S.hsr.push(f); return J(200, { name: 'x', fields: f }); }
     if (/\/cust\//.test(u.pathname)) return J(404, { error: { code: 404 } });
     if (/\/ordcfg\/main$/.test(u.pathname)) return J(200, { name: 'x', fields: { pay: enc({ mode: 'phone' }), src: enc({ br1: 'stock' }) } });
     if (/\/ord\/o\d\/log/.test(u.pathname)) return J(200, { documents: [] });
@@ -69,7 +71,7 @@ async function open(browser, www, who, calls, S) {
   const txt = (page) => page.evaluate(() => document.getElementById('main').innerText);
   const v = (page) => page.evaluate(() => cur().v);
   for (const who of ['w', 'm']) {
-    const calls = [], S = { ord: freshOrd() };
+    const calls = [], S = { ord: freshOrd(), hsr: [] };
     const { ctx, page, log } = await open(browser, www, who, calls, S);
     const card = async (id) => { await page.evaluate((i) => { NAV = [{ v: 'home' }]; go('ox'); go('oxOrd', i); }, id); await H.settle(page, 1200); await page.evaluate(() => rerender()); await H.settle(page, 300); };
     const since = (k, nm) => calls.slice(k).filter((x) => x.n === nm);
@@ -93,6 +95,16 @@ async function open(browser, www, who, calls, S) {
     const op = since(k, 'orderPick')[0], up = since(k, 'updateOrder')[0];
     check(who + ' 5 סיום: orderPick עם הסימונים, ואז updateOrder בלי השורה שהוסרה', !!op && JSON.stringify(op.d.l) === JSON.stringify([{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }, { i: 2, ok: false, act: 'ord', sup: 'ספק המפיות', qty: 3, eta: '2026-11-20' }])
       && !!up && JSON.stringify(up.d.items) === JSON.stringify([{ qty: 2, price: 10, pid: 'pA' }, { qty: 3, price: 5, pid: 'pC' }]) && calls.indexOf(op) < calls.indexOf(up) && up.d.ver === 777 && typeof op.d.upd === 'number', { op: op && op.d, up: up && up.d });
+    // חלון "להוסיף גם לרשימת החוסרים?" – מפית (סומנה "להזמין מספק"); לחם (הורדה) ועוגה (במלאי) – לא
+    for (let j = 0; j < 30 && !await page.evaluate(() => !!document.querySelector('#dlg[open] input[data-hso]')); j++) await H.settle(page, 100);
+    const ask = await page.evaluate(() => [...document.querySelectorAll('#dlg[open] input[data-hso]')].map((i) => ({ c: i.checked, t: i.closest('label').innerText.replace(/\s+/g, ' ').trim() })));
+    check(who + ' 5א אחרי השמירה: חלון "להוסיף גם לרשימת החוסרים?" עם מפית בלבד (מסומנת), ועדיין לא נוצר חוסר', ask.length === 1 && ask[0].c && /מפית · כמות 3/.test(ask[0].t) && !S.hsr.length, ask);
+    if (who === 'w') { await page.click('#dlg [data-a=hsSoNo]'); await H.settle(page, 400);
+      check('w 5ב "לא עכשיו" – החלון נסגר ולא נוצר חוסר', !S.hsr.length && await page.evaluate(() => !document.querySelector('#dlg[open]'))); }
+    else { await page.click('#dlg [data-a=hsSoAdd]'); for (let j = 0; j < 30 && (!S.hsr.length || await page.evaluate(() => !!document.querySelector('#dlg[open]'))); j++) await H.settle(page, 100);
+      const hf = S.hsr[0] || {};
+      check('m 5ב "הוסף" – חוסר אחד: מפית, כמות 3, להזמנה, מקושר להזמנה #1, פרטי הלקוח, ספק לא מוכר = כללי', S.hsr.length === 1 && hf.n.stringValue === 'מפית' && hf.q.integerValue === '3' && hf.why.stringValue === 'order' && hf.ord.mapValue.fields.id.stringValue === 'o1' && hf.ord.mapValue.fields.no.integerValue === '1'
+        && hf.cust.mapValue.fields.nm.stringValue === 'לקוח 1' && hf.cust.mapValue.fields.ph.stringValue === '0541111111' && hf.gen.booleanValue === true && hf.st.stringValue === 'open', hf); }
     const t5 = await txt(page);
     const sm = { v: await v(page), rm: /הוסר: לחם/.test(t5), ord: /להזמין מספק: מפית/.test(t5) && /ספק המפיות/.test(t5) && /20\.11\.2026/.test(t5), before: /סכום לפני[\s\S]*42\.5/.test(t5), after: /סכום אחרי[\s\S]*35/.test(t5),
       call: await page.evaluate(() => !!document.querySelector('a[href^="tel:"][data-a=oxCall]')), ok: await page.evaluate(() => !!document.querySelector('[data-a=oxPkOk]')), re: await page.evaluate(() => !!document.querySelector('[data-a=oxPkRe]')), ov: await ov(page) };

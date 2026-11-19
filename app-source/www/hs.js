@@ -2,7 +2,8 @@
    משבצת "חוסרים" עם מונה פתוחים: אצל המנהל במסך ה-+, אצל העובד במסך הבית וב-+ (window.hsTile). עובד ומנהל – אותן אפשרויות.
    מסכים: V.hs (פתוחים / לפי ספק / הגיעו / נמחקו), V.hsEd (הוספה ועריכה).
    נתונים (חוזה ב-hs-core.js ובכללים): hsr/{id}, hsr/{id}/p/1 (תמונה מוקטנת), hsph/{supId} (טלפון ספק), hsx/{supId} (שמות מוצרים מחשבוניות – המנהל בונה מ-pinv).
-   "להזמין מספקים" (supord, ord-pick.js) – קריאה ותצוגה בלבד בתצוגה לפי ספק, עם התווית "מהזמנת לקוח". לא כותבים לשם.
+   "להזמין מספקים" (supord, ord-pick.js) – לא נקרא ולא מוצג כאן (19.11.2026, בקשת בעל הפרויקט: "שיהיה אפשרות לשאול, שהוא לא יכניס לבד").
+   במקום זה: אחרי סימון "להזמין מספק" בליקוט, ord-pick.js קורא ל-window.hsAskSo – חלון "להוסיף גם לרשימת החוסרים?" (hsr רגיל, מקושר להזמנה).
    403 (הכללים עוד לא פורסמו / אין הרשאה) ← "החוסרים יופעלו בקרוב", בלי קריסה. שום דבר לא נשמר במכשיר חוץ מזמן הבנייה האחרון של hsx. */
 (function(){'use strict';
 if(typeof V==='undefined'||typeof ACT==='undefined'||typeof fsx!=='function'||typeof bzF!=='function'||!window.HsCore)return;
@@ -12,7 +13,7 @@ const on=()=>{try{return !!((isA()||isW()||!!(SY&&SY.sa))&&!SY.mg&&bzF('supplier
 const mgr=()=>{try{return isA()||!!(SY&&SY.sa)}catch(e){return false}};
 const ordOn=()=>{try{return bzF('orders')&&wp('ord')}catch(e){return false}};
 const who=()=>(SY&&SY.uid||'')+'|'+(SY&&SY.bizId||'');
-const fresh=()=>({who:who(),L:null,at:0,busy:0,off:0,err:'',tab:'open',arr:null,arrAt:0,del:null,delAt:0,lb:0,sel:'',f:null,img:{},ph:{},x:null,xat:0,xi:null,xb:0,cP:null,ci:null,so:null,soAt:0,soBusy:0,G:{},mv:{}});
+const fresh=()=>({who:who(),L:null,at:0,busy:0,off:0,err:'',tab:'open',arr:null,arrAt:0,del:null,delAt:0,lb:0,sel:'',f:null,img:{},ph:{},x:null,xat:0,xi:null,xb:0,cP:null,ci:null,ask:null,G:{},mv:{}});
 let HS=fresh();
 const chk=()=>{if(HS.who!==who())HS=fresh()};
 const DEC=d=>Object.assign({id:idOf(d)},fvj({mapValue:d})||{});
@@ -62,15 +63,6 @@ async function stLoad(k){if(HS.lb||!on())return;HS.lb=1;
  try{const L=await qrun(stQ(k,200));HS[k]=L.filter(valid).sort((a,b)=>(b.ut||b.t||0)-(a.ut||a.t||0));HS[k+'At']=Date.now()}
  catch(e){if(e&&e.code===403)HS.off=1;HS[k]=HS[k]||[];HS[k+'At']=Date.now()}
  finally{HS.lb=0}paint()}
-/* "להזמין מספקים": משתמש במה שכבר נטען במסך ההזמנות, אחרת אותה שאילתה בדיוק כמו ord-pick.js (כדי לעמוד בכללים) */
-async function soLoad(){if(HS.soBusy||!ordOn())return;HS.soBusy=1;
- try{const P=window.__oxPick&&window.__oxPick.SO;
-  if(P&&Array.isArray(P.L))HS.so=P.L.slice();
-  else{const m=typeof brMineIds==='function'?brMineIds():null,hb=(()=>{try{return brAll().filter(b=>b.on).length>0}catch(e){return false}})(),vs=a=>({arrayValue:{values:a.map(v=>({stringValue:v}))}});
-   const where=m&&hb?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:vs(m.slice(0,30))}}:{fieldFilter:{field:{fieldPath:'st'},op:'IN',value:vs(['open','ord'])}};
-   HS.so=(await qrun({from:[{collectionId:'supord'}],where,limit:1000})).filter(x=>x.st==='open'||x.st==='ord')}}
- catch(e){HS.so=HS.so||[]}
- finally{HS.soBusy=0;HS.soAt=Date.now()}paint()}
 /* שמות מוצרים מחשבוניות (hsx) – לכל הצוות, להצעת ספק */
 async function xLoad(force){if(!force&&HS.x&&Date.now()-HS.xat<600000)return;HS.xat=Date.now();
  try{const j=await fsx('/hsx?pageSize=300');HS.x=((j&&j.documents)||[]).map(DEC).filter(d=>idOk(d.id))}catch(e){HS.x=HS.x||[]}
@@ -125,18 +117,16 @@ function listH(L,mode,empty){return L===null?'<div class="empty">טוען…</di
 
 /* ---------- לפי ספק ---------- */
 function supTab(){
- if(ordOn()&&!HS.soBusy&&(HS.so===null||Date.now()-HS.soAt>20000))soLoad();
- const sups=supList(),gen=(HS.L||[]).filter(x=>x.gen);let G=C.groups(HS.L||[],sups,HS.so||[],PM());
+ const sups=supList(),gen=(HS.L||[]).filter(x=>x.gen);let G=C.groups(HS.L||[],sups,[],PM());
  if(HS.sel){let g=G.find(x=>x.id===HS.sel);if(!g){const nm=supName(HS.sel);g=nm?{id:HS.sel,name:nm,known:true,L:C.forSup(HS.L||[],HS.sel),O:[]}:null}G=g?[g]:[]}
  HS.G={};G.forEach(g=>{HS.G[g.id]=g});
  const pick=`<label class="f"><span>הצג ספק</span><select data-c="hsSel"><option value="">כל הספקים שיש להם פריטים</option>${sups.map(s=>`<option value="${esc(s.id)}"${HS.sel===s.id?' selected':''}>${esc(s.name)}</option>`).join('')}</select></label>`;
  const genN=gen.length?`<p class="note">${gen.length} פריטים כלליים מופיעים אצל כל ספק${G.length?'':' – בחרו ספק כדי לשלוח אותם'}.</p>`:'';
  const row=r=>`<div class="hs-sr"><b>${esc(r.it.n)}</b>${r.it.q?` · כמות ${esc(C.fmtQ(r.it.q))}`:''} ${r.all?'<span class="tag t1">מופיע לכל הספקים</span>':''}</div>`;
- const so=o=>`<div class="hs-sr"><b>${esc(o.n||'')}</b>${typeof o.qty==='number'?` · כמות ${esc(C.fmtQ(o.qty))}`:''} <span class="tag">מהזמנת לקוח${o.no?' #'+esc(o.no):''}</span>${o.st==='ord'?' <span class="tag t1">הוזמן</span>':''}${o.ord?` <button type="button" class="chip" data-a="go" data-v="oxOrd" data-arg="${esc(o.ord)}" style="min-height:32px">להזמנה</button>`:''}</div>`;
- const card=g=>{const ph=HS.ph[g.id];return `<div class="card" data-hsg="${esc(g.id)}"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">${esc(g.name)} (${g.L.length+g.O.length})</h3>${ph?`<button type="button" class="chip" data-a="hsPhEd" data-id="${esc(g.id)}" style="min-height:32px">☎ ${esc(ph)}</button>`:''}</div>
- ${g.L.map(row).join('')}${g.O.map(so).join('')}${g.L.length+g.O.length?'':'<p class="note">אין פריטים לספק הזה.</p>'}
+ const card=g=>{const ph=HS.ph[g.id];return `<div class="card" data-hsg="${esc(g.id)}"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">${esc(g.name)} (${g.L.length})</h3>${ph?`<button type="button" class="chip" data-a="hsPhEd" data-id="${esc(g.id)}" style="min-height:32px">☎ ${esc(ph)}</button>`:''}</div>
+ ${g.L.map(row).join('')}${g.L.length?'':'<p class="note">אין פריטים לספק הזה.</p>'}
  <div class="hs-acts"><button type="button" class="btn s" data-a="hsWa" data-id="${esc(g.id)}">וואטסאפ לספק</button><button type="button" class="btn g s" data-a="hsPdf" data-k="share" data-id="${esc(g.id)}">קובץ לשיתוף</button><button type="button" class="btn g s" data-a="hsPdf" data-k="print" data-id="${esc(g.id)}">הדפסה</button></div></div>`};
- return pick+genN+(G.length?G.map(card).join(''):`<div class="empty">${HS.sel?'אין פריטים לספק הזה':'אין פריטים משויכים לספקים'}</div>`)+(ordOn()&&HS.soBusy&&HS.so===null?'<p class="note">טוען את "להזמין מספקים"…</p>':'')}
+ return pick+genN+(G.length?G.map(card).join(''):`<div class="empty">${HS.sel?'אין פריטים לספק הזה':'אין פריטים משויכים לספקים'}</div>`)}
 
 V.hs=()=>{const T='חוסרים';if(!on())return{t:T,h:'<div class="empty">המסך הזה לא זמין</div>'};chk();
  if(!HS.busy&&(HS.L===null||Date.now()-HS.at>20000))hsLoad();
@@ -150,7 +140,7 @@ V.hs=()=>{const T='חוסרים';if(!on())return{t:T,h:'<div class="empty">המ�
  <div class="hs-tabs">${t('open','פתוחים ('+HS.L.length+')')}${t('sup','לפי ספק')}${t('arr','הגיעו')}${t('del','נמחקו')}</div>${body}
  <button type="button" class="btn g s w" data-a="hsRe" style="margin-top:8px">רענן</button>`}};
 ACT.hsTab=el=>{HS.tab=['open','sup','arr','del'].includes(el.dataset.v)?el.dataset.v:'open';rerender()};
-ACT.hsRe=()=>{HS.at=0;HS.err='';HS.arr=null;HS.del=null;HS.so=null;HS.off=0;hsLoad();rerender()};
+ACT.hsRe=()=>{HS.at=0;HS.err='';HS.arr=null;HS.del=null;HS.off=0;hsLoad();rerender()};
 CHG.hsSel=el=>{HS.sel=idOk(el.value)?el.value:'';rerender()};
 
 /* ---------- מצב: הגיע / החזר / מחיקה רכה / שחזור ---------- */
@@ -255,13 +245,14 @@ ACT.hsOrdSel=el=>{const f=HS.f,o=((window.__ox&&window.__ox.L)||[]).find(x=>x.id
  f.ord={id:o.id,no:Number.isInteger(+o.no)?+o.no:0};
  if(!f.custOn&&o.cust&&(o.cust.name||o.cust.phone)){f.cust={nm:String(o.cust.name||'').slice(0,60),ph:digits(o.cust.phone).slice(0,15)};if(idOk(String(o.custId||'')))f.cust.cid=o.custId;f.custOn=true}
  closeDlg();rerender()};
-/* שמירה */
+/* שמירה. mk – יצירת פריט חדש מתוצאת C.build (גם מהחלון שאחרי הליקוט) */
+async function mk(d,np){const id='h'+uid(),x=Object.assign({},d,{np:np?1:0,st:'open',by:SY.uid,byN:fbBy().slice(0,100),t:Date.now()});
+ await fsx('/hsr?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields:flds(x)})});x.id=id;return x}
 FRM.hsSave=async()=>{const f=HS.f;if(!f||f.busy||!on())return;
  const r=C.build({n:f.n,sups:f.sups,gen:f.gen,why:f.why,q:f.q,cust:f.custOn?f.cust:null,ord:f.why!=='store'?f.ord:null},PM());if(!r.ok)return toast(r.err);
  const me=fbBy().slice(0,100),old=f.id?find(f.id):null,np=f.img?1:f.imgDel?0:(old&&old.np?1:0);
  f.busy=1;rerender();let id=f.id,x;
- try{if(!id){id='h'+uid();x=Object.assign({},r.d,{np,st:'open',by:SY.uid,byN:me,t:Date.now()});
-   await fsx('/hsr?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields:flds(x)})});x.id=id}
+ try{if(!id){x=await mk(r.d,np);id=x.id}
   else{if(!old)throw new Error('הפריט לא נמצא. רעננו את הרשימה.');const d=Object.assign({},r.d,{np,ub:me,ut:nextUt(old)});
    await fsx('/hsr/'+id+'?'+mask(['n','nk','gen','sups','supN','why','q','cust','ord','np','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds(d)})});
    ['q','cust','ord'].forEach(k=>{if(!(k in d))delete old[k]});x=Object.assign(old,d)}}
@@ -344,4 +335,29 @@ ACT.hsInvUndo=async el=>{const D=HS.bn||[];if(el.disabled||!D.length)return;el.d
 /* המנהל: חשבוניות חדשות מ-pinv (שכבר נקראו ב-xBuild) – רק מ-30 הימים האחרונים ולא מבוטלות */
 function invFill(L){try{const cut=Date.now()-30*864e5,P=L.filter(p=>p&&idOk(String(p.id||''))&&p.st!=='void'&&+p.at>cut).map(p=>({id:p.id,sup:p.sup,supId:p.supId,inv:p.inv,at:+p.at,lines:p.lines}));if(P.length)invQ(P)}catch(e){}}
 window.hsOnInv=d=>{try{if(!d||!idOk(String(d.id||''))||!on())return;const v={id:d.id,sup:d.sup,supId:d.supId,inv:d.inv,at:Date.now(),lines:d.lines};setTimeout(()=>invQ([v]),0)}catch(e){}};
+/* ---------- 19.11.2026: אחרי "להזמין מספק" בליקוט – שואלים אם להוסיף גם לחוסרים (בקשת בעל הפרויקט: "שיהיה אפשרות לשאול, שהוא לא יכניס לבד") ----------
+   ord-pick.js קורא ל-window.hsAskSo(o, rows) אחרי orderPick מוצלח, בלי לחכות (ההזמנה כבר נשמרה). o – ההזמנה ({id,no,cust,custId}); rows – [{n,qty,sup}].
+   תוספת כבויה / 403 / כשל בטעינה – בלי חלון. פריט פתוח שכבר מקושר לאותה הזמנה ולאותו מוצר (nk) – לא מוצע שוב. הפריטים נבנים ב-C.build ונשמרים ב-mk (כמו "הוספת חוסר"). */
+window.hsAskSo=async(o,rows)=>{try{
+ if(!on()||!o||!idOk(String(o.id||''))||!Array.isArray(rows)||!rows.length)return;chk();
+ let L;try{L=(await qrun(stQ('open',500))).filter(valid)}catch(e){if(e&&e.code===403)HS.off=1;return}
+ HS.L=L.sort((a,b)=>(b.t||0)-(a.t||0));HS.at=Date.now();HS.off=0;tilePaint();
+ const c=o.cust&&typeof o.cust==='object'?o.cust:{},ph=digits(c.phone),pOk=C.phOk(ph);
+ const cust=String(c.name||'').trim()||pOk?{nm:String(c.name||'').slice(0,60),ph:pOk?ph.slice(0,15):''}:null;if(cust&&idOk(String(o.custId||'')))cust.cid=o.custId;
+ const ord={id:o.id,no:Number.isInteger(+o.no)?+o.no:0},sups=supList(),k=v=>C.keyOf(String(v||'').trim(),PM());
+ const seen=new Set(L.filter(x=>x.ord&&x.ord.id===o.id).map(x=>x.nk)),A=[];
+ rows.forEach(r=>{if(!r)return;const sp=String(r.sup||'').trim(),sv0=sp?sups.find(x=>k(x.name)===k(sp)):null;
+  const b=C.build({n:r.n,sups:sv0?[sv0]:[],gen:!sv0,why:'order',q:typeof r.qty==='number'&&r.qty>0&&r.qty<=1e5?r.qty:'',cust,ord},PM());
+  if(!b.ok||seen.has(b.d.nk))return;seen.add(b.d.nk);A.push({d:b.d,sup:sv0?sv0.name:''})});
+ if(!A.length)return;HS.ask={o:o.id,A};
+ dlg(`<h3>להוסיף גם לרשימת החוסרים?</h3><p class="note">הזמנה #${esc(ord.no||'')} – מוצרים שסומנו "להזמין מספק". סמנו מה להוסיף.</p>
+ <div style="max-height:50vh;overflow:auto">${A.map((a,i)=>`<label class="opt" style="margin:6px 0"><span style="min-width:0;overflow-wrap:anywhere"><b>${esc(a.d.n)}</b>${a.d.q?' · כמות '+esc(C.fmtQ(a.d.q)):''}<small style="display:block;color:var(--mut)">${a.sup?'ספק: '+esc(a.sup):'פריט כללי – מופיע לכל הספקים'}</small></span><input type="checkbox" data-hso="${i}" checked></label>`).join('')}</div>
+ <div class="row" style="margin-top:10px"><button type="button" class="btn grow" data-a="hsSoAdd">הוסף</button><button type="button" class="btn g grow" data-a="hsSoNo">לא עכשיו</button></div>`)}catch(e){}};
+ACT.hsSoNo=()=>{HS.ask=null;closeDlg()};
+ACT.hsSoAdd=async el=>{const a=HS.ask;if(!a||el.disabled)return;
+ const P=[...document.querySelectorAll('#dlg input[data-hso]')].filter(i=>i.checked).map(i=>a.A[+i.dataset.hso]).filter(Boolean);
+ if(!P.length){HS.ask=null;closeDlg();return}
+ el.disabled=true;HS.ask=null;let n=0;
+ for(const p of P){try{const x=await mk(p.d,0);if(HS.L)HS.L=[x].concat(HS.L.filter(y=>y.id!==x.id));n++}catch(e){}}
+ closeDlg();tilePaint();toast(n===P.length?(n===1?'נוסף לחוסרים':'נוספו '+n+' פריטים לחוסרים'):n?'נוספו '+n+' מתוך '+P.length+' לחוסרים':'לא נוסף לחוסרים (ההזמנה עצמה נשמרה)');paint()};
 })();
