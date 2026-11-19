@@ -540,11 +540,12 @@ function gnMig(d){
  const C=id=>{const c=d.cats.find(x=>x.id===id);return c&&!c.hid&&!c.off&&c.name===D[id][0]?c:null};
  const used=id=>{const ok=D[id][1].map(heKey);return d.tx.some(t=>t&&t.cat===id)||d.subs.some(x=>x&&x.cat===id&&!ok.includes(heKey(x.name)))||d.fixTpl.some(f=>f&&f.cat===id)||(Array.isArray(d.zc)&&d.zc.some(z=>z&&z.reg===id))};
  const hide=c=>{c.off=true;c.hid=true};
- const pair=(a,b,base,keepA)=>{const ca=C(a),cb=C(b),ka=ca&&(keepA||used(a)),kb=cb&&used(b);if(ca&&!ka)hide(ca);if(cb&&!kb)hide(cb);
+ const H=[],pair=(a,b,base)=>{const ca=C(a),cb=C(b),ka=ca&&used(a),kb=cb&&used(b);if(ca&&!ka)H.push(ca);if(cb&&!kb)H.push(cb);if(ca&&!ka)hide(ca);if(cb&&!kb)hide(cb);
   if(ka&&kb){const f=d.cats.indexOf(ca)<d.cats.indexOf(cb);ca.name=base+(f?' 1':' 2');cb.name=base+(f?' 2':' 1')}/* מספור לפי הסדר במסך */else if(ka)ca.name=base;else if(kb)cb.name=base};
- pair('i_nl','i_yh','קופה',!d.cats.some(x=>x.kind==='inc'&&!x.hid&&!x.off&&!D[x.id]));/* קופה ראשית נשארת, אלא אם לעסק יש קטגוריית הכנסה משלו */
- pair('i_cnl','i_cyh','כרטיסים',false);
- [['e_bak','ספקים 2'],['e_salb','משכורות 2'],['e_card','כרטיסים']].forEach(([id,n])=>{const c=C(id);if(c){if(used(id))c.name=n;else hide(c)}})}
+ pair('i_nl','i_yh','קופה');const Hr=H.slice();pair('i_cnl','i_cyh','כרטיסים');
+ [['e_bak','ספקים 2'],['e_salb','משכורות 2'],['e_card','כרטיסים']].forEach(([id,n])=>{const c=C(id);if(c){if(used(id))c.name=n;else hide(c)}})
+ /* לא משאירים עסק בלי אף קטגוריית הכנסה גלויה: מחזירים את הקופה הראשונה (לפי הסדר) שהוסתרה כאן, בשם "קופה" */
+ if(!d.cats.some(x=>x.kind==='inc'&&!x.hid&&!x.off)&&Hr.length){const c=Hr.sort((x,y)=>d.cats.indexOf(x)-d.cats.indexOf(y))[0];delete c.off;delete c.hid;c.name='קופה'}}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
 /* A2: הוזזו לכאן מהשורות 443/470 – בלוק הליבה (V.org, ACT.orgEd, FRM.orgEdF) רץ בטעינה לפני ההכרזה המקורית (TDZ) */
