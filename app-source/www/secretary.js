@@ -532,7 +532,7 @@ const SNZ=[['h1','שוב בעוד שעה'],['h3','בעוד 3 שעות'],['mo','�
 const snzH=(id,d)=>`<div class="secrow secsnz" role="group" aria-label="תזכירי לי שוב">${SNZ.map(([v,l])=>`<button type="button" class="chip" data-a="secSnz" data-v="${v}" data-id="${esc(id)}"${d?' data-d="1"':''} style="min-height:44px">${l}</button>`).join('')}</div>`;
 const snzCan=n=>n&&n.st!=='gone';
 async function snzDo(id,o,el){if(el)el.disabled=true;
- try{const r=await fnCall('secNotes',Object.assign({op:'snooze',id},o));if(document.getElementById('dlg').open)closeDlg();X.snz='';toast('אזכיר לך שוב '+(r&&r.l||''));X.nl=null;try{eyStale()}catch(e){}rerender()}
+ try{const r=await fnCall('secNotes',Object.assign({op:'snooze',id},o));if(document.getElementById('dlg').open)closeDlg();X.snz='';toast('אזכיר לך שוב '+(r&&r.l||''));/* 19.11.2026: יוצאת מהרשימה עד שתחזור – בלי טעינה מחדש של כל הרשימה */{const L=X.nl&&!X.nl.err&&X.nl.notes;if(L)X.nl.notes=L.filter(x=>x.id!==id);else X.nl=null}try{eyStale()}catch(e){}rerender()}
  catch(e){if(el)el.disabled=false;err(e)}}
 const dtl=ms=>{const d=new Date(ms),z=x=>String(x).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+'T'+z(d.getHours())+':'+z(d.getMinutes())};
 ACT.secSnz=el=>{const id=el.dataset.id,v=el.dataset.v;if(!id)return;
@@ -552,8 +552,14 @@ function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
  <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}${snzCan(n)?`<button type="button" class="chip" data-a="secSnzT" data-id="${esc(n.id)}" aria-expanded="${X.snz===n.id}">⏰ תזכירי לי שוב</button>`:''}</div>${snzCan(n)&&X.snz===n.id?snzH(n.id):''}</div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
- const L=R.notes||[];pnShown();if(!L.length)return '<div class="empty">אין התראות</div>';
- return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">לחיצה על התראה – כל הפרטים. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+ const A=R.notes||[];pnShown();
+ /* 19.11.2026: רק התראות פתוחות. מה שטופל (או כבר לא רלוונטי) – מוסתר, ואפשר לראות את 7 הימים האחרונים בקישור "טופלו לאחרונה" */
+ const L=A.filter(n=>!nClosed(n)),D=A.filter(n=>nClosed(n)&&Date.now()-(n.at||n.t||0)<7*864e5);
+ const dn=D.length?`<button type="button" class="btn g w" data-a="secNHist" aria-expanded="${!!X.nHist}" style="margin-top:8px">${X.nHist?'הסתרת ההתראות שטופלו':'טופלו לאחרונה ('+D.length+')'}</button>${X.nHist?`<div class="card" id="secNDoneL" style="margin-top:8px">${D.map(n=>noteH(n,R.types||{})).join('')}</div>`:''}`:'';
+ if(!L.length)return `<div class="empty">אין התראות פתוחות ✓</div>${dn}`;
+ return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div>${dn}<p class="note">לחיצה על התראה – כל הפרטים ומה אפשר לעשות. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+const nClosed=n=>n.st==='done'||n.st==='gone';
+ACT.secNHist=()=>{X.nHist=!X.nHist;rerender()};
 /* 15.11.2026: פרטי התראה – הכותרת, הסוג, מתי נוצרה ומתי נשלחה לאחרונה, כמה פעמים, המצב, כל הטקסט, ומה אפשר לעשות */
 function noteDlg(id){const R=X.nl,n=R&&!R.err&&(R.notes||[]).find(x=>x.id===id);if(!n)return toast('ההתראה לא נמצאה');const T=R.types||{},open=n.st==='open'&&n.k==='rem',body=nFix(n.body,n);
  const st=n.st==='done'?'טופל':n.st==='gone'?'כבר לא רלוונטי':n.k==='rem'?'פתוחה – עוד לא סומנה כטופלה'+(n.rep?' · תחזור עוד '+n.rep+' פעמים':' · לא תחזור שוב'):'פתוחה';
@@ -614,7 +620,14 @@ function pnTry(){if(!PNI.t)return;if(Date.now()-PNI.t>60000){pnEnd();return}if(!
 function pnShown(){if(!PNI.t||cur().v!=='sec')return;const id=PNI.id;pnEnd();if(id&&(X.nl.notes||[]).some(x=>x.id===id))setTimeout(()=>{if(cur().v==='sec'&&X.tab==='notes')noteDlg(id)},0)}
 function pnTap(id){PNI.t=Date.now();PNI.id=typeof id==='string'&&/^[A-Za-z0-9_:.-]{1,200}$/.test(id)?id:'';try{localStorage.setItem(PNK,JSON.stringify(PNI))}catch(e){}pnTry();PNW.forEach(ms=>setTimeout(pnTry,ms))}
 try{const o=JSON.parse(localStorage.getItem(PNK)||'null');if(o&&+o.t&&Date.now()-o.t<60000){PNI.t=+o.t;PNI.id=String(o.id||'');PNW.forEach(ms=>setTimeout(pnTry,ms))}else if(o)localStorage.removeItem(PNK)}catch(e){}
-ACT.secNDone=async el=>{el.disabled=true;try{await fnCall('secNotes',{op:'done',id:el.dataset.id});toast('סומן כטופל');X.nl=null;rerender()}catch(e){el.disabled=false;err(e)}};
+/* 19.11.2026: "טופל" – ההתראה יוצאת מהרשימה מיד (בלי לטעון את כל הרשימה מחדש, כך שהמסך לא קופץ למעלה), והשמירה בשרת ממשיכה ברקע.
+   אין תשובה מהשרת – עוד 3 ניסיונות (אחרי 2, 5 ו-12 שניות). רק אם כולם נכשלו – ההתראה חוזרת לרשימה עם הודעה. "כבר טופלה"/"לא נמצאה" = הצלחה */
+const nDoneW=[2000,5000,12000];
+function nSt(id,st){const L=X.nl&&!X.nl.err&&X.nl.notes;const n=L&&L.find(x=>x.id===id);if(n)n.st=st;return n}
+async function nDoneBg(id,i){try{await fnCall('secNotes',{op:'done',id});try{eyStale()}catch(e){}}
+ catch(e){if(notPend(e))return;if(e&&e.offline&&i<nDoneW.length){setTimeout(()=>nDoneBg(id,i+1),nDoneW[i]);return}
+  nSt(id,'open');if(cur().v==='sec'&&X.tab==='notes'&&!typing())rerender();toast(e&&e.offline?'לא נשמר – אין חיבור לשרת. ההתראה חזרה לרשימה, נסו שוב':'לא נשמר: '+(e&&e.message||'שגיאה')+'. ההתראה חזרה לרשימה')}}
+ACT.secNDone=el=>{const id=el.dataset.id;if(!id)return;if(!nSt(id,'done')){X.nl=null}toast('✓ טופל');if(X.snz===id)X.snz='';rerender();nDoneBg(id,0)};
 CHG.secNReps=async el=>{const n=+el.value;try{await fnCall('secNotes',{op:'reps',id:el.dataset.id,n});toast(n?'התזכורת תחזור עוד '+n+' פעמים':'החזרות בוטלו')}catch(e){err(e);X.nl=null;rerender()}};
 /* ---------- דוחות ותובנות ---------- */
 async function repsLoad(){X.rb4=1;const s0=X.rpl;let again=0;try{const r=await fnCall('secReports',{op:'list'});if(s0&&X.rpl===null){again=1;return}X.rpl=r}catch(e){X.rpl=X.rpl&&!X.rpl.err?X.rpl:{err:e&&e.message||'לא נטען'}}finally{X.rb4=0;if(again){repsLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
