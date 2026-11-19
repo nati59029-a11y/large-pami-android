@@ -72,17 +72,19 @@ FRM.arSendF=async f=>{const x=fd(f),b=f.querySelector('button');b.disabled=true;
 {const f=V.ocCard;if(f)V.ocCard=id=>{const r=f(id);try{if(!r||!r.h||!on())return r;if(R.cfg===undefined){cfgL().then(()=>redraw('ocCard'));return r}if(!(R.cfg||{}).on)return r;
  if(R.c[id]===undefined){custL(id).then(()=>redraw('ocCard'));return r}const c=R.c[id];if(!c)return r;const s=c.snd||{};
  const h=`<form class="card" data-f="arSndF" style="margin:8px 0"><input type="hidden" name="id" value="${esc(id)}"><b>שליחת מסמכים ללקוח</b>
-  <label class="f"><span>ערוץ</span><select name="ch"><option value="wa"${s.ch==='wa'||(!s.ch&&!s.a4)?' selected':''}>ווטסאפ</option><option value="mail"${s.ch==='mail'?' selected':''}>מייל</option><option value="both"${s.ch==='both'?' selected':''}>ווטסאפ ומייל</option><option value=""${!s.ch&&s.a4?' selected':''}>בלי שליחה (רק הדפסת A4)</option></select></label>
+  <label class="f"><span>ערוץ</span><select name="ch"><option value=""${!s.ch?' selected':''}>בלי שליחה</option><option value="wa"${s.ch==='wa'?' selected':''}>ווטסאפ</option><option value="mail"${s.ch==='mail'?' selected':''}>מייל</option><option value="both"${s.ch==='both'?' selected':''}>ווטסאפ ומייל</option></select></label>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="oc"${s.oc?' checked':''}> לשלוח אישור הזמנה אוטומטית אחרי כל הזמנה</label>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="inv"${s.inv?' checked':''}> לשלוח חשבוניות וזיכויים אוטומטית</label>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="rc"${s.rc?' checked':''}> לשלוח קבלות אוטומטית</label>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="a4"${s.a4?' checked':''}> הדפסת A4 בקופה (במקום קבלה)</label>
-  <p class="note" style="margin:4px 0">בקופה, ללקוח עסקי: הערוץ שנבחר כאן משמש גם לשליחה אוטומטית של המסמך מיד בסוף המכירה. בלי ערוץ ובלי A4 – הקופאי נשאל בסוף המכירה.</p>
+  <p class="note" style="margin:4px 0">בקופה, ללקוח עסקי: חשבוניות / קבלות שסומנו כאן נשלחות אוטומטית בערוץ שנבחר מיד בסוף המכירה. בלי שליחה ובלי A4 – הקופאי נשאל בסוף המכירה.</p>
   <button class="btn g s">שמור</button></form>`;
  r.h+=h}catch(e){}return r}}
-FRM.arSndF=async f=>{const x=fd(f),b=f.querySelector('button');b.disabled=true;const snd={ch:x.ch||'',oc:!!x.oc,inv:!!x.inv,rc:!!x.rc}; // שלב 4: גם חשבוניות (inv) וקבלות (rc)
- if(x.a4)snd.a4=true;else if(!snd.ch){toast('בחרו ערוץ שליחה, או סמנו "הדפסת A4 בקופה"');b.disabled=false;return} // קופה גל 3
- try{await fnCall('setArCfg',{cust:x.id,snd});if(R.c[x.id])R.c[x.id].snd=snd;toast('נשמר')}catch(e){err(e)}finally{b.disabled=false}};
+FRM.arSndF=async f=>{const x=fd(f),b=f.querySelector('button');b.disabled=true;let snd={ch:x.ch||'',oc:!!x.oc,inv:!!x.inv,rc:!!x.rc}; // שלב 4: גם חשבוניות (inv) וקבלות (rc)
+ /* קופה גל 3: "בלי שליחה" – בלי A4: snd:null (הכרטיס חוזר ל"הקופאי נשאל"); עם A4: רק הדפסה. סימון שליחה בלי ערוץ – לא נשמר */
+ if(x.a4)snd.a4=true;if(!snd.ch&&(snd.oc||snd.inv||snd.rc)){toast('כדי לשלוח אוטומטית – בחרו ערוץ (ווטסאפ / מייל)');b.disabled=false;return}
+ if(!snd.ch&&!snd.a4)snd=null;
+ try{await fnCall('setArCfg',{cust:x.id,snd});if(R.c[x.id]){if(snd)R.c[x.id].snd=snd;else delete R.c[x.id].snd}toast('נשמר')}catch(e){err(e)}finally{b.disabled=false}};
 
 /* ---------- הגדרות (מנהל) ---------- */
 V.arCfg=()=>{const T='הגדרות אישור הזמנה';if(!on()||!mgr())return{t:T,h:'<div class="empty">למנהל בלבד</div>'};if(R.cfg===undefined){cfgL().then(()=>redraw('arCfg'));return{t:T,h:'<div class="empty">טוען…</div>'}}

@@ -64,12 +64,14 @@ async function seed() {
     b.set(d.doc(P('sec_cfg/wa')), { pnid: '1000000099', num: '97230000009' });
     // כרטיסים: עסקי עם וואטסאפ / עסקי עם שניהם / עסקי בלי הגדרה / עסקי רק A4 / פרטי עם ערוץ (לא חל בקופה) / עסקי בלי טלפון
     const biz = { bn: 'חברה בע"מ', vat: '123456789', wholesale: true, lim: 100000 };
-    b.set(d.doc(P('cust/cWa')), Object.assign({ name: 'א', phone: '0541111111', mail: 'a@x.invalid', snd: { ch: 'wa', oc: false, inv: false, rc: false } }, biz));
-    b.set(d.doc(P('cust/cBoth')), Object.assign({ name: 'ב', phone: '0542222222', mail: 'b@x.invalid', snd: { ch: 'both', oc: false, inv: false, rc: false } }, biz));
+    b.set(d.doc(P('cust/cWa')), Object.assign({ name: 'א', phone: '0541111111', mail: 'a@x.invalid', snd: { ch: 'wa', oc: false, inv: true, rc: true } }, biz));
+    b.set(d.doc(P('cust/cOc')), Object.assign({ name: 'אישורים בלבד', phone: '0546666666', snd: { ch: 'wa', oc: true, inv: false, rc: false } }, biz));
+    b.set(d.doc(P('cust/cRc')), Object.assign({ name: 'קבלות בלבד', phone: '0547777777', snd: { ch: 'wa', oc: false, inv: false, rc: true } }, biz));
+    b.set(d.doc(P('cust/cBoth')), Object.assign({ name: 'ב', phone: '0542222222', mail: 'b@x.invalid', snd: { ch: 'both', oc: false, inv: true, rc: true } }, biz));
     b.set(d.doc(P('cust/cNone')), Object.assign({ name: 'ג', phone: '0543333333', mail: 'c@x.invalid' }, biz));
     b.set(d.doc(P('cust/cA4')), Object.assign({ name: 'ד', phone: '0544444444', snd: { oc: false, inv: false, rc: false, a4: true } }, biz));
     b.set(d.doc(P('cust/cPriv')), { name: 'פרטי', phone: '0545555555', snd: { ch: 'wa', oc: true, inv: true, rc: true } });
-    b.set(d.doc(P('cust/cNoPh')), Object.assign({ name: 'ה', snd: { ch: 'wa', oc: false, inv: false, rc: false } }, biz));
+    b.set(d.doc(P('cust/cNoPh')), Object.assign({ name: 'ה', snd: { ch: 'wa', oc: false, inv: true, rc: false } }, biz));
     await b.commit();
   });
 }
@@ -84,15 +86,23 @@ before(async () => {
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* */ } });
 
 describe('בחירת הערוץ לפי כרטיס הלקוח (טהור)', () => {
-  it('לקוח עסקי עם snd.ch – הערוץ; both – שניהם; בלי snd / רק a4 / ערוץ לא מוכר – בלי שליחה; לקוח פרטי – אף פעם', () => {
-    assert.deepEqual(DOC.autoChs({ wholesale: true, snd: { ch: 'wa' } }), ['wa']);
-    assert.deepEqual(DOC.autoChs({ wholesale: true, snd: { ch: 'mail' } }), ['mail']);
-    assert.deepEqual(DOC.autoChs({ wholesale: true, snd: { ch: 'both', oc: false } }), ['wa', 'mail']);
-    assert.deepEqual(DOC.autoChs({ wholesale: true }), []);
-    assert.deepEqual(DOC.autoChs({ wholesale: true, snd: { a4: true } }), []);
-    assert.deepEqual(DOC.autoChs({ wholesale: true, snd: { ch: 'fax' } }), []);
-    assert.deepEqual(DOC.autoChs({ snd: { ch: 'both' } }), []);
-    assert.deepEqual(DOC.autoChs(null), []);
+  it('אותו כלל כמו חשבוניות ההזמנות (snd.inv / snd.rc לפי סוג המסמך); oc בלבד / בלי snd / רק a4 / ערוץ לא מוכר / לקוח פרטי – בלי שליחה', () => {
+    const W = (snd) => ({ wholesale: true, snd });
+    assert.deepEqual(DOC.autoChs(W({ ch: 'wa', inv: true }), 'inv'), ['wa']);
+    assert.deepEqual(DOC.autoChs(W({ ch: 'wa', inv: true }), 'rc'), []);
+    assert.deepEqual(DOC.autoChs(W({ ch: 'mail', rc: true }), 'rc'), ['mail']);
+    assert.deepEqual(DOC.autoChs(W({ ch: 'mail', rc: true }), 'ir'), ['mail']);
+    assert.deepEqual(DOC.autoChs(W({ ch: 'mail', rc: true }), 'inv'), []);
+    assert.deepEqual(DOC.autoChs(W({ ch: 'both', inv: true }), 'ir'), ['wa', 'mail']);
+    for (const t of ['inv', 'rc', 'ir']) {
+      assert.deepEqual(DOC.autoChs(W({ ch: 'wa', oc: true }), t), [], 'oc בלבד – ' + t);
+      assert.deepEqual(DOC.autoChs(W({ ch: 'wa' }), t), []);
+      assert.deepEqual(DOC.autoChs({ wholesale: true }, t), []);
+      assert.deepEqual(DOC.autoChs(W({ a4: true, inv: true, rc: true }), t), []);
+      assert.deepEqual(DOC.autoChs(W({ ch: 'fax', inv: true, rc: true }), t), []);
+      assert.deepEqual(DOC.autoChs({ snd: { ch: 'both', inv: true, rc: true } }, t), []);
+      assert.deepEqual(DOC.autoChs(null, t), []);
+    }
     assert.deepEqual(DOC.chsOf('both'), ['wa', 'mail']);
     assert.deepEqual(DOC.chsOf('mail', { ch: 'wa' }), ['mail']); // בחירה בלחיצה גוברת על הכרטיס
   });
@@ -117,6 +127,13 @@ describe('שליחה אוטומטית מהשרת אחרי המכירה (autoSend
     assert.equal(again.skip, 'dup'); assert.equal(M.wa.length, 2);
   });
 
+  it('עסקי עם קבלות בלבד (snd.rc): נשלחת רק הקבלה, לא החשבונית', async () => {
+    const s = await sell(CASH, { cust: 'cRc' });
+    const M = mocks();
+    const r = await inBiz(() => DOC.autoSend(A, s.id, M.deps));
+    assert.deepEqual(r.sent.map((x) => x.t), ['rc']); assert.equal(M.wa.length, 1); assert.equal(M.wa[0].payload.tpl.name, 'pos_rc');
+  });
+
   it('עסקי + שניהם: וואטסאפ ומייל (transport מדומה) עם PDF מצורף', async () => {
     const s = await sell(CASH, { cust: 'cBoth', lines: [L({ qty: 1 })], pays: [{ m: 'cash', amt: 5000 }] });
     const M = mocks();
@@ -126,9 +143,9 @@ describe('שליחה אוטומטית מהשרת אחרי המכירה (autoSend
     assert.equal(M.mail[0].attachments[0].content.subarray(0, 5).toString('latin1'), '%PDF-');
   });
 
-  it('תאימות: עסקי בלי snd / רק A4 / לקוח פרטי עם ערוץ / בלי לקוח – לא נשלח כלום (כמו היום)', async () => {
+  it('תאימות: עסקי עם אישור הזמנה בלבד ({ch:wa, oc:true}) / בלי snd / רק A4 / לקוח פרטי עם ערוץ / בלי לקוח – לא נשלח כלום (כמו היום)', async () => {
     const M = mocks();
-    for (const c of ['cNone', 'cA4', 'cPriv']) {
+    for (const c of ['cOc', 'cNone', 'cA4', 'cPriv']) {
       const s = await sell(CASH, { cust: c });
       const r = await inBiz(() => DOC.autoSend(A, s.id, M.deps));
       assert.equal(r.skip, 'no-snd', c);

@@ -21,9 +21,14 @@ const errTxt=e=>{const r=e&&e.details&&e.details.reason;return(r&&WHY[r])||(e&&e
 const saleId=d=>{const id=String((d&&d.id)||'');return /^K[1-9][0-9]{0,3}-[0-9]{6}$/.test(id)?id:''};
 const hasDoc=d=>!!(saleId(d)&&Array.isArray(d.docs)&&d.docs.length);
 
-/* מה לעשות בסוף המכירה. null = לקוח פרטי / בלי לקוח – כמו היום */
-function plan(c){if(!c||!c.biz)return null;const s=c.snd&&typeof c.snd==='object'?c.snd:{};
- const a4=s.a4===true,ch=CHS.includes(s.ch)?s.ch:'';return{a4,ch,ask:!a4&&!ch}}
+/* סוגי המסמכים של המכירה: מהשרת (docs), ובלי רשת – לפי מה שצפוי (inv+rc ללקוח עסקי) */
+const typesOf=d=>Array.isArray(d&&d.docs)&&d.docs.length?d.docs.map(x=>x.t):d&&d.doc==='ir'?['ir']:['inv','rc'];
+/* אותו כלל בדיוק כמו השרת (ar.js wantDoc): rc ← snd.rc, ir ← snd.inv או snd.rc, inv ← snd.inv */
+const want=(s,t)=>t==='rc'?s.rc===true:t==='ir'?(s.inv===true||s.rc===true):s.inv===true;
+/* מה לעשות בסוף המכירה. null = לקוח פרטי / בלי לקוח – כמו היום. ch – רק כשהכרטיס ביקש לשלוח לפחות אחד ממסמכי המכירה;
+   אחרת המכירה מתנהגת כ"אין ערוץ" (בלי A4 – הקופאי נשאל) */
+function plan(c,doc){if(!c||!c.biz)return null;const s=c.snd&&typeof c.snd==='object'?c.snd:{};
+ const a4=s.a4===true,ch=CHS.includes(s.ch)&&typesOf(doc).some(t=>want(s,t))?s.ch:'';return{a4,ch,ask:!a4&&!ch}}
 /* קבלה במדפסת הקופה – בדיוק כמו היום */
 const thermal=doc=>UI().Dev.print({kind:'sale',doc});
 
@@ -71,8 +76,8 @@ function chModal(c,withPrint){const{modal,E}=UI();const ph=!!(c&&c.phone),ml=!!(
 
 /* ---------- סוף מכירה ---------- */
 /* thermalNow(c) – האם מסך המכירה מדפיס קבלה בקופה מיד (כמו היום). false רק ללקוח עסקי עם A4 או בלי הגדרה (החלטה בחלון) */
-function thermalNow(c){const p=plan(c);return!p||(!p.a4&&!p.ask)}
-async function after(doc,c){const p=plan(c);if(!p)return;
+function thermalNow(c,doc){const p=plan(c,doc);return!p||(!p.a4&&!p.ask)}
+async function after(doc,c){const p=plan(c,doc);if(!p)return;
  try{
   if(p.ch){UI().toast(hasDoc(doc)?'המסמך יישלח ללקוח ב'+CH_N[p.ch]:'המסמך יישלח ללקוח ב'+CH_N[p.ch]+' כשהמכירה תגיע לשרת');autoCheck(doc,p.ch)}
   if(p.a4){await a4OrThermal(doc);return}

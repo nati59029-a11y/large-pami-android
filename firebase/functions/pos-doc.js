@@ -213,17 +213,20 @@ function chsOf(ch, snd) {
   return c === 'both' ? ['wa', 'mail'] : c ? [c] : [];
 }
 // לקוח עסקי (כמו kinds/posSale: cust.wholesale) שבכרטיס שלו ערוץ – שליחה אוטומטית. אחרת – [] (פרטי / בלי הגדרה: כמו היום)
-function autoChs(c) { return c && c.wholesale === true ? chsOf('', c.snd) : []; }
+// t = סוג המסמך: נשלח רק מה שהכרטיס ביקש (snd.inv / snd.rc – אותו כלל בדיוק כמו חשבוניות ההזמנות, ar.js wantDoc). כרטיס עם oc בלבד – כלום
+function autoChs(c, t) { return c && c.wholesale === true && arCore().wantDoc(c.snd, t) ? chsOf('', c.snd) : []; }
+const autoAny = (c, docs) => (docs || []).some((d) => autoChs(c, d.t).length > 0);
 // שולח כל מסמך של המכירה בכל ערוץ. כשל לא זורק – נרשם (why). deps – לבדיקות בלבד ({ send, mail })
 async function sendSale(w, saleId, sale, ch, auto, deps) {
   const AR = arCore();
   const db = T.tdb();
   const c = sale.cust ? await AR.custOf(db, { custId: sale.cust }) : null;
-  const chs = ch ? chsOf(ch) : autoChs(c);
   const out = [];
-  if (!chs.length) return out;
+  if (ch ? !chsOf(ch).length : !autoAny(c, sale.docs)) return out;
   const cfg = await AR.cfgOf(db);
   for (const d of sale.docs || []) {
+    const chs = ch ? chsOf(ch) : autoChs(c, d.t); // אוטומטי – לכל מסמך לפי הדגלים בכרטיס
+    if (!chs.length) continue;
     let doc, buf;
     try { doc = await AR.docOf(db, d.id); buf = await AR.docBuf(db, w, doc, cfg, false); } catch (e) {
       const why = String((e && e.details && e.details.reason) || 'pdf').slice(0, 40);
@@ -260,7 +263,7 @@ async function autoSend(bizId, saleId, deps) {
   const sale = s0.data() || {};
   if (!sale.cust || !Array.isArray(sale.docs) || !sale.docs.length || sale.chk) return { skip: 'no-doc' };
   const c = await arCore().custOf(db, { custId: sale.cust });
-  if (!autoChs(c).length) return { skip: 'no-snd' };
+  if (!autoAny(c, sale.docs)) return { skip: 'no-snd' };
   let first = false;
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
@@ -294,5 +297,5 @@ exports.posSaleSend = onDocumentCreated({ document: 'b/{bizId}/possale/{id}', re
   }
 });
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  kinds, needAlloc, docLines, paySum, prep, issueSale, issueRc, issueCr, hdrOf, docIn, chsOf, autoChs, sendSale, autoSend, call: { posDoc: () => wrap('posDoc', docIn) },
+  kinds, needAlloc, docLines, paySum, prep, issueSale, issueRc, issueCr, hdrOf, docIn, chsOf, autoChs, autoAny, sendSale, autoSend, call: { posDoc: () => wrap('posDoc', docIn) },
 } });

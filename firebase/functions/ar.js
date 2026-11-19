@@ -479,6 +479,10 @@ async function docRecord(db, id, recs) {
     ARD.docUpd(tx, ref, { sent: (Array.isArray(s.get('sent')) ? s.get('sent') : []).concat(recs).slice(-SENT_MAX), upd: Date.now() });
   });
 }
+// האם הכרטיס ביקש שליחה אוטומטית של מסמך מהסוג הזה (משותף להזמנות ולקופה – pos-doc.js): rc ← snd.rc, ir ← snd.inv או snd.rc, אחר ← snd.inv
+function wantDoc(snd, t) {
+  return !!(snd && typeof snd === 'object' && CHS.includes(snd.ch) && (t === 'rc' ? snd.rc === true : t === 'ir' ? (snd.inv === true || snd.rc === true) : snd.inv === true));
+}
 // אחרי הפקה (גם מ-orders.js): קובץ, ושליחה אוטומטית לפי סימון הלקוח (cust.snd.inv / snd.rc) – גם בתקופת הטיוטה (החלטה 24). "עצור הכל" עוצר.
 async function afterIssue(w, id, opts) {
   const db = T.tdb();
@@ -488,7 +492,7 @@ async function afterIssue(w, id, opts) {
   const recs = [];
   const c = doc.cust ? await custOf(db, { custId: doc.cust }) : null;
   const snd = c && c.snd && typeof c.snd === 'object' ? c.snd : null;
-  const want = snd && CHS.includes(snd.ch) && (doc.t === 'rc' ? snd.rc === true : doc.t === 'ir' ? (snd.inv === true || snd.rc === true) : snd.inv === true);
+  const want = wantDoc(snd, doc.t);
   if (want) {
     for (const [ch, to] of targets(snd, { cust: doc.custSnap || {} }, c)) {
       const r = to ? await sendDoc(db, w, doc, ch, to, true, buf, cfg, !!(opts && opts.isVoid)) : { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
@@ -1201,4 +1205,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff, arStatement, setRemCfg };
 const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly', 'arStatement']; // שולחות: סוד ווטסאפ + סודות המייל
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(SENDS.includes(k) ? { secrets: [WA_ACCESS_TOKEN].concat(S.MAIL_SECRETS), timeoutSeconds: 120, memory: '512MiB' } : { memory: '512MiB' }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, docBuf, docOf, docName, sendDoc, docRecord, CHS, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, WA_ACCESS_TOKEN } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, docBuf, docOf, docName, sendDoc, docRecord, CHS, wantDoc, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, WA_ACCESS_TOKEN } });

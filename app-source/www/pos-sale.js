@@ -200,7 +200,7 @@ async function finish(t,r){const{cfg,toast,fmt}=UI();S.busy=1;const s=S.sess||{}
  let res;try{res=await D().saveSale(sale)}catch(e){S.busy=0;toast('המכירה לא נשמרה: '+(e&&e.message||'נסו שוב'),'bad');return}
  const doc=Object.assign({},sale,res,{cashierNo:(s.cashier||{}).no,custObj:S.cust,fmt:S.cust&&S.cust.biz?cfg('rcptBizFmt'):'r'+(cfg('rcptWidth')||80)});
  /* קופה גל 3: לקוח עסקי – לפי הכרטיס (PosBizDoc: A4 / שליחה / חלון בחירה). לקוח פרטי – קבלה בקופה כמו היום */
- const BD=root.PosBizDoc,bc=S.cust;S.last=doc;if(cfg('rcptPrint')==='always'&&(!BD||BD.thermalNow(bc)))UI().Dev.print({kind:'sale',doc});if(r.pays.some(p=>p.m==='cash'))UI().Dev.openDrawer('cash');
+ const BD=root.PosBizDoc,bc=S.cust;S.last=doc;if(cfg('rcptPrint')==='always'&&(!BD||BD.thermalNow(bc,doc)))UI().Dev.print({kind:'sale',doc});if(r.pays.some(p=>p.m==='cash'))UI().Dev.openDrawer('cash');
  S.cart=[];S.cust=null;S.note='';S.manDisc=null;S.undo=null;S.chg=r.chg||0;S.busy=0;cart();cust();refresh();focusQ();
  if(BD&&cfg('rcptPrint')==='always')BD.after(doc,bc);
  UI().say('המכירה נשמרה. '+(r.chg?'עודף '+fmt(r.chg):''))}
