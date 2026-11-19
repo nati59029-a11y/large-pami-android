@@ -546,7 +546,7 @@ V.tkSnd=()=>{const T='שליחת משימות לעובדים';if(!on()||!fbAdmin
  if(!SNDS.L&&!SNDS.err&&!SNDS.b)sndLoad();
  const row=u=>`<div class="card" style="padding:10px 12px;margin:0 0 8px"><b>${esc(u.name||u.email||u.uid)}</b>${u.active?'':' <span class="tag t4">מושבת</span>'}${u.email&&u.name?`<small style="display:block;color:var(--mut)"><bdi dir="ltr">${esc(u.email)}</bdi></small>`:''}`
   +`<label class="cb" style="margin:6px 0 0"><input type="checkbox" data-c="tkSndOn" data-uid="${esc(u.uid)}"${u.on?' checked':''}> שולח משימות לעובדים</label></div>`;
- return{t:T,s:'מתג לכל עובד',h:'<p class="note">עובד שהמתג דולק אצלו בוחר עובדים ושולח להם משימות (גם עם בקשת תמונה), ורואה לשונית "שלחתי". הוא מאשר, מחזיר ומוחק רק משימות ששלח, ומגיב בהן. הוא לא רואה משימות אחרות של המנהל ולא את פרטי העובדים. אתה רואה את כל המשימות האלה, עם "נשלח ע״י". המתג נקלט אצל העובד בפתיחה הבאה של האפליקציה.</p>'
+ return{t:T,s:'מתג לכל עובד',h:'<p class="note">עובד שהמתג דולק אצלו בוחר עובדים ושולח להם משימות (גם עם בקשת תמונה), ורואה לשונית "שלחתי". הוא מאשר, מחזיר ומוחק רק משימות ששלח, ומגיב בהן. באפליקציה הוא לא רואה משימות אחרות של המנהל ולא את פרטי העובדים. אתה רואה את כל המשימות האלה, עם "נשלח ע״י". המתג נקלט אצל העובד בפתיחה הבאה של האפליקציה.</p>'
   +(SNDS.err?`<div class="card"><p>${esc(SNDS.err)}</p><button class="btn g" data-a="tkSndRe">נסה שוב</button></div>`:SNDS.L?(SNDS.L.length?SNDS.L.map(row).join(''):'<div class="empty">אין עובדים</div>'):'<div class="empty">טוען…</div>')}};
 ACT.tkSndRe=()=>{SNDS.L=null;SNDS.err='';rerender()};
 CHG.tkSndOn=async el=>{const uid=el.dataset.uid,u=(SNDS.L||[]).find(x=>x.uid===uid);if(!u||!fbAdmin())return;const on1=!!el.checked,nm=u.name||u.email||'העובד';el.disabled=true;
