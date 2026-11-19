@@ -1572,7 +1572,7 @@
   },
   {
    "id": "M109",
-   "line": 6459,
+   "line": 6469,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "mqQ (mqLoad / mqMine)",
    "collection": "mq",
@@ -1587,7 +1587,7 @@
   },
   {
    "id": "M110",
-   "line": 6475,
+   "line": 6485,
    "snippet": "fsx('/mq/'+x.id+'/p/'+k)",
    "fn": "mqFile",
    "collection": "mq_p",
@@ -1601,7 +1601,7 @@
   },
   {
    "id": "M111",
-   "line": 6485,
+   "line": 6495,
    "snippet": "fsx('/mq/'+id+'?updateMask.fieldPaths=st&updateMask.fieldPaths=stBy&updateMask.fieldPaths=stAt&currentDocument.exists=true'",
    "fn": "mqSt",
    "collection": "mq",
@@ -1615,7 +1615,7 @@
   },
   {
    "id": "M112",
-   "line": 6487,
+   "line": 6497,
    "snippet": "fsx('/mq/'+id+'/p/'+k,{method:'DELETE'})",
    "fn": "mqSt",
    "collection": "mq_p",
@@ -1629,7 +1629,7 @@
   },
   {
    "id": "M113",
-   "line": 6499,
+   "line": 6509,
    "snippet": "fsx('/mq?documentId='+encodeURIComponent(id)",
    "fn": "mqSend",
    "collection": "mq",
@@ -1643,7 +1643,7 @@
   },
   {
    "id": "M114",
-   "line": 6502,
+   "line": 6512,
    "snippet": "fsx('/mq/'+id+'/p?documentId='+i",
    "fn": "mqSend",
    "collection": "mq_p",
@@ -1901,63 +1901,63 @@
   },
   {
    "id": "X-RP2",
-   "line": 6553,
+   "line": 6563,
    "snippet": "fsx('/'+col+'/'+id+'?'+mask.join('&')+'&currentDocument.exists=true'",
    "fn": "docPatch – עדכון ptk (בוצע/החזר), rtk (כלל קבוע), rq (תשובה/תגובה; סבב 3: ph נקראה/בטיפול ו-tk מזהה המשימה – מנהל, tasks-wc.js)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP3",
-   "line": 6554,
+   "line": 6564,
    "snippet": "fsx('/'+col+'/'+id,{method:'DELETE'})",
    "fn": "docDel – מחיקת ptk (בעלים/מנהל) ו-rtk (מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP4",
-   "line": 6559,
+   "line": 6569,
    "snippet": "fsx(':runQuery'",
    "fn": "ptQ – רשימת ptk (עובד: owner==uid; מנהל: הכול)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP5",
-   "line": 6575,
+   "line": 6585,
    "snippet": "fsx('/rtk?pageSize=300')",
    "fn": "rcLoad – רשימת משימות קבועות (מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP6",
-   "line": 6633,
+   "line": 6643,
    "snippet": "fsx('/rtk?documentId='",
    "fn": "FRM.rcSave – יצירת משימה קבועה (מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP7",
-   "line": 6645,
+   "line": 6655,
    "snippet": "fsx(':runQuery'",
    "fn": "rqQ – רשימת בקשות (עובד: owner==uid; מנהל: st==new / st IN [done,rej])",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP8",
-   "line": 6690,
+   "line": 6700,
    "snippet": "fsx('/rq?documentId='",
    "fn": "FRM.rqNew – עובד שולח בקשה למנהל (מרכז עבודה סבב 3: גם k – סוג פנייה, רק כשהגלאי מצא כללים חדשים; 403 ← נשלח שוב בלי k)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP9",
-   "line": 6697,
+   "line": 6707,
    "snippet": "fsx('/rq/'+id+'/c?pageSize=300'",
    "fn": "rqCmLoad – קריאת שרשור התגובות",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP10",
-   "line": 6714,
+   "line": 6724,
    "snippet": "fsx('/rq/'+id+'/c?documentId='",
    "fn": "FRM.rqCm – כתיבת תגובה בשרשור (עובד או מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
@@ -1971,14 +1971,14 @@
   },
   {
    "id": "X-RQ1",
-   "line": 6672,
+   "line": 6682,
    "snippet": "await fsx(base+'/p/'+ids[i],{method:'PATCH'",
    "fn": "rqImPut – העלאת תמונה לבקשה (rq/{id}/p/r1..r3) או לתגובה (rq/{id}/c/{cid}/p/1..3)",
    "reason": "סבב 2 (17.11.2026): תמונות בבקשות למנהל. הכלל והבדיקות (מותר/נחסם, שורש ו-b/{bizId}, וגם שחזור REST של הקריאה) נמצאים ב-tests/43-rq-photos-zcthr.js, כמו שאר קריאות rq (X-RP7..X-RP10)."
   },
   {
    "id": "X-RQ2",
-   "line": 6674,
+   "line": 6684,
    "snippet": "fsx(base+'/p?pageSize=5')",
    "fn": "rqImGet – קריאת תמונות הבקשה / התגובה בפתיחת שרשור",
    "reason": "סבב 2 (17.11.2026): תמונות בבקשות למנהל. הכלל והבדיקות (מותר/נחסם, שורש ו-b/{bizId}, וגם שחזור REST של הקריאה) נמצאים ב-tests/43-rq-photos-zcthr.js, כמו שאר קריאות rq (X-RP7..X-RP10)."

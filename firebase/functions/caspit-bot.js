@@ -20,6 +20,12 @@
 //   cxBotWatch – מתוזמנת כל שעה (us-central1 בלבד) → התראה למנהלים (pushMgrs ב-daily-rep.js), פעם ביום לכל סוג:
 //          needs-login (גם מיד בדיווח), selector-miss / endpoint-changed, limit, "לא סנכרן הלילה" רק אחרי 10:00 כשהיום האחרון < אתמול (חזק יותר אחרי יומיים),
 //          שורות שנשלחו לכספית ועדיין ממתינות (pd) אחרי 2 קטלוגים.
+//   מכירות היום (19.11, תוסף 0.1.10): upload עם partial:true + hm – רק היום, 07:00–23:59 ולא בשבת וחג (SC.quiet), חלק אחד (עד 30,000 שורות).
+//          נשמר כתמונת מצב חלקית (caspit.js cxPartial → cxDayP) – בלי מלאי, בלי cxRun, בלי לקדם sd; tp:{ d, hm, at, n } ב-private/cxbot.
+//          דיווח ריצה שמקדם את sd מוחק את התמונות החלקיות של הימים שנקלטו. poll מחזיר caps:['today','uq'] – תוסף 0.1.10 מפעיל לפיהן.
+//   "עדכון המחשב" (19.11): cxBotTok op:'upd' → ureq:{ id, at, by } ב-private/cxbot (רק לתוסף UPD_VER ומעלה; בקשה אחת בכל 10 דקות).
+//          poll מחזיר uq (מזהה הבקשה); התוסף בודק את הדיסק (lib/upd.js) ומחזיר poll עם ack + res:{ st, cur, disk } (ureq.took, ureq.res).
+//          poll מקבל גם upd (מצב העדכון האוטומטי, כשהשתנה – עד כל 10 דקות) – "נבדק לאחרונה" באפליקציה.
 // פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים.
 
 const crypto = require('node:crypto');
@@ -33,6 +39,7 @@ const T = require('./lib/tenant');
 const TK = require('./lib/tk-time');
 const O = require('./orders')._core;
 const CX = require('./caspit')._core;
+const SC = require('./lib/shifts-core');
 
 const EXT_ORIGIN = 'chrome-extension://mianlmahikfdnffiipdfpojnfjhcipbp';
 const MIN_VER = '0.1.0';
@@ -51,6 +58,14 @@ const TOK_RE = /^([a-z0-9-]{3,30})\.([A-Za-z0-9_-]{43})$/;
 const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
 const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
+const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
+const CAPS = ['today', 'uq'];
+const UST = ['reload', 'same', 'copying', 'busy', 'none'];
+const VER3 = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
+const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const TODAY_FROM = 7; // מכירות היום: מ-07:00 (שעון ישראל)
+const TODAY_SKEW = 2 * 60e3; // סובלנות שעון: שעון המחשב שמקדים עד 2 דקות – מתקבל מ-06:58 / 20:58 במוצאי שבת וחג
+const TODAY_GAP = 20 * 60e3; // לכל היותר העלאה חלקית אחת ל-20 דקות לעסק
 const reqLive = (q, now) => !!(q && typeof q.id === 'string' && !q.took && now - (q.at || 0) < REQ_MS);
 const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty'];
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
@@ -122,6 +137,8 @@ async function cxBotTok(w, input) {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
+      ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
+      tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
@@ -145,6 +162,25 @@ async function cxBotTok(w, input) {
     if (r.no === 'pending') throw new HttpsError('failed-precondition', 'כבר נשלחה בקשה – ממתינים למחשב.', { reason: 'pending', req: r.req });
     if (r.no === 'running') throw pre('running', 'הסנכרון כבר רץ במחשב החנות.');
     logger.info('cxBotTok: now', { biz: w.bizId });
+    return { ok: true, req: r.req };
+  }
+  // "עדכון המחשב": בקשה לתוסף לבדוק אם המשימה ב-Windows כבר הורידה גרסה חדשה, ולהיטען מחדש אם בטוח. לא מוריד כלום בעצמו.
+  if (input.op === 'upd') {
+    const now = Date.now(), id = 'q' + now.toString(36) + crypto.randomBytes(3).toString('hex');
+    const r = await ref.firestore.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const d = s.exists ? s.data() : {};
+      if (!d.h) return { no: 'no-dev' };
+      if (cmpVer(d.ver, UPD_VER) < 0) return { no: 'old-ext' };
+      const u = d.ureq;
+      if (reqLive(u, now)) return { no: 'pending', req: { id: u.id, at: u.at } };
+      tx.update(ref, { ureq: { id, at: now, by: w.uid } });
+      return { req: { id, at: now } };
+    });
+    if (r.no === 'no-dev') throw pre('no-dev', 'אין מחשב מחובר. קודם מחברים את מחשב החנות.');
+    if (r.no === 'old-ext') throw pre('old-ext', `בתוסף שבמחשב אין עדיין "עדכון המחשב" (צריך גרסה ${UPD_VER} ומעלה). העדכון האוטומטי יביא אותה לבד.`);
+    if (r.no === 'pending') throw new HttpsError('failed-precondition', 'כבר נשלחה בקשה – ממתינים למחשב.', { reason: 'pending', req: r.req });
+    logger.info('cxBotTok: upd', { biz: w.bizId });
     return { ok: true, req: r.req };
   }
   throw bad('bad-op', 'פעולה לא מוכרת');
@@ -239,6 +275,7 @@ const OPF = {
   },
   async upload(w, b, x) {
     const kind = b.kind == null ? 'cat' : b.kind;
+    if (kind === 'sales' && b.partial !== undefined) return uploadToday(w, b, x);
     if (kind === 'sales') {
       O.onlyKeys(b, ['run', 'kind', 'day', 'part', 'parts', 'lines']);
       if (typeof b.day !== 'string' || !CX.DATE_RE.test(b.day) || b.day >= ilDay(x.now)) throw bad('bad-day', 'יום מכירות לא תקין (רק ימים שלמים)');
@@ -307,6 +344,33 @@ const OPF = {
     try { return await reportRun(w, b, x, o); } catch (er) { await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {}); throw er; }
   },
 };
+// מכירות היום (חלקי): רק היום, משעה 07:00 ולא בשבת וחג, חלק אחד. בלי cxRun, בלי מלאי, בלי sd – caspit.js cxPartial
+async function uploadToday(w, b, x) {
+  O.onlyKeys(b, ['run', 'kind', 'partial', 'day', 'hm', 'part', 'parts', 'lines']);
+  if (b.partial !== true) throw bad('bad-field', 'שדה לא תקין: partial');
+  if (b.run !== undefined && (typeof b.run !== 'string' || !SRUN_RE.test(b.run))) throw bad('bad-run', 'מזהה לא תקין');
+  if (b.part !== 0 || b.parts !== 1) throw bad('bad-part', 'מכירות היום – בחלק אחד');
+  const today = ilDay(x.now), wl = TK.wall(x.now), nowHm = String(wl.hh).padStart(2, '0') + ':' + String(wl.mm).padStart(2, '0');
+  if (b.day !== today) throw bad('bad-day', 'מכירות חלקיות – רק של היום');
+  const open = (t) => TK.wall(t).hh >= TODAY_FROM && !SC.quiet(t);
+  if (!open(x.now) && !(open(x.now + TODAY_SKEW) && ilDay(x.now + TODAY_SKEW) === today)) throw pre('today-off', 'לא בשעות של עדכון מכירות היום (07:00–23:59, לא בשבת וחג)');
+  if (typeof b.hm !== 'string' || !HM_RE.test(b.hm)) throw bad('bad-hm', 'שעה לא תקינה');
+  const hm = b.hm > nowHm ? nowHm : b.hm; // שעון מחשב שמקדים – לא "עד השעה" שעוד לא הגיעה
+  if (Array.isArray(b.lines) && b.lines.some((l) => !l || typeof l !== 'object' || l.d !== today)) throw bad('day-mismatch', 'שורת מכירה מיום אחר מהיום שנשלח');
+  if (!Array.isArray(b.lines) || !b.lines.length || b.lines.length > 30000) throw bad('bad-lines', 'שורות: 1 עד 30000');
+  // מגבלת קצב (לפני כל קריאה של cxItem / prod): העלאה חלקית אחת ל-20 דקות לעסק. השמירה בטרנזקציה – שתי העלאות במקביל לא עוברות יחד
+  const ref = priv(w.bizId, 'cxbot');
+  const okRate = await ref.firestore.runTransaction(async (tx) => {
+    const s = await tx.get(ref), last = s.exists ? +s.get('tpr') || 0 : 0;
+    if (last && x.now >= last && x.now - last < TODAY_GAP) return false;
+    tx.set(ref, { tpr: x.now }, { merge: true });
+    return true;
+  });
+  if (!okRate) throw new HttpsError('resource-exhausted', 'מכירות היום כבר עודכנו לפני פחות מ-20 דקות', { reason: 'rate' });
+  const r = await CX.cxPartial(w, { day: today, hm, lines: b.lines, now: x.now });
+  await priv(w.bizId, 'cxbot').set({ tp: { d: today, hm, at: x.now, n: r.n } }, { merge: true });
+  return { n: r.n, bad: r.bad, partial: true };
+}
 async function reportRun(w, b, x, o) {
   {
     O.onlyKeys(b, ['run', 'kind', 'st', 'err', 'steps', 'info']);
@@ -336,6 +400,7 @@ async function reportRun(w, b, x, o) {
     if (st === 'ok') up.lok = x.now;
     if (last && (!sd || last > sd) && last < ilDay(x.now)) up.sd = last;
     await priv(w.bizId, 'cxbot').set(up, { merge: true });
+    if (up.sd) await CX.partDrop(up.sd).catch((er) => logger.warn('cxBot: partDrop failed', { name: er && er.name })); // תמונות חלקיות של ימים שנקלטו במלואם
     if (st !== 'run' && st !== 'wait') await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {});
     if (e && e.code === 'needs-login') await alertBiz(w.bizId, ['needs-login'], x.now, o).catch((er) => logger.warn('cxBot: alert failed', { name: er && er.name }));
     return { sd: up.sd || sd };
@@ -376,14 +441,29 @@ async function handle(req, res, opts) {
   const ver = str(b.ver, 20);
   // poll (כל דקה): פטור מהמונה היומי – אסימון ועסק כבר נבדקו למעלה, ובלי קריאות נוספות למסד (חוץ מכתיבת pl פעם ב-5 דקות)
   if (op === 'poll') {
-    if (Object.keys(b).some((k) => !['op', 'ver', 'log', 'wait'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
+    if (Object.keys(b).some((k) => !['op', 'ver', 'log', 'wait', 'upd', 'ack', 'res'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
     if (b.wait !== undefined && !(Number.isInteger(b.wait) && b.wait > 0 && b.wait < now + 24 * 3600e3)) return no(400, 'bad-field', 'שדה לא תקין');
-    const q = v.dev.req, pl = v.dev.pl || 0;
+    // "עדכון המחשב": תשובת התוסף (ack = מזהה הבקשה, res = { st, cur, disk })
+    if (b.ack !== undefined || b.res !== undefined) {
+      const rs = b.res;
+      if (typeof b.ack !== 'string' || !REQ_RE.test(b.ack) || !rs || typeof rs !== 'object' || Array.isArray(rs) || !UST.includes(rs.st) || Object.keys(rs).some((k) => !['st', 'cur', 'disk'].includes(k))) return no(400, 'bad-field', 'שדה לא תקין');
+    }
+    if (b.upd !== undefined && !updOf(b.upd, now)) return no(400, 'bad-field', 'שדה לא תקין');
+    const q = v.dev.req, pl = v.dev.pl || 0, uq = v.dev.ureq;
     const up = !(pl && now - pl < PL_MS && now >= pl) ? Object.assign({ pl: now }, ver ? { ver } : {}) : {};
     // המחשב באמצע ריצה שממתינה לניסיון חוזר (wait = מתי): נרשם על הבקשה, כדי שהטלפון יציג "ינסה שוב ב-HH:MM" ולא "לא הגיב"
     if (reqLive(q, now) && b.wait && q.wait !== b.wait) up.req = { wait: b.wait };
+    if (b.ack !== undefined && reqLive(uq, now) && uq.id === b.ack) {
+      const vv = (z) => (typeof z === 'string' && VER3.test(z) ? z : '');
+      up.ureq = { took: now, res: { st: b.res.st, cur: vv(b.res.cur), disk: vv(b.res.disk) } };
+      if (ver) up.ver = ver;
+    }
+    if (b.upd !== undefined) { const u = updOf(b.upd, now), o0 = v.dev.upd; if (!o0 || o0.at !== u.at || o0.ok !== u.ok || o0.ver !== u.ver || o0.fails !== u.fails) up.upd = u; }
     if (Object.keys(up).length) await priv(v.bizId, 'cxbot').set(up, { merge: true });
-    return send(200, reqLive(q, now) ? { ok: true, want: true, id: q.id } : { ok: true, want: false });
+    const out = reqLive(q, now) ? { ok: true, want: true, id: q.id } : { ok: true, want: false };
+    out.caps = CAPS;
+    if (reqLive(uq, now) && cmpVer(ver, UPD_VER) >= 0 && !(b.ack === uq.id)) out.uq = uq.id;
+    return send(200, out);
   }
   const lim = { calls: o.calls || CALLS_DAY, runs: o.runs || RUNS_DAY };
   // ריצה מבקשה בטלפון לא נספרת במגבלת הריצות היומית (בעל העסק: "סנכרן עכשיו" בלי הגבלה יומית)
@@ -465,7 +545,8 @@ async function watchBiz(biz, dev, now, o) {
     const u = dev.upd;
     if (u && typeof u === 'object') {
       const seen = Math.max(dev.last || 0, dev.pl || 0);
-      if (u.ok === false && (u.fails || 0) >= 2) list.push('updfail');
+      // 0.1.10: המשימה ב-Windows בודקת כל 10 דקות – תקלת רשת קצרה לא מתריעה: 6 כישלונות ברצף (שעה), או 2 כשהאחרון לפני 6 שעות ויותר (בדיקה יומית ישנה)
+      if (u.ok === false && ((u.fails || 0) >= 6 || ((u.fails || 0) >= 2 && now - (u.at || 0) > 6 * 3600e3))) list.push('updfail');
       else if (now - (u.at || 0) > 48 * 3600e3 && now - seen < 24 * 3600e3) list.push('updstale');
       else if (u.ok && u.ver && dev.ver && cmpVer(dev.ver, u.ver) < 0 && now - (u.at || 0) > 3600e3) list.push('updlag');
     }
@@ -525,4 +606,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });

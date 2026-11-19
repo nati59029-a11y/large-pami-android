@@ -355,7 +355,7 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   await mp.click('#hsSug [data-a=hsPick]'); await sleep(200);
   check('44א לחיצה על מוצר מתאים – שם המוצר מהמלאי, הספק נשאר, והרשימה נסגרת', await mp.evaluate((id) => document.querySelector('input[data-i=hsN]').value === 'חומוס אחלה 400 גרם' && !!document.querySelector(`#hsSups [data-a=hsSupRm][data-id="${id}"]`) && !document.querySelector('#hsSug [data-a=hsPick]'), nidA));
   check('44ב אפשר לשנות: הספק ניתן להסרה ויש בחירת ספק נוסף', await mp.evaluate(() => !!document.querySelector('#hsSups select[data-c=hsSupPick]')));
-  const sy = await mp.evaluate((id) => { const n1 = window.supSync(window.supCatNames()), n2 = window.supSync(['אחלה', ' תנובה ', 'אסם']); const c = S.subs.filter((s) => s.name === 'אחלה'); return { n1, n2, c: c.length, id: c[0] && c[0].id === id, cat: c[0] && c[0].cat, tn: S.subs.filter((s) => s.name === 'תנובה').length }; }, nidA);
+  const sy = await mp.evaluate((id) => { const n1 = window.supSyncNames(window.supCatNames()), n2 = window.supSyncNames(['אחלה', ' תנובה ', 'אסם']); const c = S.subs.filter((s) => s.name === 'אחלה'); return { n1, n2, c: c.length, id: c[0] && c[0].id === id, cat: c[0] && c[0].cat, tn: S.subs.filter((s) => s.name === 'תנובה').length }; }, nidA);
   check('45 סנכרון: ספק מהמלאי בלי כרטיס ("אחלה") נוסף לכרטסת "ספקים" פעם אחת, במזהה לפי השם; ספקים קיימים לא שוכפלו', sy.n1 === 1 && sy.n2 === 0 && sy.c === 1 && sy.id && sy.cat === 'e_sup' && sy.tn === 1, sy);
   check('45א הספק החדש מופיע ברשימת כל הספקים (למלאי ולבחירה)', await mp.evaluate(() => window.supAll().includes('אחלה') && window.supAll().includes('תנובה')));
   // תמונה בטופס – נגיעה מגדילה, עם שיתוף

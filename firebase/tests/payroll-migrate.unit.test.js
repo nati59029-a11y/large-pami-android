@@ -20,7 +20,7 @@ function ensureSrc() {
 }
 // הרצה בהקשר נפרד (מערכים מהקשר אחר – משווים ב-JSON ולא ב-deepEqual). uid צפוי (מונה), heKey כמו באפליקציה בקירוב (רק להשוואת שמות)
 function mk(src) {
-  let n = 0; const ctx = { uid: () => 'u' + (++n), heKey: (s) => String(s || '').replace(/\s+/g, ' ').trim() };
+  let n = 0; const ctx = { BZGEN: false /* #142: ensure בודקת BZGEN (עסק שאינו לארג' פעמי) */, uid: () => 'u' + (++n), heKey: (s) => String(s || '').replace(/\s+/g, ' ').trim() };
   vm.createContext(ctx); vm.runInContext(src + '\nthis.ensure=ensure;', ctx); return (d) => ctx.ensure(d);
 }
 const SRC = ensureSrc();

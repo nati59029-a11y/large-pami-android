@@ -58,3 +58,25 @@ test('גודל: דוח גדול מ-1MB מקוצר ומסומן truncated', () =>
   const small = S.clean({ v: 1, a: [1, 2] });
   assert.equal(small.truncated, undefined);
 });
+
+// ---------- 0.1.10: קובץ שעות עובד מההיכרות (empHours) ----------
+test('שורת כותרות של קובץ השעות: רק מילים מוכרות נשלחות, כל תא אחר "?"; מ-5 השורות הראשונות רק סוג התא', () => {
+  const NAMES = ['גלעד שפרינצק', 'משה', 'הדס', 'בני', 'מיכל רוזנצוויג', 'דוח שעות עובד - גלעד שפרינצק', 'עובד: דנה', 'שם: יוסי'];
+  for (const n of NAMES) assert.equal(S.hdrCell(n), '?', n);
+  for (const h of ['תאריך', 'יום', 'כניסה', 'יציאה', 'שעות', 'שעות רגילות', '100%', '125%', '150%', '175%', '200%', '225%', '250%', 'סה"כ', 'סה״כ שעות', 'הפסקה', 'זמן', 'הערות', 'סניף', 'חנות', 'שם העובד', 'כרטיס', 'שעת כניסה', 'כניסה ויציאה', "מס' כרטיס"]) assert.notEqual(S.hdrCell(h), '?', h);
+  assert.equal(S.hdrCell(''), '');
+  assert.equal(S.hdrCell('x'.repeat(50)), '?');
+  const rows = [['דוח שעות עובד - גלעד שפרינצק'], ['תאריך', 'כניסה', 'יציאה', 'שעות רגילות', '125%', 'עובד: גלעד', ''], ['03/11/2026', '07:41', '15:58', '8:17', 0, 'גלעד', ''], ['04/11', '7:39', '16:05', 8.43, '0', '', null], ['סה"כ', '', '', '16:43', '', '', '']];
+  const r = S.fileShape(rows, 5);
+  assert.equal(r.hi, 1);
+  assert.deepEqual(r.hdr, ['תאריך', 'כניסה', 'יציאה', 'שעות רגילות', '125%', '?', '']);
+  assert.deepEqual(r.kinds[0], ['text']);
+  assert.deepEqual(r.kinds[2], ['date', 'time', 'time', 'time', 'num', 'text', 'empty']);
+  assert.deepEqual(r.kinds[3], ['date', 'time', 'time', 'num', 'num', 'empty', 'empty']);
+  assert.equal(r.kinds.length, 5);
+  const txt = JSON.stringify(S.clean({ files: [r] }));
+  for (const x of ['גלעד', 'שפרינצק', '07:41', '15:58', '8:17', '03/11', '16:43', '8.43']) assert.ok(!txt.includes(x), 'דלף לדוח: ' + x);
+  // בלי שורה עם 2 כותרות מוכרות – בלי כותרות בכלל
+  assert.equal(S.fileShape([['דוח שעות עובד - דנה'], ['דנה', 'כהן']]).hdr, null);
+  assert.equal(S.fileShape(null).hdr, null);
+});

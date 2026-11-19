@@ -61,6 +61,47 @@ function limit(rep, max) {
   return o;
 }
 const clean = (rep, max) => limit(sanitize(rep), max);
-const api = { MAX_BYTES, SECRET_KEY, scrub, sanitize, limit, clean, size };
+// ---------- קובץ שעות עובד מההיכרות (0.1.10, זרימה empHours) ----------
+// שורת הכותרות עלולה להכיל שם עובד, ולכן נשלחת רק דרך רשימה לבנה: תא שכל המילים בו מוכרות (תאריך, כניסה, יציאה, שעות, 125%…)
+// נשלח כמו שהוא; כל תא אחר → '?'. מהשורות הראשונות (עד 5) – רק סוג לכל תא (num / time / date / empty / text), בלי ערכים.
+const HDR_WORDS = new Set(('תאריך תאריכים יום ימים כניסה כניסות יציאה יציאות שעה שעות שעת רגילות רגיל נוספות נוספת סה"כ סהכ סך הכל כולל ' +
+  'הפסקה הפסקות זמן הערות הערה סניף סניפים חנות שם העובד עובד עובדים כרטיס מספר מס\' מס חודש שבוע תעריף שכר עלות משמרת משמרות סוג סטטוס ' +
+  'פעולות מקור ידני ידנית ממוצע היעדרות חופש חופשה מחלה אישור מאושר דקות בפועל תקן חוסר עודף שבת חג ערב מחלקה תפקיד נוכחות דיווח ' +
+  'התחלה סיום מ עד של ו את ל ב').split(' '));
+const HDR_PCT = /^\d{2,3}(?:\.\d)?%$/;
+// תא כותרת → אותו תא (מנורמל) אם כל המילים בו מוכרות (גם עם ו/ה/ב/ל/מ בתחילת מילה), אחרת '?'
+function hdrCell(v) {
+  const t = String(v == null ? '' : v).replace(/[\u200e\u200f\ufeff]/g, '').replace(/[”“״]/g, '"').replace(/[׳`’]/g, "'").replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  if (t.length > 40) return '?';
+  const words = t.split(/[\s()\-–/.,:]+/).filter(Boolean);
+  if (!words.length) return '?';
+  const known = (w) => HDR_WORDS.has(w) || HDR_PCT.test(w) || (/^[והבלמש]/.test(w) && w.length > 2 && HDR_WORDS.has(w.slice(1)));
+  return words.every(known) ? t : '?';
+}
+const hdrSafe = (row) => (Array.isArray(row) ? row.slice(0, 40).map(hdrCell) : null);
+function cellKind(v) {
+  if (v == null) return 'empty';
+  if (typeof v === 'number') return Number.isFinite(v) ? 'num' : 'text';
+  if (v instanceof Date) return 'date';
+  const t = String(v).trim();
+  if (!t) return 'empty';
+  if (/^\d{1,3}:\d{2}(:\d{2})?$/.test(t)) return 'time';
+  if (/^\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?(?:[ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(t)) return 'date';
+  if (/^-?\d+(?:[.,]\d+)?%?$/.test(t)) return 'num';
+  return 'text';
+}
+// rows (מ-readRows) → { hi, hdr, kinds }: hi = השורה עם הכי הרבה תאים מוכרים (לפחות 2) מבין 10 הראשונות, אחרת -1 (hdr = null)
+function fileShape(rows, n) {
+  const R = Array.isArray(rows) ? rows : [];
+  let hi = -1, best = 1;
+  for (let i = 0; i < Math.min(10, R.length); i++) {
+    const h = hdrSafe(R[i]) || [];
+    const k = h.filter((x) => x && x !== '?').length;
+    if (k > best) { best = k; hi = i; }
+  }
+  return { hi, hdr: hi >= 0 ? hdrSafe(R[hi]) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
+}
+const api = { MAX_BYTES, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSanitize = api;
 })(typeof self !== 'undefined' ? self : this);

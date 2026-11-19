@@ -14,6 +14,7 @@ const HASH_RE = /^#\/[\w\-/?=&.%]*$/; // מערכת הניהול של כספית
 const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות לפני ריצה (רשת, Chrome)
 const TICK_MIN = 15;
 const POLL_MIN = 1, POLL_SLOW_MIN = 15; // "סנכרן עכשיו" מהטלפון: בדיקה כל דקה (שרת ישן בלי poll – כל 15 דקות)
+const TODAY_FROM = 7, TODAY_TO = 23; // מכירות היום (0.1.10): כל שעה עגולה 07:00–23:00 לפי שעון העסק, לא בשבת וחג
 
 // האסימון ב-storage.local: מגבילים את האחסון להקשרים של התוסף בלבד (לא לסקריפטי התוכן בלשונית כספית), אם הדפדפן תומך
 // (setAccessLevel נתמך בוודאות ב-storage.session; ב-local – לא מאומת, ולכן בניסיון בלבד). סקריפטי התוכן (bridge.js, selectors.js) לא קוראים אחסון בכלל.
@@ -39,6 +40,7 @@ async function setupAlarms() {
   await chrome.alarms.create('daily', { when: D.nextAt(Date.now(), s.at, s.tz) }); // נוצר מחדש אחרי כל הפעלה – נכון גם במעבר שעון
   if (!(await chrome.alarms.get('tick'))) await chrome.alarms.create('tick', { periodInMinutes: TICK_MIN, delayInMinutes: 1 });
   if (!(await chrome.alarms.get('poll'))) await chrome.alarms.create('poll', { periodInMinutes: POLL_MIN, delayInMinutes: POLL_MIN });
+  await chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); // מכירות היום – בשעה העגולה הבאה (נוצר מחדש בכל הפעלה)
 }
 chrome.runtime.onInstalled.addListener(() => { setupAlarms(); trigger('install'); });
 chrome.runtime.onStartup.addListener(() => { setupAlarms(); trigger('startup'); });
@@ -46,7 +48,8 @@ if (chrome.idle && chrome.idle.onStateChanged) chrome.idle.onStateChanged.addLis
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === 'tick' || a.name === 'poll') updTick().catch(() => {});
   if (a.name === 'daily') { setupAlarms(); trigger('daily'); }
-  else if (a.name === 'tick') tick().catch(() => {});
+  else if (a.name === 'hour') { chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); todayTick().catch(() => {}); }
+  else if (a.name === 'tick') tick().then(() => todayTick()).catch(() => {}); // השלמה: שעה שה-alarm שלה הוחמץ (מחשב ישן) – פעם אחת באותה שעה
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
   else if (a.name === 'poll') pollOnce().catch(() => {});
@@ -73,6 +76,27 @@ async function updTick() {
   (self.__cxTest.reload || (() => chrome.runtime.reload()))(); // בבדיקות אפשר להחליף (Playwright לא טוען מחדש תוסף מהשורת פקודה)
   return true;
 }
+// "עדכון המחשב" מהטלפון (0.1.10, uq בתשובת poll): בודקים אם בדיסק יש גרסה חדשה שהמשימה ב-Windows סיימה להעתיק,
+// מדווחים לשרת (poll עם ack) ונטענים מחדש רק כשבטוח (אין ריצה). ההורדה עצמה – רק מהמשימה ב-Windows (כל 10 דקות).
+// st: reload (נטען עכשיו) · same (אין גרסה חדשה בדיסק) · copying (גרסה חדשה בדיסק, ההעתקה עוד לא אושרה) · busy (סנכרון רץ – ייטען אחריו) · none (אין upd.json)
+async function updReq(id) {
+  await set({ lastUq: id }); // פעם אחת לכל בקשה, גם אם ה-service worker נסגר באמצע
+  const d = await updInfo();
+  await set({ upd: Object.assign({ cur: VER, chk: Date.now() }, d) });
+  const run = await get('run');
+  const running = busy || !!(run && !P.isTerminal(run) && Date.now() - (run.touchedAt || 0) < P.STALE_MS);
+  let st;
+  if (!d.upd) st = 'none';
+  else if (!UP.VER_RE.test(d.disk) || UP.cmpVer(d.disk, VER) <= 0) st = 'same';
+  else if (!UP.wantReload({ cur: VER, disk: d.disk, upd: d.upd, busy: false, last: null, now: Date.now() })) st = 'copying';
+  else st = running ? 'busy' : 'reload';
+  try { await (await api()).call('poll', { ack: id, res: { st, cur: VER, disk: UP.VER_RE.test(d.disk) ? d.disk : '' } }); } catch (e) { /* הטלפון יראה "לא הגיב" */ }
+  if (st === 'reload' && !busy) {
+    await set({ updReload: { to: d.disk, at: Date.now() } });
+    (self.__cxTest.reload || (() => chrome.runtime.reload()))();
+  }
+  return st;
+}
 // "סנכרן עכשיו" מהטלפון: שואלים את השרת אם יש בקשה (בלי לפתוח את כספית). רק כשמחוברים, יש רשת ואין ריצה.
 // שרת ישן (bad-op) → בדיקה כל 15 דקות, בלי להציג תקלה. החיבור בוטל (auth) → מפסיקים לבדוק עד חיבור מחדש / הפעלה של Chrome.
 async function pollEvery(min) {
@@ -85,13 +109,24 @@ async function pollOnce() {
   // ריצה שממתינה לניסיון חוזר: מדווחים מתי (wait) – הטלפון מציג "ינסה שוב ב-HH:MM" ולא "לא הגיב"
   const run0 = await get('run');
   const wait = run0 && run0.st === 'wait' && !P.isTerminal(run0) && +run0.retryAt > 0 ? +run0.retryAt : 0;
-  try { r = await (await api()).call('poll', wait ? { wait } : {}); } catch (e) {
+  const body = wait ? { wait } : {};
+  // 0.1.10: מצב העדכון האוטומטי (upd.json) – רק כשהשתנה (המשימה ב-Windows כותבת אותו כל 10 דקות), ורק לשרת שמכיר את השדה (caps.uq)
+  const caps0 = (await get('caps')) || {};
+  const ui = caps0.uq ? await updInfo().catch(() => null) : null;
+  if (ui && ui.upd && (await get('updSent')) !== ui.upd.at + '|' + ui.upd.ok + '|' + ui.upd.ver) body.upd = ui.upd;
+  try { r = await (await api()).call('poll', body); } catch (e) {
     // שרת ישן (bad-op) / העסק כבוי זמנית (403) → כל 15 דקות; האסימון בוטל (401) → מפסיקים עד חיבור מחדש / הפעלת Chrome
     if (e.code === 'bad-op' || (e.code === 'auth' && e.status === 403)) await pollEvery(POLL_SLOW_MIN);
     else if (e.code === 'auth') await chrome.alarms.clear('poll');
     return null; // רשת / שרת – הבדיקה הבאה תנסה שוב
   }
   await pollEvery(POLL_MIN);
+  if (body.upd) await set({ updSent: body.upd.at + '|' + body.upd.ok + '|' + body.upd.ver });
+  // יכולות השרת (0.1.10): today = מכירות היום כל שעה, uq = "עדכון המחשב" מהטלפון. שרת ישן (בלי caps) → שתיהן כבויות
+  const cl = Array.isArray(r.caps) ? r.caps : [];
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq') };
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq) await set({ caps });
+  if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
   if (!id || busy) return null; // עסוק – לא מסמנים את הבקשה; הבדיקה הבאה תיקח אותה
@@ -105,6 +140,52 @@ async function tick() {
   const run = await get('run');
   if (P.canResume(run, Date.now())) return resume();
   return trigger('tick');
+}
+// ---------- מכירות היום כל שעה (0.1.10) ----------
+// רק דוח המכירות של היום (בלי קטלוג ובלי קבצים לכספית), נשלח לשרת כ"חלקי – עד השעה HH:MM" (upload עם partial). לא hello ולא report:
+// לא נספר כריצה, לא מקדם את היום האחרון שנקלט (lastSales), ולא נשמר ב-salesHash (הסנכרון הלילי שולח את היום המלא ודורס).
+// לא מתחילים רק: בלי חיבור / רשת, כשריצה אחרת פעילה ממש עכשיו, מחוץ ל-07:00–23:00, בשבת וחג (שישי / ערב חג מ-14:00 עד מוצאי 21:00),
+// כשהשעה הזו כבר נלקחה, ומול שרת ישן (caps.today). סנכרון לילי שנכשל / ממתין לניסיון חוזר / עוד לא הצליח – לא עוצר את מכירות היום
+// (הנעילה busy מונעת שתי ריצות יחד; ניסיון חוזר שמתנגש נדחה ל-tick הבא). כישלון – רק בחלון התוסף (todaySt), בלי דיווח (השעה הבאה תנסה שוב).
+async function todayTick(o) {
+  const now = (o && o.now) || Date.now(); // now – לבדיקות בלבד
+  if (busy || !navigator.onLine || !(await get('token'))) return null;
+  if (!((await get('caps')) || {}).today) return null;
+  const s = await sched();
+  const slot = D.hourSlot(now, s.tz, TODAY_FROM, TODAY_TO);
+  if (!slot || ((await get('todaySt')) || {}).slot === slot) return null;
+  const run = await get('run');
+  if (run && run.st === 'run' && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null; // ריצה פעילה (גם אם ה-service worker נסגר באמצעה – tick ימשיך אותה)
+  return runToday(slot, now, s.tz);
+}
+async function runToday(slot, now, tz) {
+  if (busy) return null;
+  busy = true; // ריצה אחת בכל רגע (גם מול הסנכרון הלילי ו"סנכרן עכשיו")
+  keepAlive(true);
+  const t0 = Date.now(), day = D.dayStr(now, tz);
+  let hm = D.hmOf(now, tz), out;
+  try {
+    await set({ todaySt: { slot, st: 'run', at: Date.now() } }); // השעה נלקחה – גם אם ה-service worker נסגר באמצע, לא חוזרים עליה
+    const r0 = { flags: {} };
+    await STEP.login(r0);
+    const [y, m, d] = day.split('-');
+    const f = await capture(r0.tab, 'sales', { day, dmy: `${d}/${m}/${y}` }, 300e3);
+    hm = D.hmOf(now + (Date.now() - t0), tz); // "עד השעה" = מתי הדוח הורד מכספית
+    const rows = rowsOf(f), det = C.detect(rows);
+    if (det.kind !== 'sales') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "דוח מכירות לפריטים"');
+    const lines = C.parseSales(rows, det).lines.filter((l) => l.d === day);
+    if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
+    if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
+    out = { slot, st: 'ok', at: Date.now(), day, hm, n: lines.length };
+  } catch (e) {
+    const code = e && typeof e.code === 'string' ? e.code : 'tab';
+    // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
+    out = { slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) };
+    // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
+    if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
+  } finally { keepAlive(false); busy = false; }
+  await set({ todaySt: out });
+  return out;
 }
 // בדיקה: צריך להריץ? אם כן – מתחילים בעוד 2 דקות (alarm 'start')
 async function trigger(src) {
@@ -707,17 +788,25 @@ async function runDisc() {
         const f = await got.catch(() => null);
         if (f) {
           const bytes = U.fromB64(f.b64);
-          let hdr = null, kind = null, rows = 0, cols = 0;
-          try { const R = U.readRows(bytes, f.name, self.XLSX, C); const det = C.detect(R); kind = det.kind; rows = R.length; cols = Math.max(0, ...R.slice(0, 20).map((r) => r.length)); if (det.kind) hdr = R[det.hi].map((x) => String(x).slice(0, 40)); } catch (e) { kind = 'unreadable'; }
-          rep.files.push({ flow: pg.flow, ext: (/\.(\w{1,5})$/.exec(f.name || '') || [])[1] || '', mime: f.mime, size: f.size, via: f.via, kind, rows, cols, hdr });
+          let hdr = null, kind = null, rows = 0, cols = 0, shape = null;
+          try {
+            const R = U.readRows(bytes, f.name, self.XLSX, C); const det = C.detect(R); kind = det.kind; rows = R.length; cols = Math.max(0, ...R.slice(0, 20).map((r) => r.length));
+            if (det.kind) hdr = R[det.hi].map((x) => String(x).slice(0, 40));
+            // קובץ שעות עובד (0.1.10): שורת הכותרות רק דרך רשימה לבנה (תא לא מוכר → '?'), ומ-5 השורות הראשונות רק סוג התא – בלי שמות ובלי שעות
+            else if (pg.flow === 'empHours') shape = S.fileShape(R, 5);
+          } catch (e) { kind = 'unreadable'; }
+          rep.files.push(Object.assign({ flow: pg.flow, ext: (/\.(\w{1,5})$/.exec(f.name || '') || [])[1] || '', mime: f.mime, size: f.size, via: f.via, kind, rows, cols, hdr: shape ? shape.hdr : hdr }, shape ? { hi: shape.hi, kinds: shape.kinds } : {}));
         } else rep.files.push({ flow: pg.flow, none: true });
       }
       waiting.delete(nonce);
       await disarm(tab);
       await guardBo(tab); // היכרות – לא יוצאים מהמשרד האחורי
-      page.hash = String(await inIso(tab, () => location.hash) || '').replace(/\d+/g, '{n}').slice(0, 80);
-      page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
-      page.controls = await inIso(tab, () => self.CxSel.controls(document, 400));
+      // priv (שעות עובד): בלי כותרת הדף, ובכתובת – כל מזהה אחרי #/employee-time-tracks/ (לא רק ספרות) → {id}
+      const h0 = String(await inIso(tab, () => location.hash) || '');
+      page.hash = (pg.priv ? h0.replace(/^(#\/employee-time-tracks\/)[\s\S]*$/, '$1{id}') : h0).replace(/\d+/g, '{n}').slice(0, 80);
+      if (!pg.priv) page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
+      // priv (שעות עובד): פקדים כמו בדף לקריאה בלבד – בלי טקסט (רק מילות פעולה של כפתורים), בלי אפשרויות בחירה – כדי ששמות עובדים לא ייכנסו
+      page.controls = pg.priv ? await inIso(tab, () => self.CxSel.controls(document, 400, { noText: true, btn: true })) : await inIso(tab, () => self.CxSel.controls(document, 400));
       rep.pages.push(page);
     }
     rep.net = (await inMain(tab, () => window.__cxHook && window.__cxHook.netLog())) || [];
@@ -752,7 +841,7 @@ async function handle(m) {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
       run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null };
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }
@@ -779,4 +868,4 @@ async function handle(m) {
   return { ok: false, code: 'bad-msg' };
 }
 // לבדיקות (Playwright): הפעלת טריגר ידנית
-self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, reload: null, isBusy: () => busy };
+self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, updReq, reload: null, isBusy: () => busy };

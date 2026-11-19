@@ -87,3 +87,39 @@ test('שעה לא תקינה → ברירת מחדל 03:00', () => {
   assert.equal(D.isDue(J('2026-11-18 02:59'), 'bad', '2026-11-17', TZ), false);
   assert.equal(D.isDue(J('2026-11-18 03:00'), '25:99', '2026-11-17', TZ), true);
 });
+
+// ---------- מכירות היום כל שעה (0.1.10) ----------
+test('hourSlot: רק 07:00–23:59, פעם לכל שעה עגולה; השעה העגולה הבאה', () => {
+  // יום רביעי 18.11.2026
+  assert.equal(D.hourSlot(J('2026-11-18 06:59'), TZ, 7, 23), null);
+  assert.equal(D.hourSlot(J('2026-11-18 07:00'), TZ, 7, 23), '2026-11-18 07');
+  assert.equal(D.hourSlot(J('2026-11-18 07:59'), TZ, 7, 23), '2026-11-18 07');
+  assert.equal(D.hourSlot(J('2026-11-18 13:30'), TZ, 7, 23), '2026-11-18 13');
+  assert.equal(D.hourSlot(J('2026-11-18 23:10'), TZ, 7, 23), '2026-11-18 23');
+  assert.equal(D.hourSlot(J('2026-11-19 00:05'), TZ, 7, 23), null);
+  assert.equal(D.nextHour(J('2026-11-18 13:30')), J('2026-11-18 14:00'));
+  assert.equal(D.nextHour(J('2026-11-18 14:00')), J('2026-11-18 15:00'));
+  assert.equal(D.hmOf(J('2026-11-18 09:05'), TZ), '09:05');
+  // מעבר לשעון קיץ (27.3.2026): גם אז השעה העגולה הבאה היא שעה עגולה בישראל
+  assert.equal(D.hmOf(D.nextHour(J('2026-03-27 09:20')), TZ), '10:00');
+});
+test('שבת וחג: שישי וערב חג מ-14:00 עד מוצאי 21:00 – בלי ריצה; זהה לשרת (tk-time.js isRest / shifts-core.js quiet)', () => {
+  assert.equal(D.hourSlot(J('2026-11-20 13:00'), TZ, 7, 23), '2026-11-20 13', 'שישי בצהריים – כן');
+  assert.equal(D.hourSlot(J('2026-11-20 14:00'), TZ, 7, 23), null, 'שישי 14:00 – שקט');
+  assert.equal(D.hourSlot(J('2026-11-21 12:00'), TZ, 7, 23), null, 'שבת');
+  assert.equal(D.hourSlot(J('2026-11-21 20:59'), TZ, 7, 23), null);
+  assert.equal(D.hourSlot(J('2026-11-21 21:00'), TZ, 7, 23), '2026-11-21 21', 'מוצאי שבת 21:00 – כן');
+  // יום כיפור תשפ"ז (21.9.2026, יום שני): ערב החג מ-14:00, ועד מוצאי החג 21:00
+  assert.equal(D.restDay('2026-09-21'), true);
+  assert.equal(D.hourSlot(J('2026-09-20 15:00'), TZ, 7, 23), null);
+  assert.equal(D.hourSlot(J('2026-09-21 21:00'), TZ, 7, 23), '2026-09-21 21');
+  assert.equal(D.restDay('2026-11-19'), false);
+  // שנה שלמה מול הקוד של השרת – אותם ימי מנוחה ואותו חלון שקט
+  const TK = require('../../firebase/functions/lib/tk-time.js');
+  const SC = require('../../firebase/functions/lib/shifts-core.js');
+  for (let day = '2026-09-01'; day < '2027-09-01'; day = D.addDays(day, 1)) {
+    const [y, m, d] = day.split('-').map(Number);
+    assert.equal(D.restDay(day), TK.isRest({ y, m: m - 1, d }), day);
+    for (const h of ['13:30', '14:30', '20:30', '21:30']) assert.equal(D.quiet(J(day + ' ' + h), TZ), SC.quiet(J(day + ' ' + h)), day + ' ' + h);
+  }
+});

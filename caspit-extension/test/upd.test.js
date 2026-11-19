@@ -55,7 +55,10 @@ test('קבצי העדכון ב-Windows: נכללים בבנייה, מצביעי�
   assert.deepEqual([...ins.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'install.ps1 – UTF-8 עם BOM (הודעות בעברית)');
   const it = ins.toString('utf8');
   assert.ok(it.includes('$deny -contains $full'), 'ההתקנה מסרבת לתיקייה כללית');
-  for (const x of ['-RunLevel Limited', '-StartWhenAvailable', "'02:30'", 'caspit-update.ps1', 'LargePami Caspit Update']) assert.ok(it.includes(x), x);
+  for (const x of ['-RunLevel Limited', '-StartWhenAvailable', "'02:30'", 'caspit-update.ps1', 'LargePami Caspit Update', '-MultipleInstances IgnoreNew']) assert.ok(it.includes(x), x);
+  // 0.1.10: בדיקה כל 10 דקות לאורך היום (בנוסף ל-02:30 ולכניסה); הרצה חוזרת של ההתקנה מעדכנת את המשימה (-Force)
+  assert.ok(it.includes('-RepetitionInterval (New-TimeSpan -Minutes 10)') && it.includes('-RepetitionDuration (New-TimeSpan -Days 1)') && it.includes('-Trigger @($t1, $t2, $t3)') && it.includes('-Force'), 'כל 10 דקות');
+  assert.ok(it.includes('\r\n'), 'install.ps1 – שורות CRLF כמו קודם');
   const cmd = fs.readFileSync(path.join(src, 'install-auto-update.cmd'), 'utf8');
   assert.ok(!/[^\x00-\x7f]/.test(cmd) && cmd.includes('%~dp0updater\\install.ps1') && cmd.includes('\r\n'));
 });

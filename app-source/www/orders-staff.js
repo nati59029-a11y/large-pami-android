@@ -336,7 +336,7 @@ FRM.oxPF=async f=>{const x=fd(f),price=num(x.price);if(!x.name.trim())return toa
  if(x.cost&&x.cost.trim()){const c=num(x.cost);if(!(c>=0))return toast('עלות לא תקינה');if(!x.id||c!==costOf(x.id))d.cost=c}
  if(x.id){d.id=x.id;d.on=!x.off}else{d.reqId=x.req;if(x.qty&&x.qty.trim()){const v=num(x.qty);if(!(v>=0))return toast('כמות לא תקינה');d.qty=v;d.br=sbr()}else if(hasBr())d.br=SBR}
  try{Object.assign(d,pExtRead(f,x,!x.id))}catch(e){return toast(e.message)}
- if(d.sup&&window.supSync)window.supSync([d.sup]);/* סנכרון ספקים: ספק חדש מהמוצר – לכרטסת (מנהל) */
+ if(d.sup&&window.supSyncNames)window.supSyncNames([d.sup]);/* סנכרון ספקים: ספק חדש מהמוצר – לכרטסת (מנהל) */
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveProduct',d);closeDlg();toast('המוצר נשמר');await load(true)}catch(e){b.disabled=false;err(e)}};
 // הכנסת מלאי – כמה שורות בבת אחת
 ACT.oxIn=()=>{O.inL=[{pid:'',qty:''}];O.inReq=rid();dlg(inH())};
