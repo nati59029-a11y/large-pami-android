@@ -119,7 +119,7 @@ async function cxBotTok(w, input) {
     const d = s.exists ? s.data() : {};
     const cfg = CX.cfgOf(c);
     const out = {
-      dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120) } : null,
+      dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
@@ -197,6 +197,13 @@ async function useOk(bizId, day, isRun, lim) {
 const runRef = (id) => T.tdb().doc('cxBotRun/' + id);
 const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)) });
 async function cfgNow() { return CX.cfgOf(await T.tdb().doc(CX.CFG).get()); }
+// מצב העדכון האוטומטי של התוסף (0.1.7, upd.json מהמחשב, ב-hello). לא תקין → מתעלמים (לא מכשילים את הסנכרון).
+// { at, ok, ver, err, fails, rx (מתי התקבל) }; at לא בעתיד (שעון מחשב שגוי → rx)
+function updOf(u, now) {
+  if (!u || typeof u !== 'object' || Array.isArray(u) || typeof u.ok !== 'boolean' || !Number.isFinite(u.at) || u.at <= 0) return null;
+  const ver = typeof u.ver === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(u.ver) ? u.ver : '';
+  return { at: Math.min(Math.round(u.at), now), ok: u.ok, ver, err: str(u.err, 120).replace(/[^\w .:/()-]/g, ''), fails: Number.isInteger(u.fails) && u.fails > 0 ? Math.min(u.fails, 999) : 0, rx: now };
+}
 function pick(b, keys) { const o = {}; for (const k of keys) if (b[k] !== undefined) o[k] = b[k]; return o; }
 async function runKind(run) { const r = await T.tdb().doc('cxRun/' + run).get(); return r.exists ? r.get('kind') || 'cat' : null; }
 const runOf = (v) => { if (typeof v !== 'string' || !CX.RUN_RE.test(v)) throw bad('bad-run', 'מזהה סנכרון לא תקין'); return v; };
@@ -222,7 +229,8 @@ const OPF = {
       if (!req) throw pre('req-gone', 'הבקשה מהטלפון כבר טופלה או פגה');
     }
     if (mode === 'sync') await runRef(runId).set(Object.assign({ at: x.now, d: today, st: 'run', ver: x.ver, manual: b.manual === true || !!req, days, dev: x.dev.id }, req ? { req } : {}));
-    await priv(w.bizId, 'cxbot').set(Object.assign({ last: x.now, ver: x.ver, ua: x.ua }, x.dev.conn ? {} : { conn: x.now }), { merge: true });
+    const u = updOf(b.upd, x.now);
+    await priv(w.bizId, 'cxbot').set(Object.assign({ last: x.now, ver: x.ver, ua: x.ua }, x.dev.conn ? {} : { conn: x.now }, u ? { upd: u } : {}), { merge: true });
     return { runId, minVer: MIN_VER, enabled: true, biz: { name: (w.biz && w.biz.name) || '' }, days, lastSales: sd, schedule: SCHED, limits: limitsOf(cfg) };
   },
   async cfg(w, b, x) {
@@ -414,6 +422,9 @@ const MSG = {
   limit: 'יותר מדי שינויים לכספית בריצה אחת – הרובוט עצר לבדיקה. פרטים באפליקציה, בסנכרון כספית.',
   nosync: 'המחשב בחנות לא סנכרן מול כספית הלילה. בדקו שהמחשב דלוק ו-Chrome פתוח.',
   nosync2: 'כבר יומיים ויותר המחשב בחנות לא סנכרן מול כספית! בדקו שהמחשב דלוק, ש-Chrome פתוח ושאתם מחוברים לכספית.',
+  updfail: 'העדכון האוטומטי של התוסף במחשב החנות נכשל כמה פעמים ברצף. הסנכרון ממשיך בגרסה הנוכחית – פרטים באפליקציה, בכרטיס "רובוט".',
+  updstale: 'העדכון האוטומטי של התוסף במחשב החנות לא רץ כבר יומיים (המשימה המתוזמנת ב-Windows הופסקה או נמחקה?). פרטים באפליקציה, בכרטיס "רובוט".',
+  updlag: 'גרסה חדשה של התוסף הורדה למחשב החנות אבל לא נטענה. כדאי לסגור ולפתוח את Chrome במחשב (או ללחוץ ⟳ ב-chrome://extensions).',
   pd: (n) => `${n} שינויים שנשלחו לכספית עדיין לא נקלטו שם, גם אחרי 2 סנכרוני קטלוג. כדאי לבדוק בכספית את ייבוא הקבצים.`,
 };
 // שולח לכל מנהלי העסק התראה אחת לכל סוג ביום (b/{bizId}/private/cxbot.watch). → הסוגים שנשלחו
@@ -450,6 +461,14 @@ async function watchBiz(biz, dev, now, o) {
   if (lr && ALERT_CODES.includes(lr.code) && now - (lr.at || 0) < 24 * 3600e3) list.push(lr.code === 'endpoint-changed' ? 'selector-miss' : lr.code);
   let n = 0;
   if (hh >= 10) {
+    // עדכון אוטומטי (רק אם הותקן – יש upd): נכשל פעמיים ברצף / לא רץ 48 שעות כשהמחשב פעיל / גרסה שהורדה ולא נטענה
+    const u = dev.upd;
+    if (u && typeof u === 'object') {
+      const seen = Math.max(dev.last || 0, dev.pl || 0);
+      if (u.ok === false && (u.fails || 0) >= 2) list.push('updfail');
+      else if (now - (u.at || 0) > 48 * 3600e3 && now - seen < 24 * 3600e3) list.push('updstale');
+      else if (u.ok && u.ver && dev.ver && cmpVer(dev.ver, u.ver) < 0 && now - (u.at || 0) > 3600e3) list.push('updlag');
+    }
     // "לא סנכרן הלילה": היום האחרון שנקלט (או היום שלפני החיבור) קודם לאתמול
     const last = dev.sd || (dev.at ? addDays(ilDay(dev.at), -1) : yday);
     if (last < yday) list.push(last < addDays(yday, -1) ? 'nosync2' : 'nosync');
@@ -506,4 +525,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });

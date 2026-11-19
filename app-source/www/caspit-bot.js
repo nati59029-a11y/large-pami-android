@@ -1,6 +1,7 @@
 /* רובוט כספית – כרטיס "רובוט – מחשב החנות" במסך "סנכרון כספית" (שלב B, 18.11.2026). מנהל בלבד (השרת אוכף: functions/caspit-bot.js).
    חיבור מחשב (קוד שמוצג פעם אחת + העתקה), ניתוק, מצב (סנכרון אחרון ואיך התחיל, 14 הריצות האחרונות, תקלות בעברית פשוטה),
    כמה פריטים חדשים מותר לרובוט לטעון לכספית בכל ריצה (newMax), הורדת התוסף והוראות התקנה, ודוח היכרות (מנהל־על בלבד).
+   עדכון אוטומטי (19.11, תוסף 0.1.7): שורת מצב לפי i.dev.upd (תקין / נכשל / הורד וממתין לטעינה / לא מותקן).
    "סנכרן עכשיו" (18.11): בקשה למחשב החנות (cxBotTok op:'now'); התוסף 0.1.5 בודק כל דקה. בזמן המתנה / ריצה – רענון כל 20 שניות, רק כשהמסך פתוח וגלוי.
    רכיבי העיצוב הקיימים בלבד (.card .btn .kg .k .li .note .f). משתמש ב: V, ACT, FRM, fnCall, esc, toast, dlg, closeDlg, ask, rerender, cur, fd, saveFile, SY, APP_REPO. */
 (function(){
@@ -50,6 +51,12 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
    else if(ns==='late')h+=`<p class="note" role="alert">⚠ המחשב לא הגיב לבקשה (${tm(q.at)}) – בדקו שהוא דלוק ו-Chrome פתוח.</p>`;
    if(!i.pl||verLt(i.dev.ver,nv))h+=`<p class="note">כדי ש"סנכרן עכשיו" יעבוד צריך לעדכן את התוסף במחשב לגרסה ${esc(nv)} ומעלה ("הורדת התוסף" למטה).</p>`;
    nowTick(/^(wait|run|retry)$/.test(ns));
+   /* עדכון אוטומטי של התוסף (0.1.7, הסקריפט במחשב – upd.json) */
+   {const u=i.dev.upd;
+    if(!u)h+=`<p class="note">עדכון אוטומטי של התוסף: לא מותקן. בתיקיית התוסף במחשב – הפעלה אחת של install-auto-update.cmd (מגרסה 0.1.7).</p>`;
+    else if(!u.ok)h+=`<p class="note" role="alert">⚠ עדכון אוטומטי של התוסף נכשל (${dt(u.at)}${u.fails>1?', '+u.fails+' פעמים ברצף':''})${u.err?': '+esc(u.err):''}. הסנכרון ממשיך בגרסה הנוכחית.</p>`;
+    else if(u.ver&&verLt(i.dev.ver,u.ver))h+=`<p class="note" role="alert">⚠ גרסה ${esc(u.ver)} של התוסף הורדה למחשב וממתינה לטעינה. אם זה נמשך – לסגור ולפתוח את Chrome במחשב.</p>`;
+    else h+=`<p class="note">עדכון אוטומטי של התוסף: תקין (נבדק ${dt(u.at)}).</p>`;}
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;
