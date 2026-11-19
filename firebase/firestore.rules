@@ -905,7 +905,7 @@ service cloud.firestore {
       }
       function itOk(d) {
         return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
-          && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h'])
+          && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h', 'od'])
           && d.n is string && d.n.size() > 0 && d.n.size() <= 80
           && d.nk is string && d.nk.size() <= 200
           && d.gen is bool
@@ -926,17 +926,27 @@ service cloud.firestore {
       }
       // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
       // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
+      // 19.11.2026 – "הוזמן": od = { u, byN, t, sup, eta } – בשם המבצע (u = המחובר, byN = השם שלו), t = ut, ספק עד 60 תווים,
+      // צפי הגעה YYYY-MM-DD או ריק. משתנה רק בעדכון שנוגע ב-od / ub / ut בלבד (סימון, עדכון או ביטול = מחיקת od). ביצירה – אסור.
+      function odOk(d) {
+        return !d.keys().hasAny(['od']) || (d.od is map && d.od.keys().hasOnly(['u', 'byN', 't', 'sup', 'eta']) && d.od.keys().hasAll(['u', 'byN', 't', 'sup', 'eta'])
+          && d.od.u == request.auth.uid && isMyName(d.od.byN) && d.od.t == d.get('ut', 0)
+          && d.od.sup is string && d.od.sup.size() <= 60 && d.od.eta is string && d.od.eta.matches('^([0-9]{4}-[0-9]{2}-[0-9]{2})?$'));
+      }
       function updDataOk() {
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['st', 'q', 'h', 'ub', 'ut'])
+        let ak = request.resource.data.diff(resource.data).affectedKeys();
+        return ak.hasOnly(['od', 'ub', 'ut']) && ak.hasAny(['od'])
+          ? (odOk(request.resource.data) && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
+          : ak.hasOnly(['st', 'q', 'h', 'ub', 'ut'])
           ? (request.resource.data.st in ['open', 'arr', 'del']
             && (!request.resource.data.keys().hasAny(['q']) || (request.resource.data.q is number && request.resource.data.q > 0 && request.resource.data.q <= 100000))
             && (!request.resource.data.keys().hasAny(['h']) || (request.resource.data.h is list && request.resource.data.h.size() <= 30))
             && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
-          : itOk(request.resource.data);
+          : (itOk(request.resource.data) && request.resource.data.get('od', null) == resource.data.get('od', null));
       }
       allow read: if (isStaff());
       allow create: if lpW() && (isStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
-        && !nw().keys().hasAny(['ub', 'ut', 'h']));
+        && !nw().keys().hasAny(['ub', 'ut', 'h', 'od']));
       allow update: if lpW() && (isStaff() && updDataOk() && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
         && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
       allow delete: if lpW() && (isManager());
@@ -2661,7 +2671,7 @@ service cloud.firestore {
         }
         function itOk(d) {
           return d.keys().hasAll(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'np', 'st', 'by', 'byN', 't'])
-            && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h'])
+            && d.keys().hasOnly(['n', 'nk', 'gen', 'sups', 'supN', 'why', 'q', 'cust', 'ord', 'np', 'st', 'by', 'byN', 't', 'ub', 'ut', 'h', 'od'])
             && d.n is string && d.n.size() > 0 && d.n.size() <= 80
             && d.nk is string && d.nk.size() <= 200
             && d.gen is bool
@@ -2682,17 +2692,27 @@ service cloud.firestore {
         }
         // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
         // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
+        // 19.11.2026 – "הוזמן": od = { u, byN, t, sup, eta } – בשם המבצע (u = המחובר, byN = השם שלו), t = ut, ספק עד 60 תווים,
+        // צפי הגעה YYYY-MM-DD או ריק. משתנה רק בעדכון שנוגע ב-od / ub / ut בלבד (סימון, עדכון או ביטול = מחיקת od). ביצירה – אסור.
+        function odOk(d) {
+          return !d.keys().hasAny(['od']) || (d.od is map && d.od.keys().hasOnly(['u', 'byN', 't', 'sup', 'eta']) && d.od.keys().hasAll(['u', 'byN', 't', 'sup', 'eta'])
+            && d.od.u == request.auth.uid && isMyName(d.od.byN) && d.od.t == d.get('ut', 0)
+            && d.od.sup is string && d.od.sup.size() <= 60 && d.od.eta is string && d.od.eta.matches('^([0-9]{4}-[0-9]{2}-[0-9]{2})?$'));
+        }
         function updDataOk() {
-          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['st', 'q', 'h', 'ub', 'ut'])
+          let ak = request.resource.data.diff(resource.data).affectedKeys();
+          return ak.hasOnly(['od', 'ub', 'ut']) && ak.hasAny(['od'])
+            ? (odOk(request.resource.data) && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
+            : ak.hasOnly(['st', 'q', 'h', 'ub', 'ut'])
             ? (request.resource.data.st in ['open', 'arr', 'del']
               && (!request.resource.data.keys().hasAny(['q']) || (request.resource.data.q is number && request.resource.data.q > 0 && request.resource.data.q <= 100000))
               && (!request.resource.data.keys().hasAny(['h']) || (request.resource.data.h is list && request.resource.data.h.size() <= 30))
               && request.resource.data.get('ub', '') is string && request.resource.data.get('ub', '').size() <= 100)
-            : itOk(request.resource.data);
+            : (itOk(request.resource.data) && request.resource.data.get('od', null) == resource.data.get('od', null));
         }
         allow read: if feat('suppliers') && (bStaff());
         allow create: if feat('suppliers') && (bStaff() && itOk(nw()) && nw().st == 'open' && nw().by == request.auth.uid && isMyName(nw().byN) && nowOk(nw().t)
-          && !nw().keys().hasAny(['ub', 'ut', 'h']));
+          && !nw().keys().hasAny(['ub', 'ut', 'h', 'od']));
         allow update: if feat('suppliers') && (bStaff() && updDataOk() && nw().by == od().by && nw().byN == od().byN && nw().t == od().t
           && isMyName(nw().get('ub', '')) && nowOk(nw().get('ut', 0)) && nw().ut != od().get('ut', 0) && hUpdOk());
         allow delete: if feat('suppliers') && (bMgr());
