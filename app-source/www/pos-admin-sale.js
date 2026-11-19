@@ -1,6 +1,7 @@
 /* POS:M2 – קופה גל 2, ש2: ניהול מכירה באזור הניהול (17.11.2026). לא במסך הקופה (אין בו הגדרות).
    V.posAdmSale – מנהל / מנהל־על: מבצעים (רשימה, הוספה, שכפול לשבוע הבא, מתג), קופונים אישיים (הפקה ידנית ללקוח, ביטול),
    דוחות: החזרות, הנחות ידניות (יומי), יתרות פתקי זיכוי פתוחים, תצוגה מקדימה של קבלה (80 מ"מ / A4).
+   גל 3 (19.11.2026): "אשראי במסוף – חיובים בלי מכירה" (poscard: אושר ולא נקשר למכירה, או ממתין יותר מ-5 דקות) עם ביטול החיוב (posCardCancel).
    הגדרות טבלה 2 של אפיון ב (payOn, cashMax, retDays …) – במסך ההגדרות של ש4 (pos-admin.js, PosCfg); כאן רק קוראים (PosCfg.get, עם גרסה מדומה עד המיזוג).
    כל כתיבה – רק דרך פונקציות השרת posPromo / posCouponUse. קריאה – לפי החוקים (promo, posret, possale, posgift, poscpn). רכיבי D1, בלי צבע קבוע. */
 (function(){
@@ -17,7 +18,7 @@ const ld={};
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 const dec=d=>Object.assign({id:idOf(d)},fvj({mapValue:d}));
 const sh=a=>(window.PosReceipt?PosReceipt.sh(a):(Math.round(a)/100).toFixed(2));
-const reset=()=>{P.promos=null;P.rets=null;P.disc=null;P.late=null;P.vouch=null;P.err=''};
+const reset=()=>{P.promos=null;P.rets=null;P.disc=null;P.late=null;P.vouch=null;P.card=null;P.err=''};
 const day0=()=>{const d=new Date();d.setHours(0,0,0,0);return d.getTime()};
 const load=(k,fn)=>{if(ld[k]||P.err)return;ld[k]=1;fn().catch(e=>{P.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(cur().v==='posAdmSale'&&!document.querySelector('#dlg[open]'))rerender()})};
 const list=async q=>{const j=await fsx(q);return((j&&j.documents)||[]).map(dec)};
@@ -62,8 +63,9 @@ V.posAdmSale=()=>{const T='ניהול מכירה';if(!on()||!mgr())return deny(T
    <button class="btn w">הפקה</button></form><p class="note">קופון: פעם אחת, ללקוח הזה בלבד, לא על מוצר במבצע (לפי ההגדרות).</p></div>
    <div class="card"><h3 style="margin-top:0">ביטול קופון</h3><form data-f="psaCpnVoid"><label class="f"><span>קוד</span><input name="code" dir="ltr" required></label><button class="btn g w">ביטול</button></form></div>`;
  }else if(P.tab==='rpt'){
-  if(!P.rets){load('rt',async()=>{const t=day0()-29*86400000;const[r,s,g]=await Promise.all([since('posret',t),since('possale',0),list('/posgift?pageSize=300')]);P.rets=r;const d0=day0();P.disc=s.filter(x=>(x.at||0)>=d0&&(x.manDisc||x.discOvr||(x.lines||[]).some(l=>l.mdisc)));P.late=s.filter(x=>x.apLate&&!(x.apChk&&x.apChk.by));P.vouch=g.filter(x=>x.type==='voucher'&&x.st==='open'&&x.bal>0)});return Object.assign(loading(T),{h:tabs()+loading(T).h})}
+  if(!P.rets){load('rt',async()=>{const t=day0()-29*86400000;const[r,s,g,c]=await Promise.all([since('posret',t),since('possale',0),list('/posgift?pageSize=300'),list('/poscard?pageSize=300').catch(()=>[])]);const c0=Date.now()-300000;P.card=c.filter(x=>(x.st==='ok'&&!x.sale)||(x.st==='wait'&&(x.at||0)<c0)).sort((a,b)=>b.at-a.at);P.rets=r;const d0=day0();P.disc=s.filter(x=>(x.at||0)>=d0&&(x.manDisc||x.discOvr||(x.lines||[]).some(l=>l.mdisc)));P.late=s.filter(x=>x.apLate&&!(x.apChk&&x.apChk.by));P.vouch=g.filter(x=>x.type==='voucher'&&x.st==='open'&&x.bal>0)});return Object.assign(loading(T),{h:tabs()+loading(T).h})}
   const rsum=P.rets.reduce((a,x)=>a+(x.amt||0),0),vsum=P.vouch.reduce((a,x)=>a+x.bal,0);
+  if((P.card||[]).length)h+=`<div class="card"><h3 style="margin-top:0">אשראי במסוף – חיובים בלי מכירה (${P.card.length})</h3><p class="note">חיוב שאושר במסוף ולא נקשר למכירה (למשל המכירה נכשלה או בוטלה), או חיוב שלא התקבלה עליו תשובה. בדקו מול המסוף: לקשר ידנית, או לבטל את החיוב.</p>${P.card.slice(0,100).map(x=>`<div class="li" style="cursor:default"><div class="m grow"><b>${sh(x.amt)} ₪ · ${esc(x.dev||'')}${x.last4?' · •••• '+esc(x.last4):''}${x.appr?' · אישור '+esc(x.appr):''}</b><small>${x.st==='wait'?'<span class="tag t4">אין תשובה מהמסוף</span> ':''}${esc(new Date(x.at).toLocaleString('he-IL'))}${x.mode==='mock'?' · מסוף מדומה':''}</small></div>${x.st==='ok'?`<button class="btn s g" data-a="psaCardVoid" data-id="${esc(x.id)}">ביטול החיוב</button>`:''}</div>`).join('')}</div>`;
   h+=`<div class="card"><h3 style="margin-top:0">החזרות – 30 יום (${P.rets.length}, ${sh(rsum)} ₪)</h3>${P.rets.slice(0,100).map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(x.id)} · ${sh(x.amt)} ₪</b><small>${esc(new Date(x.at).toLocaleString('he-IL'))} · ${esc(x.why||'')}${x.debtOff?' · קוזז מהקפה '+sh(x.debtOff):''}${x.dmg?' · פגום':''}</small></div></div>`).join('')||'<div class="empty">אין החזרות</div>'}</div>
    ${(P.late||[]).length?`<div class="card"><h3 style="margin-top:0">הנחות באישור שפג תוקפו – לבדיקה (${P.late.length})</h3><p class="note">המכירה נגבתה בלי רשת עם אישור שהיה תקף ברגע המכירה, והגיעה לשרת אחרי 30 דקות. שעת המכירה נלקחת משעון המכשיר – בדקו שהיא סבירה.</p>${P.late.slice(0,100).map(x=>{const m=(x.manDisc&&x.manDisc.amt||0)+(x.lines||[]).reduce((a,l)=>a+(l.mdisc&&l.mdisc.amt||0),0);return `<div class="li" style="cursor:default"><div class="m grow"><b>${esc(x.id)} · ${sh(m)} ₪</b><small>${x.apCrit?'<span class="tag t4">דחוף – יותר מ-72 שעות</span> ':''}נמכרה ${esc(new Date(x.soldAt||x.at).toLocaleString('he-IL'))} · הגיעה ${esc(new Date(x.at).toLocaleString('he-IL'))}</small></div><button class="btn g" data-a="psaApChk" data-id="${esc(x.id)}">נבדק</button></div>`}).join('')}</div>`:''}
    <div class="card"><h3 style="margin-top:0">הנחות ידניות – היום (${P.disc.length})</h3>${P.disc.map(x=>{const m=(x.manDisc&&x.manDisc.amt||0)+(x.lines||[]).reduce((a,l)=>a+(l.mdisc&&l.mdisc.amt||0),0);return `<div class="li" style="cursor:default"><div class="m"><b>${esc(x.id)} · ${sh(m)} ₪</b><small>${x.discOvr?'<span class="tag t4">מתחת למינימום</span> ':''}${esc(x.manDisc&&x.manDisc.why||'')}</small></div></div>`}).join('')||'<div class="empty">אין הנחות ידניות היום</div>'}</div>
@@ -79,6 +81,7 @@ V.posAdmSale=()=>{const T='ניהול מכירה';if(!on()||!mgr())return deny(T
  return{t:T,h}};
 ACT.psaRe=()=>{reset();rerender()};
 ACT.psaApChk=async el=>{if(el.disabled)return;el.disabled=true;try{await fnCall('posOps',{op:'apChk',sale:el.dataset.id});P.late=(P.late||[]).filter(x=>x.id!==el.dataset.id);toast('סומן כנבדק');rerender()}catch(e){err(e)}finally{el.disabled=false}};
+ACT.psaCardVoid=async el=>{if(el.disabled)return;if(!(await ask('לבטל את החיוב במסוף? הכסף יוחזר ללקוח.')))return;el.disabled=true;try{const r=await fnCall('posCardCancel',{id:el.dataset.id});toast(r&&r.st==='void'?'החיוב בוטל':'מצב החיוב: '+(r&&r.st||''));P.card=(P.card||[]).filter(x=>x.id!==el.dataset.id);rerender()}catch(e){err(e)}finally{el.disabled=false}};
 ACT.psaTab=el=>{P.tab=el.dataset.t;P.err='';rerender()};
 ACT.psaOn=async el=>{if(el.disabled)return;el.disabled=true;try{await fnCall('posPromo',{op:'on',id:el.dataset.id,on:el.dataset.on==='1'});P.promos=null;rerender()}catch(e){err(e)}finally{el.disabled=false}};
 ACT.psaDup=async el=>{const d=new Date();d.setDate(d.getDate()+(7-d.getDay())%7||7);const f=d.toLocaleDateString('en-CA');const e=new Date(d.getTime()+6*86400000).toLocaleDateString('en-CA');

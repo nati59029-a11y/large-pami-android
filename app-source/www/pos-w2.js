@@ -105,7 +105,7 @@ PD.getCust=async id=>{try{return clone((await custList()).find(c=>c.id===id)||nu
 PD.giftBalance=async(m,code)=>{try{const r=await fn('posGift',{op:'get',code:String(code||'').trim().toUpperCase()});if(!r||r.type!==m||r.st==='exp'||r.st==='void')return{ok:false,bal:0};return{ok:true,bal:r.bal}}catch(e){return{ok:false,bal:0}}};
 
 /* ---------- מכירה: צורת ש1 → ש3 (ש3 שולח ל-posSale של ש2 את התשלומים, ההנחות והלקוח) ---------- */
-const PF0=['m','amt','ref','reqId'],PF={card:['last4','appr','brand','inst','tx','src','term','termNo'],check:['chk','due','post'],gift:['code'],voucher:['code']};
+const PF0=['m','amt','ref','reqId'],PF={card:['last4','appr','brand','inst','tx','src','term','termNo','cardTx'],check:['chk','due','post'],gift:['code'],voucher:['code']};
 const payOut=p=>{const o={};for(const k of Object.keys(p))if((PF0.includes(k)||(PF[p.m]||[]).includes(k))&&p[k]!=null&&p[k]!=='')o[k]=p[k];return o};
 function closeOk(s){const pays=s.pays||[],chg=s.chg||0,debt=s.debt||0,cash=pays.filter(p=>p.m==='cash').reduce((a,p)=>a+p.amt,0),sum=pays.reduce((a,p)=>a+p.amt,0);
  if(chg<0||debt<0)throw fail('bad-amt','סכום שלילי');if(chg>cash)throw fail('bad-chg','עודף רק במזומן');if(sum-chg+debt!==s.gross)throw fail('not-closed','המכירה לא מאוזנת');
