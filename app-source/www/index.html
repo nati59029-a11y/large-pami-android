@@ -2704,7 +2704,7 @@ async function pushItem(it){/* 6ח סבב 2: הוצאה מקופה מלפני ה
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
  try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
 /* ---- קונפיג קטגוריות (מנהל מפרסם, עובד מקבל) ---- */
-async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>s.hp?{id:s.id,name:s.name,hp:s.hp}:{id:s.id,name:s.name})}));
+async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>Object.assign({id:s.id,name:s.name},s.hp?{hp:s.hp}:{},Array.isArray(s.al)&&s.al.length?{al:s.al.slice(0,10)}:{}))}));
  await fsx('/cfg/main',{method:'PATCH',body:JSON.stringify({fields:{data:sv(JSON.stringify(Object.assign({cats,th:S.theme||'paper',at:new Date().toISOString()},brAll().length>1?{org:{branches:brAll().map(b=>({id:b.id,name:b.name,on:b.on,sig:b.sig}))}}:{})))}})});return cats.length}
 async function getCfg(){const d=await fsx('/cfg/main');const j=JSON.parse(gv(d,'data')||'{}');try{localStorage.setItem(CK,JSON.stringify(j))}catch(e){}return j}
 const cfgLocal=()=>{try{return JSON.parse(localStorage.getItem(CK))||{cats:[]}}catch(e){return{cats:[]}}};
@@ -2817,7 +2817,7 @@ async function wkLoad(){try{await getCfg()}catch(e){}
  try{await flush();if(wpE()==='none'){WKL=[];throw 0}WKL=(await runQ('owner',SY.uid)).map(d=>({id:idOf(d),st:gv(d,'status'),rq:gv(d,'req'),at:gv(d,'created'),d:(()=>{try{return JSON.parse(gv(d,'data'))}catch(e){return{}}})()})).sort((a,b)=>(b.at||'').localeCompare(a.at||'')).slice(0,40)}catch(e){}
  if(cur().v==='wk')rerender()}
 let WS='home';
-const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id,hp:typeof s.hp==='string'?s.hp:''})));return o};
+const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id,hp:typeof s.hp==='string'?s.hp:'',al:Array.isArray(s.al)?s.al.filter(x=>typeof x==='string'):[]})));return o};
 /* DS:D3 – הכנסת חשבונית: אריח ראשי + אריחים קטנים. מראה בלבד: אותם input (capture, data-c) ואותם data-a */
 const SCI={cam:'<path d="M4 8.5h3l1.6-2.5h6.8L17 8.5h3v10H4z"/><circle cx="12" cy="13.2" r="3.4"/>',up:'<path d="M12 16V5M7.5 9.5 12 5l4.5 4.5"/><path d="M5 19h14"/>',img:'<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M5 17l5-4.5 3.5 3 2.5-2L20 16"/>',pdf:'<path d="M7 3.5h7l4 4V20.5H7z"/><path d="M14 3.5v4h4M9.5 13h5M9.5 16.5h5"/>',pen:'<path d="M4 20l1-4L16.5 4.5l3 3L8 19z"/><path d="M14.5 6.5l3 3"/>',stack:'<rect x="7" y="9" width="12" height="11" rx="2"/><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H15"/>',warn:'<path d="M12 4 3 19.5h18z"/><path d="M12 10v4.5M12 17.2v.1"/>',ok:'<path d="M5 12.5l4.5 4.5L19 7.5"/>'};
 const sci=n=>`<svg class="sci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SCI[n]}</svg>`;
@@ -6124,7 +6124,7 @@ const usNum=v=>typeof v==='number'&&isFinite(v)?String(v):'';
 const usDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''))&&pDate(v)?v:'';
 /* ספק לפי השם (התאמה בסיסית). העטיפה למטה ("קודם לפי ח.פ") בודקת קודם את הח.פ מכרטיס הספק – אצל מנהל מ-S.subs ואצל עובד מ-cfg/main (pubCfg שולח hp) */
 function usSup(f,subs){const n=s_(f&&f.supplier);return n?ocrSupplier(n,subs):null}
-const usSupSubs=()=>S.subs.filter(s=>!s.off&&(cat(s.cat)||{}).beh==='sup').map(s=>({id:s.id,name:s.name,cat:s.cat,hp:s.hp||''}));
+const usSupSubs=()=>S.subs.filter(s=>!s.off&&(cat(s.cat)||{}).beh==='sup').map(s=>({id:s.id,name:s.name,cat:s.cat,hp:s.hp||'',al:Array.isArray(s.al)?s.al:[]}));
 /* מנהל: חשבונית/הוצאה מקופה. ספק שנמצא → הקטגוריה שלו (הפעם הקודמת) ומיד לפרטים; אחרת בוחרים קטגוריה ו"ספק חדש" מוצע עם השם שזוהה */
 function usFillExp(k){const f=usF('invoice')||usF('cashout');if(!f||!A)return;A.usf=1;
  if(US.cls.ty==='invoice'){const s=usSup(f,usSupSubs());if(s&&cat(s.cat)){A.cat=s.cat;A.sub=s.id;A.step='det';A.type='exp';sheetDraw()}}}
@@ -6348,6 +6348,16 @@ ACT.usBatchGo=()=>{const U=US;if(!U||!U.pg.length)return;U.batch=0;U.i=0;if(!U.p
 {const o=FRM.subsave;FRM.subsave=form=>{const s=subById(form.elements.id&&form.elements.id.value),el=form.elements.hp;
  if(s&&el){const h=hpN(el.value);if(h&&!hpOk(h))return toast('ח.פ / ע.מ: 7 עד 9 ספרות');const ot=h&&S.subs.find(x=>x!==s&&x.hp===h);if(ot)return toast('הח.פ הזה כבר שמור אצל "'+ot.name+'"');if(h)s.hp=h;else delete s.hp}
  return o(form)}}
+/* ---- שמות נוספים לאותו ספק (19.11.2026): למשל השם בכספית ("פלאס") לספק שהחשבונית שלו בשם אחר ("נטו").
+   נשמר בכרטיס (s.al – רשימת שמות) ומתפרסם לעובדים (pubCfg). בתמחור חשבונית (pricing.js) מוצר שהספק שלו הוא אחד השמות
+   נחשב "אותו ספק" ומקושר לבד. שדה רשות – כרטיס בלי al מתנהג כמו קודם */
+const supAlN=v=>[...new Set(String(v||'').split(/[,،\n]/).map(x=>s_(x).slice(0,60)).filter(Boolean))].slice(0,10);
+{const o=ACT.subMenu;ACT.subMenu=el=>{o(el);const s=subById(el.dataset.id);if(!s||(cat(s.cat)||{}).beh!=='sup')return;const b=$('#dlg form[data-f=subsave] button.btn');if(b)b.insertAdjacentHTML('beforebegin',fld('שמות נוספים של אותו ספק (למשל השם בכספית), מופרדים בפסיק','al',(s.al||[]).join(', '),'text','maxlength="400" autocomplete="off"'))}}
+{const o=FRM.subsave;FRM.subsave=form=>{const s=subById(form.elements.id&&form.elements.id.value),el=form.elements.al;if(!s||!el)return o(form);
+ const nm=s_(form.elements.name&&form.elements.name.value)||s.name,L=supAlN(el.value).filter(x=>x!==nm),ot=L.map(x=>S.subs.find(y=>y!==s&&!y.off&&y.name===x)).find(Boolean);
+ if(ot)return toast('"'+ot.name+'" הוא כרטיס ספק נפרד – אי אפשר להוסיף אותו כשם נוסף');
+ const before=JSON.stringify(s.al||[]);if(L.length)s.al=L;else delete s.al;const r=o(form);
+ if(JSON.stringify(s.al||[])!==before&&typeof isA==='function'&&isA())try{pubCfg().catch(()=>{})}catch(e){}return r}}
 /* ספק חדש מתוך הסריקה: הח.פ שזוהה נשמר בכרטיס החדש */
 {const o=FRM.subnew;FRM.subnew=f=>{const U=US,us=!!(U&&A&&A.us),n0=S.subs.length;o(f);if(!us||S.subs.length<=n0)return;const s=S.subs[S.subs.length-1],h=hpN(U.cls&&U.cls.f&&U.cls.f.supplier_id);
  if(s&&hpOk(h)&&(cat(s.cat)||{}).beh==='sup'&&!S.subs.some(x=>x.hp===h)){s.hp=h;save()}}}
