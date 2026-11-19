@@ -149,6 +149,7 @@ if "LpMessagingService" not in s:
            '\n            </intent-filter>'
            '\n        </service>'
            '\n        <receiver android:name="' + P + 'LpActReceiver" android:exported="false" />'
+           '\n        <service android:name="' + P + 'LpActJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />'
            '\n        <receiver android:name="' + P + 'LpBootReceiver" android:exported="false">'
            '\n            <intent-filter>'
            '\n                <action android:name="android.intent.action.BOOT_COMPLETED" />'
@@ -166,6 +167,7 @@ if "LpMessagingService" not in s:
 assert s.count("com.google.firebase.MESSAGING_EVENT") == 1, "notif buttons: expected exactly 1 MESSAGING_EVENT service in the app manifest"
 assert s.count("LpMessagingService") == 1 and s.count('tools:node="remove"') >= 1
 assert s.count("LpActReceiver") == 1 and s.count("LpActActivity") == 1 and s.count("LpBootReceiver") == 1
+assert s.count("LpActJob") == 1 and 'LpActJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE"' in s, "notif buttons: LpActJob service"
 print("notif buttons manifest: OK (LpMessagingService, plugin service removed)")
 PY3
 # Android backup (16.11.2026): the button tokens of local snoozes (lp_notif_snz) and the cached FCM token (lp_notif_tok) are not
@@ -373,8 +375,9 @@ cp android-plugin/PanoStitchCore.java $J/PanoStitchCore.java
 cp android-plugin/PanoStitchPlugin.java $J/PanoStitchPlugin.java
 # Live dictation in the secretary chat (16.11.2026): the phone's own speech recognizer
 cp android-plugin/LpSpeechPlugin.java $J/LpSpeechPlugin.java
-# Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot
-for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver; do cp android-plugin/$f.java $J/$f.java; done
+# Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot,
+# background sending of a button press (LpActJob, JobScheduler, 19.11.2026)
+for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver LpActJob; do cp android-plugin/$f.java $J/$f.java; done
 # Background work (17.11.2026): customer feedback queues keep running outside the app
 cp android-plugin/LpWorkService.java $J/LpWorkService.java
 cp android-plugin/LpWorkPlugin.java $J/LpWorkPlugin.java

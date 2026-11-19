@@ -117,6 +117,33 @@ public class LpNotif {
         }
     }
 
+    /**
+     * Post time of our notification with this tag that is showing now (0 = none / Android below 6). A re-post keeps it
+     * (setWhen), so an update never moves the notification - or the app's notification bundle - to the top of the shade.
+     */
+    static long whenOf(Context c, String tag) {
+        if (Build.VERSION.SDK_INT < 23 || tag == null || tag.isEmpty()) return 0;
+        try {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return 0;
+            for (StatusBarNotification sb : nm.getActiveNotifications()) {
+                if (sb.getId() == NID && tag.equals(sb.getTag())) {
+                    long w = sb.getNotification().when;
+                    return w > 0 ? w : sb.getPostTime();
+                }
+            }
+        } catch (Exception e) {
+            // unknown - a new time
+        }
+        return 0;
+    }
+
+    /** Re-post of a notification that may be showing: its original time, no new sound / heads-up. */
+    static NotificationCompat.Builder keepTime(Context c, String tag, NotificationCompat.Builder b) {
+        long w = whenOf(c, tag);
+        return b.setWhen(w > 0 ? w : System.currentTimeMillis()).setShowWhen(true).setOnlyAlertOnce(true);
+    }
+
     public static void cancel(Context c, String tag) {
         if (tag == null || tag.isEmpty()) return;
         NotificationManagerCompat.from(c).cancel(tag, NID);
@@ -181,7 +208,10 @@ public class LpNotif {
             .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openPi(c, d))
             .setAutoCancel(true)
+            .setShowWhen(true)
             .setOnlyAlertOnce(err != null);
+        // err != null = an update of a notification that is showing: keep its time (new message / snooze alarm = a new time)
+        if (err != null) keepTime(c, tag, b);
         String acts = "," + s(d, "acts") + ",";
         boolean canAct = !s(d, "at").isEmpty();
         // fixed order: done/open, tomorrow, in an hour
@@ -191,16 +221,6 @@ public class LpNotif {
             b.addAction(action(c, d, a));
         }
         post(c, tag, b);
-    }
-
-    /** "מעדכן…" while the request runs (no buttons, so no double tap). */
-    static void progress(Context c, Map<String, String> d) {
-        NotificationCompat.Builder b = base(c, s(d, "title"))
-            .setContentText("מעדכן…")
-            .setProgress(0, 0, true)
-            .setOnlyAlertOnce(true)
-            .setSilent(true);
-        post(c, s(d, "tag"), b);
     }
 
     /** Result line without buttons. timeout > 0 = disappears by itself. Tap opens the item. */
@@ -213,7 +233,25 @@ public class LpNotif {
             .setOnlyAlertOnce(true)
             .setSilent(true);
         if (timeout > 0) b.setTimeoutAfter(timeout);
+        keepTime(c, s(d, "tag"), b);
         post(c, s(d, "tag"), b);
+    }
+
+    /**
+     * A button press that the server refused / could not do (LpActJob): one note without buttons, tap opens the item.
+     * Not silent (the user believed it was done). If a newer notification for the same item is showing, it is not replaced.
+     */
+    static void failed(Context c, Map<String, String> d, String msg) {
+        String tag = s(d, "tag");
+        if (tag.isEmpty() || whenOf(c, tag) > 0) return;
+        NotificationCompat.Builder b = base(c, s(d, "title"))
+            .setContentText(msg)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(msg))
+            .setContentIntent(openPi(c, d))
+            .setAutoCancel(true)
+            .setShowWhen(true)
+            .setOnlyAlertOnce(true);
+        post(c, tag, b);
     }
 
     // ---------- local snooze (task reminders): AlarmManager + private SharedPreferences, restored after reboot ----------
@@ -255,10 +293,11 @@ public class LpNotif {
     }
 
     /**
-     * Sign-out (PushGate.clearLocal from secPushOff): all local snoozes and their alarms, the cached FCM token,
+     * Sign-out (PushGate.clearLocal from secPushOff): waiting button presses (LpActJob), all local snoozes and their alarms, the cached FCM token,
      * and every notification we built (id NID) are removed, so the next user of this phone sees none of them.
      */
     public static void clearAll(Context c) {
+        LpActJob.cancelAll(c); // button presses still waiting to be sent
         SharedPreferences p = c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         for (String tag : new HashMap<>(p.getAll()).keySet()) {

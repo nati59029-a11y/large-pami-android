@@ -8,30 +8,26 @@ import com.google.firebase.messaging.FirebaseMessaging;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.json.JSONObject;
 
 /**
  * A notification button was pressed (after unlock - see LpNotif.action), or a local snooze alarm fired.
  * - Personal reminder (tag "wc|...", scheduled on the phone by tasks-wc.js): "טופל" removes it at once, "מחר"/"בעוד שעה" snooze it
  *   locally; the press is kept (LpNotif.wcQueue) and the app applies it (and updates the server) when it opens next.
  * - Task reminder ('tk') "בעוד שעה" / "מחר": local snooze - the same notification (same token) comes back later.
- * - Anything else: POST {t: token, a: action, f: this device's FCM token} to the server address that came with the message
- *   (only https://us-central1-<this APK's Firebase project>.cloudfunctions.net/pushAct - see allowed()). While waiting the notification shows "מעדכן…".
- *   Success -> the server's message without buttons, gone after 4 seconds. No connection -> the buttons come back with a note.
- *   r:'used' (already handled, e.g. a second tap or another device) -> treated as success: "כבר טופל", gone after 4 seconds.
- * Time budget (goAsync gives ~10 s): FCM token 1 s + connect 2 s + read 7 s.
+ * - Anything else ("טופל", and the server-side snooze of 'sec'): the notification is removed AT ONCE (no "מעדכן…", no re-post,
+ *   so the shade does not re-sort) and LpActJob sends {t: token, a: action, f: this device's FCM token} in the background
+ *   (JobScheduler: waits for a network, retries with backoff) to the server address that came with the message
+ *   (only https://us-central1-<this APK's Firebase project>.cloudfunctions.net/pushAct - see allowed()).
+ *   Success / r:'used' -> nothing more. Refused -> one note without buttons, tap opens the item (see LpActJob).
  * Not exported: only our own PendingIntents (and LpActActivity) reach it.
  */
 public class LpActReceiver extends BroadcastReceiver {
     static final long H = 3600L * 1000;
-    static final String NO_NET = "אין חיבור לאינטרנט – נסו שוב";
 
     @Override
     public void onReceive(Context ctx, Intent intent) {
@@ -76,17 +72,9 @@ public class LpActReceiver extends BroadcastReceiver {
             LpNotif.result(c, d, "אי אפשר לבצע מההתראה – פתחו את האפליקציה", 0);
             return;
         }
-        LpNotif.progress(c, d);
-        final PendingResult pr = goAsync();
-        new Thread(() -> {
-            try {
-                run(c, d, a, url);
-            } catch (Throwable t) {
-                LpNotif.show(c, d, NO_NET);
-            } finally {
-                pr.finish();
-            }
-        }).start();
+        // optimistic: gone now, the server is updated in the background; could not schedule -> the buttons come back with a note
+        LpNotif.cancel(c, tag);
+        if (!LpActJob.schedule(c, d, a, url)) LpNotif.show(c, d, "לא הצלחנו לשלוח – נסו שוב");
     }
 
     /**
@@ -128,9 +116,9 @@ public class LpActReceiver extends BroadcastReceiver {
         }
     }
 
-    static String fcmToken(Context c) {
+    static String fcmToken(Context c, long waitMs) {
         try {
-            String t = Tasks.await(FirebaseMessaging.getInstance().getToken(), 1000, TimeUnit.MILLISECONDS);
+            String t = Tasks.await(FirebaseMessaging.getInstance().getToken(), waitMs, TimeUnit.MILLISECONDS);
             if (t != null && !t.isEmpty()) {
                 c.getSharedPreferences(LpMessagingService.TOK, Context.MODE_PRIVATE).edit().putString("t", t).apply();
                 return t;
@@ -139,72 +127,6 @@ public class LpActReceiver extends BroadcastReceiver {
             // slow or no Firebase - use the last known token
         }
         return c.getSharedPreferences(LpMessagingService.TOK, Context.MODE_PRIVATE).getString("t", null);
-    }
-
-    static void run(Context c, Map<String, String> d, String a, URL url) {
-        String f = fcmToken(c);
-        if (f == null) {
-            LpNotif.show(c, d, NO_NET);
-            return;
-        }
-        HttpURLConnection con = null;
-        int code;
-        String body;
-        try {
-            JSONObject req = new JSONObject();
-            req.put("t", LpNotif.s(d, "at"));
-            req.put("a", a);
-            req.put("f", f);
-            byte[] out = req.toString().getBytes(StandardCharsets.UTF_8);
-            con = (HttpURLConnection) url.openConnection();
-            con.setInstanceFollowRedirects(false);
-            con.setConnectTimeout(2000);
-            con.setReadTimeout(7000); // the server checks permissions and runs a transaction - 4 s was too short on a cold start
-            con.setDoOutput(true);
-            con.setRequestMethod("POST");
-            con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            con.setFixedLengthStreamingMode(out.length);
-            try (OutputStream os = con.getOutputStream()) {
-                os.write(out);
-            }
-            code = con.getResponseCode();
-            InputStream in = code >= 400 ? con.getErrorStream() : con.getInputStream();
-            body = read(in);
-        } catch (Exception e) {
-            LpNotif.show(c, d, NO_NET);
-            return;
-        } finally {
-            if (con != null) con.disconnect();
-        }
-        JSONObject r = null;
-        try {
-            r = new JSONObject(body);
-        } catch (Exception e) {
-            // not JSON
-        }
-        if (r == null || code >= 500) {
-            LpNotif.show(c, d, "לא הצלחנו לעדכן – נסו שוב");
-            return;
-        }
-        String msg = r.optString("msg", "");
-        if ("used".equals(r.optString("r", ""))) {
-            // already done (second tap after a slow answer, or the same item from another device) - same as success
-            LpNotif.dropSnooze(c, LpNotif.s(d, "tag"));
-            LpNotif.result(c, d, "כבר טופל", 4000);
-            return;
-        }
-        if (r.optBoolean("ok", false)) {
-            LpNotif.dropSnooze(c, LpNotif.s(d, "tag"));
-            if (r.optBoolean("open", false)) {
-                // Android 10+ does not let a background receiver open a screen: the note stays until tapped (tap opens the item)
-                LpNotif.result(c, d, msg.isEmpty() ? "לחצו לפתיחה באפליקציה" : msg, 0);
-            } else {
-                LpNotif.result(c, d, msg.isEmpty() ? "עודכן" : msg, 4000);
-            }
-        } else {
-            // refused by the server (token used / expired / no permission): no buttons, tap opens the app
-            LpNotif.result(c, d, msg.isEmpty() ? "הפעולה לא בוצעה – פתחו את האפליקציה" : msg, 0);
-        }
     }
 
     static String read(InputStream in) throws IOException {
