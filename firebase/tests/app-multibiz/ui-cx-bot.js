@@ -7,7 +7,7 @@ const path = require('path');
 const H = require('./harness');
 const out = {}; let fail = 0;
 const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
-const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
+const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cxSales'].map((k) => [k, true])); // cxSales – תוספת "מכירות כספית" (19.11.2026)
 const T0 = Date.UTC(2026, 10, 18, 1, 10);
 const RUNS = [{ id: 'r2', at: T0, end: T0 + 600e3, st: 'fail', manual: false, days: ['2026-11-17'], err: { code: 'selector-miss', msg: 'x', step: 'catalog' }, imp: null },
   { id: 'r1', at: T0 - 864e5, st: 'ok', manual: true, days: ['2026-11-15', '2026-11-16'], err: null, imp: { price: { n: 3, ok: true, text: '', id: 25520, status: 'בוצע', errors: 0, loaded: 3 } } }];
