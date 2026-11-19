@@ -86,6 +86,27 @@ describe('pos-card – ולידציה', () => {
   });
 });
 
+describe('pos-card – סבב 2: מצב לא ודאי ומסוף מדומה בייצור', () => {
+  it('asOpen: רק ok/no/cancel/void סופיים; err ותשובה לא מוכרת → unk; wait נשאר', () => {
+    for (const st of ['ok', 'no', 'cancel', 'void', 'wait']) assert.equal(C.asOpen({ st }).st, st);
+    assert.equal(C.asOpen({ st: 'err' }).st, 'unk');
+    assert.equal(C.asOpen(PV.clean({ st: 'weird' })).st, 'unk');
+    assert.equal(C.asOpen(PV.clean({ st: 'ok', appr: '1' })).st, 'unk'); // "אושר" בלי 4 ספרות – לא ודאי, לא סופי
+  });
+  it('mockOk לפי הסביבה', () => {
+    const e0 = process.env.FUNCTIONS_EMULATOR, g0 = process.env.GCLOUD_PROJECT;
+    try {
+      process.env.FUNCTIONS_EMULATOR = 'false';
+      process.env.GCLOUD_PROJECT = 'largpeami-prod'; assert.equal(PV.mockOk(), false);
+      process.env.GCLOUD_PROJECT = 'largpeami-test-f4691'; assert.equal(PV.mockOk(), true);
+      process.env.FUNCTIONS_EMULATOR = 'true'; process.env.GCLOUD_PROJECT = 'largpeami-prod'; assert.equal(PV.mockOk(), true);
+    } finally {
+      if (e0 === undefined) delete process.env.FUNCTIONS_EMULATOR; else process.env.FUNCTIONS_EMULATOR = e0;
+      if (g0 === undefined) delete process.env.GCLOUD_PROJECT; else process.env.GCLOUD_PROJECT = g0;
+    }
+  });
+});
+
 describe('pos-pay (לקוח) – PayCalc מקבל תשלום אשראי במסוף', () => {
   it('src:term עם cardTx נשמר כמו שהוא; ידני – כמו קודם', () => {
     const o = { payOn: ['cash', 'card'], txTypes: ['reg', 'inst'], instMax: 3 };
