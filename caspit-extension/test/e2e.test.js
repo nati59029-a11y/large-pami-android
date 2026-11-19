@@ -563,6 +563,47 @@ test('העלאה לכספית כבויה (importEnabled:false): קטלוג ומ�
   await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; });
 });
 
+test('עדכון אוטומטי (0.1.7): upd.json נקרא מהדיסק ונשלח ב-hello; גרסה חדשה בדיסק → רענון רק כשהסקריפט סיים, לא בזמן ריצה, פעם אחת לשעה', async () => {
+  const mf = path.join(ext, 'manifest.json'), uf = path.join(ext, 'upd.json'), orig = fs.readFileSync(mf, 'utf8');
+  const VER = JSON.parse(orig).version;
+  await sw.evaluate(() => { self.__rl = 0; self.__cxTest.reload = () => { self.__rl++; }; return chrome.storage.local.remove(['updReload', 'upd']); });
+  try {
+    // בלי upd.json: "לא מותקן", בלי רענון
+    assert.deepEqual(await sw.evaluate(() => self.__cxTest.updInfo()), { disk: VER, upd: null });
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    // הסקריפט רץ ולא היה מה לעדכן → נשלח ב-hello
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: 1763500000000, ok: true, ver: VER, err: '', fails: 0 }));
+    srv.exportN.new = 0; srv.exportN.price = 0;
+    const t0 = Date.now();
+    await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+    await waitRun(t0);
+    const h = srv.ops('hello').at(-1);
+    assert.deepEqual(h.upd, { at: 1763500000000, ok: true, ver: VER, err: '', fails: 0 }, JSON.stringify(h));
+    // גרסה חדשה בדיסק, אבל upd.json עוד מהגרסה הקודמת (הסקריפט באמצע) → לא מרעננים
+    fs.writeFileSync(mf, orig.replace(`"version": "${VER}"`, '"version": "9.9.9"'));
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    // הסקריפט סיים (ok + אותה גרסה) → רענון אחד; ניסיון נוסף לאותה גרסה תוך שעה – לא
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: Date.now(), ok: true, ver: '9.9.9', err: '', fails: 0 }));
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), true);
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    assert.equal(await sw.evaluate(() => self.__rl), 1);
+    // כישלון של הסקריפט (גרסה בדיסק שלא אושרה) → לא מרעננים, והמצב מוצג בחלון
+    await sw.evaluate(() => chrome.storage.local.remove('updReload'));
+    fs.writeFileSync(uf, JSON.stringify({ v: 1, at: Date.now(), ok: false, ver: VER, err: 'bad-hash <x>', fails: 2 }));
+    assert.equal(await sw.evaluate(() => self.__cxTest.updTick()), false);
+    const pop = await ctx.newPage();
+    await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+    await pop.waitForFunction(() => /העדכון נכשל/.test(document.getElementById('upd').textContent));
+    assert.match(await pop.textContent('#upd'), /bad-hash x/);
+    await pop.close();
+  } finally {
+    fs.writeFileSync(mf, orig);
+    fs.rmSync(uf, { force: true });
+    await sw.evaluate(() => { self.__cxTest.reload = null; return chrome.storage.local.remove(['updReload', 'upd']); });
+    srv.exportN.price = 2;
+  }
+});
+
 test('ניתוק: הקוד נמחק', async () => {
   const pg = await ctx.newPage();
   await pg.goto(`chrome-extension://${EXT_ID}/options.html`);

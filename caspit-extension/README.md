@@ -16,6 +16,7 @@
   - דף היכרות בלי `flow` – לקריאה בלבד, בלי שום לחיצה: רק פקדים, כותרות טבלה וכתובת. בכתובת ישירה (`hash`, למשל `hours` → `#/hours-reports`) או לפי טקסט קישור בתפריט (`menu` + `find`, רק `#/...` בתוך `/bo`). `btn: true` – גם טקסט של כפתורים עם מילת פעולה, מחוץ לטבלאות.
   - `setFile` (0.1.6): בזרימה רגילה ה-service worker מבצע אותו בתוך הדף (MAIN world): בחירה רגילה → גרירה → סוג Excel, כל עוד "ממתין לטעינה" ריק; בכישלון – `selector-miss` עם אבחון.
     בכל ריצת היכרות נאספת גם רשימת קישורי התפריט (`menu`: טקסט + hash, עד 200; כותרות התפריט שבהגדרה נפתחות במעבר עכבר בלבד).
+- `src/updater/` + `src/install-auto-update.cmd` (0.1.7) – עדכון אוטומטי במחשב החנות: משימה מתוזמנת של Windows שמורידה את ה-release האחרון (`caspit-ext-v*`), בודקת SHA-256 ומזהה תוסף, מחליפה קבצים וכותבת `upd.json`. התוסף (`lib/upd.js`) מרענן את עצמו כשבטוח ומדווח `upd` ב-hello (התראות `updfail/updstale/updlag` בשרת).
 - `build.js` – `node caspit-extension/build.js --backend prod|test [--zip]` → `dist/<backend>/` (+zip). בודק הרשאות ו-eval לפני בנייה.
 
 ## תזמון
@@ -33,7 +34,7 @@
 
 | op | שדות שהתוסף שולח | תשובה מצופה |
 |---|---|---|
-| `hello` | `mode: 'sync'\|'connect'`, `manual`, `req?` (מזהה בקשה מהטלפון – נלקחת פעם אחת; אחרת `reason:'req-gone'`) | `runId`, `minVer`, `enabled`, `biz:{name}`, `days:['YYYY-MM-DD']` (מ-lastSales+1 עד אתמול, ≤14), `lastSales`, `schedule:{at:'03:00', tz:'Asia/Jerusalem'}`, `limits:{price, newMax}` |
+| `hello` | `mode: 'sync'\|'connect'`, `manual`, `req?` (מזהה בקשה מהטלפון – נלקחת פעם אחת; אחרת `reason:'req-gone'`), `upd?` (0.1.7: מצב העדכון האוטומטי מ-upd.json – `{at, ok, ver, err, fails}`) | `runId`, `minVer`, `enabled`, `biz:{name}`, `days:['YYYY-MM-DD']` (מ-lastSales+1 עד אתמול, ≤14), `lastSales`, `schedule:{at:'03:00', tz:'Asia/Jerusalem'}`, `limits:{price, newMax}` |
 | `cfg` | – | `schedule`, `lastSales`, `limits` (שמור לשימוש עתידי; התוסף כרגע מסתפק ב-hello) |
 | `upload` | קטלוג: `run, log, part, parts, items` (כמו cxUpload, בלי kind). מכירות: `run, log, kind:'sales', day, part, parts, lines` | `{ok:true}` |
 | `preview` | `run, log` | כמו cxPreview (התוסף שומר רק `cnt`) |

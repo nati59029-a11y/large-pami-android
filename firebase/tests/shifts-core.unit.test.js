@@ -167,6 +167,45 @@ describe('shifts-core – תזכורת והתראת הבוקר', () => {
   });
 });
 
+describe('shifts-core – "שכחת להחתים יציאה" (שלב G)', () => {
+  const oc = SC.expand([fixed('A')], '2026-11-18', 1)[0]; // רביעי 08:00–14:00
+  it('15 דק\' אחרי הסוף ועד 12 שעות אחריו; לפני 15 דק\' – לא; בלי עובד – לא', () => {
+    assert.deepEqual(SC.attWin(oc), [IL('2026-11-18', '14:15'), IL('2026-11-19', '02:00')]);
+    assert.equal(SC.attDue(oc, IL('2026-11-18', '14:10')), false);
+    assert.equal(SC.attDue(oc, IL('2026-11-18', '14:15')), true);
+    assert.equal(SC.attDue(oc, IL('2026-11-19', '01:55')), true);
+    assert.equal(SC.attDue(oc, IL('2026-11-19', '02:00')), false, 'יותר מ-12 שעות – לא נשלח (למשל אחרי הפעלה מחדש)');
+    assert.equal(SC.attDue(Object.assign({}, oc, { u: '' }), IL('2026-11-18', '15:00')), false);
+  });
+  it('משמרת שחוצה חצות (22:00–06:00): ההתראה ב-06:15 של היום הבא', () => {
+    const n = SC.expand([one('N', { d: '2026-11-18', s: '22:00', e: '06:00' })], '2026-11-18', 1)[0];
+    assert.equal(SC.attDue(n, IL('2026-11-18', '23:00')), false);
+    assert.equal(SC.attDue(n, IL('2026-11-19', '06:10')), false);
+    assert.equal(SC.attDue(n, IL('2026-11-19', '06:15')), true);
+  });
+  it('שבת: סוף משמרת בשישי 13:50 / בשבת 10:00 – נדחה למוצאי שבת 21:00, לא נשלח בחלון; שישי 13:00 – כרגיל', () => {
+    const f = SC.expand([one('F', { d: '2026-11-20', s: '08:00', e: '13:50' })], '2026-11-20', 1)[0];
+    assert.equal(SC.attDue(f, IL('2026-11-20', '14:05')), false);
+    assert.equal(SC.attDue(f, IL('2026-11-21', '20:55')), false);
+    assert.equal(SC.attDue(f, IL('2026-11-21', '21:00')), true);
+    assert.deepEqual(SC.attWin(f), [IL('2026-11-21', '21:00'), IL('2026-11-22', '08:45')]);
+    const s = SC.expand([one('S', { d: '2026-11-21', s: '07:00', e: '10:00' })], '2026-11-21', 1)[0];
+    assert.equal(SC.attDue(s, IL('2026-11-21', '10:15')), false);
+    assert.equal(SC.attDue(s, IL('2026-11-21', '21:05')), true);
+    const e = SC.expand([one('E', { d: '2026-11-20', s: '07:00', e: '13:00' })], '2026-11-20', 1)[0];
+    assert.equal(SC.attDue(e, IL('2026-11-20', '13:15')), true);
+    assert.equal(SC.attDue(e, IL('2026-11-20', '14:05')), false, 'בתוך החלון – לא');
+  });
+  it('כניסה פתוחה חופפת: נכנס לפני הסוף ולא יצא; יצא / נכנס אחרי הסוף / כניסה ישנה מ-12 שעות לפני ההתחלה – לא', () => {
+    assert.equal(SC.attHit({ in: oc.start + 5 * 60000, out: null }, oc.start, oc.end), true);
+    assert.equal(SC.attHit({ in: oc.start - H, out: null }, oc.start, oc.end), true);
+    assert.equal(SC.attHit({ in: oc.start + 5 * 60000, out: oc.end }, oc.start, oc.end), false);
+    assert.equal(SC.attHit({ in: oc.end + 60000, out: null }, oc.start, oc.end), false);
+    assert.equal(SC.attHit({ in: oc.start - 13 * H, out: null }, oc.start, oc.end), false);
+    assert.equal(SC.attHit(null, oc.start, oc.end), false);
+  });
+});
+
 describe('shifts-core – skip ומופע מקביל', () => {
   it('addSkip לא מוחק תאריכים ישנים; מגבלה רק על עתידיים; מעל 400 – רק מלפני שנה, ו-from עולה', () => {
     const r = SC.addSkip({ from: '2020-01-01', skip: ['2020-01-08', '2026-10-07'] }, '2026-11-25', '2026-11-18');

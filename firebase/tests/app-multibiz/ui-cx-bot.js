@@ -29,7 +29,7 @@ async function scenario(browser, www, sa, shots) {
     let R = { ok: true };
     if (n === 'cxCfg') R = { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa };
     if (n === 'cxBotTok' && d.op === 'info') R = { dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'x', step: 'catalog', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, li: st.dev ? { kind: 'price', at: T0, id: 25521, status: 'בוצע', errors: 0, loaded: 1 } : null, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
-    if (n === 'cxBotTok' && d.op === 'new') { st.dev = { id: 'ab12cd34', at: T0, last: T0 + 60e3, ver: '0.1.0', ua: '' }; R = { token: 'biz-o.' + 'A'.repeat(43), id: 'ab12cd34' }; }
+    if (n === 'cxBotTok' && d.op === 'new') { st.dev = { id: 'ab12cd34', at: T0, last: T0 + 60e3, ver: '0.1.0', ua: '', upd: { at: T0, ok: false, ver: '0.1.0', err: 'bad-hash', fails: 2, rx: T0 } }; R = { token: 'biz-o.' + 'A'.repeat(43), id: 'ab12cd34' }; }
     if (n === 'cxBotTok' && d.op === 'revoke') { st.dev = null; R = { ok: true }; }
     if (n === 'cxBotDisc') R = { id: 'd1', at: T0, size: 30, data: JSON.stringify({ pages: [{ p: '#/catalogs' }] }) };
     if (n === 'getCosts') R = { cost: {} };
@@ -56,6 +56,7 @@ async function scenario(browser, www, sa, shots) {
   check(P + '2ב הקוד נמחק מהמסך בסגירה', await page.evaluate(() => !document.getElementById('cxBotTok')));
   v = await q(); await shot((sa ? 'sa-' : '') + 'bot-3-status');
   check(P + '3 מצב: סנכרון אחרון נכשל · אוטומטי, מכירות עד 16/11, תקלה בעברית פשוטה, newMax=1', /סנכרון אחרון/.test(v.text) && /נכשל/.test(v.text) && /אוטומטי/.test(v.text) && /16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /טעינה אחרונה לכספית \(מחירים[^)]*\): מזהה 25521 · בוצע · נטענו 1 · שגויים 0/.test(v.text) && (await page.inputValue('form[data-f=cxBotMaxF] input[name=n]')) === '1' && fine(v), { small: v.small, t: v.text.slice(0, 300) });
+  check(P + '3ג עדכון אוטומטי של התוסף: נכשל, כמה פעמים ברצף, הסיבה', /עדכון אוטומטי של התוסף נכשל \([^)]*2 פעמים ברצף\): bad-hash/.test(v.text), v.text.slice(0, 600));
   check(P + '3ב דוח היכרות – ' + (sa ? 'מוצג למנהל־על' : 'מוסתר ממנהל רגיל'), sa === /דוח היכרות/.test(v.text));
   await page.click('[data-a=cxBotRuns]'); await H.settle(page, 400);
   v = await q(); await shot((sa ? 'sa-' : '') + 'bot-4-runs');

@@ -47,8 +47,9 @@ const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f
 const N = (v) => (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e10 ? rnd(v) : null);
 
 // ---------- בדיקת המבנה של נתוני הכספים (מהמכשיר או למראה). מה שלא מוכר – נזרק ----------
-const LIM = { months: 26, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120, rec: 80 };
-function cleanFin(x) {
+const LIM = { months: 26, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120, rec: 80, notes: 60, noteT: 500 };
+// o.notes === true – רק בצ'אט, כשלמנהל יש הרשאה למידע רגיש (sensOn ב-secretary.js). אחרת הערות העובדים נזרקות (גם במראה ובתזכורות)
+function cleanFin(x, o) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || x.v !== 1 || !Number.isInteger(x.at)) return null;
   const f = { v: 1, at: x.at, months: {}, open: [], sups: [], crs: [], late: { sum: 0, gross: 0, n: 0 }, due: null, cf: [], wk: null, chk: [], bk: null };
   const mk = Object.keys(x.months && typeof x.months === 'object' ? x.months : {}).filter((k) => MON_RE.test(k)).sort().slice(-LIM.months);
@@ -75,6 +76,11 @@ function cleanFin(x) {
   if (Array.isArray(x.rec)) {
     f.rec = x.rec.filter((r) => Array.isArray(r) && ['i', 'e'].includes(r[2]) && N(r[5]) !== null).slice(0, LIM.rec)
       .map((r) => [Number.isInteger(r[0]) && r[0] > 0 ? r[0] : 0, DAY_RE.test(r[1]) ? r[1] : '', r[2], clean(r[3], 40), clean(r[4], 60), N(r[5]), clean(r[6], 30), clean(r[7], 40), N(r[8]) || 0, r[9] === 1 ? 1 : 0]);
+  }
+  // 19.11.2026 (שלב F): הערות על עובדים (S.enotes) – [שם העובד, תאריך, טקסט עד 500 תווים], עד 60. מגיעות רק מהמכשיר לשאלה בצ'אט
+  if (o && o.notes === true && Array.isArray(x.notes)) {
+    f.notes = x.notes.filter((r) => Array.isArray(r) && clean(r[0], 60) && clean(r[2], LIM.noteT)).slice(0, LIM.notes)
+      .map((r) => [clean(r[0], 60), DAY_RE.test(r[1]) ? r[1] : '', clean(r[2], LIM.noteT)]);
   }
   if (x.pay && typeof x.pay === 'object' && !Array.isArray(x.pay)) {
     f.pay = {};
@@ -104,6 +110,7 @@ const DECL = {
   getPayroll: { description: 'שכר: סך לכל עובד לחודש, לפי מה שנרשם באפליקציה.', parameters: S({ employee: str('שם עובד (לא חובה)'), month: str('YYYY-MM') }) },
   getEmployeeActivity: { description: 'נתוני עובד: משימות (בזמן/באיחור), סגירות קופה, הוצאות שהגיש. תמיד עם "מה לא ידוע".', parameters: S({ employee: str('שם העובד'), days: numP('כמה ימים אחורה, ברירת מחדל 60') }, ['employee']) },
   ...KT.DECL,
+  getEmployeeNotes: { description: 'הערות שהמנהל רשם בכרטיסי העובדים (מהמכשיר, עד 60 האחרונות): שם העובד, תאריך וטקסט. מידע פנימי למנהל בלבד – רק להסבר ולתזכורת; לא להעביר לעובד ולא כבסיס יחיד להחלטה נגד עובד.', parameters: S({ employee: str('שם העובד (לא חובה)') }) },
   getAppHelp: { description: 'מדריך העזרה של האפליקציה: איך עושים פעולה, איפה נמצא מסך או כפתור, מה המשמעות של שדה, ופתרון תקלות (סנכרון, עדכון, סריקה, כניסה, התראות, גיבוי ועוד). להפעיל בכל שאלה על השימוש באפליקציה או על תקלה בה.', parameters: S({ question: str('השאלה או הנושא, במילים של המנהל') }, ['question']) },
   refuseOffTopic: { description: 'להפעיל רק כשהשאלה אינה קשורה בשום צורה לעסק או לאפליקציה (למשל נושא אישי, בידור או פוליטיקה).', parameters: S({}) },
 };
@@ -123,19 +130,22 @@ function toolsFor(ch, o) {
   L.push('getBusinessFacts', 'proposeFact', 'getCalendar', 'proposeCalendarEvent');
   // מידע רגיש (10.8, 63): רק כשהמתג העסקי (ניתוח עובדים ומידע רגיש) פעיל וגם למנהל יש הרשאה אישית למידע רגיש
   if (p.emp === true && p.sens === true) L.push('getSensitiveInfo');
+  // 19.11.2026 (שלב F): הערות על עובדים – אותו תנאי כמו מידע רגיש, ורק כשהמכשיר שלח אותן לשאלה הזו
+  if (p.emp === true && p.sens === true && p.notes === true) L.push('getEmployeeNotes');
   L.push('getAppHelp', 'refuseOffTopic');
   return L;
 }
 const declsOf = (names) => names.map((n) => Object.assign({ name: n }, DECL[n]));
 
 // ---------- ביצוע ----------
-const SCREEN = { ...KT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', loanCalc: '', getAppHelp: '' };
+const SCREEN = { ...KT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
 const LABEL = {
   ...KT.LABEL,
   getMonthSummary: (a) => 'סיכום חודש ' + (a.month || ''), getRecentEntries: () => 'פעולות אחרונות שנרשמו', getOpenInvoices: () => 'חשבוניות לתשלום', getSupplierBalance: (a) => 'כרטיס ספק – ' + (a.supplier || ''),
   getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים',
   getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (a.month ? ' ' + a.month : ''),
   getEmployeeActivity: (a) => 'נתוני עובד – ' + (a.employee || ''), loanCalc: () => 'חישוב הלוואה (לפי ההנחות)', getAppHelp: () => 'מדריך העזרה של האפליקציה',
+  getEmployeeNotes: () => 'הערות על עובדים (מוצפן)',
 };
 const match = (name, q) => { const a = clean(String(name || ''), 80).toLowerCase(), b = clean(String(q || ''), 80).toLowerCase(); return !!b && (a.includes(b) || b.includes(a)); };
 const prevYear = (m) => (Number(m.slice(0, 4)) - 1) + m.slice(4);
@@ -360,6 +370,11 @@ async function runTool(name, args, ctx) {
         cashClosings: cl.length, expensesSubmitted: { total: inb.length, rejected: inb.filter((x) => x.status === 'rej' || x.status === 'rejected').length },
         unknown: 'לא ידוע מהנתונים: חופשה, מחלה, משמרות, עומס או תקלה באפליקציה. הפרש בקופה אינו הוכחה לגניבה.', _tgt: uid };
     }
+    case 'getEmployeeNotes': {
+      if (!Array.isArray(ctx.notes)) return { error: 'not-available', note: 'הכלי לא זמין' }; // הגנה כפולה: הכלי גם לא מוצע
+      const L = ctx.notes.filter((r) => !a.employee || match(r[0], a.employee));
+      return { count: L.length, notes: L.map((r) => ({ employee: r[0], date: r[1], text: r[2] })), rule: 'הערות פנימיות של המנהל – רק להסבר ולתזכורת למנהל. לא להעביר לעובד ולא כבסיס יחיד להחלטה נגד עובד.', _at: ctx.fin ? ctx.fin.at : now };
+    }
     case 'getAppHelp': return appHelp(clean(String(a.question || ''), 300));
     case 'refuseOffTopic': return { refuse: true };
     default: return KT.NAMES.includes(name) ? KT.run(name, a, ctx) : { error: 'unknown-tool' };
@@ -369,7 +384,7 @@ async function runTool(name, args, ctx) {
 function sourceOf(name, args, ctx, at0) {
   const fromFin = FIN_TOOLS.includes(name) || name === 'getPayroll';
   const at = fromFin ? (ctx.finFrom === 'mirror' ? ctx.mirrorAt : ctx.fin ? ctx.fin.at : 0) : (at0 || ctx.now);
-  const where = fromFin ? (ctx.finFrom === 'mirror' ? 'מראה הכספים בענן' : 'נתוני המכשיר') : name === 'loanCalc' ? 'חישוב' : name === 'getAppHelp' ? 'מדריך האפליקציה' : KT.WHERE[name] || 'נתוני הענן';
+  const where = fromFin ? (ctx.finFrom === 'mirror' ? 'מראה הכספים בענן' : 'נתוני המכשיר') : name === 'loanCalc' ? 'חישוב' : name === 'getAppHelp' ? 'מדריך האפליקציה' : name === 'getEmployeeNotes' ? 'נתוני המכשיר' : KT.WHERE[name] || 'נתוני הענן';
   return { k: name, l: (LABEL[name] || (() => name))(args || {}) + ' · ' + where, at: at || 0, atText: fmtAt(at), s: SCREEN[name] || '' };
 }
 

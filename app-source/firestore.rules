@@ -1753,6 +1753,9 @@ service cloud.firestore {
           || (id.matches('^sal_.*') && perm('sal'))
           || (id.matches('^rpi_.*') && perm('rep') && perm('incR'))
           || (id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_.+$') && id == 'rpo_' + id.split('_')[1] + '_' + request.auth.uid && perm('rep') && expOwn())
+          // 19.11.2026 (שלב E, "השכר שלי"): pay_YYYY-MM_<uid> = השכר המשוער של העובד הזה בלבד (מכשיר המנהל מפרסם רק עם המתג pay.show).
+          // קורא רק העובד שה-uid שלו במזהה, ורק כשהוא עובד פעיל בעסק פעיל (bEmp). בלי מתג הרשאה – המתג אצל המנהל בכרטיס העובד.
+          || (id.matches('^pay_20[0-9]{2}-(0[1-9]|1[0-2])_[A-Za-z0-9_-]{1,128}$') && id == 'pay_' + id.split('_')[1] + '_' + request.auth.uid && bEmp())
           || (id.matches('^rpe_.*') && perm('rep') && perm('expR'))
           || (id.matches('^rps_.*') && perm('rep') && perm('sal'))
           // 2026-11-12: "מצב העסק" (bal) – סכומים בלבד {i,e}. bal_YYYY-MM = כל העסק; bal_YYYY-MM_<סניף> = סניף אחד.
@@ -1763,7 +1766,7 @@ service cloud.firestore {
           || bMgr();
         allow list: if bMgr();
         allow create, update: if bMgr()
-          && (id.matches('^(inc|sal|rpi|rpe|rps|bal)_20[0-9]{2}-(0[1-9]|1[0-2])$') || id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_[A-Za-z0-9_-]{1,128}$')
+          && (id.matches('^(inc|sal|rpi|rpe|rps|bal)_20[0-9]{2}-(0[1-9]|1[0-2])$') || id.matches('^(rpo|pay)_20[0-9]{2}-(0[1-9]|1[0-2])_[A-Za-z0-9_-]{1,128}$')
               || id.matches('^bal_20[0-9]{2}-(0[1-9]|1[0-2])_[a-z0-9_]{2,20}$'))
           && request.resource.data.keys().hasOnly(['data', 'h', 'm', 'at'])
           && request.resource.data.data is string && request.resource.data.data.size() <= 900000

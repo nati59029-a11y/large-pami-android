@@ -31,7 +31,9 @@ const HDR_PRICE = ['קוד פריט', 'מחיר לצרכן כולל מעמ', 'מ
 const CAT = { c: 'קוד פריט', n: 'שם פריט', bc: 'ברקוד', col: 'צבע', sz: 'מידה', sup: 'ספק', c1: 'קטגוריה ראשית', c2: 'קטגוריה משנית', cost: 'מחיר עלות', p: 'מחיר לצרכן', nv: 'פריט ללא מעמ' };
 const SALES = ['מספר עסקה', 'פדיון', 'מספר ברקוד']; // דוח מכירות – זיהוי (הקליטה – parseSales, A2)
 // עמודות "דוח מכירות לפריטים" מכספית. "מספר ברקוד" = קוד הפריט בכספית. אין עמודת כמות – הכמות מחושבת (qtyOf)
-const SAL = { d: 'תאריך מכירה', n: 'שם פריט', c: 'מספר ברקוד', tx: 'מספר עסקה', bn: 'שם סניף', bno: 'מספר סניף', w: 'משקל', ds: 'הנחה', a: 'פדיון' };
+// h (C2, רשות): עמודת שעה נפרדת, אם יש בקובץ – "שעת מכירה", ואם אין – "שעה" (SAL_H2). בלי העמודה – השעה מתוך "תאריך מכירה" (timeOf)
+const SAL = { d: 'תאריך מכירה', n: 'שם פריט', c: 'מספר ברקוד', tx: 'מספר עסקה', bn: 'שם סניף', bno: 'מספר סניף', w: 'משקל', ds: 'הנחה', a: 'פדיון', h: 'שעת מכירה' };
+const SAL_H2 = 'שעה';
 const WHY = { skip: 'קוד מיוחד', code: 'קוד פריט לא תקין', noname: 'בלי שם', junk: 'שם קצר ומחיר 0', price: 'מחיר חסר או שלילי' };
 const WARN = { long: 'שם ארוך – קוצר', badbc: 'ברקוד לא תקין – לא נשמר', dupbc: 'ברקוד של קוד אחר – לא נשמר', p0: 'מחיר 0', same: 'שם זהה לקוד אחר (מחיר/צבע/מידה שונים) – לא אוחד, מסומן "שם כפול – לבדוק"', mcost: 'אוחד, אבל העלות שלו שונה מהקוד הראשי – נשמרה העלות של הראשי', sku: 'קוד פריט אחר באפליקציה – לא נדרס' };
 
@@ -76,6 +78,7 @@ function detect(rows) {
     if (SALES.every((x) => at(x) >= 0)) {
       const map = {};
       for (const [k, v] of Object.entries(SAL)) map[k] = at(v);
+      if (map.h < 0) map.h = at(SAL_H2);
       return { kind: 'sales', hi: i, map };
     }
   }
@@ -255,6 +258,52 @@ function dateOf(v) {
   if (m) return ok(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
   return '';
 }
+// שעה ודקה → דקות מתחילת היום (-1 = לא תקין). ap = 'A'/'P' (AM/PM, C2): השעה 1–12, 12 AM = 00, 12 PM = 12
+const hm = (h, m, sec, ap) => {
+  if (ap) { if (h < 1 || h > 12) return -1; h = (h % 12) + (/p/i.test(ap) ? 12 : 0); }
+  return h >= 0 && h < 24 && m >= 0 && m < 60 && (sec == null || (sec >= 0 && sec < 60)) ? h * 60 + m : -1;
+};
+// שעת המכירה מאותו תא "תאריך מכירה" (C1, 19.11.2026): "16/11/2026 14:32", "16/11/2026 14:32:05", "2026-11-16 14:32" / "2026-11-16T14:32:05",
+//   וגם AM/PM (C2): "16/11/2026 2:30 PM", "16/11/2026 02:30:00 pm", "16/11/2026 2:30 P.M.",
+//   מספר Excel עם שבר (46342.6055…), או Date. → דקות מתחילת היום (0–1439), או -1 = אין שעה (תאריך בלבד / לא תקין).
+//   תאריך לא תקין → -1. אזור זמן מפורש (Z / +02:00) → -1 (לא ידוע אם זו שעת החנות). מספר Excel שלם / Date בדיוק בחצות = תאריך בלבד → -1.
+//   dateOf לא משתנה (תאימות): הוא כבר מקבל תאריך ואחריו רווח ושעה.
+function timeOf(v) {
+  if (v instanceof Date) { if (Number.isNaN(v.getTime()) || !dateOf(v)) return -1; return v.getHours() || v.getMinutes() || v.getSeconds() || v.getMilliseconds() ? hm(v.getHours(), v.getMinutes()) : -1; }
+  if (typeof v === 'number') {
+    if (!dateOf(v)) return -1;
+    const ms = Math.round((v - 25569) * 864e5), r = ((ms % 864e5) + 864e5) % 864e5; // אותו עיגול כמו dateOf – השעה תמיד באותו יום
+    return r ? Math.floor(r / 6e4) : -1;
+  }
+  const s = str(v);
+  if (!dateOf(s)) return -1;
+  const m = /^\d{4}-\d{1,2}-\d{1,2}(?:T|\s+)(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:\s*([AaPp])\.?[Mm]\.?)?$/.exec(s) || /^\d{1,2}[/.-]\d{1,2}[/.-](?:\d{2}|\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp])\.?[Mm]\.?)?$/.exec(s);
+  return m ? hm(+m[1], +m[2], m[3] == null ? null : +m[3], m[4]) : -1;
+}
+// תא של עמודת שעה נפרדת (C2): "14:32", "14:32:05", "2:30 PM", שבר של יום מ-Excel (0.6055…), Date (רק השעה), או תאריך+שעה מלאים (timeOf).
+//   → דקות מתחילת היום, או -1. ריק / לא תקין → -1
+function clockOf(v) {
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? -1 : hm(v.getHours(), v.getMinutes());
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v) || v < 0) return -1;
+    if (v < 1) { const ms = Math.round(v * 864e5); return ms < 864e5 ? Math.floor(ms / 6e4) : -1; }
+    return timeOf(v);
+  }
+  const s = str(v), m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp])\.?[Mm]\.?)?$/.exec(s);
+  return m ? hm(+m[1], +m[2], m[3] == null ? null : +m[3], m[4]) : timeOf(s);
+}
+// דפוס מוסווה של תא (C2 – לראות איך כספית כותבת את השעה, בלי לשמור ערכים): ספרה → d, אות לועזית → a, אות עברית → h,
+//   כל תו אחר שאינו סימן פשוט → ?. מספר (Excel) מתחיל ב-#, Date → @. עד 30 תווים
+const TM_P_RE = /[^dah #@:/.,+\-()'"_|?]/g;
+function tmMask(v) {
+  if (v instanceof Date) return '@';
+  const s = (typeof v === 'number' ? '#' : '') + str(v).replace(/[0-9A-Za-z\u05d0-\u05ea]/g, (ch) => (ch >= '0' && ch <= '9' ? 'd' : /[A-Za-z]/.test(ch) ? 'a' : 'h'));
+  return s.replace(/\s/g, ' ').replace(TM_P_RE, '?').slice(0, 30);
+}
+// סל שעה לפילוח: '00'–'23', ובלי שעה – 'na'
+const HOUR_NA = 'na';
+const hourKey = (t) => (Number.isInteger(t) && t >= 0 && t < 1440 ? p2(Math.floor(t / 60)) : HOUR_NA);
+const HOUR_RE = /^(?:[01]\d|2[0-3]|na)$/;
 // מפתח סניף בכספית: מספר הסניף (ספרות), ואם אין – השם בלי סימנים. משמש במזהי מסמכים (בלי "/")
 function brKey(bno, bn) {
   const d = str(bno).replace(/\D/g, '').slice(0, 12);
@@ -266,16 +315,23 @@ const d8 = (d) => String(d).replace(/-/g, '');
 const dayId = (bk, d) => `${bk}_${d8(d)}`;
 const txKey = (tx) => str(tx).replace(/[^0-9A-Za-z-]/g, '').slice(0, 30);
 const txId = (bk, d, tx) => `${dayId(bk, d)}_${txKey(tx)}`;
-// rows = מ-readTable / parseCsv. → { lines:[{ d, c, n, tx, bk, bn, w, ds, a }], bad:[{ r, why }], rows }
+// rows = מ-readTable / parseCsv. → { lines:[{ d, c, n, tx, bk, bn, w, ds, a, t?, tm? }], bad:[{ r, why }], rows, tm }
+//   tm (C2) = { y: שורות תקינות עם שעה, n: בלי שעה, p: דפוס מוסווה (tmMask) של התא הראשון שהשעה בו לא נקראה, q: של הראשון שנקראה } ('' = אין).
+//     עם עמודת שעה נפרדת – הדפוס הוא "תאריך|שעה". השורה הראשונה של כל תאריך נושאת עותק (line.tm), כי לשרת נשלחות רק השורות
+//     (גם מהתוסף, לפי יום); השרת הישן מתעלם מהשדה (cleanLine), החדש שומר אותו (cxDay.tm). לא חלק ממפתח השורה.
 function parseSales(rows, det) {
   const dd = det || detect(rows);
   if (dd.kind !== 'sales') throw new Error('זה לא דוח מכירות של כספית');
   const m = dd.map, get = (r, k) => (m[k] >= 0 ? r[m[k]] : '');
   const lines = [], bad = []; let n = 0;
+  const tm = { y: 0, n: 0, p: '', q: '' };
   for (let i = dd.hi + 1; i < rows.length; i++) {
     const r = rows[i];
     if (!Array.isArray(r) || r.every((x) => str(x) === '')) continue;
     n++;
+    // C2: שעת המכירה – מעמודת שעה נפרדת אם יש וקריאה, אחרת מתוך תא התאריך (C1). הדפוס נאסף מכל השורות (גם פגומות), כדי לראות פורמט שלא נקרא
+    const dv = get(r, 'd'), hv = m.h >= 0 ? r[m.h] : '', hc = m.h >= 0 ? clockOf(hv) : -1, t = hc >= 0 ? hc : timeOf(dv);
+    if (t >= 0 ? !tm.q : !tm.p && str(dv) !== '') { const pt = (tmMask(dv) + (m.h >= 0 ? '|' + tmMask(hv) : '')).slice(0, 30); if (t >= 0) tm.q = pt; else tm.p = pt; }
     const d = dateOf(get(r, 'd')), c = str(get(r, 'c')).slice(0, 40), tx = txKey(get(r, 'tx'));
     const a = num(get(r, 'a')), ds0 = str(get(r, 'ds')) === '' ? 0 : num(get(r, 'ds')), w0 = str(get(r, 'w')) === '' ? null : num(get(r, 'w'));
     // אותם גבולות כמו בשרת (cleanLine): שורה פגומה מסומנת כאן ולא מכשילה חלק שלם של 1,000 שורות
@@ -283,10 +339,14 @@ function parseSales(rows, det) {
     if (why) { bad.push({ r: i + 1, why }); continue; }
     const bn = hk(get(r, 'bn')).slice(0, 60), bno = str(get(r, 'bno')).replace(/\D/g, ''), bk = brKey(bno, bn);
     const o = { d, c, n: hk(get(r, 'n')).slice(0, 80), tx, bk, bn, w: w0 != null && !Number.isNaN(w0) && w0 > 0 ? Math.round(w0 * 1000) / 1000 : null, ds: r2(ds0), a: r2(a) };
+    if (t >= 0) o.t = t; // C1: שעת המכירה (דקות מתחילת היום) – רק כשיש בקובץ. לא חלק ממפתח השורה (k)
     if (!bno) o.bkn = true; // אין מספר סניף – המפתח לפי השם; השרת ממיר למספר הסניף המוכר (cxcfg.bkn), כדי שאותה מכירה לא תקבל מזהה אחר
+    if (t >= 0) tm.y++; else tm.n++;
     lines.push(o);
   }
-  return { lines, bad, rows: n };
+  const seen = new Set();
+  for (const l of lines) if (!seen.has(l.d)) { seen.add(l.d); l.tm = Object.assign({}, tm); }
+  return { lines, bad, rows: n, tm };
 }
 const SBAD = { date: 'תאריך לא תקין', tx: 'בלי מספר עסקה', code: 'בלי קוד פריט', amount: 'פדיון לא תקין', disc: 'הנחה לא תקינה', weight: 'משקל לא תקין' };
 // כמות שסימנה הפוך לפדיון (מכירה עם כמות שלילית / החזרה עם כמות חיובית) – נדחית. 0 = בלי תנועת מלאי (מותר)
@@ -355,6 +415,32 @@ function aggDays(days, opt) {
   for (const b of Object.values(T.br)) { b.gross = R(b.gross); b.ret = R(b.ret); b.net = R(b.gross - b.ret - b.disc); b.disc = R(b.disc); }
   const dl = [...T.days.values()].map((d) => Object.assign(d, { gross: R(d.gross), ret: R(d.ret), net: R(d.gross - d.ret - d.disc), disc: R(d.disc) })).sort((a, b) => (a.d < b.d ? 1 : -1));
   return { gross: R(T.gross), ret: R(T.ret), net: R(T.gross - T.ret - T.disc), disc: R(T.disc), ntx: T.ntx, nl: T.nl, sp: R(T.sp), un: T.un, items, br: T.br, cats: T.cats, days: dl };
+}
+// מכירות לפי יום ולפי שעה (C1 – לבונוסי מכירות בשכר). days = מסמכי cxDay (cxSales + unpackDays); bk = רק סניף כספית אחד (אופציונלי).
+//   cxDay.h = { 'HH'|'na': פדיון נטו (אחרי הנחה, החזרות במינוס) } – נשמר בשרת משורות המכירה (מ-19.11.2026).
+//   → { day:{ 'YYYY-MM-DD': נטו }, hours:{ 'YYYY-MM-DD': { 'HH': ש"ח, na?: ש"ח } } }
+//   יום שאין לו אף שעה ידועה (נתונים ישנים בלי h, או רק 'na' – קובץ בלי שעות) → hours[d] = {} (הקורא מחליט, למשל הערכה לפי יום).
+//   יום עם פילוח חלקי (סניף/שורות שנקלטו לפני הפילוח) – ההפרש מהסך היומי נכנס ל-'na', כך שסכום השעות = הסך היומי.
+function salesHours(days, bk) {
+  const day = {}, hours = {}, has = {};
+  for (const x of days || []) {
+    if (!x || typeof x.d !== 'string' || (bk && x.bk !== bk)) continue;
+    const net = (+x.gross || 0) - (+x.ret || 0) - (+x.disc || 0);
+    day[x.d] = (day[x.d] || 0) + net;
+    const H = hours[x.d] || (hours[x.d] = {});
+    let sum = 0;
+    if (x.h && typeof x.h === 'object' && !Array.isArray(x.h)) {
+      for (const [k, v] of Object.entries(x.h)) { const a = +v; if (!HOUR_RE.test(k) || !Number.isFinite(a)) continue; H[k] = (H[k] || 0) + a; sum += a; if (k !== HOUR_NA) has[x.d] = true; }
+    }
+    if (Math.abs(net - sum) >= 0.005) H[HOUR_NA] = (H[HOUR_NA] || 0) + net - sum;
+  }
+  for (const d of Object.keys(day)) {
+    day[d] = r2(day[d]);
+    if (!has[d]) { hours[d] = {}; continue; }
+    const H = hours[d];
+    for (const k of Object.keys(H)) { H[k] = r2(H[k]); if (k === HOUR_NA && Math.abs(H[k]) < 0.005) delete H[k]; }
+  }
+  return { day, hours };
 }
 // מיון ורשימת מוצרים: by = 'q' (הכי נמכר) | 'a' (הכי הרבה פדיון). s = חיפוש (שם או קוד)
 function itemList(items, by, s) {
@@ -435,7 +521,7 @@ function unpackDays(p) {
 function chunks(from, to, n) { const out = []; let a = from; while (a <= to) { let b = addDay(a, (n || 92) - 1); if (b > to) b = to; out.push([a, b]); a = addDay(b, 1); } return out; }
 const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
 
-const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
+const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);
