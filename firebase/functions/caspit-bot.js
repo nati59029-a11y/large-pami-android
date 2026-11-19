@@ -64,6 +64,8 @@ const UST = ['reload', 'same', 'copying', 'busy', 'none'];
 const VER3 = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const TODAY_FROM = 7; // מכירות היום: מ-07:00 (שעון ישראל)
+const TODAY_SKEW = 2 * 60e3; // סובלנות שעון: שעון המחשב שמקדים עד 2 דקות – מתקבל מ-06:58 / 20:58 במוצאי שבת וחג
+const TODAY_GAP = 20 * 60e3; // לכל היותר העלאה חלקית אחת ל-20 דקות לעסק
 const reqLive = (q, now) => !!(q && typeof q.id === 'string' && !q.took && now - (q.at || 0) < REQ_MS);
 const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty'];
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
@@ -135,7 +137,8 @@ async function cxBotTok(w, input) {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
-      ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER, tp: d.h ? d.tp || null : null,
+      ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
+      tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
@@ -349,10 +352,21 @@ async function uploadToday(w, b, x) {
   if (b.part !== 0 || b.parts !== 1) throw bad('bad-part', 'מכירות היום – בחלק אחד');
   const today = ilDay(x.now), wl = TK.wall(x.now), nowHm = String(wl.hh).padStart(2, '0') + ':' + String(wl.mm).padStart(2, '0');
   if (b.day !== today) throw bad('bad-day', 'מכירות חלקיות – רק של היום');
-  if (wl.hh < TODAY_FROM || SC.quiet(x.now)) throw pre('today-off', 'לא בשעות של עדכון מכירות היום (07:00–23:59, לא בשבת וחג)');
+  const open = (t) => TK.wall(t).hh >= TODAY_FROM && !SC.quiet(t);
+  if (!open(x.now) && !(open(x.now + TODAY_SKEW) && ilDay(x.now + TODAY_SKEW) === today)) throw pre('today-off', 'לא בשעות של עדכון מכירות היום (07:00–23:59, לא בשבת וחג)');
   if (typeof b.hm !== 'string' || !HM_RE.test(b.hm)) throw bad('bad-hm', 'שעה לא תקינה');
   const hm = b.hm > nowHm ? nowHm : b.hm; // שעון מחשב שמקדים – לא "עד השעה" שעוד לא הגיעה
   if (Array.isArray(b.lines) && b.lines.some((l) => !l || typeof l !== 'object' || l.d !== today)) throw bad('day-mismatch', 'שורת מכירה מיום אחר מהיום שנשלח');
+  if (!Array.isArray(b.lines) || !b.lines.length || b.lines.length > 30000) throw bad('bad-lines', 'שורות: 1 עד 30000');
+  // מגבלת קצב (לפני כל קריאה של cxItem / prod): העלאה חלקית אחת ל-20 דקות לעסק. השמירה בטרנזקציה – שתי העלאות במקביל לא עוברות יחד
+  const ref = priv(w.bizId, 'cxbot');
+  const okRate = await ref.firestore.runTransaction(async (tx) => {
+    const s = await tx.get(ref), last = s.exists ? +s.get('tpr') || 0 : 0;
+    if (last && x.now >= last && x.now - last < TODAY_GAP) return false;
+    tx.set(ref, { tpr: x.now }, { merge: true });
+    return true;
+  });
+  if (!okRate) throw new HttpsError('resource-exhausted', 'מכירות היום כבר עודכנו לפני פחות מ-20 דקות', { reason: 'rate' });
   const r = await CX.cxPartial(w, { day: today, hm, lines: b.lines, now: x.now });
   await priv(w.bizId, 'cxbot').set({ tp: { d: today, hm, at: x.now, n: r.n } }, { merge: true });
   return { n: r.n, bad: r.bad, partial: true };

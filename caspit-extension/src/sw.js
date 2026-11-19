@@ -144,8 +144,9 @@ async function tick() {
 // ---------- מכירות היום כל שעה (0.1.10) ----------
 // רק דוח המכירות של היום (בלי קטלוג ובלי קבצים לכספית), נשלח לשרת כ"חלקי – עד השעה HH:MM" (upload עם partial). לא hello ולא report:
 // לא נספר כריצה, לא מקדם את היום האחרון שנקלט (lastSales), ולא נשמר ב-salesHash (הסנכרון הלילי שולח את היום המלא ודורס).
-// לא מתחילים: בלי חיבור / רשת, בזמן ריצה אחרת (או ריצה שממתינה לניסיון חוזר), כשהסנכרון הלילי עוד לא רץ (הוא קודם), מחוץ ל-07:00–23:00,
-// בשבת וחג (שישי / ערב חג מ-14:00 עד מוצאי 21:00), פעם אחת לכל שעה, ושרת ישן (caps.today). כישלון – רק בחלון התוסף, בלי דיווח (השעה הבאה תנסה שוב).
+// לא מתחילים רק: בלי חיבור / רשת, כשריצה אחרת פעילה ממש עכשיו, מחוץ ל-07:00–23:00, בשבת וחג (שישי / ערב חג מ-14:00 עד מוצאי 21:00),
+// כשהשעה הזו כבר נלקחה, ומול שרת ישן (caps.today). סנכרון לילי שנכשל / ממתין לניסיון חוזר / עוד לא הצליח – לא עוצר את מכירות היום
+// (הנעילה busy מונעת שתי ריצות יחד; ניסיון חוזר שמתנגש נדחה ל-tick הבא). כישלון – רק בחלון התוסף (todaySt), בלי דיווח (השעה הבאה תנסה שוב).
 async function todayTick(o) {
   const now = (o && o.now) || Date.now(); // now – לבדיקות בלבד
   if (busy || !navigator.onLine || !(await get('token'))) return null;
@@ -154,23 +155,22 @@ async function todayTick(o) {
   const slot = D.hourSlot(now, s.tz, TODAY_FROM, TODAY_TO);
   if (!slot || ((await get('todaySt')) || {}).slot === slot) return null;
   const run = await get('run');
-  if (run && !P.isTerminal(run) && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null;
-  const st = (await get('st')) || {};
-  if ((D.isDue(now, s.at, st.lastOkDay, s.tz) && !blockedSlot(st, s)) || (await chrome.alarms.get('start'))) return null;
+  if (run && run.st === 'run' && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null; // ריצה פעילה (גם אם ה-service worker נסגר באמצעה – tick ימשיך אותה)
   return runToday(slot, now, s.tz);
 }
 async function runToday(slot, now, tz) {
   if (busy) return null;
   busy = true; // ריצה אחת בכל רגע (גם מול הסנכרון הלילי ו"סנכרן עכשיו")
   keepAlive(true);
-  const day = D.dayStr(now, tz), hm = D.hmOf(now, tz);
-  let out;
+  const t0 = Date.now(), day = D.dayStr(now, tz);
+  let hm = D.hmOf(now, tz), out;
   try {
     await set({ todaySt: { slot, st: 'run', at: Date.now() } }); // השעה נלקחה – גם אם ה-service worker נסגר באמצע, לא חוזרים עליה
     const r0 = { flags: {} };
     await STEP.login(r0);
     const [y, m, d] = day.split('-');
     const f = await capture(r0.tab, 'sales', { day, dmy: `${d}/${m}/${y}` }, 300e3);
+    hm = D.hmOf(now + (Date.now() - t0), tz); // "עד השעה" = מתי הדוח הורד מכספית
     const rows = rowsOf(f), det = C.detect(rows);
     if (det.kind !== 'sales') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "דוח מכירות לפריטים"');
     const lines = C.parseSales(rows, det).lines.filter((l) => l.d === day);
@@ -179,8 +179,10 @@ async function runToday(slot, now, tz) {
     out = { slot, st: 'ok', at: Date.now(), day, hm, n: lines.length };
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
-    out = { slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) };
-    if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) }); // השרת לא מכיר – עד שיודיע אחרת
+    // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
+    out = { slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) };
+    // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
+    if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }
   await set({ todaySt: out });
   return out;
@@ -799,8 +801,10 @@ async function runDisc() {
       waiting.delete(nonce);
       await disarm(tab);
       await guardBo(tab); // היכרות – לא יוצאים מהמשרד האחורי
-      page.hash = String(await inIso(tab, () => location.hash) || '').replace(/\d+/g, '{n}').slice(0, 80);
-      page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
+      // priv (שעות עובד): בלי כותרת הדף, ובכתובת – כל מזהה אחרי #/employee-time-tracks/ (לא רק ספרות) → {id}
+      const h0 = String(await inIso(tab, () => location.hash) || '');
+      page.hash = (pg.priv ? h0.replace(/^(#\/employee-time-tracks\/)[\s\S]*$/, '$1{id}') : h0).replace(/\d+/g, '{n}').slice(0, 80);
+      if (!pg.priv) page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
       // priv (שעות עובד): פקדים כמו בדף לקריאה בלבד – בלי טקסט (רק מילות פעולה של כפתורים), בלי אפשרויות בחירה – כדי ששמות עובדים לא ייכנסו
       page.controls = pg.priv ? await inIso(tab, () => self.CxSel.controls(document, 400, { noText: true, btn: true })) : await inIso(tab, () => self.CxSel.controls(document, 400));
       rep.pages.push(page);

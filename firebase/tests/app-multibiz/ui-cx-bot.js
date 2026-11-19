@@ -65,10 +65,16 @@ async function scenario(browser, www, sa, shots) {
   check(P + '3ד "עדכון המחשב" (תוסף ישן): גרסה מותקנת, מצב "נכשל", כפתור הבדיקה כבוי + "צריך גרסה 0.1.10"; 10 דקות; להריץ שוב install-auto-update.cmd; מגע ≥44, RTL', /גרסה מותקנת\s*0\.1\.0/.test(v.text) && /נכשל/.test(v.text) && await page.evaluate(() => document.querySelector('#dlg [data-a=cxBotUpdGo]').disabled) && /צריך גרסה 0\.1\.10/.test(v.text) && /10 דקות/.test(v.text) && /install-auto-update\.cmd/.test(v.text) && /פעם אחת/.test(v.text) && fine(v), { small: v.small, t: v.text.slice(0, 600) });
   await page.evaluate(() => closeDlg()); await H.settle(page, 300);
   // תוסף 0.1.10, עדכון תקין, מכירות היום עודכנו עד 13:00
-  st.dev = Object.assign({}, st.dev, { ver: '0.1.10', upd: { at: T0 + 3600e3, ok: true, ver: '0.1.10', err: '', fails: 0, rx: T0 } }); st.tp = { d: '2026-11-18', hm: '13:00', at: T0, n: 40 };
+  const tday = await page.evaluate(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
+  const yd = new Date(Date.parse(tday + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+  st.dev = Object.assign({}, st.dev, { ver: '0.1.10', upd: { at: T0 + 3600e3, ok: true, ver: '0.1.10', err: '', fails: 0, rx: T0 } }); st.tp = { d: yd, hm: '23:00', at: T0, n: 40 };
   await page.evaluate(() => { cxBotReset(); rerender(); }); await H.settle(page, 700);
   v = await q();
-  check(P + '3ה שורת "מכירות היום": עודכנו עד 13:00 – חלקי', /מכירות היום \(18\/11\) עודכנו מהמחשב עד השעה 13:00 – חלקי/.test(v.text), v.text.slice(0, 800));
+  check(P + '3ה0 עדכון "מכירות היום" של אתמול – לא מוצג', !/מכירות היום \(/.test(v.text), v.text.slice(0, 300));
+  st.tp = { d: tday, hm: '13:00', at: T0, n: 40 };
+  await page.evaluate(() => { cxBotReset(); rerender(); }); await H.settle(page, 700);
+  v = await q();
+  check(P + '3ה שורת "מכירות היום": עודכנו עד 13:00 – חלקי', new RegExp('מכירות היום \\(' + tday.slice(8) + '\\/' + tday.slice(5, 7) + '\\) עודכנו מהמחשב עד השעה 13:00 – חלקי').test(v.text), v.text.slice(0, 800));
   await page.click('[data-a=cxBotUpd]'); await H.settle(page, 500);
   v = await q();
   check(P + '3ו חלון "עדכון המחשב": גרסה 0.1.10, מצב תקין, כפתור פעיל', /גרסה מותקנת\s*0\.1\.10/.test(v.text) && /מצב\s*תקין/.test(v.text) && await page.evaluate(() => !document.querySelector('#dlg [data-a=cxBotUpdGo]').disabled) && fine(v), { small: v.small, t: v.text.slice(0, 300) });

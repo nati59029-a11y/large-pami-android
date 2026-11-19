@@ -300,7 +300,8 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const eh = rep.pages[4];
   assert.equal(eh.ok, true, JSON.stringify(eh.probe));
   assert.deepEqual(eh.probe.map((x) => [x.op, x.found, x.done]), [['nav', true, true], ['waitFor', true, true], ['click', true, true], ['click', true, true], ['waitFor', true, true], ['click', true, true]]);
-  assert.equal(eh.hash, '#/employee-time-tracks/{n}');
+  assert.equal(eh.hash, '#/employee-time-tracks/{id}', 'מזהה העובד מוחלף כולו');
+  assert.equal(eh.title, undefined, 'בדף priv – בלי כותרת הדף');
   assert.ok(eh.controls.every((c) => c.options === undefined && c.aria === undefined && c.placeholder === undefined), JSON.stringify(eh.controls));
   assert.ok(eh.controls.some((c) => c.text === 'יצוא לאקסל') && eh.controls.some((c) => c.id === 'ttAdd'), 'פקדי דף השעות נאספו (בלי טקסט חופשי)');
   const bo0 = caspitPage();
@@ -649,14 +650,22 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(await tt(D.zonedToUtc('2026-11-18', '06:30', TZ)), null);
   assert.equal(await tt(D.zonedToUtc('2026-11-21', '12:00', TZ)), null);
   assert.equal(await tt(D.zonedToUtc('2026-11-20', '15:00', TZ)), null);
-  // ריצה אחרת באמצע (ממתינה לניסיון חוזר) – לא
-  const saved = await sw.evaluate(async () => (await chrome.storage.local.get('run')).run);
-  await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ run: Object.assign({}, run, { st: 'wait', retryAt: Date.now() + 600e3, touchedAt: Date.now() }) }); });
-  assert.equal(await tt(W + 2 * 3600e3), null);
-  await sw.evaluate(async (x) => chrome.storage.local.set({ run: x }), saved);
+  // ריצה פעילה עכשיו – לא; סנכרון לילי שממתין לניסיון חוזר / שעוד לא הצליח – לא עוצר
+  const saved = await sw.evaluate(async () => (await chrome.storage.local.get(['run', 'st'])));
+  await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ run: Object.assign({}, run, { st: 'run', touchedAt: Date.now() }) }); });
+  assert.equal(await tt(W + 2 * 3600e3), null, 'ריצה פעילה');
+  await sw.evaluate(async () => { const { run, st } = await chrome.storage.local.get(['run', 'st']); await chrome.storage.local.set({ run: Object.assign({}, run, { st: 'wait', retryAt: Date.now() + 600e3, touchedAt: Date.now() }), st: Object.assign({}, st, { lastOkDay: '2000-01-01' }) }); });
+  assert.equal((await tt(W + 2 * 3600e3)).st, 'ok', 'סנכרון לילי ממתין / לא הצליח – מכירות היום רצות בכל זאת');
+  await sw.evaluate(async (x) => chrome.storage.local.set(x), saved);
+  // השרת דוחה today-off (שעון) → השעה לא נלקחת
+  srv.todayOff = true;
+  const off = await tt(W + 3 * 3600e3);
+  assert.equal(off.code, 'today-off'); assert.equal(off.slot, null);
+  srv.todayOff = false;
+  assert.equal((await tt(W + 3.1 * 3600e3)).st, 'ok', 'אותה שעה – ניסיון חוזר מותר');
   // שרת שלא מכיר partial (bad-field) → נכשל בשקט, ומפסיקים עד שהשרת יודיע אחרת
   srv.noPartial = true;
-  const f = await tt(W + 3 * 3600e3);
+  const f = await tt(W + 4 * 3600e3);
   assert.equal(f.st, 'fail'); assert.equal(f.code, 'bad-field');
   assert.equal((await store()).caps.today, false);
   assert.equal(cnt().report, c0.report, 'בלי דיווח לשרת');

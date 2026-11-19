@@ -201,6 +201,10 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   const po = await q(); const sc2 = calls.filter((x) => x.n === 'cxSales').slice(-2);
   check('31 שרת ישן (bad-field על pt): בקשה חוזרת בלי pt, המסך עובד ובלי יום חלקי', sc2.length === 2 && sc2[0].d.pt === true && sc2[1].d.pt === undefined && !/חלקי – עד השעה/.test(po.text) && /התאמה לסגירת קופה/.test(po.text), { sc2: sc2.map((x) => x.d), t: po.text.slice(0, 300) });
   noPt = false;
+  // הטעינה הבאה של המסך מנסה שוב עם pt (השרת עודכן בינתיים)
+  await page.click('[data-a=cxYPer][data-k=custom]'); await H.settle(page, 800);
+  const pa = await q(); const sc3 = calls.filter((x) => x.n === 'cxSales').pop();
+  check('32 אחרי שרת ישן – הטעינה הבאה מנסה שוב pt:true ומציגה את היום החלקי', sc3 && sc3.d.pt === true && /חלקי – עד השעה 13:00/.test(pa.text), { d: sc3 && sc3.d });
   check('23 בלי שגיאות JavaScript', page.__errors.length === 0, page.__errors.slice(0, 3));
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

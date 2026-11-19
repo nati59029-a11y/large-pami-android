@@ -600,6 +600,11 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     // שעון מחשב שמקדים – "עד השעה" לא בעתיד
     assert.equal((await part({ day: DAY, hm: '12:30', lines: L2 }, at(DAY, '12:01'))).code, 200);
     assert.equal((await PD('6200_20261202').get()).get('pt.hm'), '12:01');
+    // מגבלת קצב: העלאה חלקית אחת ל-20 דקות לעסק
+    const rr = await part({ day: DAY, hm: '12:10', lines: L1 }, at(DAY, '12:10'));
+    assert.equal(rr.code, 429); assert.equal(rr.body.reason, 'rate');
+    assert.equal((await PD('6200_20261202').get()).get('pt.hm'), '12:01', 'לא נשמר');
+    assert.equal((await part({ day: DAY, hm: '12:22', lines: L2 }, at(DAY, '12:22'))).code, 200, 'אחרי 20 דקות – מותר');
   });
 
   it('upload חלקי נדחה: לא היום, לפני 07:00, שישי מ-14:00 / שבת, כמה חלקים, שורות מיום אחר, שעה / שדה לא תקינים', async () => {
@@ -607,10 +612,16 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     const t = at(DAY, '15:00');
     assert.equal((await part({ day: BOT.addDays(DAY, -1), hm: '15:00', lines: lines(BOT.addDays(DAY, -1), [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, t)).body.reason, 'bad-day');
     assert.equal((await part({ day: DAY, hm: '06:30', lines: L }, at(DAY, '06:30'))).body.reason, 'today-off');
+    assert.equal((await part({ day: DAY, hm: '06:57', lines: L }, at(DAY, '06:57'))).body.reason, 'today-off');
+    // סובלנות שעון: 2 דקות לפני תחילת החלון – מתקבל ונשמר (השעה – של השרת)
+    assert.equal((await part({ day: DAY, hm: '07:00', lines: L }, at(DAY, '06:58'))).code, 200);
+    assert.equal((await PD('6200_20261202').get()).get('pt.hm'), '06:58');
     const FRI = '2026-12-04', SAT = '2026-12-05';
     assert.equal((await part({ day: FRI, hm: '15:00', lines: lines(FRI, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(FRI, '15:00'))).body.reason, 'today-off');
     assert.equal((await part({ day: FRI, hm: '13:00', lines: lines(FRI, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(FRI, '13:00'))).code, 200, 'שישי לפני 14:00 – מותר');
     assert.equal((await part({ day: SAT, hm: '12:00', lines: lines(SAT, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(SAT, '12:00'))).body.reason, 'today-off');
+    assert.equal((await part({ day: SAT, hm: '21:00', lines: lines(SAT, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(SAT, '20:57'))).body.reason, 'today-off');
+    assert.equal((await part({ day: SAT, hm: '21:00', lines: lines(SAT, [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, at(SAT, '20:58'))).code, 200, 'מוצאי שבת 20:58 – סובלנות שעון');
     assert.equal((await part({ day: DAY, hm: '15:00', lines: L, parts: 2 }, t)).body.reason, 'bad-part');
     assert.equal((await part({ day: DAY, hm: '15:00', lines: lines(BOT.addDays(DAY, -1), [['כוס נייר', '400001', '9201', 'סניף א', '6200', '', '0.0', '24']]) }, t)).body.reason, 'day-mismatch');
     assert.equal((await part({ day: DAY, hm: '25:00', lines: L }, t)).body.reason, 'bad-hm');
@@ -662,7 +673,7 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     assert.equal((await dev()).ureq.res.st, 'reload', 'תשובה שנייה לאותה בקשה – לא נרשמת');
     assert.equal((await okb(TOK, { op: 'poll', ver: '0.1.10' })).uq, undefined, 'הבקשה טופלה');
     const i = await ok('cxBotTok', MGR, { op: 'info' });
-    assert.equal(i.ureq.id, r.req.id); assert.equal(i.ureq.res.st, 'reload'); assert.equal(i.updVer, BOT.UPD_VER); assert.equal(i.tp.d, '2026-12-04', 'מכירות היום האחרונות (שישי 13:00)');
+    assert.equal(i.ureq.id, r.req.id); assert.equal(i.ureq.res.st, 'reload'); assert.equal(i.updVer, BOT.UPD_VER); assert.equal(i.tp, null, 'העדכון האחרון אינו של היום – לא מוחזר');
     assert.notEqual((await ok('cxBotTok', MGR, { op: 'upd' })).req.id, r.req.id, 'אחרי תשובה – בקשה חדשה מותרת');
     // מצב העדכון האוטומטי ב-poll: נשמר מסונן, ולא נכתב שוב כשלא השתנה
     const U1 = { at: Date.now() - 60e3, ok: true, ver: '0.1.10', err: '', fails: 0 };

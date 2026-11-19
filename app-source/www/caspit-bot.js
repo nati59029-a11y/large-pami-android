@@ -34,6 +34,8 @@ function nowSt(i){const q=i.req;if(!q)return'';const sn=(i.now||Date.now())+(Dat
 function nowTick(on){if(!on||B.tm)return;B.tm=setTimeout(()=>{B.tm=0;if(cur().v==='cxSync'&&!document.hidden)load()},20000)}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&B.i&&/^(wait|run|retry)$/.test(nowSt(B.i))&&cur().v==='cxSync')load()});
 const big='style="min-height:48px"';
+/* היום לפי שעון ישראל (שורת "מכירות היום" – רק כשהעדכון האחרון הוא של היום) */
+const ilToday=()=>{try{return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}catch(e){return new Date().toISOString().slice(0,10)}};
 
 /* הכרטיס – נקרא מ-V.cxSync (caspit-sync.js) */
 window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
@@ -60,7 +62,7 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
     else if(u.ver&&verLt(i.dev.ver,u.ver))h+=`<p class="note" role="alert">⚠ גרסה ${esc(u.ver)} של התוסף הורדה למחשב וממתינה לטעינה. אם זה נמשך – לסגור ולפתוח את Chrome במחשב.</p>`;
     else h+=`<p class="note">עדכון אוטומטי של התוסף: תקין (נבדק ${dt(u.at)}).</p>`;}
    h+=`<button class="btn g w" ${big} data-a="cxBotUpd" style="min-height:48px;margin-bottom:8px">עדכון המחשב</button>`;
-   if(i.tp&&i.tp.d)h+=`<p class="note">מכירות היום (${dd(i.tp.d)}) עודכנו מהמחשב עד השעה ${esc(String(i.tp.hm||''))} – חלקי, הסכום הסופי נקלט בלילה.</p>`;
+   if(i.tp&&i.tp.d&&i.tp.d===ilToday())h+=`<p class="note">מכירות היום (${dd(i.tp.d)}) עודכנו מהמחשב עד השעה ${esc(String(i.tp.hm||''))} – חלקי, הסכום הסופי נקלט בלילה.</p>`;
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;

@@ -119,9 +119,10 @@ const addD=(d,n)=>new Date(Date.parse(d+'T12:00:00Z')+n*864e5).toISOString().sli
 function range(p){const t=ymd(new Date());if(p==='yday'){const y=addD(t,-1);return[y,y]}if(p==='week')return[addD(t,-6),t];if(p==='month')return[t.slice(0,8)+'01',t];if(p==='custom'&&Y.from&&Y.to)return[Y.from,Y.to];return[t,t]}
 const PER=[['today','היום'],['yday','אתמול'],['week','שבוע'],['month','חודש'],['custom','טווח']];
 /* תיקון סבב 1 (הערה 5): השרת מחזיר עד 92 ימים בבקשה, בצורה קומפקטית (CaspitCore.unpackDays); טווח ארוך – כמה בקשות */
-/* מכירות היום (19.11): pt:true → גם תמונת מצב חלקית מהרובוט (x.pt = { at, hm }), רק ליום שעוד אין לו סיכום סופי. שרת ישן (bad-field) → בלי */
+/* מכירות היום (19.11): pt:true → גם תמונת מצב חלקית מהרובוט (x.pt = { at, hm }), רק ליום שעוד אין לו סיכום סופי.
+   שרת ישן (bad-field) → בלי pt עד סוף הטעינה הזו; בטעינה הבאה של המסך מנסים שוב (השרת אולי עודכן בינתיים) */
 let ptOk=true;
-async function yLoad(){const [f,t]=range(Y.per);Y.load=1;Y.err='';
+async function yLoad(){const [f,t]=range(Y.per);Y.load=1;Y.err='';ptOk=true;
  try{let r=null,days=[];for(const [a,b] of C.chunks(f,t,92)){let x;if(ptOk){try{x=await fnCall('cxSales',{from:a,to:b,pt:true})}catch(e){if(e&&e.reason==='bad-field')ptOk=false;else throw e}}if(!x)x=await fnCall('cxSales',{from:a,to:b});days=days.concat(C.unpackDays(x));r=r||x}
   Y.D=Object.assign(r,{days,f,t});Y.T=C.aggDays(days);Y.U=null}catch(e){Y.err=e.message||'הטעינה נכשלה';Y.D=null}
  Y.load=0;if(cur().v==='cxSales')rerender()}
