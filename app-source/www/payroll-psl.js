@@ -10,7 +10,8 @@
      תלוש חדש לאותו עובד וחודש מחליף את הקודם; מחיקה/החלפה חסומות כשרשומת ec שויכה לחיוב אשראי (t.ecl) או לבנק (stl).
      חיוב אשראי ← עלויות מעביד: בטופס חיוב אשראי חדש (אותה רשימה של "תשלום עבור חשבונית") נוספות קבוצות של עלויות מעביד לפי חודש/רכיב.
        בחירה ← החיוב מסומן x (לא נספר פעמיים, כמו בחשבונית) ונשמרת בו רשימת ה-ec (ecl). שיוך מחושב מ-ecl – מחיקת החיוב משחררת.
-     פרטיות: רשומות ec לא נכנסות למראה לעובדים (wv); תוכן תלושים לא נכתב ליומן.
+     פרטיות: רשומות ec לא נכנסות לרשימה לפי עובד במראה לעובדים (sal_), רק לסכומים (rps_, bal_); תוכן תלושים לא נכתב ליומן.
+     רשומת ec לא נמחקת ולא נערכת כתנועה רגילה (רק דרך התלוש); כרטיס עובד עם תלושים/שעות/בונוסים לא נמחק (pslSubN).
    משתמש ב: S, V, ACT, FRM, CHG, isA, isW, subById, cat, save, dlg, closeDlg, ask, toast, go, rerender, esc, pNum, uid, fput, fget, fdelK,
      pdfLoad, mkScanPdf, viewImg, ils, mfmt, NOWM, isNat, u8b64, du2b, rdU, ldImg, s_, detHtml, readTx, wvWant. */
 (function(root){
@@ -151,20 +152,23 @@ async function intake(f,mode,sub){
   if(f.size>40*1048576)return toast('הקובץ גדול מדי');
   const def=prevMon(),Q=[];
   if(isImg){if(mode==='all')return toast('קובץ מרוכז – רק PDF');const du=await imgDU(f);
-    Q.push({sub,mon:def,du,pv:du,src:'img',v:{gross:null,net:null,ec:[]},why:['תמונה – בלי קריאה אוטומטית. הזינו את הנתונים לפי התמונה.']})}
+    Q.push({sub,mon:def,du,pv:du,src:'img',v:{gross:null,net:null,ec:[]},why:['תמונה – בלי קריאה אוטומטית. הזינו את הנתונים לפי התמונה.'],cf:1})}
   else{const du0=await rdU(f);let doc;try{doc=await pdfOpen(du0)}catch(e){return toast('לא הצלחתי לפתוח את קובץ ה-PDF')}
     try{const n=doc.numPages;if(n>MAXPG)return toast('עד '+MAXPG+' עמודים בקובץ');
       const T=[];for(let p=1;p<=n;p++){let t='';try{t=await pageText(doc,p)}catch(e){}T.push(t)}
       const E=emps().map(s=>({id:s.id,name:s.name,tz:s.pay&&s.pay.tz})),G=groupPages(T,E),ids=[...new Set(G.filter(g=>g.sub).map(g=>g.sub))];
       const noTxt=!T.some(t=>t.trim());
-      if(mode==='one'&&ids.length<=1){const all=T.join('\n'),v=parseSlip(all),why=v.warn.slice();
+      if(mode==='one'&&n===1){const all=T.join('\n'),v=parseSlip(all),why=v.warn.slice();
         let s0=sub;if(ids.length===1&&ids[0]!==sub){const a=empOf(sub),b=empOf(ids[0]);why.unshift('הקובץ הועלה מהכרטיס של '+(a?a.name:'—')+', אבל בתלוש זוהה '+(b?b.name:'—')+'. בדקו את העובד.');s0=ids[0]}
         if(noTxt)why.unshift('אין טקסט בקובץ (כנראה סרוק) – הזינו ידנית.');else if(!v.found)why.unshift('לא נמצאו נתונים בתלוש – הזינו ידנית.');
+        /* עמוד אחד שלא זוהה בוודאות לעובד – נשמר רק באישור מפורש (סימון בחלון) */const cf=!ids.length;if(cf)why.unshift('בתלוש לא זוהה שם העובד או ת״ז שלו. ודאו שזה התלוש של העובד שנבחר וסמנו אישור.');
         let o;if(duBytes(du0)<=MAXB)o={du:du0,pv:await pageImg(doc,1,700,.8),pgs:null};else o=await pagesPdf(doc,T.map((_,i)=>i+1));
-        Q.push({sub:s0,mon:findMon(all)||def,du:o.du,pv:o.pv,pgs:o.pgs,src:'pdf',v,why})}
-      else{if(mode==='one')toast('בקובץ יש תלושים של כמה עובדים – מפצלים לפי עמוד');
+        Q.push({sub:s0,mon:findMon(all)||def,du:o.du,pv:o.pv,pgs:o.pgs,src:'pdf',v,why,cf})}
+      else{/* העלאה מכרטיס עובד של קובץ עם כמה עמודים: תמיד פיצול לפי עמוד. עמוד שלא זוהה לעובד – לא נשמר אוטומטית (שיוך ידני או דילוג), והערכים נקראים רק מהעמודים של כל קבוצה */
+        if(mode==='one')toast(ids.length>1?'בקובץ יש תלושים של כמה עובדים – מפצלים לפי עמוד':'בקובץ כמה עמודים – כל עמוד נבדק בנפרד');
         for(const g of G){const o=await pagesPdf(doc,g.pages.map(i=>i+1)),v=parseSlip(g.text),why=v.warn.slice(),pl=g.pages.length>1?'עמודים '+(g.pages[0]+1)+'–'+(g.pages[g.pages.length-1]+1):'עמוד '+(g.pages[0]+1);
-          if(!g.sub)why.unshift(pl+': לא זוהה עובד'+(noTxt?' (אין טקסט בקובץ)':'')+'. בחרו עובד או דלגו.');else if(!v.found)why.unshift(pl+': לא נמצאו נתונים – הזינו ידנית.');
+          if(!g.sub)why.unshift(pl+': לא זוהה עובד'+(noTxt?' (אין טקסט בקובץ)':'')+'. בחרו עובד או דלגו.'+(mode==='one'?' ייתכן שזה עמוד של עובד אחר – אל תשייכו אותו בלי לבדוק.':''));
+          else if(mode==='one'&&sub&&g.sub!==sub){const a=empOf(sub),b=empOf(g.sub);why.unshift(pl+': זוהה '+(b?b.name:'—')+' ולא '+(a?a.name:'—')+'. העמוד יישמר רק אצל העובד שנבחר כאן.')}if(g.sub&&!v.found)why.unshift(pl+': לא נמצאו נתונים – הזינו ידנית.');
           Q.push({sub:g.sub,mon:g.mon||def,du:o.du,pv:o.pv,pgs:o.pgs,src:'pdfc',v,why,pl,auto:!!g.sub})}}}
     finally{try{doc.destroy()}catch(e){}}}
   PS.q=Q;PS.i=0;PS.batch={};PS.saved=0;showPiece()}
@@ -185,6 +189,7 @@ ${(it.why||[]).map(w=>`<div class="note"><span class="tag t1">לבדיקה</span
 ${inp('חודש התלוש','mon',it.mon,'type="month"')}<div ${G2}>${inp('ברוטו (₪)','gross',it.v.gross,'inputmode="decimal" autocomplete="off"')}${inp('נטו לתשלום (₪)','net',it.v.net,'inputmode="decimal" autocomplete="off"')}</div>
 <div class="sec"><h3>עלויות מעביד</h3></div><div ${G2}>${EC.map(([k,n])=>inp(n+' (₪)','ec_'+k,ecv(k),'inputmode="decimal" autocomplete="off"')).join('')}</div>
 <p class="note">שדה ריק = לא נרשם. כל עלות מעביד נרשמת כהוצאה של העובד לאותו חודש (נספרת ברווח, לא ב"שולם לעובד").${old?' <b>לעובד כבר יש תלוש לחודש הזה – הוא יוחלף.</b>':''}${it.pgs&&!it.auto?' אם בוחרים עובד וחודש שכבר אושרו בהעלאה הזו – העמוד מצורף לתלוש שלו (שדה ריק = הערך שכבר אושר).':''}</p>
+${it.cf?`<label class="cb" style="min-height:48px;display:flex;align-items:center;gap:8px"><input type="checkbox" name="cf"> בדקתי: זה התלוש של העובד שנבחר</label>`:''}
 <div class="row"><button type="submit" class="btn grow" ${big}>אישור ושמירה</button>${N>1?`<button type="button" class="btn g grow" ${big} data-a="pslSkip">דילוג</button>`:''}<button type="button" class="btn g grow" ${big} data-a="pslCancel">${N>1?'הפסקה':'ביטול'}</button></div></form>`)}
 ACT.pslPv=()=>{const it=PS.q[PS.i];if(it&&typeof viewImg==='function')viewImg(null,'Payslip',it.du)};
 ACT.pslSkip=()=>{if(!PS.q[PS.i])return;PS.i++;showPiece()};
@@ -196,6 +201,7 @@ FRM.pslOkF=async f=>{if(!on()||f.dataset.busy)return;const it=PS.q[PS.i];if(!it)
   const kb=s.id+'|'+mon,pb=PS.batch[kb];let du=it.du,pgs=it.pgs;
   if(pb&&pb.pgs&&it.pgs){/* צירוף לתלוש שנשמר באותה העלאה */v={gross:v.gross!==null?v.gross:pb.v.gross,net:v.net!==null?v.net:pb.v.net,ec:pb.v.ec.filter(e=>!v.ec.some(x=>x.k===e.k)).concat(v.ec)}}
   const er=checkVals(v);if(er.length)return toast(er[0]);
+  if(it.cf&&!(f.elements.cf&&f.elements.cf.checked))return toast('העובד לא זוהה בתלוש – סמנו שבדקתם שזה התלוש של העובד שנבחר');
   const old=AR('psl').filter(p=>p&&p.sub===s.id&&p.mon===mon);
   if(old.some(pslLock))return toast('לתלוש הקיים של '+s.name+' ל'+mfmt(mon)+' יש עלויות מעביד ששויכו לחיוב אשראי או בנק. בטלו קודם את השיוך.');
   f.dataset.busy='1';
@@ -274,6 +280,8 @@ if(typeof readTx==='function'){const o=readTx;readTx=function(f,c,sub,t0){
   if(!(f&&typeof f.link==='string'&&f.link.startsWith('ec:')&&c&&c.beh==='cc'&&!t0))return o.apply(this,arguments);
   const L=ecSel(f.link),r=o.call(this,Object.assign({},f,{link:''}),c,sub,t0);if(!r||r.errs)return r;
   if(!L.length)return{errs:['לא נמצאו עלויות מעביד פתוחות לשיוך']};const sm=r2(L.reduce((a,t)=>a+(+t.amt||0),0));
+  /* חיוב קטן מהעלויות שנבחרו – לא נועלים את כולן (היתרה ששולמה בדרך אחרת הייתה נספרת פעמיים) */
+  if(r.t.amt<sm-0.004)return{errs:['החיוב ('+ils(r.t.amt)+') קטן מסכום העלויות שנבחרו ('+ils(sm)+') – בחר רכיבים לפי הסכום']};
   r.t.x=1;r.t.ecl=L.map(t=>t.id);PEND=null;
   /* חיוב גדול מהעלויות (ניכויי העובד שמועברים לרשויות): פיצול – החלק המשויך (x, ecl) לא נספר, והיתרה נרשמת כחיוב רגיל באותה קטגוריה ונספרת.
      שתי הרשומות מקושרות ב-ecg: מחיקת אחת מוחקת את שתיהן. היתרה נוספת רק כשהחיוב באמת נשמר (FRM.addsave), כי readTx רץ שוב אחרי שאלת כפילות */
@@ -285,10 +293,19 @@ let PEND=null;
 if(FRM&&typeof FRM.addsave==='function'){const o=FRM.addsave;FRM.addsave=function(){const r=o.apply(this,arguments);
   try{const P=PEND;if(P&&S.tx.some(t=>t&&t.id===P.id)&&!S.tx.some(t=>t&&t.id===P.rest.id)){PEND=null;S.tx.push(P.rest);save();rerender();
     toast('נשמר חיוב '+ils(P.tot)+': '+ils(P.tot-P.rest.amt)+' משויך לעלויות מעביד, '+ils(P.rest.amt)+' נספר כהוצאה')}}catch(e){}return r}}
+/* רשומת עלות מעביד (ec) נוצרת ונמחקת רק עם התלוש שלה – לא נמחקת ולא נערכת כתנועה רגילה */
+const ecMsg='זו עלות מעביד מתלוש שכר. כדי למחוק או לתקן אותה – מוחקים או מחליפים את התלוש במסך "תלושים" שבכרטיס העובד.';
+const isEc=el=>{try{const t=S.tx.find(x=>x&&x.id===(el&&el.dataset&&el.dataset.id));return !!(t&&t.ec)}catch(e){return false}};
+if(typeof ACT.txEdit==='function'){const o=ACT.txEdit;ACT.txEdit=function(el){if(isEc(el)){try{closeDlg()}catch(e){}return toast(ecMsg)}return o.apply(this,arguments)}}
+/* כרטיס עובד עם תלושים / שעות / בונוסים – לא נמחק (אחרת נשארים יתומים, והקובץ ממשיך להיכנס לגיבוי). index.html (subMenu) מסתיר את כפתור המחיקה לפי זה */
+window.pslSubN=id=>{try{return ['psl','wh','bon'].reduce((a,k)=>a+(Array.isArray(S[k])?S[k].filter(x=>x&&x.sub===id).length:0),0)}catch(e){return 0}};
+if(typeof ACT.subDel==='function'){const o=ACT.subDel;ACT.subDel=function(el){if(window.pslSubN(el&&el.dataset&&el.dataset.id))return toast('לכרטיס יש תלושים, שעות או בונוסים – אי אפשר למחוק אותו. אפשר להסתיר.');return o.apply(this,arguments)}}
 /* מחיקת חיוב מפוצל (החלק המשויך או היתרה) ← מוחקת גם את בן הזוג, כך שהשיוך משתחרר ולא נשארת יתרה יתומה */
-if(typeof ACT.txDel==='function'){const o=ACT.txDel;ACT.txDel=function(el){const t=S.tx.find(x=>x&&x.id===(el&&el.dataset&&el.dataset.id)),r=o.apply(this,arguments);
+if(typeof ACT.txDel==='function'){const o=ACT.txDel;ACT.txDel=function(el){if(isEc(el)){try{closeDlg()}catch(e){}return toast(ecMsg)}const t=S.tx.find(x=>x&&x.id===(el&&el.dataset&&el.dataset.id)),r=o.apply(this,arguments);
   try{const g=t&&t.ecg,f=typeof PENDING!=='undefined'?PENDING:null;if(g&&typeof f==='function')PENDING=function(){f();let n=0;for(let i=S.tx.length-1;i>=0;i--){if(S.tx[i]&&S.tx[i].ecg===g){S.tx.splice(i,1);n++}}if(n){save();rerender()}}}catch(e){}return r}}
-/* פרטיות: רשומות עלות מעביד לא נכנסות למראה לעובדים (wv) */
+/* פרטיות: רשומות עלות מעביד לא נכנסות לרשימה לפי עובד במראה לעובדים (sal_). בסכומים המצטברים (rps_, bal_) הן נשארות,
+   כדי שעובד עם הרשאת דוחות / מצב העסק יראה את אותן הוצאות כמו המנהל (סכום בלבד, בלי שם ובלי פירוט תלוש) */
 if(typeof wvWant==='function'){const o=wvWant;wvWant=function(){const T=S.tx;if(!Array.isArray(T)||!T.some(t=>t&&t.ec))return o.apply(this,arguments);
-  S.tx=T.filter(t=>!(t&&t.ec));try{return o.apply(this,arguments)}finally{S.tx=T}}}
+  const R=o.apply(this,arguments);let F;S.tx=T.filter(t=>!(t&&t.ec));try{F=o.apply(this,arguments)}finally{S.tx=T}
+  Object.keys(R).forEach(k=>{if(/^sal_/.test(k))R[k]=F[k]});return R}}
 })(typeof self!=='undefined'?self:this);

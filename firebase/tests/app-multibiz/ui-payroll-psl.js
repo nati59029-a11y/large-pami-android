@@ -16,6 +16,8 @@ const pageH = (color, lines) => `<section style="page-break-after:always;height:
 const DANA = (net) => pageH(RED, ['תלוש שכר לחודש אוקטובר 2026', 'שם העובד: דנה כהן', 'שכר בסיס 8,000.00', 'סה"כ ברוטו 9,250.50', 'ביטוח לאומי מעביד 420.75', 'פנסיה מעביד 601.28', 'פיצויים 555.03', 'נטו לתשלום ' + net]);
 const YOSSI = pageH(BLUE, ['תלוש שכר לחודש אוקטובר 2026', 'מספר זהות 023456789', 'סה"כ ברוטו 6,000.00', 'ביטוח לאומי מעביד 250.00', 'נטו לתשלום 5,100.00']);
 const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי עובד']);
+// תרחיש הבודק (סבב 1, ליקוי 1): בכרטיס "יוסי לוי", אבל בתלוש "יוסף לוי" – לא זוהה בוודאות
+const YOSEF = pageH(BLUE, ['תלוש שכר לחודש אוקטובר 2026', 'שם העובד: יוסף לוי', 'סה"כ ברוטו 5,000.00', 'נטו לתשלום 4,321.00']);
 
 (async () => {
   const A = process.argv.slice(2), www = A[0], out = A.length > 2 ? A[1] : null, shots = A.length > 2 ? A[2] : A[1];
@@ -73,12 +75,36 @@ const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי �
     const ms = await pg.evaluate(() => { const s = S.subs.find((x) => x.id === 'psA'); const r = PayCore.monthSum(s, '2026-10', { wh: S.wh, bon: S.bon, psl: S.psl, tx: S.tx.filter((t) => (cat(t.cat) || {}).beh === 'emp'), pmon }); return { due: r.due, paid: r.paid, left: r.left }; });
     check('2ז "שולם לעובד" לא כולל ec: לתשלום = נטו 7412.30, שולם 3000', ms.due === 741230 && ms.paid === 300000 && ms.left === 441230, ms);
     check('2ח ec נספרות כהוצאה (live, בלי x)', await pg.evaluate(() => live().filter((t) => t.ec && t.sub === 'psA').reduce((a, t) => a + t.amt, 0)) === 1677.06);
-    check('2ט ec לא נכנסות למראה לעובדים (wv)', await pg.evaluate(() => { const o = wvWant(); return !Object.values(o).some((j) => /420\.75|601\.28|555\.03/.test(j)) && S.tx.some((t) => t.ec); }));
+    check('2ט ec לא נכנסות למראה לעובדים (wv) כפריטים', await pg.evaluate(() => { const o = wvWant(); return !Object.values(o).some((j) => /420\.75|601\.28|555\.03|עלות מעביד/.test(j)) && S.tx.some((t) => t.ec); }));
+    // ליקוי 3: רק sal_ (רשימה לפי עובד) בלי ec; הסכומים rps_/bal_ כוללים אותן – כמו אצל המנהל
+    const wv = await pg.evaluate(() => { const o = wvWant(), m = '2026-10', inM = (t) => (t.date || '').slice(0, 7) === m, emp = (t) => (cat(t.cat) || {}).beh === 'emp', L = live();
+      const sal = JSON.parse(o['sal_' + m] || '[]'), bal = JSON.parse(o['bal_' + m] || '{}'), mgrE = Math.round(L.filter((t) => t.t === 'exp' && inM(t) && !ownOut(t)).reduce((a, t) => a + (+t.amt || 0), 0) * 100) / 100;
+      return { sal: sal.map((x) => x.a), rps: JSON.parse(o['rps_' + m]), mgrS: Math.round(L.filter((t) => t.t === 'exp' && inM(t) && emp(t)).reduce((a, t) => a + (+t.amt || 0), 0) * 100) / 100, bal: bal.e, mgrE }; });
+    check('2י wv: sal_ = רק התשלום לעובד (3000); rps_ ו-bal_ כוללים את עלויות המעביד (4677.06) = מה שהמנהל רואה', wv.sal.join() === '3000' && wv.rps === 4677.06 && wv.rps === wv.mgrS && wv.bal === wv.mgrE, wv);
+    // ליקוי 4: ec לא נמחקת ולא נערכת כתנועה רגילה; תנועת שכר רגילה – כרגיל
+    const ec0 = (await ecs('psA'))[0].id; await clearT(pg);
+    await pg.evaluate((id) => ACT.txDel({ dataset: { id } }), ec0); await sleep(200);
+    const delB = await pg.evaluate((id) => ({ has: S.tx.some((t) => t.id === id), ask: !!document.querySelector('#dlg[open] [data-a=yes]') }), ec0);
+    check('2כ מחיקת ec כתנועה ← חסומה עם הפניה למסך התלושים, בלי שאלת אישור', delB.has && !delB.ask && /מסך "תלושים"/.test(await toasts(pg)), [delB, await toasts(pg)]);
+    await clearT(pg); await pg.evaluate((id) => ACT.txEdit({ dataset: { id } }), ec0); await sleep(200);
+    check('2ל עריכת ec כתנועה ← חסומה (אין טופס עריכה)', await pg.evaluate(() => !document.querySelector('#dlg[open] form[data-f=tsave]')) && /מסך "תלושים"/.test(await toasts(pg)), await toasts(pg));
+    await pg.evaluate(() => ACT.txEdit({ dataset: { id: 'psPay1' } })); await sleep(200);
+    check('2מ עריכת תנועת שכר רגילה – נפתחת כרגיל', await pg.evaluate(() => !!document.querySelector('#dlg[open] form[data-f=tsave]')));
+    await closeD(pg);
+    // ליקוי 2: המזכירה – "שולם לעובד" (f.pay) ופעולות אחרונות (f.rec) בלי ec
+    const sf = await pg.evaluate(() => { if (typeof secFin !== 'function') return { skip: 1 }; const m = NOWM(), d = today(), s = S.subs.find((x) => x.id === 'psC');
+      S.tx.push({ id: 'sfP', t: 'exp', cat: s.cat, sub: 'psC', date: d, amt: 1000, plan: m, pays: [] }, { id: 'sfE', t: 'exp', cat: s.cat, sub: 'psC', date: d, amt: 777, plan: m, pays: [], ec: 1, eck: 'bl', psl: 'x', note: 'עלות מעביד: ביטוח לאומי מעביד' });
+      let f; try { f = secFin({ pay: true, rec: true }); } finally { S.tx = S.tx.filter((t) => !/^sf[PE]$/.test(t.id)); }
+      if (!f) return { nul: 1 }; const r = ((f.pay || {})[m] || []).find((x) => x[0] === 'רון אבן'); return { pay: r && r[1], rec: (f.rec || []).filter((x) => x[5] === 777).length, rec1: (f.rec || []).filter((x) => x[5] === 1000).length }; });
+    check('2נ מזכירה: "שולם לעובד" = 1000 בלי ec, ו-ec לא בפעולות האחרונות', sf.pay === 1000 && sf.rec === 0 && sf.rec1 === 1, sf);
 
     // 3. שיוך חיוב אשראי לעלויות מעביד
     const cc = await pg.evaluate(() => { const c = S.cats.find((k) => k.beh === 'cc'); const h = detHtml(c, null); return { id: c.id, all: h.includes('value="ec:2026-10:*"'), bl: h.includes('value="ec:2026-10:bl"'), inv: h.includes('name="link"') }; });
     check('3 טופס חיוב אשראי חדש: קבוצות עלויות מעביד בבחירת השיוך', cc.all && cc.bl && cc.inv, cc);
     const big = await pg.evaluate((cid) => { const n = S.tx.length; const r = readTx({ amt: '999', date: '2026-11-10', link: 'ec:2026-10:bl', note: '' }, cat(cid), null, null); return { e: r.errs || null, amt: r.t && r.t.amt, x: r.t && r.t.x, same: S.tx.length === n }; }, cc.id);
+    // ליקוי 5: חיוב קטן מסכום העלויות שנבחרו ← חסימה, כלום לא ננעל
+    const sm = await pg.evaluate((cid) => { const r = readTx({ amt: '1000', date: '2026-11-10', link: 'ec:2026-10:*', note: '' }, cat(cid), null, null); return { e: (r.errs || []).join(), open: detHtml(cat(cid), null).includes('value="ec:2026-10:*"'), lk: S.tx.some((t) => Array.isArray(t.ecl)) }; }, cc.id);
+    check('3-ליקוי5 חיוב 1000 מול עלויות 1677.06 ← חסימה עם הודעה, העלויות לא ננעלו', /קטן מסכום העלויות שנבחרו/.test(sm.e) && sm.open && !sm.lk, sm);
     check('3א חיוב גדול מהעלויות: readTx מחזיר את החלק המשויך (420.75, x) ולא מוסיף כלום לפני שמירה', !big.e && big.amt === 420.75 && big.x === 1 && big.same, big);
     const lk = await pg.evaluate((cid) => { const r = readTx({ amt: '420.75', date: '2026-11-10', link: 'ec:2026-10:bl', note: '' }, cat(cid), null, null); if (r.errs) return r; r.t.id = 'ccL1'; S.tx.push(r.t); save(); return { x: r.t.x, ecl: r.t.ecl }; }, cc.id);
     check('3ב חיוב משויך: x=1 (לא נספר פעמיים) + ecl', lk.x === 1 && Array.isArray(lk.ecl) && lk.ecl.length === 1, lk);
@@ -154,18 +180,20 @@ const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי �
     await pg.evaluate(() => go('pslList', 'psB')); await sleep(250);
     await pg.setInputFiles('#main input[data-c=pslFile][data-m=one]', { name: 'b.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
     await waitOk(); v = await vals();
-    check('6 תמונה: חלון ידני עם תצוגת התמונה, כל השדות ריקים, עובד = הכרטיס', v.img && v.sub === 'psB' && v.net === '' && v.gross === '' && v.ec_bl === '' && /תמונה/.test(v.notes), v);
+    check('6 תמונה: חלון ידני עם תצוגת התמונה, כל השדות ריקים, עובד = הכרטיס, סימון אישור', v.img && v.sub === 'psB' && v.net === '' && v.gross === '' && v.ec_bl === '' && /תמונה/.test(v.notes) && await pg.evaluate(() => !!document.querySelector('#dlg input[name=cf]')), v);
     await clearT(pg); await submit(); await sleep(200);
     check('6א בלי נטו ← לא נשמר (נטו חובה)', /נטו/.test(await toasts(pg)) && (await psl()).length === 3);
     await setF({ mon: '2026-09', gross: '5000', net: '6000' }); await clearT(pg); await submit(); await sleep(200);
     check('6ב נטו גדול מברוטו ← לא נשמר', /גדול מהברוטו/.test(await toasts(pg)) && (await psl()).length === 3);
-    await setF({ net: '4000', ec_bl: '100' }); await submit(); await sleep(500);
+    await setF({ net: '4000', ec_bl: '100' }); await clearT(pg); await submit(); await sleep(200);
+    check('6ב2 בלי סימון "בדקתי" ← לא נשמר', /סמנו שבדקתם/.test(await toasts(pg)) && (await psl()).length === 3, await toasts(pg));
+    await pg.check('#dlg input[name=cf]'); await submit(); await sleep(500);
     P = await psl(); const pI = P.find((p) => p.sub === 'psB' && p.mon === '2026-09');
     check('6ג תמונה נשמרה (jpeg, עד 3MB) עם ec', pI && pI.src === 'img' && await pg.evaluate(async (f) => { const d = await fget(f); return /^data:image\/jpeg;base64,/.test(d) && d.length * 3 / 4 <= 3 * 1048576; }, pI.f) && (await ecs('psB')).length === 2, pI);
     // PDF בלי שום טקסט שמזוהה ← ידני
     await pg.setInputFiles('#main input[data-c=pslFile][data-m=one]', { name: 'x.pdf', mimeType: 'application/pdf', buffer: await mkPdf([pageH(BLUE, ['מסמך בלי נתונים'])]) });
     await waitOk(); v = await vals();
-    check('6ד PDF שהקריאה בו נכשלה ← שדות ריקים והזנה ידנית', v.sub === 'psB' && v.net === '' && v.gross === '' && /הזינו ידנית/.test(v.notes), v);
+    check('6ד PDF שהקריאה בו נכשלה ← שדות ריקים והזנה ידנית, נדרש סימון אישור', v.sub === 'psB' && v.net === '' && v.gross === '' && /הזינו ידנית/.test(v.notes) && await pg.evaluate(() => !!document.querySelector('#dlg input[name=cf]')), v);
     await pg.click('#dlg [data-a=pslCancel]'); await sleep(250);
     check('6ה ביטול – לא נשמר כלום', (await psl()).length === 4);
 
@@ -219,6 +247,34 @@ const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי �
     check('9ו ת"ז לא תקינה בטופס ← לא נשמר', /5–9/.test(await toasts(pg)) && await pg.evaluate(() => S.subs.find((s) => s.id === 'psC').pay.tz === '123456782'));
     await pg.fill('#main form[data-f=payCfgF] input[name=tz]', '0-23456789'); await pg.click('#main form[data-f=payCfgF] button[type=submit]'); await sleep(200);
     check('9ז ת"ז מהטופס נשמרת (בלי מקפים), שאר ההגדרות נשמרות', await pg.evaluate(() => { const p = S.subs.find((s) => s.id === 'psC').pay; return p.tz === '023456789' && p.rate === 40 && p.slip === true; }));
+    // ליקוי 1 (תרחיש הבודק): כרטיס "יוסי לוי", קובץ של 2 עמודים – דנה כהן + "יוסף לוי" ← פיצול; שום עמוד לא נשמר אוטומטית אצל יוסי
+    await pg.evaluate(() => go('pslList', 'psB')); await sleep(250);
+    const n0 = (await psl()).length, e0b = (await ecs()).length;
+    await pg.setInputFiles('#main input[data-c=pslFile][data-m=one]', { name: 'two.pdf', mimeType: 'application/pdf', buffer: await mkPdf([DANA('7,500.00'), YOSEF]) });
+    t = await waitOk('1 מתוך 2'); v = await vals();
+    check('12 כרטיס יוסי, 2 עמודים ← פיצול: עמוד 1 מזוהה לדנה (לא ליוסי) עם אזהרה', !!t && v.sub === 'psA' && +v.net === 7500 && /זוהה דנה כהן ולא יוסי לוי/.test(v.notes), [t, v]);
+    await pg.click('#dlg [data-a=pslSkip]'); t = await waitOk('2 מתוך 2'); v = await vals();
+    check('12א עמוד "יוסף לוי": לא משויך (צריך לבחור עובד), הנטו רק מהעמוד שלו (4321), אזהרה', !!t && v.sub === '' && +v.net === 4321 && /לא זוהה עובד/.test(v.notes) && /עובד אחר/.test(v.notes), [t, v]);
+    await clearT(pg); await submit(); await sleep(250);
+    check('12ב אישור בלי בחירת עובד ← לא נשמר', /בחרו עובד/.test(await toasts(pg)) && (await psl()).length === n0);
+    await pg.click('#dlg [data-a=pslSkip]'); await sleep(400);
+    check('12ג אחרי דילוג: לא נשמר שום תלוש ושום עלות מעביד', (await psl()).length === n0 && (await ecs()).length === e0b && !(await psl()).some((p) => p.sub === 'psB' && p.net === 7500));
+    // עמוד אחד שלא זוהה ← אישור ידני מפורש
+    await pg.setInputFiles('#main input[data-c=pslFile][data-m=one]', { name: 'yosef.pdf', mimeType: 'application/pdf', buffer: await mkPdf([YOSEF]) });
+    await waitOk(); v = await vals();
+    check('12ד עמוד אחד "יוסף לוי": אזהרה + סימון אישור', v.sub === 'psB' && +v.net === 4321 && /לא זוהה שם העובד/.test(v.notes) && await pg.evaluate(() => !!document.querySelector('#dlg input[name=cf]')), v);
+    await clearT(pg); await submit(); await sleep(250);
+    check('12ה בלי סימון ← לא נשמר', /סמנו שבדקתם/.test(await toasts(pg)) && (await psl()).length === n0, await toasts(pg));
+    await pg.click('#dlg [data-a=pslCancel]'); await sleep(250);
+    // ליקוי 6: כרטיס עובד בלי תנועות אבל עם שעות/תלוש ← אין מחיקה
+    await pg.evaluate(() => { const emp = S.cats.find((c) => c.kind === 'exp' && !c.hid && c.beh === 'emp'); S.subs.push({ id: 'psD', cat: emp.id, name: 'עובד מחיקה', pay: { mode: 'hr', rate: 40, m: 'מזומן', rules: [], add: [] } }); S.wh.push({ id: 'whD', sub: 'psD', d: '2026-10-05', in: '08:00', out: '12:00', brk: 0, src: 'man', n: '' }); save(); });
+    const sd = async () => { await pg.evaluate(() => ACT.subMenu({ dataset: { id: 'psD' } })); await sleep(150); const r = await pg.evaluate(() => !!document.querySelector('#dlg [data-a=subDel]')); await closeD(pg); return r; };
+    const delBtn1 = await sd(); await clearT(pg); await pg.evaluate(() => ACT.subDel({ dataset: { id: 'psD' } })); await sleep(150);
+    check('13 כרטיס עם שעות (בלי תנועות): אין כפתור מחיקה, ומחיקה ישירה חסומה', !delBtn1 && /תלושים, שעות או בונוסים/.test(await toasts(pg)) && await pg.evaluate(() => S.subs.some((s) => s.id === 'psD') && !document.querySelector('#dlg[open] [data-a=yes]')), await toasts(pg));
+    check('13א כרטיס עובד עם תלושים (psB) – אין מחיקה גם בלי תנועות', await pg.evaluate(() => pslSubN('psB') > 0));
+    await pg.evaluate(() => { S.wh = S.wh.filter((w) => w.id !== 'whD'); save(); });
+    check('13ב בלי שעות/תלושים/בונוסים – כפתור המחיקה חוזר', await sd());
+    await pg.evaluate(() => { S.subs = S.subs.filter((s) => s.id !== 'psD'); save(); });
     const lg = await pg.evaluate(() => window.__log.filter((l) => /7,?412|9,?250|420\.75|601\.28|5,?100|023456789/.test(l)));
     check('9ד אין נתוני תלוש ביומן (console)', lg.length === 0, lg);
     check('10 אין שגיאות JS', pg.__errors.length === 0, pg.__errors);
