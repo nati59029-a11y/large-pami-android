@@ -357,6 +357,9 @@ Object.assign(exports, require('./pos-auth'), require('./pos-cash'), require('./
 // POS:M7 – קופה ש7: תפעול מכשירים (posOps: אישור/ניתוק מרחוק/מצב ציוד/יומן תקלות/התנגשויות/הזנה ידנית, posOpsWatch) וגיבוי (posBackup, posBackupDaily)
 Object.assign(exports, require('./pos-ops'));
 Object.assign(exports, require('./pos-backup'));
+// POS:W3 – קופה גל 3 (19.11.2026): אשראי במסוף מחובר – posCardCfg (מנהל־על), posCardStart, posCardStatus, posCardCancel (pos-card.js).
+// הספק מופשט (lib/pos-card-prov.js): מסוף מדומה עכשיו, CardCom אחרי שיגיע תיעוד. לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pos-card'));
 // /POS:M7
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));

@@ -164,7 +164,9 @@ const noCard = (input) => { if (hasCard(input)) throw bad('card-data', 'אסור
 
 // ---------- תשלומים (ב ת1–ת8, פרק 4) ----------
 const PAYM = ['cash', 'card', 'check', 'transfer', 'bit', 'paybox', 'gift', 'voucher', 'extGift', 'link'];
-const PF = { cash: [], card: ['last4', 'appr', 'brand', 'inst', 'tx', 'src', 'term', 'termNo'], check: ['chk', 'due', 'post'], gift: ['code'], voucher: ['code'] };
+// גל 3 (19.11.2026): cardTx – עסקת אשראי במסוף מחובר (poscard/{id}, pos-card.js). רק ב-posSale; השרת לוקח את פרטי החיוב מהרשומה ומסמן אותה כמנוצלת
+const CARD_TX_RE = /^K[1-9][0-9]{0,3}_[A-Za-z0-9_-]{6,64}$/;
+const PF = { cash: [], card: ['last4', 'appr', 'brand', 'inst', 'tx', 'src', 'term', 'termNo', 'cardTx'], check: ['chk', 'due', 'post'], gift: ['code'], voucher: ['code'] };
 const PF0 = ['m', 'amt', 'ref', 'reqId'];
 const PAY_MAX = 20;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -200,7 +202,12 @@ function paysIn(pays, gross, cfg, today) {
       if (p.due) { if (p.due > today && cfg.checkPostdated !== true) throw pre('no-postdated', 'צ\'ק דחוי לא מתקבל בעסק'); o.due = p.due; }
     }
     if (p.m === 'card') {
-      const src = p.src == null ? 'manual' : p.src;
+      if (p.cardTx != null) {
+        if (typeof p.cardTx !== 'string' || !CARD_TX_RE.test(p.cardTx)) throw bad('bad-card-tx', 'עסקת אשראי לא תקינה');
+        if (p.src != null && p.src !== 'term') throw bad('bad-card-tx', 'עסקת אשראי במסוף – מקור term בלבד');
+        o.cardTx = p.cardTx;
+      }
+      const src = p.cardTx != null ? 'term' : p.src == null ? 'manual' : p.src;
       if (!['manual', 'term'].includes(src)) throw bad('bad-pay', 'מקור חיוב לא תקין');
       o.src = src;
       if (p.last4 != null || src === 'manual') { if (typeof p.last4 !== 'string' || !/^[0-9]{4}$/.test(p.last4)) throw pre('need-last4', 'חובה 4 ספרות אחרונות בדיוק'); o.last4 = p.last4; }
@@ -421,6 +428,8 @@ async function saleIn(request) {
   const today = PP.dayOf(now);
   // מבנה התשלומים נבדק לפני הטרנזקציה (בלי סכום); הסדר והיתרה – אחרי החישוב
   paysIn(input.pays, Number.MAX_SAFE_INTEGER, cfg, today);
+  const ctx = [...new Set((input.pays || []).filter((p) => p && p.m === 'card' && typeof p.cardTx === 'string').map((p) => p.cardTx))];
+  if (ctx.length !== (input.pays || []).filter((p) => p && p.m === 'card' && p.cardTx != null).length) throw bad('bad-card-tx', 'אותה עסקת אשראי פעמיים במכירה');
   const mark = db.doc('posreq/' + input.dev + '_' + input.reqId), dref = db.doc('posdev/' + input.dev);
   const pids = [...new Set(lines.filter((l) => l.pid).map((l) => l.pid))];
   let res, rejectLog = null;
@@ -429,7 +438,8 @@ async function saleIn(request) {
     const refs = [mark, dref].concat(pids.map((p) => db.doc('prod/' + p)), cpnCodes.map((c) => db.doc('poscpn/' + c)));
     const gcodes = [...new Set((input.pays || []).filter((p) => p && (p.m === 'gift' || p.m === 'voucher') && typeof p.code === 'string').map((p) => p.code))];
     const gr = gcodes.map((c) => db.doc('posgift/' + c));
-    const snaps = await tx.getAll(...refs.concat(gr, apIds.map((a) => db.doc('poslog/' + a))));
+    const cr = ctx.map((c) => db.doc('poscard/' + c));
+    const snaps = await tx.getAll(...refs.concat(gr, cr, apIds.map((a) => db.doc('poslog/' + a))));
     const [m, s] = snaps;
     if (m.exists) { res = Object.assign({ ok: true, dup: true }, m.get('res') || { id: m.get('sale'), seq: m.get('seq'), gross: m.get('gross') }); return; }
     // POS:W2: אישור הנחה (ש5) – אחרי בדיקת הכפילות (שליחה חוזרת של מכירה שכבר נרשמה מחזירה אותה, גם כשהאישור כבר נוצל)
@@ -467,6 +477,21 @@ async function saleIn(request) {
       chk = { devGross: input.gross }; gross = input.gross;
     }
     const list = paysIn(input.pays, gross, cfg, today);
+    // גל 3: אשראי במסוף מחובר – החיוב אושר בשרת (poscard), באותו סכום, מאותה קופה, ועוד לא שייך למכירה. פרטי החיוב – מהרשומה, לא מהמכשיר
+    const cards = {};
+    ctx.forEach((c, i) => { cards[c] = snaps[2 + pids.length + cpnCodes.length + gcodes.length + i]; });
+    for (const p of list.filter((x) => x.cardTx)) {
+      const x = cards[p.cardTx];
+      const v = x && x.exists ? x.data() : null;
+      if (!v) throw nf('card-tx-none', 'עסקת האשראי לא נמצאה', { i: p.i });
+      if (v.st !== 'ok') throw pre('card-tx-st', 'עסקת האשראי לא אושרה', { i: p.i });
+      if (v.sale) throw pre('card-tx-used', 'עסקת האשראי כבר שייכת למכירה אחרת', { i: p.i });
+      if (v.dev !== input.dev) throw pre('card-tx-dev', 'עסקת האשראי שייכת לקופה אחרת', { i: p.i });
+      if (v.amt !== p.amt) throw pre('card-tx-amt', 'סכום התשלום שונה מסכום החיוב במסוף', { i: p.i });
+      Object.assign(p, { src: 'term', last4: v.last4, appr: v.appr, term: String(v.mode || ''), tx: v.tx || 'reg' });
+      if ((v.n || 1) > 1) p.inst = v.n; else delete p.inst;
+      if (v.brand) p.brand = v.brand; else delete p.brand;
+    }
     const cl = closeOk(gross, list, chg, debt);
     // הקפה: partialPay='debt', לקוח מזוהה, בתוך המסגרת (lim – בשקלים, כמו בכרטיס הלקוח)
     let debtWarn = false;
@@ -547,6 +572,7 @@ async function saleIn(request) {
       tx.set(db.collection('posgiftlog').doc(), { code, amt: -amt, sale: id, by: who.uid, at: now });
     }
     for (const { s: x, code } of cps) tx.update(x.ref, { st: 'used', sale: id, usedAt: now, usedBy: who.uid });
+    for (const c of ctx) tx.update(cards[c].ref, { sale: id, usedAt: now, upd: now });
     apUse(tx, db, dc.used, { sale: id });
     // מלאי (מינימלי עד ש6 – lib/pos-stock.js): q.{סניף} יורד בכמות, גם מתחת ל-0 (ב ס8)
     const byPid = {};
@@ -929,6 +955,7 @@ async function debtIn(request) {
   const cfg = await cfgOf(db);
   const now = Date.now();
   const list = paysIn(input.pays, input.amt, cfg, PP.dayOf(now));
+  if (list.some((p) => p.cardTx)) throw bad('bad-card-tx', 'אשראי במסוף – רק במכירה');
   if (list.some((p) => p.m === 'gift' || p.m === 'voucher')) throw pre('pay-off', 'תשלום חוב – בלי כרטיס מתנה ופתק זיכוי');
   closeOk(input.amt, list, chg, 0);
   const mark = db.doc('posreq/' + input.dev + '_' + input.reqId), dref = db.doc('posdev/' + input.dev);
@@ -1075,6 +1102,7 @@ async function giftIn(request) {
   if (!isAg(input.amt) || input.amt <= 0 || input.amt > 10000000) throw bad('bad-amt', 'סכום לא תקין');
   const chg = input.chg == null ? 0 : input.chg;
   const list = paysIn(input.pays, input.amt, cfg, PP.dayOf(now));
+  if (list.some((p) => p.cardTx)) throw bad('bad-card-tx', 'אשראי במסוף – רק במכירה');
   if (list.some((p) => p.m === 'gift' || p.m === 'voucher')) throw pre('pay-off', 'אי אפשר לקנות כרטיס מתנה בכרטיס מתנה או בפתק זיכוי');
   closeOk(input.amt, list, chg, 0);
   const mark = db.doc('posreq/' + input.dev + '_' + input.reqId), dref = db.doc('posdev/' + input.dev);
