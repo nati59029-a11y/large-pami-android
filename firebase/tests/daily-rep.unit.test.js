@@ -157,3 +157,89 @@ describe('dailyRep – ההנחיה ו-multi', () => {
     for (const k of ['multi', 'chat', 'transcribe', 'see']) assert.equal(typeof AI[k], 'function', k);
   });
 });
+
+// "סיכום יום" (19.11.2026): מתי נשלחות התזכורות – lib/dr-core.js remindPlan (טהורה). המשמרות – SC.expand כמו בשרת.
+describe('סיכום יום – remindPlan (תזכורת ראשונה ושנייה לפי משמרת / נוכחות)', () => {
+  const SC = require(path.join(FN, 'lib', 'shifts-core.js'));
+  const U = 'e1';
+  const cfg = D.cfgOf({ hr: '18:00' });
+  const sh = (d, s, e, u) => SC.expand([{ id: 's1', u: u || U, fx: false, d, s, e }], d, 1);
+  const P = (now, o) => D.remindPlan(Object.assign({ cfg, now, occs: [], att: null, rem: null, uid: U }, o || {}));
+  const H1 = 3600000;
+  it('אין משמרת: לפני hr – 0, ב-hr – 1, שעה אחרי הראשונה – 2, אחרי השנייה – 0', () => {
+    assert.deepEqual([P(IL(2026, 11, 16, 17, 59)).stage, P(IL(2026, 11, 16, 17, 59)).why], [0, 'early']);
+    const p1 = P(IL(2026, 11, 16, 18, 0));
+    assert.equal(p1.stage, 1); assert.equal(p1.at, IL(2026, 11, 16, 18, 0));
+    const t1 = IL(2026, 11, 16, 18, 10); // נשלחה בפועל ב-18:10
+    assert.deepEqual(P(IL(2026, 11, 16, 19, 9), { rem: { u: { [U]: t1 } } }), { stage: 0, why: 'wait2', at: t1 + H1 });
+    assert.equal(P(IL(2026, 11, 16, 19, 10), { rem: { u: { [U]: t1 } } }).stage, 2, 'השנייה נמדדת מהשליחה בפועל');
+    assert.deepEqual(P(IL(2026, 11, 16, 21, 0), { rem: { u: { [U]: t1 }, u2: { [U]: t1 + H1 } } }), { stage: 0, why: 'done' });
+  });
+  it('מסמך rem_ ישן (רק u): אין ראשונה נוספת, השנייה שעה אחרי', () => {
+    const t1 = IL(2026, 11, 16, 18, 0);
+    assert.equal(P(IL(2026, 11, 16, 18, 30), { rem: { u: { [U]: t1 }, day: '2026-11-16' } }).stage, 0);
+    assert.equal(P(IL(2026, 11, 16, 19, 0), { rem: { u: { [U]: t1 }, day: '2026-11-16' } }).stage, 2);
+    assert.equal(P(IL(2026, 11, 16, 19, 0), { rem: { u: { other: t1 } } }).stage, 1, 'תזכורת של עובד אחר לא נחשבת');
+  });
+  it('משמרת עד 15:00 בלי נוכחות (או מקור לא ידוע): ב-15:00, לא מחכה ל-18:00', () => {
+    const occs = sh('2026-11-16', '07:00', '15:00');
+    assert.equal(P(IL(2026, 11, 16, 14, 59), { occs }).stage, 0);
+    assert.equal(P(IL(2026, 11, 16, 15, 0), { occs }).stage, 1);
+    assert.equal(P(IL(2026, 11, 16, 15, 0), { occs, att: { out: 0 } }).stage, 1, 'אין רשומה סגורה – הסוף המתוכנן');
+  });
+  it('יציאה מוחתמת עד שעתיים לפני הסוף – ביציאה; הפסקה מוקדמת – ממתינים לסוף', () => {
+    const occs = sh('2026-11-16', '07:00', '15:00');
+    const out = IL(2026, 11, 16, 14, 40);
+    assert.equal(P(IL(2026, 11, 16, 14, 39), { occs, att: { out } }).stage, 0);
+    assert.deepEqual(P(IL(2026, 11, 16, 14, 40), { occs, att: { out } }), { stage: 1, why: 'go1', at: out });
+    const brk = IL(2026, 11, 16, 11, 0);
+    assert.equal(P(IL(2026, 11, 16, 12, 0), { occs, att: { out: brk } }).stage, 0, 'הפסקה ב-11:00');
+    assert.equal(P(IL(2026, 11, 16, 15, 0), { occs, att: { out: brk } }).stage, 1);
+    assert.equal(P(IL(2026, 11, 16, 13, 0), { occs, att: { out: IL(2026, 11, 16, 13, 0) } }).stage, 1, 'בדיוק שעתיים לפני הסוף – נחשבת');
+    assert.equal(P(IL(2026, 11, 16, 16, 30), { occs, att: { out: IL(2026, 11, 16, 16, 30) } }).stage, 1, 'יציאה מאוחרת מהסוף');
+  });
+  it('כניסה פתוחה בסוף המשמרת: ממתינים עד שעה אחרי הסוף', () => {
+    const occs = sh('2026-11-16', '07:00', '15:00');
+    assert.equal(P(IL(2026, 11, 16, 15, 59), { occs, att: { open: true } }).stage, 0);
+    assert.equal(P(IL(2026, 11, 16, 16, 0), { occs, att: { open: true } }).stage, 1);
+  });
+  it('משמרת 20:00–02:00 (חוצה חצות): לא אחרי 23:30; משמרת של עובד אחר / של אתמול לא נחשבת', () => {
+    const occs = sh('2026-11-16', '20:00', '02:00');
+    assert.equal(P(IL(2026, 11, 16, 23, 29), { occs }).stage, 0);
+    assert.deepEqual(P(IL(2026, 11, 16, 23, 30), { occs }), { stage: 1, why: 'go1', at: IL(2026, 11, 16, 23, 30) });
+    assert.equal(P(IL(2026, 11, 16, 23, 30), { occs, att: { open: true } }).stage, 1, 'גם עם כניסה פתוחה – 23:30');
+    assert.equal(P(IL(2026, 11, 16, 15, 0), { occs: sh('2026-11-16', '07:00', '15:00', 'e2') }).stage, 0, 'משמרת של עובד אחר – לפי hr');
+    assert.equal(P(IL(2026, 11, 17, 18, 0), { occs: sh('2026-11-16', '20:00', '02:00') }).stage, 1, 'משמרת של אתמול – לפי hr של היום');
+  });
+  it('כמה משמרות ביום: הקובעת היא זו שמסתיימת אחרונה', () => {
+    const occs = sh('2026-11-16', '07:00', '11:00').concat(SC.expand([{ id: 's2', u: U, fx: false, d: '2026-11-16', s: '13:00', e: '16:00' }], '2026-11-16', 1));
+    assert.equal(D.remindOcc(occs, U, '2026-11-16').sid, 's2');
+    assert.equal(P(IL(2026, 11, 16, 11, 30), { occs }).stage, 0);
+    assert.equal(P(IL(2026, 11, 16, 16, 0), { occs }).stage, 1);
+  });
+  it('שבת / חופש / לא יום סיכום / ערב שבת מ-14:00 / חג באמצע השבוע – 0', () => {
+    assert.equal(P(IL(2026, 11, 21, 19)).why, 'sat');
+    assert.equal(D.remindPlan({ cfg: D.cfgOf({ off: ['2026-11-16'] }), now: IL(2026, 11, 16, 19), uid: U }).why, 'off');
+    assert.equal(P(IL(2026, 11, 20, 19)).why, 'not-day', 'שישי לא בברירת המחדל');
+    const fri = D.cfgOf({ days: [0, 1, 2, 3, 4, 5], hr: '18:00' });
+    assert.equal(D.remindPlan({ cfg: fri, now: IL(2026, 11, 20, 13, 0), occs: sh('2026-11-20', '07:00', '13:00'), uid: U }).stage, 1, 'שישי 13:00 – לפני החלון');
+    assert.equal(D.remindPlan({ cfg: fri, now: IL(2026, 11, 20, 15, 0), occs: sh('2026-11-20', '07:00', '15:00'), uid: U }).why, 'quiet');
+    assert.equal(D.remindPlan({ cfg: fri, now: IL(2026, 11, 20, 18, 0), uid: U }).why, 'quiet');
+    assert.equal(P(IL(2026, 9, 21, 19)).why, 'quiet', 'יום כיפור תשפ"ז (שני 21.9.2026)');
+    assert.equal(P(IL(2026, 9, 20, 18)).why, 'quiet', 'ערב יום כיפור אחרי 14:00');
+    const t1 = IL(2026, 11, 20, 13, 0);
+    assert.equal(D.remindPlan({ cfg: fri, now: IL(2026, 11, 20, 14, 0), rem: { u: { [U]: t1 } }, uid: U }).why, 'quiet', 'גם השנייה לא בחלון');
+  });
+  it('שעון קיץ וחורף: משמרת עד 15:00 = 12:00Z בקיץ, 13:00Z בחורף', () => {
+    assert.equal(P(Date.UTC(2026, 6, 13, 11, 59), { occs: sh('2026-07-13', '07:00', '15:00') }).stage, 0);
+    assert.equal(P(Date.UTC(2026, 6, 13, 12, 0), { occs: sh('2026-07-13', '07:00', '15:00') }).stage, 1);
+    assert.equal(P(Date.UTC(2026, 10, 16, 12, 59), { occs: sh('2026-11-16', '07:00', '15:00') }).stage, 0);
+    assert.equal(P(Date.UTC(2026, 10, 16, 13, 0), { occs: sh('2026-11-16', '07:00', '15:00') }).stage, 1);
+  });
+  it('attNeedAt: הנוכחות נקראת רק מ-שעתיים לפני הסוף (או 23:30)', () => {
+    const [o] = sh('2026-11-16', '07:00', '15:00'), info = D.dayInfo(IL(2026, 11, 16, 12));
+    assert.equal(D.attNeedAt(o, info), IL(2026, 11, 16, 13, 0));
+    const [x] = sh('2026-11-16', '20:00', '02:00');
+    assert.equal(D.attNeedAt(x, info), IL(2026, 11, 16, 23, 30));
+  });
+});

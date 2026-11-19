@@ -65,8 +65,9 @@ function inputObject(request) {
 // pos / posMgr (קופה, שלב 0, 17.11.2026): קופאי / אחראי משמרת – כבויים כברירת מחדל, גם לעובד ישן בלי perms. pos לבד לא נותן עלות (p/cost).
 // shf (18.11.2026, shifts.js): "משמרות" – עובד שרואה את כל המשמרות, עורך ושולח משימות למשמרת; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
 // yl (19.11.2026): "שלוחות הקו" – עובד שמשתמש בפונקציות הקו (requireStaff עם yemotLine); כבוי כברירת מחדל, גם לעובד ישן בלי perms.
-const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf', 'yl']);
-const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false });
+// tkS (19.11.2026, tasks-send.js + חוקי tasks): "שליחת משימות" – עובד ששולח משימות לעובדים אחרים ומאשר/מחזיר/מוחק רק את מה ששלח (dg == '1'); כבוי כברירת מחדל.
+const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf', 'yl', 'tkS']);
+const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false });
 // 18.11.2026 (הכרעת בעל העסק): קופה – רק מנהל־על מחליט מי מקבל, גם מנהלים. pos / posMgr של מנהל עסק = admins/{uid}.perms
 // (רק השרת כותב: setStaffPerms, מנהל־על בלבד). מנהל־על (גם כשהוא מנהל בעסק) = הכול, כמו היום. שאר ההרשאות של מנהל לא השתנו.
 // אותה הגדרה בדיוק כמו perm() בכללי Firestore של b/{bizId}.

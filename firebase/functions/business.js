@@ -7,6 +7,7 @@
 //                                     setStaffEmail (שינוי מייל של עובד קיים – 17.11.2026).
 //   מנהל העסק (בתוך העסק שלו בלבד):   setStaffActive (השבתה והחזרה של עובד קיים).
 //                                     setStaffPrc (מנהל העסק: המתג prc או yl של עובד – 12.11.2026, הורחב 19.11.2026).
+//                                     setStaffTkS (המתג tkS "שליחת משימות" בלבד, legacy וגם b – 19.11.2026).
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
 // כניסה ראשונה (שלב 6ג, עדכון חוזה 9, החלטת המשתמש "א"): אין קוד חד־פעמי ואין שליחת מייל בשרת.
 //   השרת יוצר חשבון Auth בלי סיסמה ומחזיר את המייל שנשמר. האפליקציה שולחת למייל הזה את המייל המובנה של Firebase
@@ -526,6 +527,33 @@ async function setStaffPrc(request) {
   return { ok: true, uid, [key]: on };
 }
 
+// setStaffTkS({uid, on}) – 19.11.2026, "שליחת משימות": מנהל העסק (או מנהל־על בתוך העסק) מדליק/מכבה לעובד רק את המתג tkS.
+// גם בלארג' פעמי (legacy) וגם בעסק במבנה b (שם מנהל־על יכול גם דרך setStaffPerms). אותה לוגיקה בדיוק כמו setStaffPrc:
+// עובד עם perms – משתנה רק perms.tkS. עובד ישן בלי perms – מפה מלאה של ברירות המחדל (R.DEFAULT_PERMS) ועליה tkS. כיבוי לעובד בלי perms – אין מה לשנות.
+async function setStaffTkS(request) {
+  const who = await requireStaff(request);
+  if (who.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל העסק בלבד');
+  const input = inputObject(request);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  if (typeof input.on !== 'boolean') throw bad('bad-on', 'ערך לא תקין');
+  const on = input.on;
+  const db = getFirestore();
+  const sRef = db.doc(T.bizRef(who.biz, 'staff/' + uid));
+  const aRef = db.doc(T.bizRef(who.biz, 'admins/' + uid));
+  await db.runTransaction(async (tx) => {
+    const [s, a] = await Promise.all([tx.get(sRef), tx.get(aRef)]);
+    if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+    if (a.exists || s.get('role') === 'manager') throw new HttpsError('failed-precondition', 'למנהל העסק יש את כל ההרשאות', { reason: 'is-admin' });
+    const p = s.get('perms');
+    const has = !!p && typeof p === 'object' && !Array.isArray(p);
+    if (has) tx.update(sRef, { 'perms.tkS': on });
+    else if (on) tx.update(sRef, { perms: Object.assign({}, R.DEFAULT_PERMS, { tkS: true }) });
+    tx.set(auditRef(who.bizId), auditData(who.uid, 'setStaffTkS', uid + '=' + on));
+  });
+  return { ok: true, uid, tkS: on };
+}
+
 // ---------- סניפים, בנקים וכרטיסי אשראי (2026-11-08, חלק א') – מנהל־על בלבד ----------
 // b/{bizId}.org = {v:1, branches:[{id,name,on,sig}], banks:[{id,name,last4,on,sig}], cards:[{id,name,last4,bank,on,sub?}]}.
 // רק השרת כותב (setBusinessOrg). מזהה קיים אי אפשר להסיר – רק on:false. שדות אחרים במסמך העסק לא משתנים.
@@ -806,6 +834,7 @@ exports.setBusinessBrand = onCall(wrap('setBusinessBrand', setBusinessBrand));
 exports.setBusinessRanks = onCall(wrap('setBusinessRanks', setBusinessRanks));
 exports.setStaffPerms = onCall(wrap('setStaffPerms', setStaffPerms));
 exports.setStaffPrc = onCall(wrap('setStaffPrc', setStaffPrc));
+exports.setStaffTkS = onCall(wrap('setStaffTkS', setStaffTkS));
 exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 exports.setStaffName = onCall(wrap('setStaffName', setStaffName));
@@ -815,5 +844,5 @@ exports.setStaffBranches = onCall(wrap('setStaffBranches', setStaffBranches));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, mapBase, themeOf, addStaff, setBusinessRanks, setStaffPerms, setStaffPrc, cleanPerms, cleanRanks, setStaffActive, setStaffEmail, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, mapBase, themeOf, addStaff, setBusinessRanks, setStaffPerms, setStaffPrc, setStaffTkS, cleanPerms, cleanRanks, setStaffActive, setStaffEmail, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });

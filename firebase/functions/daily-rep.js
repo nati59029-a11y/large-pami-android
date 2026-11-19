@@ -24,6 +24,7 @@ const { requireStaff, inputObject } = require('./lib/roles');
 const T = require('./lib/tenant');
 const TK = require('./lib/tk-time');
 const D = require('./lib/dr-core');
+const SC = require('./lib/shifts-core');
 const AI = require('./lib/sec-ai');
 const PR = require('./lib/prompts-dr');
 const C = require('./secretary')._core;
@@ -40,11 +41,11 @@ const bucketOf = (name) => (name ? getStorage().bucket(name) : getStorage().buck
 // רשומה בלי af (לא אמור לקרות – תאימות בלבד) = a{i}.wav
 const audName = (i) => 'a' + i + '_' + crypto.randomBytes(6).toString('hex') + '.wav';
 const audPath = (who, id, i, af) => who.prefix + 'dr/' + id + '/' + (typeof af === 'string' && /^a[0-9]_[0-9a-f]{12}[.]wav$/.test(af) ? af : 'a' + i + '.wav');
-const DAY_MSG = { sat: 'אין דיווח בשבת', off: 'היום יום חופש – אין דיווח', 'not-day': 'היום אינו יום דיווח' };
+const DAY_MSG = { sat: 'אין סיכום יום בשבת', off: 'היום יום חופש – אין סיכום יום', 'not-day': 'היום אינו יום סיכום' };
 
 async function gate(request, o) {
   const who = await requireStaff(request, { feature: 'dailyRep' });
-  if (!who.prefix) throw pre('legacy', 'הדיווח היומי זמין רק אחרי מעבר העסק למבנה החדש');
+  if (!who.prefix) throw pre('legacy', 'סיכום היום זמין רק אחרי מעבר העסק למבנה החדש');
   if (o && o.mgr && who.role !== 'manager') throw deny('not-manager', 'הפעולה זמינה למנהל בלבד');
   if (o && o.sup && !who.superadmin) throw deny('not-superadmin', 'הפעולה זמינה למנהל־על בלבד');
   return { who, db: T.tdb() };
@@ -76,7 +77,7 @@ async function pushTo(db, uids, msg, o, bizId) {
 async function pushMgrs(db, who, id, name, o) {
   const s = await db.collection('admins').limit(MAX_PUSH).get();
   const to = s.docs.map((d) => d.id).filter((u) => u !== who.uid);
-  return pushTo(db, to, (o && o.msg) || { id, title: 'דיווח יומי', body: (name || 'עובד') + ' שלח/ה דיווח יומי – פרטים באפליקציה' }, o, who.bizId);
+  return pushTo(db, to, (o && o.msg) || { id, title: 'סיכום יום', body: (name || 'עובד') + ' שלח/ה סיכום יום – פרטים באפליקציה' }, o, who.bizId);
 }
 
 // ---------- מונה העלות: תקציב נפרד (drcfg/cap, drcfg/use), אותו חישוב חודשי/יומי כמו במזכירה (usageOf / costMc) ----------
@@ -163,7 +164,7 @@ async function submit(request, opts) {
   const { who, db } = await gate(request);
   const now = o.now || Date.now();
   const cfg = D.cfgOf((await db.doc('drcfg/main').get()).data());
-  if (cfg.req[who.uid] !== true) throw deny('not-required', 'לא הוגדר לך דיווח יומי');
+  if (cfg.req[who.uid] !== true) throw deny('not-required', 'לא הוגדר לך סיכום יום');
   const info = D.dayInfo(now);
   const why = D.dayStatus(cfg, info);
   if (why) throw pre(why, DAY_MSG[why]);
@@ -172,9 +173,9 @@ async function submit(request, opts) {
   const ref = db.doc('dr/' + id);
   const check = (s) => {
     const d = s.exists ? s.data() || {} : {};
-    if (d.st === 'ok') throw pre('approved', 'הדיווח של היום כבר אושר');
+    if (d.st === 'ok') throw pre('approved', 'סיכום היום כבר אושר');
     const e = Array.isArray(d.e) ? d.e : [];
-    if (e.length >= D.MAX_SUB) throw pre('max', 'אפשר לשלוח עד ' + D.MAX_SUB + ' דיווחים ביום');
+    if (e.length >= D.MAX_SUB) throw pre('max', 'אפשר לשלוח עד ' + D.MAX_SUB + ' סיכומים ביום');
     return { d, e };
   };
   const i = check(await ref.get()).e.length;
@@ -191,7 +192,7 @@ async function submit(request, opts) {
     doc = await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       const { d, e } = check(s);
-      if (e.length !== i) throw new HttpsError('aborted', 'דיווח אחר נשלח באותו רגע. נסו שוב.', { reason: 'busy' });
+      if (e.length !== i) throw new HttpsError('aborted', 'סיכום אחר נשלח באותו רגע. נסו שוב.', { reason: 'busy' });
       const nd = s.exists
         ? { e: e.concat([entry]), st: 'new', ut: now }
         : { uid: who.uid, n, br, day: info.day, t: now, ut: now, e: [entry], st: 'new', ai: '', ap: 0, apBy: '' };
@@ -225,10 +226,10 @@ async function mgr(request, opts) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { mgr: true });
   const id = typeof input.id === 'string' ? input.id : '';
-  if (!D.ID_RE.test(id)) throw bad('bad-id', 'מזהה דיווח לא תקין');
+  if (!D.ID_RE.test(id)) throw bad('bad-id', 'מזהה סיכום לא תקין');
   const ref = db.doc('dr/' + id), mRef = db.doc('dr/' + id + '/x/m'), wRef = db.doc('dr/' + id + '/x/w');
   const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError('not-found', 'הדיווח לא נמצא', { reason: 'no-report' });
+  if (!snap.exists) throw new HttpsError('not-found', 'הסיכום לא נמצא', { reason: 'no-report' });
   const d = snap.data() || {};
   const e = Array.isArray(d.e) ? d.e : [];
   const now = o.now || Date.now();
@@ -258,7 +259,7 @@ async function mgr(request, opts) {
       tx.update(ref, { st: 'ok', ap: now, apBy: who.uid, ut: now });
       return { sumW, notes };
     });
-    await pushTo(db, [d.uid], { id, title: 'דיווח יומי', body: 'המנהל אישר את הדיווח היומי שלך – פרטים באפליקציה' }, o, who.bizId);
+    await pushTo(db, [d.uid], { id, title: 'סיכום יום', body: 'המנהל אישר את סיכום היום שלך – פרטים באפליקציה' }, o, who.bizId);
     return Object.assign({ ok: true, st: 'ok' }, res);
   }
   if (op === 'tk') {
@@ -288,7 +289,7 @@ async function mgr(request, opts) {
     return { mime: 'audio/wav', b64: buf.toString('base64') };
   }
   if (op === 'resum') {
-    if (d.st === 'ok') throw pre('approved', 'הדיווח כבר אושר');
+    if (d.st === 'ok') throw pre('approved', 'הסיכום כבר אושר');
     const bucket = bucketOf(o.bucket);
     const tri = [], auds = [];
     let audSec = 0;
@@ -333,36 +334,65 @@ async function setCap(request) {
   return { ok: true, capCents: v };
 }
 
-// ---------- drRemind: תזכורת אחת ביום לעובד חייב שלא דיווח, אחרי hr, ביום דיווח ----------
+// ---------- drRemind: "סיכום יום" (19.11.2026) – עד שתי תזכורות ביום לעובד חייב (פעיל) שלא שלח. מתי – D.remindPlan:
+//   סוף המשמרת של היום / היציאה שהוחתמה בקופה (shifts.js attLast), ואם אין משמרת – השעה hr. השנייה – שעה אחרי הראשונה.
+//   מניעת כפילות: drcfg/rem_<key> – u (ראשונה, כמו קודם), u2 (שנייה). תפיסה בטרנזקציה – ריצות במקביל לא שולחות פעמיים.
+//   משמרות נקראות רק בעסק עם תוספת המשימות, ורק כשיש מועמד; בלעדיה – כמו קודם, לפני hr לא קוראים כלום.
 // עסק אחד (בתוך T.runInBiz). opts: { now, send }
+const isO = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 async function remindBiz(o) {
   const db = T.tdb();
   const now = o.now || Date.now();
   const s = T.scope();
+  const biz = s && s.biz;
   const cfg = D.cfgOf((await db.doc('drcfg/main').get()).data());
-  const dec = D.remindDue(cfg, now);
-  if (!dec.go) return { skip: dec.why };
+  const info = D.dayInfo(now);
+  const why = D.dayStatus(cfg, info);
+  if (why) return { skip: why };
+  if (SC.quiet(now)) return { skip: 'quiet' };
+  const tasks = !!(biz && biz.features && biz.features.tasks === true);
+  if (!tasks && !D.remindDue(cfg, now).go) return { skip: 'early' };
   const uids = Object.keys(cfg.req).slice(0, D.REQ_MAX);
   if (!uids.length) return { sent: 0, n: 0 };
-  const remRef = db.doc('drcfg/rem_' + dec.key);
-  const [rem, ...snaps] = await db.getAll(remRef, ...uids.map((u) => db.doc('dr/' + u + '_' + dec.key)), ...uids.map((u) => db.doc('staff/' + u)));
-  const done = rem.exists && rem.get('u') && typeof rem.get('u') === 'object' ? rem.get('u') : {};
-  let n = 0, sent = 0;
-  for (let k = 0; k < uids.length; k++) {
-    const u = uids[k], rep = snaps[k], st = snaps[uids.length + k];
-    if (done[u] || rep.exists || !st.exists || st.get('active') !== true) continue;
-    // תפיסה בטרנזקציה – שתי ריצות במקביל לא שולחות פעמיים
+  const remRef = db.doc('drcfg/rem_' + info.key);
+  const [rem, ...snaps] = await db.getAll(remRef, ...uids.map((u) => db.doc('dr/' + u + '_' + info.key)), ...uids.map((u) => db.doc('staff/' + u)));
+  const rd = rem.exists ? rem.data() || {} : {};
+  const u1 = isO(rd.u) ? rd.u : {}, u2 = isO(rd.u2) ? rd.u2 : {};
+  const cand = uids.filter((u, k) => !u2[u] && !snaps[k].exists && snaps[uids.length + k].exists && snaps[uids.length + k].get('active') === true);
+  if (!cand.length) return { n: 0, sent: 0 };
+  const SH = tasks ? require('./shifts')._core : null; // עצל – shifts.js מבקש את הקובץ הזה באותה שיטה
+  let occs = [];
+  if (SH) {
+    try { occs = SC.expand(await SH.loadDefs(db), info.day, 1); } catch (e) { logger.warn('drRemind: shifts failed', { name: e && e.name, code: e && e.code }); }
+  }
+  let n = 0, sent = 0, due = 0;
+  for (const u of cand) {
+    const occ = D.remindOcc(occs, u, info.day);
+    const att = occ && !u1[u] && now >= D.attNeedAt(occ, info) ? await SH.attLast(db, biz, u, occ.start, occ.end) : null;
+    const p = D.remindPlan({ cfg, now, occs: occ ? [occ] : [], att, rem: { u: u1, u2 }, uid: u });
+    if (!p.stage) continue;
+    due++;
     const mine = await db.runTransaction(async (tx) => {
       const r = await tx.get(remRef);
-      const uu = r.exists && r.get('u') && typeof r.get('u') === 'object' ? r.get('u') : {};
-      if (uu[u]) return false;
-      tx.set(remRef, { u: { [u]: now }, day: dec.day }, { merge: true });
+      const x = r.exists ? r.data() || {} : {};
+      const a = isO(x.u) ? x.u : {}, b = isO(x.u2) ? x.u2 : {};
+      if (p.stage === 1) {
+        if (a[u]) return false;
+        tx.set(remRef, { u: { [u]: now }, day: info.day }, { merge: true });
+        return true;
+      }
+      if (b[u] || !a[u] || now < (Number.isFinite(a[u]) ? a[u] : 0) + D.GAP2) return false;
+      tx.set(remRef, { u2: { [u]: now } }, { merge: true });
       return true;
     });
     if (!mine) continue;
     n++;
-    sent += await pushTo(db, [u], { id: u + '_' + dec.key, title: 'דיווח יומי', body: 'עוד לא שלחת את הדיווח היומי של היום' }, o, s && s.bizId);
+    const msg = p.stage === 1
+      ? { id: u + '_' + info.key, title: 'סיכום יום', body: 'עוד לא שלחת את סיכום היום' }
+      : { id: u + '_' + info.key, title: 'סיכום יום – תזכורת', body: 'עדיין לא שלחת את סיכום היום' };
+    sent += await pushTo(db, [u], msg, o, s && s.bizId);
   }
+  if (!due) return { skip: 'early' };
   return { n, sent };
 }
 async function runRemind(opts) {

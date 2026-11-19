@@ -334,6 +334,8 @@ Object.assign(exports, require('./secretary-media'));
 Object.assign(exports, require('./recurring'));
 // מרכז עבודה סבב 3 (15.11.2026): tkNudge – "הזכר לעובד" בהתראת טלפון (tasks-nudge.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./tasks-nudge'));
+// "שליחת משימות" לעובד מורשה (19.11.2026): tkStaffNames – רשימת נמענים (uid ושם בלבד) למנהל ולעובד עם המתג tkS (tasks-send.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./tasks-send'));
 // קבוצות התכתבות סבב 3 (17.11.2026): grpMsg / grpMsgB – התראה לטלפון על הודעה חדשה בקבוצה ועדכון grp/{gid}.last; grpDel / grpDelB – מחיקה מדורגת של קבוצה; grpMDel / grpMDelB – מחיקת הודעה: last מחדש וקובץ הסרטון (grp-notify.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./grp-notify'));
 // התראות משימות (18.11.2026): tkPush / tkPushB – משימה חדשה, הוחזרה, ממתינה לאישור, בוצעה ותגובה; ptkPush / ptkPushB – משימה פרטית חדשה של עובד. בלי שליחה בשבת ובחג (tasks-push.js). לא מפורסם עד מיזוג ואישור

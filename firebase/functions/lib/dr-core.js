@@ -3,7 +3,8 @@
 //   dayInfo(now)          – יום הדיווח לפי שעון ישראל (lib/tk-time.js): { day 'YYYY-MM-DD', key 'YYYYMMDD', wd (0=ראשון … 6=שבת), y, m, d }
 //   cfgOf(data)           – drcfg/main מנורמל: { days, hr, off, req } עם ברירות המחדל של החוזה
 //   dayStatus(cfg, info)  – '' = יום דיווח; 'sat' / 'off' (חופש) / 'not-day' (יום שלא הוגדר)
-//   remindDue(cfg, now)   – האם הגיע זמן התזכורת היום (יום דיווח, אחרי hr)
+//   remindDue(cfg, now)   – האם הגיע זמן התזכורת היום (יום דיווח, אחרי hr). נשאר לתאימות; drRemind משתמש ב-remindPlan
+//   remindPlan({ cfg, now, occs, att, rem, uid }) – "סיכום יום" (19.11.2026): { stage 0|1|2, why, at } – תזכורת ראשונה/שנייה לעובד
 //   cfgIn(input)          – אימות קלט drSetCfg (חלקי). שבת (6) נדחית
 //   submitIn(input, dep)  – אימות קלט drSubmit: טקסט, הקלטה (WAV, עד 120 שניות לפי הכותרת), עד 3 תמונות (data URL עד 500KB)
 //   parseAi(text)         – פענוח JSON מה-AI: {tr, sum, sumW}, חיתוך אורך וניקוי תווי בקרה. לא תקין = null
@@ -12,6 +13,7 @@
 //   notesIn(arr, old), tkIn(arr) – הערות המנהל ומזהי משימות
 const { HttpsError } = require('firebase-functions/v2/https');
 const TK = require('./tk-time');
+const SC = require('./shifts-core');
 
 const DAYS_DEF = Object.freeze([0, 1, 2, 3, 4]);
 const HR_DEF = '18:00';
@@ -81,6 +83,49 @@ function remindDue(cfg, now) {
   return { go: true, why: 'go', day: info.day, key: info.key, at };
 }
 
+// ---------- remindPlan: מתי לשלוח תזכורת "סיכום יום" לעובד אחד (טהורה) ----------
+//   occs – מופעי משמרות (SC.expand); נלקחת המשמרת של uid שמתחילה היום ומסתיימת אחרונה. אין משמרת – השעה הקבועה hr.
+//   att  – נוכחות במשמרת (shifts.js attLast): null = לא ידוע / לא נבדק; { open:true } = כניסה פתוחה; { out } = יציאה אחרונה (0 = אין).
+//     יציאה נחשבת רק אם היא עד EARLY_OUT לפני הסוף המתוכנן (לפני כן – הפסקה); כניסה פתוחה – ממתינים עד OPEN_WAIT אחרי הסוף.
+//   T1 (ראשונה) לא אחרי 23:30. rem – drcfg/rem_<key>: u = ראשונה נשלחה, u2 = שנייה נשלחה (מסמך ישן בלי u2 = {}).
+//   שנייה – GAP2 אחרי שליחת הראשונה בפועל. לא בשבת / חופש / יום שלא הוגדר, ולא בחלון השקט של שבת וחג (SC.quiet).
+const EARLY_OUT = 2 * 3600000;
+const OPEN_WAIT = 3600000;
+const GAP2 = 3600000;
+const CAP_H = 23, CAP_M = 30;
+function remindOcc(occs, uid, day) {
+  let best = null;
+  for (const o of occs || []) if (o && o.u === uid && o.day === day && (!best || o.end > best.end)) best = o;
+  return best;
+}
+const capOfDay = (info) => TK.zoned(info.y, info.m, info.d, CAP_H, CAP_M);
+// מאיזה רגע הנוכחות יכולה לשנות את T1 (לפני כן אין טעם לקרוא אותה)
+const attNeedAt = (occ, info) => Math.min(occ.end - EARLY_OUT, capOfDay(info));
+function remindAt1(cfg, info, occ, att) {
+  let t;
+  if (!occ) {
+    const [hh, mm] = cfg.hr.split(':').map(Number);
+    t = TK.zoned(info.y, info.m, info.d, hh, mm);
+  } else if (att && att.open) t = occ.end + OPEN_WAIT;
+  else if (att && Number.isFinite(att.out) && att.out >= occ.end - EARLY_OUT) t = att.out;
+  else t = occ.end;
+  return Math.min(t, capOfDay(info));
+}
+function remindPlan(o) {
+  const { cfg, now, uid } = o;
+  const info = dayInfo(now);
+  const why = dayStatus(cfg, info);
+  if (why) return { stage: 0, why };
+  if (SC.quiet(now)) return { stage: 0, why: 'quiet' };
+  const r = isObj(o.rem) ? o.rem : {};
+  const u1 = isObj(r.u) && Number.isFinite(r.u[uid]) ? r.u[uid] : r.u && r.u[uid] ? 1 : 0;
+  const u2 = isObj(r.u2) && r.u2[uid];
+  if (u2) return { stage: 0, why: 'done' };
+  if (u1) return now >= u1 + GAP2 ? { stage: 2, why: 'go2', at: u1 + GAP2 } : { stage: 0, why: 'wait2', at: u1 + GAP2 };
+  const at = remindAt1(cfg, info, remindOcc(o.occs, uid, info.day), o.att);
+  return now >= at ? { stage: 1, why: 'go1', at } : { stage: 0, why: 'early', at };
+}
+
 // drSetCfg – רק השדות שנשלחו. req: { uid: true|false } (false = הסרה)
 function cfgIn(input) {
   const o = isObj(input) ? input : {};
@@ -88,8 +133,8 @@ function cfgIn(input) {
   if (!keys.length || keys.some((k) => !['days', 'hr', 'off', 'req'].includes(k))) throw bad('bad-cfg', 'הגדרות לא תקינות');
   const out = {};
   if ('days' in o) {
-    if (!Array.isArray(o.days) || o.days.length > 7 || o.days.some((x) => !Number.isInteger(x) || x < 0 || x > 6)) throw bad('bad-days', 'ימי הדיווח לא תקינים');
-    if (o.days.includes(6)) throw bad('sat', 'אי אפשר לקבוע דיווח בשבת');
+    if (!Array.isArray(o.days) || o.days.length > 7 || o.days.some((x) => !Number.isInteger(x) || x < 0 || x > 6)) throw bad('bad-days', 'ימי הסיכום לא תקינים');
+    if (o.days.includes(6)) throw bad('sat', 'אי אפשר לקבוע סיכום יום בשבת');
     out.days = [...new Set(o.days)].sort();
   }
   if ('hr' in o) {
@@ -146,7 +191,7 @@ function submitIn(input, dep) {
       imgs.push({ url: u, mime: m[1], b64: m[2] });
     }
   }
-  if (!txt && !audio && !imgs.length) throw bad('empty', 'הדיווח ריק');
+  if (!txt && !audio && !imgs.length) throw bad('empty', 'הסיכום ריק');
   return { txt, audio, imgs };
 }
 
@@ -213,5 +258,6 @@ const tkAdd = (old, add) => [...new Set((Array.isArray(old) ? old.filter((t) => 
 module.exports = {
   DAYS_DEF, HR_DEF, OFF_MAX, REQ_MAX, MAX_SUB, TXT_MAX, IMG_MAX, IMG_MAX_CHARS, AUD_MAX_SEC, AUD_MAX_BYTES, CAP_DEF, CAP_MAX, DAY_CAP_DIV,
   NOTES_MAX, NOTE_MAX, TK_MAX, TR_MAX, SUM_MAX, SUMW_MAX, RESERVE_USAGE, UID_RE, ID_RE,
+  EARLY_OUT, OPEN_WAIT, GAP2, remindOcc, attNeedAt, remindAt1, remindPlan,
   clean, dayInfo, validDay, cfgOf, dayStatus, remindDue, cfgIn, submitIn, parseAi, splitTr, capOf, reserveAmt, costOf, notesIn, tkIn, tkAdd, safeTxt, reserveUsage,
 };

@@ -56,7 +56,7 @@ const FC=[['','הכול'],['mine','שלי'],['mgr','מהמנהל'],['urg','דח�
 function pass(x,F,now){if(F.q){const s=[x.txt,x.by,x.owN,x.cat,(x.toN||[]).join(' ')].join(' ').toLowerCase();if(!s.includes(F.q.toLowerCase()))return false}
  if(F.t&&(x.k==='r'||(x.cat||'')!==F.t))return false;
  const rem=x.k==='r',dl=rem?x.at:tkDl(x);
- switch(F.c){case'mine':return rem||(x.pv?x.owner===SY.uid:(x.ow===SY.uid||x.owner===SY.uid));case'mgr':return !rem&&!x.pv&&x.role==='a';case'prv':return rem||!!x.pv;case'urg':return !rem&&x.pri==='h';
+ switch(F.c){case'mine':return rem||(x.pv?x.owner===SY.uid:(x.ow===SY.uid||x.owner===SY.uid));case'mgr':return !rem&&!x.pv&&x.role==='a'&&x.dg!=='1';case'prv':return rem||!!x.pv;case'urg':return !rem&&x.pri==='h';
   case'late':return rem?x.at<now:x.pv?(x.st!=='done'&&now>dl)||x.late==='1':tkIsLate(x);case'today':return dl<day0(1);case'week':return dl<wkEnd()}return true}
 W.flt=L=>{const F=fl();if(!on()||(!F.q&&!F.c&&!F.t))return L;const now=Date.now();return L.filter(x=>pass(x,F,now))};
 W.fbar=tab=>{if(!on()||!['my','open','late','done','wait'].includes(tab))return '';const F=fl(),h0=fbar0(tab,F);
@@ -75,7 +75,7 @@ let IC=null;const icKey=()=>[SY.uid,localStorage.getItem(KU('lp-rem')),localStor
 function items(){const k=icKey();if(IC&&IC.T===TK.L&&IC.P===PT.L&&IC.k===k)return IC.v;const v=items0();IC={T:TK.L,P:PT.L,k,v};Promise.resolve().then(()=>{IC=null});return v}
 function items0(){const me=SY.uid,adm=fbAdmin(),out=[],now=Date.now(),sz=snzL();
  (TK.L||[]).forEach(t=>{if(t.st!=='open')return;if(adm){if(!(t.ow===me||(tkNew(t)&&!t.ow&&t.to.includes(me))))return}else{if(!tkSee(t)||(t.ow&&t.ow!==me))return}
-  out.push({k:'t',id:t.id,o:t,at:tkDl(t),src:t.owner===me?'שלי':t.role==='a'?'מהמנהל':'מהצוות',nd:ndNew(t)})});
+  out.push({k:'t',id:t.id,o:t,at:tkDl(t),src:t.owner===me?'שלי':t.role==='a'&&t.dg!=='1'?'מהמנהל':'מהצוות',nd:ndNew(t)})});
  (PT.L||[]).forEach(p=>{if(p.st!=='done'&&p.owner===me)out.push({k:'p',id:p.id,o:p,at:tkDl(p),src:'פרטית'})});
  remL().forEach(r=>out.push({k:'r',id:r.id,o:Object.assign({k:'r'},r),at:r.at||Infinity,src:'תזכורת'}));
  out.forEach(x=>{const s=sz[x.k+':'+x.id];if(s>now)x.sz=s});return out}
@@ -128,7 +128,7 @@ function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew
  const mi=t.mi>0?miImg(t.id):null,tg=W.wkTags(t,lt);
  return `<div class="card" id="tkc-${did}" style="border-color:${lt?'var(--bad)':'var(--acc)'};border-width:2px${W.bar(t)}">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<div style="white-space:pre-wrap;font-weight:700;font-size:1.2rem">${esc(t.txt)}</div>
   ${mi?`<img src="${esc(mi)}" alt="תמונת הוראות מהמנהל" data-a="tkPics" data-id="${did}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin:8px 0 0;display:block">`:''}${W.ckH(t)}
-  <p class="note" style="margin:8px 0">יעד: ${dl<Infinity?esc(tkDT(dl)):'בלי יעד'}</p>${t.note?`<p class="note" style="color:var(--bad);margin:0 0 8px;white-space:pre-wrap">${t.rt==='1'?'המנהל החזיר את המשימה':'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
+  <p class="note" style="margin:8px 0">יעד: ${dl<Infinity?esc(tkDT(dl)):'בלי יעד'}</p>${t.note?`<p class="note" style="color:var(--bad);margin:0 0 8px;white-space:pre-wrap">${t.rt==='1'?(t.dg==='1'?'המשימה הוחזרה':'המנהל החזיר את המשימה'):'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
   ${pb}${nt?`<p class="note" style="margin:6px 0 0;text-align:center">${nt}</p>`:''}
   <div style="margin-top:8px;text-align:center">${[ex,(cn||tkUnr(t))?lnk('tkRead','✓ סמן כנקרא'):'',lnk('tkCm',`${icd('chat')} תגובה${cc!=null?' ('+cc+')':''}`,cn?';color:var(--acc)':''),t.mi>0||wp>0?lnk('tkPics',`${icd('img')} תמונות`):'',ndNew(t)?lnk('tkwNdSeen','ראיתי את התזכורת'):''].filter(Boolean).join('<span style="color:var(--mut)"> · </span>')}</div>
   ${W.wkDet(t,W.tag(t))}</div>`}
@@ -508,13 +508,13 @@ W.out=u=>{const k=x=>LK(x+'-'+(u||''));clearTimeout(sT);
   Promise.resolve(P.getPending()).then(r=>{const a=((r&&r.notifications)||[]).filter(n=>n&&n.extra&&n.extra.lp==='wc').map(n=>({id:n.id}));if(a.length)return P.cancel({notifications:a})}).catch(()=>{})}}catch(e){}
  natRem().then(G=>{if(G)return G.remSync({p:'wc|',n:[],keep:[],q:true})}).catch(()=>{});
  ['lp-rem','lp-snz','lp-tk-dt','lp-tk-ndv','lp-tk-mn','lp-ln-ids'].forEach(x=>{try{localStorage.removeItem(k(x))}catch(e){}});
- ['lp-tk-flt','lp-tk-tpl','lp-tk-rv'].forEach(x=>{try{localStorage.removeItem(LK(x))}catch(e){}});
+ ['lp-tk-flt','lp-tk-tpl','lp-tk-rv','lp-tk-rv3'].forEach(x=>{try{localStorage.removeItem(LK(x))}catch(e){}});
  FX=FX0();W.fo=0;W.rqc=null;W.wAll=0;W.fin='';W.cur='';W.ap=null;TPC.L=null;TPC.t=0;TPC.old=0;TPC.err=''};
 /* ---- חיבור לקוד הקיים ---- */
 {const o=tkPatch;tkPatch=async function(id,ob){const r=await o.apply(this,arguments);try{if(ob&&ob.doneBy&&(ob.st==='done'||ob.st==='wait')&&ob.doneBy===fbBy()){const t=tkGet(id);logDone('t',id,t?t.txt:'')}}catch(e){}return r}}
 {const o=tkLoad;tkLoad=async function(){const r=await o.apply(this,arguments);try{W.sched();if(lnQ)lnAct()}catch(e){}return r}}
 {const o=tkAlert;tkAlert=async function(){await o.apply(this,arguments);try{wcAlert()}catch(e){}}}
-{const o=ACT.tkRefresh;if(o)ACT.tkRefresh=function(){W.rvChk(1);return o.apply(this,arguments)}}
+{const o=ACT.tkRefresh;if(o)ACT.tkRefresh=function(){W.rvChk(1);dgF=1;return o.apply(this,arguments)}}
 {const o=ACT.tkTab;if(o)ACT.tkTab=function(){W.fo=0;return o.apply(this,arguments)}}
 /* רענון המסך לא מאבד את הפוקוס בשדות החדשים של הטופס (נושא, פריט ברשימה, תאריך) */
 {const o=tkRe;tkRe=function(){const a=document.activeElement,k=a&&a.dataset&&a.dataset.i&&/^tkw(Cat|CkI|D|Tm)$/.test(a.dataset.i)?[a.dataset.i,a.dataset.n||'',a.selectionStart]:null;const r=o.apply(this,arguments);
@@ -524,5 +524,36 @@ setTimeout(()=>{try{if(on()){W.sched();wcAlert()}}catch(e){}},6000);
 setTimeout(()=>{try{if(LN())lnSetup()}catch(e){}},500);
 /* חזרה לאפליקציה: מיישמים לחיצות שנעשו בהתראות בזמן שהייתה ברקע */
 document.addEventListener('resume',()=>{try{if(on())W.sched()}catch(e){}});
+/* ---- שליחת משימות לעובד מורשה (19.11.2026) ----
+   גלאי rv/tk3: הכללים של dg / tkS פורסמו (404) או לא (403). נשמר במכשיר לכל עסק ל-6 שעות (lp-tk-rv3), ומתרענן ב"רענן".
+   index.html (tkDg) שואל רק כשלעובד יש perms.tkS. בלי הכללים החדשים – הטופס, "שלחתי" והכפתורים לא מוצגים. */
+const DGK=()=>LK('lp-tk-rv3');let dgB=0,dgF=0;
+const dgC=()=>{const c=rd(DGK(),null);return c&&typeof c==='object'&&(c.v===0||c.v===1)?c:null};
+W.dgOk=()=>{if(!on())return false;const c=dgC(),n=Date.now();
+ if(!dgB&&(dgF||!c||n-c.t>=RVT||c.t>n)){dgB=1;dgF=0;Promise.resolve().then(()=>fsx('/rv/tk3')).then(()=>1,e=>e&&e.code===404?1:e&&e.code===403?0:-1)
+  .then(v=>{if(v===0||v===1){const ch=!c||c.v!==v;wr(DGK(),{v,t:Date.now()});if(ch){if(v===1){TK.at=0;if(TKST.L===null)TKST.t=0}tkRe()}}}).catch(()=>{}).then(()=>{dgB=0})}
+ return !!(c&&c.v===1)};
+/* מסך למנהל: "מי שולח משימות לעובדים" – מתג tkS לכל עובד (השרת: setStaffTkS, מנהל העסק בלבד; משנה רק את tkS).
+   הכניסה – כפתור בתחתית מסך המשימות של המנהל. רשימת העובדים נקראת כמו במסך המשימות (staff, למנהל בלבד) */
+const SNDS={L:null,b:0,err:''},UOK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(v);
+async function sndLoad(){if(SNDS.b)return;SNDS.b=1;SNDS.err='';
+ try{const j=await fsx('/staff?pageSize=300');SNDS.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d})||{},p=f.perms;
+   return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true,on:!!(p&&typeof p==='object'&&p.tkS===true)}})
+  .filter(u=>UOK(u.uid)&&u.role!=='manager'&&u.uid!==SY.uid).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email,'he'))}
+ catch(e){SNDS.err=e&&e.offline?'אין חיבור לאינטרנט':'טעינת רשימת העובדים נכשלה'}
+ finally{SNDS.b=0;try{if(cur().v==='tkSnd')rerender()}catch(e){}}}
+V.tkSnd=()=>{const T='שליחת משימות לעובדים';if(!on()||!fbAdmin())return{t:T,h:'<div class="empty">המסך הזה למנהל בלבד</div>'};
+ if(!SNDS.L&&!SNDS.err&&!SNDS.b)sndLoad();
+ const row=u=>`<div class="card" style="padding:10px 12px;margin:0 0 8px"><b>${esc(u.name||u.email||u.uid)}</b>${u.active?'':' <span class="tag t4">מושבת</span>'}${u.email&&u.name?`<small style="display:block;color:var(--mut)"><bdi dir="ltr">${esc(u.email)}</bdi></small>`:''}`
+  +`<label class="cb" style="margin:6px 0 0"><input type="checkbox" data-c="tkSndOn" data-uid="${esc(u.uid)}"${u.on?' checked':''}> שולח משימות לעובדים</label></div>`;
+ return{t:T,s:'מתג לכל עובד',h:'<p class="note">עובד שהמתג דולק אצלו בוחר עובדים ושולח להם משימות (גם עם בקשת תמונה), ורואה לשונית "שלחתי". הוא מאשר, מחזיר ומוחק רק משימות ששלח, ומגיב בהן. באפליקציה הוא לא רואה משימות אחרות של המנהל ולא את פרטי העובדים. אתה רואה את כל המשימות האלה, עם "נשלח ע״י". המתג נקלט אצל העובד בפתיחה הבאה של האפליקציה.</p>'
+  +(SNDS.err?`<div class="card"><p>${esc(SNDS.err)}</p><button class="btn g" data-a="tkSndRe">נסה שוב</button></div>`:SNDS.L?(SNDS.L.length?SNDS.L.map(row).join(''):'<div class="empty">אין עובדים</div>'):'<div class="empty">טוען…</div>')}};
+ACT.tkSndRe=()=>{SNDS.L=null;SNDS.err='';rerender()};
+CHG.tkSndOn=async el=>{const uid=el.dataset.uid,u=(SNDS.L||[]).find(x=>x.uid===uid);if(!u||!fbAdmin())return;const on1=!!el.checked,nm=u.name||u.email||'העובד';el.disabled=true;
+ try{await fnCall('setStaffTkS',SY.sa&&SY.bizId?{bizId:SY.bizId,uid,on:on1}:{uid,on:on1});u.on=on1;toast(on1?'✓ '+nm+' יכול לשלוח משימות לעובדים':'המתג כובה ל'+nm)}
+ catch(e){el.checked=!on1;toast(e&&e.offline?'אין חיבור לאינטרנט':(e&&e.message)||'השמירה נכשלה')}finally{el.disabled=false}};
+{const o=V.tk;if(typeof o==='function')V.tk=function(){const r=o.apply(this,arguments);
+ try{if(on()&&fbAdmin()&&r&&typeof r.h==='string'){const m='<button class="btn g w" data-a="tkRefresh"';
+  if(r.h.includes(m))r.h=r.h.replace(m,()=>`<button class="opt" data-a="go" data-v="tkSnd" style="margin-top:8px"><span>${icd('user')} מי שולח משימות לעובדים<small>מתג לכל עובד: מי יכול לשלוח משימות לעובדים אחרים</small></span></button>`+m)}}catch(e){}return r}}
 window.TKW=W;
 })();

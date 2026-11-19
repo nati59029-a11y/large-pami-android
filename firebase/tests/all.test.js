@@ -9,6 +9,7 @@ require('./36-tasks');
 require('./36b-tasks-claim');
 require('./36c-private-requests');
 require('./36d-tasks-v2');
+require('./36e-tasks-delegate'); // שליחת משימות לעובד מורשה (tkS / dg, 19.11.2026)
 require('./37-appreq');
 require('./38-closings');
 require('./39-cashout');
