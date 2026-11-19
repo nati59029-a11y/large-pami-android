@@ -3,6 +3,8 @@
 //   runFbSync(opts) – מוסיפה לרשימת התפוצה "לקוחות משוב" בימות את הטלפונים מטופסי משוב מאושרים (fb, st=='ok'),
 //                     גם בשורש וגם ב-b/largpeami/fb, שעוד לא נשלחו (yemot_fbsent/{טלפון}). נקראת מהריצה הלילית (yemot.js) ומ-yemotFbList.
 //   yemotFbList      – מנהל בלבד: { action:'state' } מצב, { action:'sync' } סנכרון עכשיו, { action:'setTz', on } מתג צינתוק (רק שמירה – הצינתוק עצמו ב-sendPromo ב-yemot.js).
+//                      (משימה 2026-11-19, "מספרים בקו") { action:'numbers' } – המספרים ברשימה החינמית ובלקוחות משוב (קריאה בלבד);
+//                      { action:'block'|'unblock', phone } – חסימה/ביטול חסימה של מספר שכבר ברשימת לקוחות המשוב (UpdateTemplateEntry לפי rowid). לא מוחק ולא מוסיף.
 // בטיחות: רק הוספה ועדכון (UploadPhoneList עם updateType UPDATE, ב-lib/yemot-client.js). אין מחיקת מספרים, אין ניקוי רשימה ואין מחיקת תבנית.
 // הרשימה נוצרת פעם אחת: קודם templateId השמור, אחר כך GetTemplates לפי השם, ורק אם אין – CreateTemplate. יצירה שלא ודאית (פסק זמן) לא חוזרת באותה ריצה;
 // בריצה הבאה GetTemplates ימצא אותה אם נוצרה.
@@ -17,7 +19,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const roles = require('./lib/roles');
 const T = require('./lib/tenant');
 const { inputObject } = roles;
-const { apiBase, getTemplates, createTemplate, uploadPhoneList } = require('./lib/yemot-client');
+const { YemotError, apiBase, getTemplates, createTemplate, uploadPhoneList, getTemplateEntries, setEntryBlocked, tzlEntries } = require('./lib/yemot-client');
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
@@ -205,6 +207,64 @@ async function stateOf(db) {
     tzMonth: { month, count: tm }, tzMax: Number.isInteger(YEMOT_FB_TZ_MAX.value()) && YEMOT_FB_TZ_MAX.value() > 0 ? YEMOT_FB_TZ_MAX.value() : 1500 };
 }
 
+// ---------------- "מספרים בקו" (משימה 2026-11-19) ----------------
+// שגיאה מימות ← קוד קצר בלבד (לא טקסט מימות). פסק זמן בחסימה = לא ודאי (ייתכן שבוצעה).
+const yErr = (e) => (e instanceof YemotError ? String(e.code).slice(0, 30) : 'internal');
+const tplIdOf = async (db) => { const v = (await db.doc(STATE).get()).get('templateId'); return Number.isInteger(v) && v > 0 ? v : null; };
+function yemotCtx(key, base) {
+  if (!key) throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר בשרת.', { reason: 'no-key' });
+  try { return { key, base: apiBase(base), timeoutMs: YEMOT_TIMEOUT_MS.value() }; } catch (e) { throw new HttpsError('failed-precondition', 'כתובת ימות לא תקינה בשרת.', { reason: 'bad-base' }); }
+}
+
+// הרשימה החינמית (רק טלפונים) + לקוחות משוב ({ p, b, n }). כל רשימה בנפרד: כשל באחת לא מסתיר את השנייה (freeErr/fbErr).
+async function numbersOf(db, key, base) {
+  const ctx = yemotCtx(key, base);
+  const list = require('./yemot').shared.readCfg().list;
+  const tplId = await tplIdOf(db);
+  const out = { ok: true, listName: String(list), listReady: tplId !== null, free: [], fb: [], freeErr: null, fbErr: null };
+  const [fr, fe] = await Promise.allSettled([tzlEntries(ctx, list), tplId ? getTemplateEntries(ctx, tplId) : Promise.resolve([])]);
+  if (fr.status === 'fulfilled') out.free = [...new Set(fr.value.map((p) => normPhone(p) || String(p).slice(0, 20)))];
+  else { out.freeErr = yErr(fr.reason); logger.warn('yemot-fblist: numbers free failed', { reason: 'free-failed', code: out.freeErr }); }
+  if (fe.status === 'fulfilled') {
+    const m = new Map(); // מאוחד לפי מספר מנורמל; חסום אם אחת השורות חסומה
+    for (const e of fe.value) {
+      const p = normPhone(e.phone) || String(e.phone).slice(0, 20);
+      const cur = m.get(p);
+      if (!cur) m.set(p, { p, b: e.blocked, n: cleanName(e.name || '') });
+      else { cur.b = cur.b || e.blocked; if (!cur.n) cur.n = cleanName(e.name || ''); }
+    }
+    out.fb = [...m.values()];
+  } else { out.fbErr = yErr(fe.reason); logger.warn('yemot-fblist: numbers fb failed', { reason: 'fb-failed', code: out.fbErr }); }
+  out.counts = { free: out.free.length, fbActive: out.fb.filter((x) => !x.b).length, fbBlocked: out.fb.filter((x) => x.b).length };
+  return out;
+}
+
+// חסימה / ביטול חסימה. רק מספר שכבר ברשימת לקוחות המשוב. אחרי העדכון קוראים שוב מימות ומוודאים שהמצב השתנה.
+async function setBlocked(db, key, base, who, rawPhone, on) {
+  const phone = normPhone(rawPhone);
+  if (!phone) throw new HttpsError('invalid-argument', 'מספר טלפון לא תקין.', { reason: 'bad-phone' });
+  const tplId = await tplIdOf(db);
+  if (!tplId) throw new HttpsError('failed-precondition', 'רשימת לקוחות המשוב עוד לא נוצרה בימות.', { reason: 'no-list' });
+  const ctx = yemotCtx(key, base);
+  const fail = (e) => { const c = yErr(e); logger.warn('yemot-fblist: block failed', { reason: 'block-failed', code: c });
+    return c === 'timeout' ? new HttpsError('unavailable', 'ימות לא ענה בזמן. לא ידוע אם השינוי בוצע – רעננו את הרשימה ובדקו.', { reason: 'uncertain' })
+      : new HttpsError('unavailable', 'הפעולה מול ימות נכשלה. נסו שוב.', { reason: 'yemot-failed', code: c }); };
+  let rows;
+  try { rows = (await getTemplateEntries(ctx, tplId)).filter((e) => normPhone(e.phone) === phone); } catch (e) { throw fail(e); }
+  if (!rows.length) throw new HttpsError('failed-precondition', 'המספר לא נמצא ברשימת לקוחות המשוב.', { reason: 'not-in-list' });
+  const todo = rows.filter((e) => e.blocked !== on);
+  if (todo.some((e) => !Number.isInteger(e.rowid))) throw new HttpsError('unavailable', 'ימות לא החזיר מזהה שורה. לא בוצע שינוי.', { reason: 'no-rowid' });
+  // חסימה: מסמנים "נשלח" (אם עוד לא) כדי שהסנכרון הלילי לא יעלה את המספר שוב (העלאה עם blocked:0 עלולה לבטל חסימה – לא מאומת)
+  if (on) { try { await db.doc(`${SENT}/${phone}`).create({ st: 'sent', at: new Date().toISOString(), tpl: tplId, by: 'block' }); } catch (e) { if (e.code !== 6) throw e; } }
+  try { for (const e of todo) await setEntryBlocked(ctx, tplId, e, on); } catch (e) { throw fail(e); }
+  let after;
+  try { after = (await getTemplateEntries(ctx, tplId)).filter((e) => normPhone(e.phone) === phone); } catch (e) { throw fail(e); }
+  const ok = after.length > 0 && after.every((e) => e.blocked === on);
+  if (!ok) { logger.warn('yemot-fblist: block not applied', { reason: 'not-applied' }); throw new HttpsError('unavailable', 'ימות לא עדכן את המספר. נסו שוב.', { reason: 'not-applied' }); }
+  logger.info('yemot-fblist: block', { on, changed: todo.length, by: who.uid });
+  return { ok: true, phone, blocked: on, changed: todo.length };
+}
+
 async function fbList(request, key, base) {
   const who = await requireStaff(request);
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
@@ -220,6 +280,11 @@ async function fbList(request, key, base) {
     if (typeof input.on !== 'boolean') throw new HttpsError('invalid-argument', 'קלט לא תקין', { reason: 'bad-input' });
     await db.doc(STATE).set({ tzOn: input.on, tzBy: who.uid, tzAt: new Date().toISOString() }, { merge: true });
     return stateOf(db);
+  }
+  if (input.action === 'numbers') return numbersOf(db, key, base);
+  if (input.action === 'block' || input.action === 'unblock') {
+    if (typeof input.phone !== 'string' || input.phone.length > 30) throw new HttpsError('invalid-argument', 'קלט לא תקין', { reason: 'bad-input' });
+    return setBlocked(db, key, base, who, input.phone, input.action === 'block');
   }
   throw new HttpsError('invalid-argument', 'קלט לא תקין', { reason: 'bad-input' });
 }

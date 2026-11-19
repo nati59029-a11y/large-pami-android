@@ -27,6 +27,7 @@ require('./62-voice');
 require('./63-yemot-fblist');
 require('./64-yemot-one-ext'); // כל התוכן בשלוחה אחת (משימה 2026-11-17, שלבים 1-2)
 require('./65-yemot-tz-send'); // שליחת צינתוקים מהקו (sendLineTzintuk, משימה 2026-11-18)
+require('./66-yemot-numbers'); // מספרים בקו: הצגה, חיפוש וחסימה (yemotFbList numbers/block/unblock, משימה 2026-11-19)
 require('./90-coverage');
 const H = require('./helpers');
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* האמולטור כבר נסגר */ } });

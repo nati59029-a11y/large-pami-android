@@ -140,6 +140,7 @@ async function deleteFiles(ctx, whats) {
 // ---------------- רשימות תפוצה וצינתוק (משימה 2026-11-17, לקוחות משוב) ----------------
 // מתועד ב-api-55 (post/32033, 32037, 32039, 32043, 64941, 65034). אין כאן פקודות מחיקה של רשימה או של מספרים:
 // לא DeleteTemplate, לא ClearTemplateEntries, לא UpdateTemplateEntries, ולא updateType NEW/REMOVE – בכוונה.
+// (משימה 2026-11-19) UpdateTemplateEntry – רק לחסימה/ביטול חסימה של מספר קיים לפי rowid (setEntryBlocked). לא מוסיף ולא מוחק.
 const PHONE_RE = /^0\d{8,9}$/;
 
 // כל התבניות: [{ templateId, description }]
@@ -157,12 +158,24 @@ async function createTemplate(ctx, description) {
   return id;
 }
 
-// המספרים ברשימת התפוצה: [{ phone, blocked }]
+// המספרים ברשימת התפוצה: [{ phone, blocked, rowid, name, moreinfo }] (rowid/name/moreinfo – לחסימה, בלי למחוק שם ומידע נוסף)
 // חסום = כל ערך שאינו false/0/'0'/'false'/ריק (true, 1, '1' וכו') – בספק לא שולחים צינתוק בתשלום
 const isBlocked = (b) => !(b === false || b === 0 || b == null || b === '' || b === '0' || b === 'false');
 async function getTemplateEntries(ctx, templateId) {
   const j = await yemotCall(ctx, 'GetTemplateEntries', { templateId });
-  return (Array.isArray(j.entries) ? j.entries : []).map((e) => ({ phone: String((e && e.phone) || ''), blocked: isBlocked(e && e.blocked) })).filter((e) => e.phone);
+  const str = (v) => (typeof v === 'string' ? v : null);
+  return (Array.isArray(j.entries) ? j.entries : []).map((e) => ({ phone: String((e && e.phone) || ''), blocked: isBlocked(e && e.blocked),
+    rowid: Number.isInteger(Number(e && e.rowid)) && Number(e.rowid) > 0 ? Number(e.rowid) : null, name: str(e && e.name), moreinfo: str(e && e.moreinfo) })).filter((e) => e.phone);
+}
+
+// חסימה / ביטול חסימה של מספר אחד שכבר ברשימה (UpdateTemplateEntry, מתועד ב-api-55). entry = שורה מ-getTemplateEntries.
+// rowid חובה (בלעדיו ימות עלול ליצור שורה חדשה או למחוק שם ומידע נוסף). השם והמידע הנוסף נשלחים כמו שהם, כדי שלא יימחקו (לא מאומת אם נדרש).
+async function setEntryBlocked(ctx, templateId, entry, blocked) {
+  if (!entry || !Number.isInteger(entry.rowid) || entry.rowid <= 0 || !entry.phone || typeof blocked !== 'boolean') throw new YemotError('bad-entry', false);
+  const p = { templateId, rowid: entry.rowid, phone: String(entry.phone), blocked: blocked ? 1 : 0 };
+  if (typeof entry.name === 'string') p.name = entry.name;
+  if (typeof entry.moreinfo === 'string') p.moreinfo = entry.moreinfo;
+  await yemotCall(ctx, 'UpdateTemplateEntry', p);
 }
 
 // הוספה/עדכון של מספרים ברשימת תפוצה. updateType קבוע: UPDATE (מוסיף חדשים ומעדכן קיימים, לא מסיר אף מספר).
@@ -193,4 +206,4 @@ async function runTzintukPhones(ctx, phones) {
 }
 
 module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, readText, uploadText, uploadBinary, deleteFiles,
-  getTemplates, createTemplate, getTemplateEntries, uploadPhoneList, tzlEntries, runTzintukPhones };
+  getTemplates, createTemplate, getTemplateEntries, setEntryBlocked, uploadPhoneList, tzlEntries, runTzintukPhones };
