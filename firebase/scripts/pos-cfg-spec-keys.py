@@ -25,6 +25,10 @@ for line in s.splitlines():
     for i, (k, st) in enumerate(toks):
         keys.append([re.sub(r'\{.*', '', k), ws[i] if len(ws) > 1 else ws[0], bool(st)])
 repl += re.findall(r'`([^`]+)`←', s21)
+# מפתחות שנוספו בהחלטת בעל העסק אחרי פרק 2 (שם, מי משנה, רגישה, אחרי איזה מפתח)
+EXTRA = [('rcptBizRc', 'mgr', False, 'rcptBizFmt')]  # קופה גל 3, 19.11.2026: קבלה ללקוח עסקי שמקבל רק חשבוניות
+for k, w, sens, aft in EXTRA:
+    keys.insert([x[0] for x in keys].index(aft) + 1, [k, w, sens])
 out = {'source': 'my-agents: משימות/2026-11-17_תוכנית-קופה-לחנות/תוצרים/06-אפיון-סופי.md – פרק 2 (טבלה) ופרק 2.1. נוצר בסקריפט firebase/scripts/pos-cfg-spec-keys.py',
        'count': len(keys), 'keys': keys, 'replaced': sorted(set(repl))}
 open(sys.argv[2], 'w', encoding='utf8').write(json.dumps(out, ensure_ascii=False, indent=0) + '\n')

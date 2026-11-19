@@ -216,6 +216,15 @@ function chsOf(ch, snd) {
 // t = סוג המסמך: נשלח רק מה שהכרטיס ביקש (snd.inv / snd.rc – אותו כלל בדיוק כמו חשבוניות ההזמנות, ar.js wantDoc). כרטיס עם oc בלבד – כלום
 function autoChs(c, t) { return c && c.wholesale === true && arCore().wantDoc(c.snd, t) ? chsOf('', c.snd) : []; }
 const autoAny = (c, docs) => (docs || []).some((d) => autoChs(c, d.t).length > 0);
+// rcptBizRc (poscfg, מנהל): כרטיס עם חשבוניות בלבד (snd.inv בלי snd.rc) ומכירה עם חשבונית + קבלה – 'send' = הקבלה נשלחת גם היא באותו ערוץ.
+// 'print' (ברירת המחדל) / 'none' – הקבלה לא נשלחת (בקופה: מודפסת / לא כלום – pos-bizdoc.js)
+const invOnly = (c, docs) => !!(c && c.snd && c.snd.inv === true && c.snd.rc !== true && (docs || []).some((d) => d.t === 'inv') && (docs || []).some((d) => d.t === 'rc'));
+function autoChsSale(c, t, docs, rcMode) {
+  const x = autoChs(c, t);
+  if (x.length || t !== 'rc' || rcMode !== 'send' || !invOnly(c, docs)) return x;
+  return autoChs(c, 'inv');
+}
+async function rcModeOf(db) { try { const v = (await require('./pos-sale')._core.cfgOf(db)).rcptBizRc; return ['print', 'send', 'none'].includes(v) ? v : 'print'; } catch (e) { return 'print'; } }
 // שולח כל מסמך של המכירה בכל ערוץ. כשל לא זורק – נרשם (why). deps – לבדיקות בלבד ({ send, mail })
 async function sendSale(w, saleId, sale, ch, auto, deps) {
   const AR = arCore();
@@ -224,8 +233,9 @@ async function sendSale(w, saleId, sale, ch, auto, deps) {
   const out = [];
   if (ch ? !chsOf(ch).length : !autoAny(c, sale.docs)) return out;
   const cfg = await AR.cfgOf(db);
+  const rcMode = !ch && invOnly(c, sale.docs) ? await rcModeOf(db) : 'print';
   for (const d of sale.docs || []) {
-    const chs = ch ? chsOf(ch) : autoChs(c, d.t); // אוטומטי – לכל מסמך לפי הדגלים בכרטיס
+    const chs = ch ? chsOf(ch) : autoChsSale(c, d.t, sale.docs, rcMode); // אוטומטי – לכל מסמך לפי הדגלים בכרטיס (+ rcptBizRc לקבלה)
     if (!chs.length) continue;
     let doc, buf;
     try { doc = await AR.docOf(db, d.id); buf = await AR.docBuf(db, w, doc, cfg, false); } catch (e) {
@@ -297,5 +307,5 @@ exports.posSaleSend = onDocumentCreated({ document: 'b/{bizId}/possale/{id}', re
   }
 });
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  kinds, needAlloc, docLines, paySum, prep, issueSale, issueRc, issueCr, hdrOf, docIn, chsOf, autoChs, autoAny, sendSale, autoSend, call: { posDoc: () => wrap('posDoc', docIn) },
+  kinds, needAlloc, docLines, paySum, prep, issueSale, issueRc, issueCr, hdrOf, docIn, chsOf, autoChs, autoAny, autoChsSale, invOnly, sendSale, autoSend, call: { posDoc: () => wrap('posDoc', docIn) },
 } });

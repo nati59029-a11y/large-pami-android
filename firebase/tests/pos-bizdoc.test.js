@@ -66,6 +66,7 @@ async function seed() {
     const biz = { bn: 'חברה בע"מ', vat: '123456789', wholesale: true, lim: 100000 };
     b.set(d.doc(P('cust/cWa')), Object.assign({ name: 'א', phone: '0541111111', mail: 'a@x.invalid', snd: { ch: 'wa', oc: false, inv: true, rc: true } }, biz));
     b.set(d.doc(P('cust/cOc')), Object.assign({ name: 'אישורים בלבד', phone: '0546666666', snd: { ch: 'wa', oc: true, inv: false, rc: false } }, biz));
+    b.set(d.doc(P('cust/cInv')), Object.assign({ name: 'חשבוניות בלבד', phone: '0548888888', snd: { ch: 'wa', oc: false, inv: true, rc: false } }, biz));
     b.set(d.doc(P('cust/cRc')), Object.assign({ name: 'קבלות בלבד', phone: '0547777777', snd: { ch: 'wa', oc: false, inv: false, rc: true } }, biz));
     b.set(d.doc(P('cust/cBoth')), Object.assign({ name: 'ב', phone: '0542222222', mail: 'b@x.invalid', snd: { ch: 'both', oc: false, inv: true, rc: true } }, biz));
     b.set(d.doc(P('cust/cNone')), Object.assign({ name: 'ג', phone: '0543333333', mail: 'c@x.invalid' }, biz));
@@ -132,6 +133,22 @@ describe('שליחה אוטומטית מהשרת אחרי המכירה (autoSend
     const M = mocks();
     const r = await inBiz(() => DOC.autoSend(A, s.id, M.deps));
     assert.deepEqual(r.sent.map((x) => x.t), ['rc']); assert.equal(M.wa.length, 1); assert.equal(M.wa[0].payload.tpl.name, 'pos_rc');
+  });
+
+  it('rcptBizRc: חשבוניות בלבד בכרטיס + חשבונית וקבלה – print (ברירת מחדל) ו-none: רק החשבונית; send: גם הקבלה באותו ערוץ', async () => {
+    for (const [mode, ts] of [[null, ['inv']], ['print', ['inv']], ['none', ['inv']], ['send', ['inv', 'rc']]]) {
+      if (mode) await set('poscfg/main', { rcptBizRc: mode }, true);
+      const s = await sell(CASH, { cust: 'cInv' });
+      assert.deepEqual(s.docs.map((x) => x.t), ['inv', 'rc']);
+      const M = mocks();
+      const r = await inBiz(() => DOC.autoSend(A, s.id, M.deps));
+      assert.deepEqual(r.sent.map((x) => x.t), ts, String(mode));
+      assert.ok(r.sent.every((x) => x.ok && x.ch === 'wa'));
+    }
+    // אותו כלל לא חל על כרטיס עם קבלות / אישור הזמנה בלבד
+    assert.deepEqual(DOC.autoChsSale({ wholesale: true, snd: { ch: 'wa', oc: true } }, 'rc', [{ t: 'inv' }, { t: 'rc' }], 'send'), []);
+    assert.deepEqual(DOC.autoChsSale({ wholesale: true, snd: { ch: 'wa', inv: true } }, 'rc', [{ t: 'rc' }], 'send'), []);
+    assert.deepEqual(DOC.autoChsSale({ wholesale: true, snd: { ch: 'mail', inv: true } }, 'rc', [{ t: 'inv' }, { t: 'rc' }], 'send'), ['mail']);
   });
 
   it('עסקי + שניהם: וואטסאפ ומייל (transport מדומה) עם PDF מצורף', async () => {

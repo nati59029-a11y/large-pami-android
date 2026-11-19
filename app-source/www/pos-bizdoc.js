@@ -28,7 +28,10 @@ const want=(s,t)=>t==='rc'?s.rc===true:t==='ir'?(s.inv===true||s.rc===true):s.in
 /* מה לעשות בסוף המכירה. null = לקוח פרטי / בלי לקוח – כמו היום. ch – רק כשהכרטיס ביקש לשלוח לפחות אחד ממסמכי המכירה;
    אחרת המכירה מתנהגת כ"אין ערוץ" (בלי A4 – הקופאי נשאל) */
 function plan(c,doc){if(!c||!c.biz)return null;const s=c.snd&&typeof c.snd==='object'?c.snd:{};
- const a4=s.a4===true,ch=CHS.includes(s.ch)&&typesOf(doc).some(t=>want(s,t))?s.ch:'';return{a4,ch,ask:!a4&&!ch}}
+ const ts=typesOf(doc),a4=s.a4===true,ch=CHS.includes(s.ch)&&ts.some(t=>want(s,t))?s.ch:'';
+ /* rcptBizRc (הגדרת מנהל): חשבוניות בלבד בכרטיס + מכירה עם חשבונית וקבלה – 'send' (השרת שולח גם את הקבלה) / 'none' = בלי קבלה בקופה; 'print' = כמו היום */
+ let rc='';if(ch&&s.inv===true&&s.rc!==true&&ts.includes('inv')&&ts.includes('rc')){let m;try{m=UI().cfg('rcptBizRc')}catch(e){}rc=['send','none'].includes(m)?m:'print'}
+ return{a4,ch,ask:!a4&&!ch,rc}}
 /* קבלה במדפסת הקופה – בדיוק כמו היום */
 const thermal=doc=>UI().Dev.print({kind:'sale',doc});
 
@@ -76,7 +79,7 @@ function chModal(c,withPrint){const{modal,E}=UI();const ph=!!(c&&c.phone),ml=!!(
 
 /* ---------- סוף מכירה ---------- */
 /* thermalNow(c) – האם מסך המכירה מדפיס קבלה בקופה מיד (כמו היום). false רק ללקוח עסקי עם A4 או בלי הגדרה (החלטה בחלון) */
-function thermalNow(c,doc){const p=plan(c,doc);return!p||(!p.a4&&!p.ask)}
+function thermalNow(c,doc){const p=plan(c,doc);return!p||(!p.a4&&!p.ask&&p.rc!=='send'&&p.rc!=='none')}
 async function after(doc,c){const p=plan(c,doc);if(!p)return;
  try{
   if(p.ch){UI().toast(hasDoc(doc)?'המסמך יישלח ללקוח ב'+CH_N[p.ch]:'המסמך יישלח ללקוח ב'+CH_N[p.ch]+' כשהמכירה תגיע לשרת');autoCheck(doc,p.ch)}
