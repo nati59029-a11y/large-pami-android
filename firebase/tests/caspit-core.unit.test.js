@@ -223,7 +223,7 @@ describe('דוח מכירות (A2)', () => {
     assert.equal(C.detect(rows).kind, 'sales');
     const p = C.parseSales(rows);
     assert.equal(p.rows, 3); assert.equal(p.lines.length, 2); assert.deepEqual(p.bad, [{ r: 4, why: 'date' }]);
-    assert.deepEqual(p.lines[0], { d: '2026-11-16', c: '300001', n: 'פריט 300001', tx: '5001', bk: '6200', bn: 'סניף א', w: null, ds: 0, a: 29.7 });
+    assert.deepEqual(p.lines[0], { d: '2026-11-16', c: '300001', n: 'פריט 300001', tx: '5001', bk: '6200', bn: 'סניף א', w: null, ds: 0, a: 29.7, tm: { y: 0, n: 2, p: 'dd/dd/dddd', q: '' } }); // tm (C2) – רק בשורה הראשונה של כל תאריך
     assert.equal(p.lines[1].a, -4.5);
   });
   it('מפתח סניף: מספר, ואם אין – השם בלי סימנים', () => {
@@ -393,6 +393,52 @@ describe('C1: שעת מכירה ופילוח לפי שעה', () => {
     assert.deepEqual(C.salesHours([]), { day: {}, hours: {} });
     // קובץ בלי שעות: הכול ב-na → יום בלי שעות
     assert.deepEqual(C.salesHours([{ d: '2026-11-20', bk: 'a', gross: 9, h: { na: 9 } }]), { day: { '2026-11-20': 9 }, hours: { '2026-11-20': {} } });
+  });
+  it('C2 – AM/PM: timeOf ו-clockOf; 12 AM = 00, 12 PM = 12; שעה מעל 12 עם AM/PM → -1', () => {
+    assert.equal(C.timeOf('16/11/2026 2:30 PM'), 14 * 60 + 30);
+    assert.equal(C.timeOf('16/11/2026 02:30:59 pm'), 14 * 60 + 30);
+    assert.equal(C.timeOf('16/11/2026 2:30 P.M.'), 14 * 60 + 30);
+    assert.equal(C.timeOf('16/11/2026 2:30PM'), 14 * 60 + 30);
+    assert.equal(C.timeOf('16/11/2026 9:05 AM'), 9 * 60 + 5);
+    assert.equal(C.timeOf('16/11/2026 12:10 AM'), 10);
+    assert.equal(C.timeOf('16/11/2026 12:10 PM'), 12 * 60 + 10);
+    assert.equal(C.timeOf('2026-11-16 11:59 PM'), 1439);
+    for (const v of ['16/11/2026 0:30 AM', '16/11/2026 13:00 PM', '16/11/2026 14:32 PM', '16/11/2026 2:30 XM']) assert.equal(C.timeOf(v), -1, v);
+    assert.equal(C.dateOf('16/11/2026 2:30 PM'), '2026-11-16'); // dateOf לא השתנה
+    assert.equal(C.clockOf('14:32'), 872); assert.equal(C.clockOf('2:32 pm'), 872); assert.equal(C.clockOf('14:32:05'), 872);
+    assert.equal(C.clockOf(0.5), 720); assert.equal(C.clockOf(0), 0); assert.equal(C.clockOf('16/11/2026 14:32'), 872);
+    for (const v of ['', null, 'x', '24:00', '13:00 PM', -0.1, 1.5]) assert.equal(C.clockOf(v), -1, String(v));
+  });
+  it('C2 – parseSales מחזיר tm { y, n, p, q }: דפוס מוסווה בלי ספרות ובלי אותיות אמיתיות; עותק בשורה הראשונה של כל תאריך', () => {
+    const p = C.parseSales([SH, sl('16/11/2026', '1', '9', '10'), sl('16/11/2026 2:30 PM', '2', '9', '5'), sl('17/11/2026 Mon', '1', '8', '10'), sl('xx', '1', '7', '1')]);
+    assert.deepEqual(p.tm, { y: 1, n: 2, p: 'dd/dd/dddd', q: 'dd/dd/dddd d:dd aa' });
+    assert.equal(p.bad.length, 1);
+    assert.deepEqual(p.lines.map((l) => !!l.tm), [true, false, true]); // 16.11 – הראשונה; 17.11 – הראשונה
+    assert.deepEqual(p.lines[0].tm, p.tm); assert.notEqual(p.lines[0].tm, p.tm); // עותק
+    assert.equal(p.lines[1].t, 870);
+    // הסוואה: אין ספרות ואין אותיות אמיתיות בדפוס; עברית → h; מספר Excel → #; Date → @; עד 30 תווים
+    assert.equal(C.tmMask('יום ב 14:00'), 'hhh h dd:dd');
+    assert.equal(C.tmMask(46342.75), '#ddddd.dd');
+    assert.equal(C.tmMask(new Date(2026, 10, 16)), '@');
+    assert.equal(C.tmMask('16/11/2026 14:32:05 GMT+0200 (שעון ישראל)'), 'dd/dd/dddd dd:dd:dd aaa+dddd (hhhh hhhhh)'.slice(0, 30));
+    assert.equal(C.tmMask('a\u200f€\tb'), 'a?? a');
+    for (const v of ['16/11/2026 14:32', 'Nov 16, 2026 2:32:00 PM', '2026-11-16T14:32:05Z']) assert.ok(/^[dah #@:/.,+\-()'"_|?]*$/.test(C.tmMask(v)) && !/[0-9]/.test(C.tmMask(v)), v);
+    // תאריך פגום לגמרי (כל השורות נדחו) – הדפוס עדיין מגיע
+    const q = C.parseSales([SH, sl('11/16/2026 2:30 PM', '1', '9', '10')]);
+    assert.equal(q.lines.length, 0); assert.deepEqual(q.tm, { y: 0, n: 0, p: 'dd/dd/dddd d:dd aa', q: '' });
+  });
+  it('C2 – עמודת שעה נפרדת ("שעת מכירה" או "שעה"): רשות, לא שוברת זיהוי; עדיפות לעמודה, ואם ריקה – מתוך התאריך', () => {
+    for (const hn of ['שעת מכירה', 'שעה']) {
+      const H = SH.concat([hn]), row = (d, t, c) => sl(d, c, '9', '10').concat([t]);
+      const det = C.detect([H]);
+      assert.equal(det.kind, 'sales'); assert.equal(det.map.h, 9);
+      const p = C.parseSales([H, row('16/11/2026', '14:05', '1'), row('16/11/2026 09:00', '', '2'), row('16/11/2026', '2:30 PM', '3'), row('16/11/2026', 0.25, '4'), row('16/11/2026', '', '5')]);
+      assert.deepEqual(p.lines.map((l) => l.t), [845, 540, 870, 360, undefined], hn);
+      assert.deepEqual(p.tm, { y: 4, n: 1, p: 'dd/dd/dddd|', q: 'dd/dd/dddd|dd:dd' });
+    }
+    // בלי העמודה: map.h = -1, הזיהוי והשורות כמו קודם
+    const d0 = C.detect([SH]); assert.equal(d0.kind, 'sales'); assert.equal(d0.map.h, -1);
+    assert.equal(C.SAL.h, 'שעת מכירה');
   });
   it('packDays/unpackDays מעבירים את h (תשובת cxSales)', () => {
     const D = C.unpackDays(C.packDays([{ d: '2026-11-16', bk: '6200', gross: 10, h: { 14: 10 }, it: { 1: { n: 'x', q: 1, a: 10 } } }]));
