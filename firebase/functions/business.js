@@ -449,6 +449,24 @@ async function setStaffPerms(request) {
   const uid = typeof input.uid === 'string' ? input.uid : '';
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
   const biz = await bizB(bizId);
+  // 18.11.2026 (הכרעת בעל העסק): קופה למנהל העסק – רק מנהל־על, ורק pos / posMgr (admins/{uid}.perms). שאר ההרשאות של מנהל לא נקבעות כאן.
+  const aRef0 = getFirestore().doc(T.bizRef(biz, 'admins/' + uid));
+  const a0 = await aRef0.get();
+  if (a0.exists) {
+    const p = input.perms;
+    const okIn = Object.keys(input).every((k) => ['bizId', 'uid', 'perms', 'rank'].includes(k)) && (input.rank === undefined || input.rank === '');
+    if (!okIn || !p || typeof p !== 'object' || Array.isArray(p) || !Object.keys(p).length || Object.entries(p).some(([k, v]) => !R.SA_ONLY.includes(k) || typeof v !== 'boolean')) {
+      throw new HttpsError('failed-precondition', 'למנהל העסק יש את כל ההרשאות. אפשר לקבוע לו רק את הקופה', { reason: 'is-admin' });
+    }
+    const prev = a0.get('perms');
+    const perms = {};
+    for (const k of R.SA_ONLY) perms[k] = typeof p[k] === 'boolean' ? p[k] : !!(prev && typeof prev === 'object' && prev[k] === true);
+    const b = getFirestore().batch();
+    b.update(aRef0, { perms });
+    b.set(auditRef(bizId), auditData(by, 'setStaffPerms', uid + ':admin:' + R.SA_ONLY.filter((k) => perms[k]).join(',')));
+    await b.commit();
+    return { ok: true, uid, perms, admin: true };
+  }
   const r = await rankOf(bizId, input.rank);
   if (input.perms === undefined && !r) throw bad('bad-perms', 'צריך לבחור דרגה או הרשאות');
   const perms = input.perms !== undefined ? cleanPerms(input.perms) : cleanPerms(r.perms);

@@ -59,6 +59,12 @@ const COPY = [
   // המזכירה העסקית: SEC_COLLS ב-functions/secretary.js + sec_ord (הזמנות מהמייל, secretary-google.js)
   'sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log',
   'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', // sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה
+  // קופה – pos (גל 2, 18.11.2026): קיימת רק במבנה b/{bizId} (השרת דוחה עסק legacy), ולכן אין לה מקור בשורש וההעתקה לא עושה בהם דבר.
+  // נוספו כמו rv – כדי שהרשימה תכסה כל כלל ב-b/{bizId} וכל אוסף שהשרת כותב דרך T.tdb() (posalert, poslbl, poscnt, posbc, posbr – בלי כלל).
+  // תתי-אוספים (prod/{id}/ph) מועתקים עם ההורה. postpl ו-posbug הם טבלאות שרת משותפות לכל העסקים – ב-SHARED.
+  'possale', 'pospay', 'posret', 'posshift', 'posz', 'posdev', 'poscfg', 'promo', 'clubcfg', 'clublog', 'poslog', 'poserr', 'posconf',
+  'posbk', 'posgift', 'posgiftlog', 'posclock', 'posimp', 'pos_income_daily', 'posreq', 'poscfglog', 'pospark', 'poscpn', 'pospin',
+  'posalert', 'poslbl', 'poscnt', 'posbc', 'posbr',
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
@@ -69,7 +75,8 @@ const DEFERRED = [
 ];
 // טבלאות שרת משותפות לכל העסקים (מפתח לפי bizId, נכתבות תמיד ב-getFirestore() בשורש): נשארות בשורש.
 // מגובות, לא מועתקות, לא "לא ידוע", ולא מכשילות אימות. ב-compare-backup לא מושוות (עסקים אחרים כותבים אליהן כל הזמן).
-const SHARED = ['sec_route', 'sec_mailroute', 'sec_oauth', 'sec_mailq', 'sec_waq', 'mailRate', 'impQ'];
+// postpl (תבניות קופה לפי סוג עסק) ו-posbug (דיווחי תקלות קופה מכל העסקים) – קופה ש4, pos-cfg.js, נכתבות בשורש לכל העסקים.
+const SHARED = ['sec_route', 'sec_mailroute', 'sec_oauth', 'sec_mailq', 'sec_waq', 'mailRate', 'impQ', 'postpl', 'posbug'];
 // אוספים חדשים של ריבוי העסקים: לא מקור להעתקה. b לא נכלל אפילו בגיבוי (זה היעד)
 const NEW_ROOT = ['users', 'superadmins'];
 const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'];

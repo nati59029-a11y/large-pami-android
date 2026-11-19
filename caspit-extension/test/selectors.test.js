@@ -146,13 +146,15 @@ test('controls: בלי ערכים ובלי שדות סיסמה; isLogin מזהה
   assert.equal(await page.evaluate(() => window.CxSel.isLogin(document, window, { hash: ['#/login'] })), false);
 });
 
-test('selectors.json: דפי ההיכרות – זרימות קיימות; מסך הנוכחות לפי התפריט, בלי זרימה (בלי שום צעד/לחיצה)', () => {
+test('selectors.json: דפי ההיכרות – זרימות קיימות; דוחות הנוכחות בכתובת ישירה, בלי זרימה (בלי שום צעד/לחיצה)', () => {
   for (const pg of SEL.disc) if (pg.flow) assert.ok(Array.isArray(SEL.flows[pg.flow]), pg.name);
-  const att = SEL.disc.find((p) => p.name === 'attendance');
-  assert.ok(att, 'attendance');
-  assert.equal(att.flow, undefined); assert.equal(att.hash, undefined); assert.equal(att.peek, undefined);
-  assert.deepEqual(att.menu, ['עובדים']); assert.equal(att.find, 'נוכחות');
-  assert.ok(SEL.v >= 3);
+  for (const [name, hash] of [['hours', '#/hours-reports'], ['on-shift', '#/report-active-employee-on-stores']]) {
+    const att = SEL.disc.find((p) => p.name === name);
+    assert.ok(att, name);
+    assert.equal(att.flow, undefined); assert.equal(att.peek, undefined); assert.equal(att.hash, hash); assert.equal(att.btn, true);
+  }
+  assert.ok(!SEL.disc.some((p) => p.name === 'attendance'));
+  assert.ok(SEL.v >= 4);
 });
 
 test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, בלי aria ובלי אפשרויות – רק מספרן', async () => {
@@ -161,4 +163,19 @@ test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, ב
   assert.ok(!s.includes('טעינת פריטים חדשים') && !s.includes('ייצוא לאקסל') && !s.includes('סגור חלון'), s);
   assert.equal(c.find((x) => x.tag === 'select').optN, 3);
   assert.ok(c.filter((x) => x.href).every((x) => x.href === '(int)' || x.href === '(ext)'));
+  // btn: רק כפתורים עם מילת פעולה, מחוץ לטבלאות
+  const b = await page.evaluate(() => window.CxSel.controls(document, 400, { noText: true, btn: true }));
+  assert.ok(b.every((x) => x.text === undefined || /יצוא|ייצוא|הצג|קובץ|דוח|סנן/.test(x.text)), JSON.stringify(b.filter((x) => x.text)));
+  assert.ok(!JSON.stringify(b).includes('סגור חלון'));
+  // שמות ושעות על כפתורים: נשמרות רק מילות הפעולה עצמן (התאמה מלאה של מילה)
+  const t = await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'btnt';
+    box.innerHTML = ['אבי צור', 'משה בן צור', 'רונית נבחרה', 'דני כהן הצג פרטים', 'הצג 08:02-16:00', 'ייצוא לאקסל'].map((x, k) => '<button id="bt' + k + '">' + x + '</button>').join('');
+    document.body.appendChild(box);
+    const r = window.CxSel.controls(document, 400, { noText: true, btn: true }).filter((x) => /^button#bt\d$/.test(x.css)).map((x) => [x.css, x.text]);
+    box.remove(); return r;
+  });
+  const T = JSON.stringify(t);
+  for (const nm of ['אבי', 'משה', 'רונית', 'נבחרה', 'דני', 'כהן', 'פרטים', '08', '16']) assert.ok(!T.includes(nm), nm + ' ' + T);
+  assert.deepEqual(Object.fromEntries(t), { 'button#bt0': 'צור', 'button#bt1': 'צור', 'button#bt2': undefined, 'button#bt3': 'הצג', 'button#bt4': 'הצג', 'button#bt5': 'ייצוא לאקסל' });
 });

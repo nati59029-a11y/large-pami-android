@@ -289,17 +289,20 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const txt = JSON.stringify(rep);
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'attendance']);
-  // נוכחות: ניווט לפי קישור התפריט ("עובדים" → "דוח נוכחות", נחשף רק במעבר עכבר), בלי שום לחיצה; כותרות הטבלה בלי השורות
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'hours', 'on-shift']);
+  // נוכחות (0.1.6): "דוח שעות מרוכז" ו"דוח עובדים במשמרת" בכתובת ישירה, בלי שום לחיצה; כותרות הטבלה בלי השורות
   const att = rep.pages[3];
   assert.equal(att.ok, true, JSON.stringify(att));
-  assert.equal(att.hash, '#/attendance-report');
+  assert.equal(att.hash, '#/hours-reports');
+  assert.equal(rep.pages[4].ok, true); assert.equal(rep.pages[4].hash, '#/report-active-employee-on-stores');
   assert.deepEqual(att.heads, [['שם עובד', 'תאריך', 'שעת כניסה', 'שעת יציאה', 'סה"כ שעות']]);
   assert.ok(att.controls.some((c) => c.id === 'attIn' && c.tag === 'button'), 'הפקדים נאספו (תגית/מזהה)');
-  assert.ok(att.controls.every((c) => c.text === undefined && c.options === undefined && c.aria === undefined), 'דף לקריאה בלבד – בלי טקסט ובלי אפשרויות: ' + JSON.stringify(att.controls));
+  assert.ok(att.controls.every((c) => (c.text === undefined || c.text === 'ייצוא לאקסל') && c.options === undefined && c.aria === undefined), 'דף לקריאה בלבד – רק טקסט של כפתורי פעולה, בלי אפשרויות: ' + JSON.stringify(att.controls));
+  assert.ok(att.controls.some((c) => c.text === 'ייצוא לאקסל'), 'טקסט כפתור פעולה נאסף');
+  assert.ok(!att.controls.some((c) => c.id === 'attIn' && c.text), 'כפתור בלי מילת פעולה – בלי טקסט');
   assert.equal(att.controls.find((c) => c.id === 'empSel').optN, 3, 'רשימת בחירה – רק מספר האפשרויות');
   for (const nm of ['כהנוביץ', '08:02', 'מזרחיאן', 'בלומנפלד', 'אבוטבולי', 'קרליבך', 'זילברשטיין']) assert.ok(!txt.includes(nm), 'שם / שעה של עובד בדוח: ' + nm);
-  assert.ok(rep.menu.some((l) => l.t === 'דוח נוכחות' && l.h === '#/attendance-report') && rep.menu.some((l) => l.t === 'רשימת עובדים'), JSON.stringify(rep.menu));
+  assert.ok(rep.menu.some((l) => l.t === 'דוח שעות מרוכז' && l.h === '#/hours-reports') && rep.menu.some((l) => l.t === 'רשימת עובדים'), JSON.stringify(rep.menu));
   assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור (גם לא "עובדים")');
   const imp = rep.pages[1];
   assert.ok(!imp.controls.some((c) => c.type === 'password'));
@@ -387,7 +390,7 @@ test('היכרות לא יוצאת מהמשרד האחורי: מסך שמעבי�
 
 test('היכרות נוכחות: הקישור מוביל אל מחוץ למשרד האחורי → wrong-page, בלי לאסוף מהקופה ובלי לחיצות', async () => {
   const cp = caspitPage() || ctx.pages().find((p) => p.url().startsWith('https://caspit.valu.co.il/'));
-  await cp.evaluate(() => { localStorage.setItem('redir', '#/attendance-report'); localStorage.setItem('posHits', '0'); localStorage.removeItem('attHits'); });
+  await cp.evaluate(() => { localStorage.setItem('redir', '#/hours-reports'); localStorage.setItem('posHits', '0'); localStorage.removeItem('attHits'); });
   await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
   const pop = await ctx.newPage();
   await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
@@ -396,7 +399,7 @@ test('היכרות נוכחות: הקישור מוביל אל מחוץ למשר�
   assert.equal(s.discSt.st, 'fail');
   assert.equal(s.disc.rep.err.code, 'wrong-page');
   assert.deepEqual(s.disc.rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales'], 'עצר לפני שאסף משהו מהקופה');
-  assert.ok(s.disc.rep.menu.some((l) => l.h === '#/attendance-report'), 'רשימת הקישורים נשמרה גם כשהניווט נכשל');
+  assert.ok(s.disc.rep.menu.some((l) => l.h === '#/hours-reports'), 'רשימת הקישורים נשמרה גם כשהניווט נכשל');
   for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/(?!bo)/.test(x.url()))) assert.equal(await posHits(p), 0);
   const bo = ctx.pages().find((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
   if (bo) assert.equal(await bo.evaluate(() => localStorage.getItem('attHits')), null);
@@ -463,6 +466,53 @@ test('"טעינות קודמות" נטענת באיחור → מחכים לה ו
   assert.equal(q, 0, 'הקובץ שלנו לא נוסף לתור');
   await cp.evaluate(() => localStorage.removeItem('histnone'));
   srv.exportN.price = 2;
+});
+
+// 0.1.6 – התקלה של 19.11: הקובץ לא נכנס ל"ממתין לטעינה" בבחירה הרגילה. ניסיונות חלופיים: גרירה, ואז סוג קובץ של Excel
+for (const [mode, evx] of [['drop', 'drop'], ['xls', 'add:application/vnd.ms-excel']]) {
+  test(`העלאה: בחירה רגילה לא נקלטת (${mode}) → ניסיון חלופי, קובץ אחד בדיוק בתור ומועלה פעם אחת`, async () => {
+    const cp = caspitPage();
+    await cp.evaluate((m) => { localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.setItem('upmode', m); }, mode);
+    await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
+    await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+    srv.exportN.new = 0; srv.exportN.price = 2;
+    const nImp = imports.length, t0 = Date.now();
+    await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+    const s = await waitRun(t0);
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+    assert.equal(imports.at(-1).type, 'price');
+    const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+    const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+    assert.ok(evs.includes(evx), evs.join('|'));
+    assert.equal(evs.filter((e) => e.startsWith('add:')).length, 1, 'נוסף לתור פעם אחת בלבד: ' + evs.join('|'));
+    await cp.evaluate(() => localStorage.removeItem('upmode'));
+  });
+}
+
+test('העלאה: הקובץ לא נקלט בשום דרך → selector-miss עם אבחון (מסונן), בלי לחיצה על "העלה קבצים והרץ טעינה"', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.setItem('upmode', 'none'); window.ev = []; });
+  await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  assert.equal(s.st.lastRun.code, 'selector-miss', JSON.stringify(s.st.lastRun));
+  assert.equal(s.st.lastRun.step, 'exportPrice');
+  const msg = s.st.lastRun.msg;
+  assert.match(msg, /לא נכנס ל"ממתין לטעינה" אחרי 3 ניסיונות/, msg);
+  assert.match(msg, /שדות קובץ: 1/, msg);
+  assert.match(msg, /הקובץ לא נקלט/, 'ההודעה הגלויה בדף: ' + msg);
+  assert.match(msg, /יש לבחור קובץ מסוג CSV/, 'ההודעה לא נחתכה גם עם accept ארוך: ' + msg);
+  assert.ok(!msg.includes('0521234567'), 'מספר טלפון סונן: ' + msg);
+  assert.equal(srv.ops('report').at(-1).err.code, 'selector-miss');
+  assert.equal(imports.length, nImp, 'לא הועלה כלום');
+  const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+  const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+  assert.ok(!evs.includes('run'), 'לא נלחץ "העלה קבצים והרץ טעינה": ' + evs.join('|'));
+  await cp.evaluate(() => localStorage.removeItem('upmode'));
 });
 
 test('ייבוא עם שגויים בכספית → import-errors (עם המספרים), בלי ניסיון חוזר; זמן קצוב → import-timeout', async () => {
