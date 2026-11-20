@@ -522,7 +522,7 @@ const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
 /* 15.11.2026: התראות ישנות של סגירת קופה נשמרו עם מזהה הקופה (i_nl) ותאריך בכתיב מחשב – בתצוגה: שם הסניף (ZREG) ויום בשבוע + תאריך */
 const ZN=g=>{try{return typeof ZREG!=='undefined'&&ZREG[g]?ZREG[g].n:''}catch(e){return ''}};
 const dayL=d=>{const t=new Date(d+'T12:00:00Z');return isNaN(t)?d:'יום '+WDN[t.getUTCDay()]+' '+(+d.slice(8,10))+'.'+(+d.slice(5,7))};
-const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));if(n&&n.typ==='cal')s=calFix(s,n);return s};
+const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?(typeof BZGEN!=='undefined'&&BZGEN?ZN(g):'סניף '+ZN(g)):m)/* עסק חדש: קופה אחת – "קופה" בלי "סניף" */;if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));if(n&&n.typ==='cal')s=calFix(s,n);return s};
 /* 15.11.2026 (סעיף 7): תזכורת יומן – "2026-11-15 12:00" (התראות ישנות) או "יום ראשון 15.11, 12:00" (חדשות) → "היום 12:00" / "מחר 12:00" /
    "יום ראשון 15.11, 12:00", לפי היום בזמן הציור (שעון ישראל) */
 const ilDay=ms=>{try{return new Date(ms).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'})}catch(e){return new Date(ms).toISOString().slice(0,10)}};
