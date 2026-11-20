@@ -484,7 +484,7 @@ function defaults(){
  if(BZGEN){/* עסק אחר: בסיס כללי – קופה אחת, בלי סניפים, בלי "אפייה" ובלי כרטיסים של לארג' פעמי */
   C('i_reg','inc','קופה','simple',['אשראי','מזומן','צ׳קים','העברה']);
   C('e_sup','exp','ספקים','sup',[]);C('e_sal','exp','משכורות','emp',[]);C('e_fix','exp','הוצאות קבועות','fixed',['חשמל','ארנונה','שכירות']);
-  C('e_cc','exp','אשראי','cc',[]);C('e_loan','exp','הלוואות','loan',[]);C('e_misc','exp','שונות','free',[]);C('e_own','exp','משכורת בעלים','simple',[]);
+  C('e_cc','exp','אשראי','cc',[]);C('e_loan','exp','הלוואות','loan',[]);C('e_misc','exp','שונות','free',[]);C('e_own','exp','משכורת בעלים','simple',[]);C('e_dep','exp','הפקדה לבנק','free',[]);
   cats.push({id:'p_inc',kind:'inc',name:'ממתין לסיווג',beh:'simple',hid:true},{id:'p_exp',kind:'exp',name:'ממתין לסיווג',beh:'simple',hid:true});
   return{v:3,theme:'paper',fs:1,cats,subs,tx:[],fixTpl:[],fixOk:{},loans:[],ccx:[],imp:null,gnMig:1,created:new Date().toISOString()}}
  C('i_yh','inc','קופה יהודה הנשיא','simple',['אשראי','מזומן','צ׳קים','העברה']);
@@ -501,6 +501,7 @@ function defaults(){
  C('e_loan','exp','הלוואות','loan',[]);
  C('e_misc','exp','שונות','free',[]);
  C('e_own','exp','משכורת בעלים','simple',[]);
+ C('e_dep','exp','הפקדה לבנק','free',[]);
  cats.push({id:'p_inc',kind:'inc',name:'ממתין לסיווג',beh:'simple',hid:true},{id:'p_exp',kind:'exp',name:'ממתין לסיווג',beh:'simple',hid:true});
  return{v:3,theme:'paper',fs:1,cats,subs,tx:[],fixTpl:[],fixOk:{},loans:[],ccx:[],imp:null,created:new Date().toISOString()};
 }
@@ -526,7 +527,7 @@ function ensure(d){
  if(!d.fixOk||typeof d.fixOk!=='object'||Array.isArray(d.fixOk))d.fixOk={};
  if(d.pmOff==null)d.pmOff=2;if(d.orgC!=null&&(typeof d.orgC!=='object'||Array.isArray(d.orgC)))delete d.orgC;/* סניפים 2026-11-08: S.orgC = עותק של org מהשרת. tx[].br / pays[].bank / pays[].card – רשות, בלי מיגרציה */if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
  /* תזרים/צ'קים (חלק ב' 2026-11-08): subs[].terms / tx[].due / pays[].chk – רשות. כאן רק מוחקים ערך פגום, לא מוסיפים */if(typeof cfClean==='function')cfClean(d);/* התאמות (חלק ג'): S.stm/S.stl, subs[].offset/offBal0, tx.off, pays[].stl – רשות. רק ניקוי ערכים פגומים וצנזור */if(typeof stlClean==='function')stlClean(d);/* C3: S.ccc/ccMeta/impMap/mLearn – רשות, רק ניקוי */if(typeof c3Clean==='function')c3Clean(d);
- /* משכורת בעלים (9.11): קטגוריה חדשה – נוספת רק אם חסרה. S.ownExp=false = משיכה, לא נספרת בהוצאות וברווח (ברירת מחדל: נספרת) */if(!d.cats.find(c=>c.id==='e_own'))d.cats.push({id:'e_own',kind:'exp',name:'משכורת בעלים',beh:'simple'});if(d.ownExp!=null&&typeof d.ownExp!=='boolean')delete d.ownExp;/* סף פער בסגירת קופה (17.11): שדה חדש, רק מספר חיובי. חסר = כבוי */if(d.zcThr!=null&&!(typeof d.zcThr==='number'&&isFinite(d.zcThr)&&d.zcThr>0))delete d.zcThr;
+ /* משכורת בעלים (9.11): קטגוריה חדשה – נוספת רק אם חסרה. S.ownExp=false = משיכה, לא נספרת בהוצאות וברווח (ברירת מחדל: נספרת) */if(!d.cats.find(c=>c.id==='e_own'))d.cats.push({id:'e_own',kind:'exp',name:'משכורת בעלים',beh:'simple'});/* הפקדה לבנק (20.11): מזומן שיצא מהקופה לבנק = העברה, לא הוצאה. קטגוריה חדשה – נוספת רק אם חסרה, בלי לגעת ברשומות קיימות */if(!d.cats.find(c=>c.id==='e_dep'))d.cats.push({id:'e_dep',kind:'exp',name:'הפקדה לבנק',beh:'free'});if(d.ownExp!=null&&typeof d.ownExp!=='boolean')delete d.ownExp;/* סף פער בסגירת קופה (17.11): שדה חדש, רק מספר חיובי. חסר = כבוי */if(d.zcThr!=null&&!(typeof d.zcThr==='number'&&isFinite(d.zcThr)&&d.zcThr>0))delete d.zcThr;
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  if(BZGEN&&!(d.gnMig>=1)){gnMig(d);d.gnMig=1}
  return d}
@@ -1079,8 +1080,8 @@ FRM.chkLinkF=form=>{if(!CKS||form.dataset.busy)return;Object.assign(CKS,chkRead(
  const grp='g'+uid(),R=msApply(L,[],rnd(a),today(),METHODS[1],'',CKS.img,grp,{bank:CKS.bank}),chk={no:CKS.no,bank:CKS.bank,date:CKS.date,img:CKS.img};
  L.forEach(t=>(t.pays||[]).forEach(p=>{if(p.grp===grp)p.chk=Object.assign({},chk)}));const ib=CKS.inb;if(ib){S.inbox=S.inbox.filter(x=>x.id!==ib)}save();CKS=null;closeDlg();if(ib)inbClose(ib);toast('הצ׳ק נרשם על '+R.n+' חשבוניות · ירד ב־'+dfmt(chk.date));if(US)usDone();else rerender()};
 const monthIncome=m=>rnd(sum(live().filter(t=>t.t==='inc'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
-/* משכורת בעלים כמשיכה (S.ownExp===false): לא בהוצאות ולא ברווח */
-const ownOut=t=>t&&t.cat==='e_own'&&S&&S.ownExp===false;
+/* משכורת בעלים כמשיכה (S.ownExp===false): לא בהוצאות ולא ברווח. הפקדה לבנק (e_dep): תמיד לא בהוצאות ולא ברווח (העברת כסף). בקופה/סגירת קופה/הפקדות היא נשארת יציאה רגילה מהקופה */
+const ownOut=t=>!!t&&(t.cat==='e_dep'||(t.cat==='e_own'&&!!S&&S.ownExp===false));
 const monthExpense=m=>rnd(sum(live().filter(t=>t.t==='exp'&&!ownOut(t)&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const monthOwner=m=>rnd(sum(live().filter(t=>t.cat==='e_own'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const invIn=(t,tag)=>`<div class="m"><b>${esc(subName(t))}</b><small>חשבונית ${dfmt(t.date)}${invS(t)} · ${esc(cat(t.cat).name)}</small>${paid(t)>0?`<small>שולם ${ils(paid(t))} מתוך ${ils(t.amt)}</small>`:''}${dxWhoSm(t)}</div><div class="a">${ils(bal(t))}<small>${tag||mfmt(pmon(t))}</small></div>`;
@@ -1449,7 +1450,7 @@ function overview(kind){
  h+=`<div class="hero hk" style="--hk:${kind==='inc'?'var(--inc)':'var(--exp)'}"><small>${kind==='inc'?'סך ההכנסות':'סך ההוצאות'} · ${esc(plabel())}</small><div class="big">${ils(total)}</div><small>${L.length} תנועות</small></div>`;
  h+=`<div class="row" style="margin-bottom:12px"><button class="btn grow" data-a="addTo" data-t="${kind}">＋ הוספת ${TL[kind]}</button><button class="btn g grow" data-a="rep" data-s="all:${kind}">${ico('doc')} דוח לכל הקטגוריות</button></div>`;
  h+=cs.map(c=>{const subs=subsOf(c.id).length,ct=catTotal(c,live());const op=c.beh==='sup'||c.beh==='fixed'?rnd(sum(inv().filter(t=>t.cat===c.id&&inBr(t,brFil())),bal)):0;
-  return `<button class="li ${kind}" data-a="go" data-v="cat" data-arg="${c.id}"><div class="m"><b>${esc(c.name)}</b><small>${c.id==='e_own'&&S.ownExp===false?'משיכת בעלים – לא נספרת בהוצאות · ':''}${c.beh==='free'?L.filter(t=>t.cat===c.id).length+' רישומים':subs+' כרטיסים'}${op>0.004?' · פתוח לתשלום '+ils(op):''}</small></div><div class="a">${ils(ct)}</div>${ico('chev','chev')}</button>`}).join('');
+  return `<button class="li ${kind}" data-a="go" data-v="cat" data-arg="${c.id}"><div class="m"><b>${esc(c.name)}</b><small>${c.id==='e_own'&&S.ownExp===false?'משיכת בעלים – לא נספרת בהוצאות · ':c.id==='e_dep'?'העברה לבנק – לא נספרת בהוצאות · ':''}${c.beh==='free'?L.filter(t=>t.cat===c.id).length+' רישומים':subs+' כרטיסים'}${op>0.004?' · פתוח לתשלום '+ils(op):''}</small></div><div class="a">${ils(ct)}</div>${ico('chev','chev')}</button>`}).join('');
  h+=`<button class="opt add" data-a="catWiz" data-t="${kind}" style="margin-top:6px"><span>＋ קטגוריה חדשה</span></button>`;
  return{t:kind==='inc'?'הכנסות':'הוצאות',s:'כל הקטגוריות',h}}
 V.inc=()=>overview('inc');V.exp=()=>{const r=overview('exp');r.h=dpBan()+r.h;return r};
@@ -2298,7 +2299,7 @@ function exportPdf(sp,name){try{saveFile(name,mkPdf(pdfPages(sp)),'application/p
 /* ===== דוחות, PDF, אקסל ===== */
 let RS=null;
 function scopeOf(s){
- if(s.startsWith('all:')){const k=s.slice(4);return{title:k==='inc'?'דוח הכנסות – כל הקטגוריות':'דוח הוצאות – כל הקטגוריות',cats:catsOf(k).map(c=>c.id),subs:null,kind:k}}
+ if(s.startsWith('all:')){const k=s.slice(4);return{title:k==='inc'?'דוח הכנסות – כל הקטגוריות':'דוח הוצאות – כל הקטגוריות',cats:catsOf(k).filter(c=>c.id!=='e_dep').map(c=>c.id),subs:null,kind:k}}
  if(s.startsWith('cat:')){const c=cat(s.slice(4));return{title:'דוח קטגוריה: '+c.name,cats:[c.id],subs:null,kind:c.kind}}
  if(s==='subs'){const c=cat(SEL.cat);return{title:'דוח כרטיסים נבחרים · '+c.name,cats:[c.id],subs:[...SEL.ids],kind:c.kind}}
  if(s.startsWith('sub:')){const sb=subById(s.slice(4)),c=cat(sb.cat);return{title:'דוח כרטיס: '+sb.name+' · '+c.name,cats:[c.id],subs:[sb.id],kind:c.kind}}
@@ -4635,11 +4636,11 @@ function wvWant(){const o={},L=live(),cn=t=>(cat(t.cat)||{}).name||'—',emp=t=>
   o['sal_'+m]=JSON.stringify(L.filter(t=>t.t==='exp'&&emp(t)&&pmon(t)===m).sort(bd).map(t=>({d:t.date||'',n:subName(t),c:cn(t),a:rnd(num(t.amt))})));
   const tot=(k,f)=>{const r={};L.filter(t=>t.t===k&&inM(t)&&(!f||f(t))).forEach(t=>{const n=cn(t);r[n]=rnd((r[n]||0)+num(t.amt))});return Object.entries(r).sort((a,b)=>b[1]-a[1])};
   /* 6ז: הדוח מפוצל לפי רמה (החוקים): rpi הכנסות (rep), rpe הוצאות בלי משכורות (rep + expR כל העסק), rps סך המשכורות (rep + sal) */
-  o['rpi_'+m]=JSON.stringify(tot('inc'));o['rpe_'+m]=JSON.stringify(tot('exp',t=>!emp(t)));
+  o['rpi_'+m]=JSON.stringify(tot('inc'));o['rpe_'+m]=JSON.stringify(tot('exp',t=>!emp(t)&&t.cat!=='e_dep'));
   o['rps_'+m]=JSON.stringify(rnd(sum(L.filter(t=>t.t==='exp'&&inM(t)&&emp(t)),t=>num(t.amt))));
   /* 6ז: rpo_<חודש>_<uid> – ההוצאות שהעובד עצמו הזין (t.eu), בלי משכורות. רק העובד הזה קורא (החוקים: uid במזהה) */
   const eus=[...new Set(L.filter(t=>t.t==='exp'&&inM(t)&&!emp(t)&&typeof t.eu==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(t.eu)&&t.eu!==SY.uid).map(t=>t.eu))];
-  for(const u of eus)o['rpo_'+m+'_'+u]=JSON.stringify(tot('exp',t=>!emp(t)&&t.eu===u));  /* 2026-11-12: מצב העסק (bal) – סכומים בלבד {i,e}, כמו טבלת "לפי סניף" (הוצאות כולל משכורות, בלי משיכת בעלים כשאינה הוצאה). bal_<חודש> = כל העסק, bal_<חודש>_<סניף> = סניף (החוקים: עובד מוגבל קורא רק את הסניפים שלו) */  const bx=L.filter(t=>inM(t)&&(t.t==='inc'||(t.t==='exp'&&!ownOut(t)))),bt=l=>JSON.stringify({i:rnd(sum(l.filter(t=>t.t==='inc'),t=>num(t.amt))),e:rnd(sum(l.filter(t=>t.t==='exp'),t=>num(t.amt)))});o['bal_'+m]=bt(bx);  if(brAll().length)for(const id of new Set(brAll().map(b=>b.id).concat(bx.map(txBr))))if(/^[a-z0-9_]{2,20}$/.test(id))o['bal_'+m+'_'+id]=bt(bx.filter(t=>txBr(t)===id))}
+  for(const u of eus)o['rpo_'+m+'_'+u]=JSON.stringify(tot('exp',t=>!emp(t)&&t.eu===u&&t.cat!=='e_dep'));  /* 2026-11-12: מצב העסק (bal) – סכומים בלבד {i,e}, כמו טבלת "לפי סניף" (הוצאות כולל משכורות, בלי משיכת בעלים כשאינה הוצאה). bal_<חודש> = כל העסק, bal_<חודש>_<סניף> = סניף (החוקים: עובד מוגבל קורא רק את הסניפים שלו) */  const bx=L.filter(t=>inM(t)&&(t.t==='inc'||(t.t==='exp'&&!ownOut(t)))),bt=l=>JSON.stringify({i:rnd(sum(l.filter(t=>t.t==='inc'),t=>num(t.amt))),e:rnd(sum(l.filter(t=>t.t==='exp'),t=>num(t.amt)))});o['bal_'+m]=bt(bx);  if(brAll().length)for(const id of new Set(brAll().map(b=>b.id).concat(bx.map(txBr))))if(/^[a-z0-9_]{2,20}$/.test(id))o['bal_'+m+'_'+id]=bt(bx.filter(t=>txBr(t)===id))}
  return o}
 function wvSched(){if(typeof WVS==='undefined'||!WVS||!isA())return;clearTimeout(WVS.t);WVS.t=setTimeout(()=>{wvSync().catch(e=>{try{console.warn('wv',e&&e.message)}catch(z){}});/* מראה השכר לעובד (pay_) – לולאה נפרדת עם טיפול שגיאות משלה, pay-me.js */try{if(typeof pmSync==='function')pmSync().catch(e=>{try{console.warn('wv pay',e&&e.message)}catch(z){}})}catch(e){}},4000)}
 async function wvSync(){if(!isA()||SY.sa||!bzB()||!S.tx.length||Date.now()<(WVS.off||0))return;if(WVS.b){WVS.again=1;return}WVS.b=1;try{
