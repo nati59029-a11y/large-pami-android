@@ -109,6 +109,17 @@ function fileShape(rows, n) {
   }
   return { hi, hdr: hi >= 0 ? hdrSafe(R[hi]) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
 }
-const api = { MAX_BYTES, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
+// קובץ יצוא של דף שאינו priv (מבצעים, 0.1.12): שורת הכותרות כמו שהיא (עד 40 תאים, 40 תווים) – השורה הראשונה מבין 10 עם לפחות 2 תאים
+// ושכל התאים בה טקסט (לא מספר / תאריך / שעה); מהשורות הראשונות (עד n) – רק סוג התא. בלי ערכים של שורות הנתונים
+function hdrRaw(rows, n) {
+  const R = Array.isArray(rows) ? rows : [];
+  let hi = -1;
+  for (let i = 0; i < Math.min(10, R.length) && hi < 0; i++) {
+    const r = Array.isArray(R[i]) ? R[i] : [], k = r.map(cellKind), full = k.filter((x) => x !== 'empty').length;
+    if (full >= 2 && k.every((x) => x === 'text' || x === 'empty')) hi = i;
+  }
+  return { hi, hdr: hi >= 0 ? R[hi].slice(0, 40).map((x) => String(x == null ? '' : x).trim().slice(0, 40)) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
+}
+const api = { MAX_BYTES, hdrRaw, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSanitize = api;
 })(typeof self !== 'undefined' ? self : this);

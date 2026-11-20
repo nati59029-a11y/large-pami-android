@@ -74,6 +74,22 @@ const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason })
 const priv = (bizId, k) => getFirestore().doc(`b/${bizId}/private/${k}`);
 const sha = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 const str = (v, n) => (typeof v === 'string' ? v : '').slice(0, n);
+// 0.1.12: תמונת מסך הייבוא מדיווח ריצה שנכשל (info.scr – התוסף כבר סינן). לאפליקציה רק השדות הצפויים, מקוצרים; כל השאר נזרק
+const sArr = (a, n, f) => (Array.isArray(a) ? a.slice(0, n).map(f) : []);
+const sNum = (x) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(99999, Math.round(x))) : 0);
+function scrOut(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = (x) => (x && typeof x === 'object' ? x : {});
+  return {
+    flow: str(v.flow, 20), op: str(v.op, 20), err: str(v.err, 30), qhead: str(v.qhead, 10),
+    heads: sArr(v.heads, 25, (x) => str(x, 60)),
+    wait: sArr(v.wait, 8, (w) => ({ t: str(o(w).t, 60), vis: o(w).vis === true })),
+    tables: sArr(v.tables, 8, (t) => ({ rows: sNum(o(t).rows), vis: o(t).vis === true, th: sArr(o(t).th, 15, (x) => str(x, 30)) })),
+    btns: sArr(v.btns, 15, (x) => str(x, 40)),
+    files: sArr(v.files, 4, (f) => ({ vis: o(f).vis === true, multi: o(f).multi === true, accept: str(o(f).accept, 80), n: sNum(o(f).n), val: o(f).val === true, lbl: str(o(f).lbl, 60), up: sArr(o(f).up, 4, (u) => str(o(u).t, 100)).filter(Boolean) })),
+    dialogs: sArr(v.dialogs, 3, (d) => str(o(d).t, 60)),
+  };
+}
 
 // ---------- ימים ושעות בישראל ----------
 const ilDay = (t) => TK.dayStr(TK.ymdOf(t));
@@ -139,7 +155,7 @@ async function cxBotTok(w, input) {
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
-      runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null }; }),
+      runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null, scr: r.st !== 'ok' && r.info ? scrOut(r.info.scr) : null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
     return out;
@@ -606,4 +622,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });

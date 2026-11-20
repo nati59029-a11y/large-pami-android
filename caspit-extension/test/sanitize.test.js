@@ -80,3 +80,13 @@ test('שורת כותרות של קובץ השעות: רק מילים מוכרו
   assert.equal(S.fileShape([['דוח שעות עובד - דנה'], ['דנה', 'כהן']]).hdr, null);
   assert.equal(S.fileShape(null).hdr, null);
 });
+
+test('hdrRaw (0.1.12, קובץ מבצעים): שורת הכותרות כמו שהיא – הראשונה עם 2+ תאי טקסט בלבד; מהשורות רק סוג התא', () => {
+  const R = [['מבצעים'], ['מספר מבצע', 'שם מבצע', 'מתאריך', 'מחיר מבצע'], [301, 'קוקה קולה 1+1', '01/11/2026', 12.9], ['302', 'במבה', '05/11/2026', 10]];
+  const o = S.hdrRaw(R, 5);
+  assert.equal(o.hi, 1);
+  assert.deepEqual(o.hdr, ['מספר מבצע', 'שם מבצע', 'מתאריך', 'מחיר מבצע']);
+  assert.deepEqual(o.kinds[2], ['num', 'text', 'date', 'num']);
+  assert.ok(!JSON.stringify(o).includes('קוקה') && !JSON.stringify(o).includes('במבה'));
+  assert.equal(S.hdrRaw([[1, 2], ['x']], 5).hdr, null, 'בלי שורת טקסט – בלי כותרות');
+});

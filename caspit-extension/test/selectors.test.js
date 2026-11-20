@@ -166,7 +166,7 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; עו�
   assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
   // פרטיות: לא מחכים על הכותרת עם שם העובד
   assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
-  assert.equal(SEL.v, 6);
+  assert.equal(SEL.v, 7);
 });
 
 test('selectors.json v6: לקוחות הקפה – 8 מסכים priv בכתובת ישירה; hkExport לוחץ רק "יצוא לאקסל"; הפקת חשבוניות מרכזות – בלי זרימה', () => {
@@ -259,4 +259,57 @@ test('controls במצב noText (דף לקריאה בלבד): בלי טקסט, ב
   const T = JSON.stringify(t);
   for (const nm of ['אבי', 'משה', 'רונית', 'נבחרה', 'דני', 'כהן', 'פרטים', '08', '16']) assert.ok(!T.includes(nm), nm + ' ' + T);
   assert.deepEqual(Object.fromEntries(t), { 'button#bt0': 'צור', 'button#bt1': 'צור', 'button#bt2': undefined, 'button#bt3': 'הצג', 'button#bt4': 'הצג', 'button#bt5': 'ייצוא לאקסל' });
+});
+
+test('selectors.json v7 (0.1.12): מסך הייבוא בהיכרות – קריאה בלבד (בלי זרימה, בלי peek), זרימות הייבוא לא השתנו', () => {
+  const p = SEL.disc.find((x) => x.name === 'imp-screen');
+  assert.ok(p);
+  assert.equal(p.hash, '#/csv-imports'); assert.equal(p.imp, true);
+  assert.equal(p.flow, undefined); assert.equal(p.peek, undefined); assert.equal(p.find, undefined);
+  assert.equal(SEL.flows.importNew.find((x) => x.op === 'nav').hash, p.hash, 'אותו מסך כמו importNew');
+  assert.equal(SEL.flows.importPrice.find((x) => x.op === 'nav').hash, p.hash, 'אותו מסך כמו importPrice');
+  assert.equal(SEL.importEnabled, true, 'ההעלאה האוטומטית נשארת פועלת');
+  // מבצעים: "כרטיס הטבות" ← "מבצעים" (רק טקסט מלא – לא "הוסף מבצע"), הזרימה היחידה – hkExport ("יצוא לאקסל" בלבד), לא priv
+  const pr = SEL.disc.find((x) => x.name === 'promos');
+  assert.deepEqual(pr.menu, ['כרטיס הטבות']); assert.deepEqual(pr.find, ['מבצעים']);
+  assert.equal(pr.flow, 'hkExport'); assert.equal(pr.promo, true); assert.equal(pr.priv, undefined); assert.equal(pr.hash, undefined);
+  // אמצעי תשלום: findAll לפי המילים, רק hkExport; בחירת סניף – רק שמות לזיהוי (אין צעד שבוחר סניף)
+  const py = SEL.disc.find((x) => x.name === 'pay');
+  assert.deepEqual(py.findAll, ['אמצעי תשלום', 'תקבולים', 'סיכום קופה', 'דוח z', 'מזומן', 'אשראי', 'דוח קופאים']);
+  assert.equal(py.flow, 'hkExport'); assert.equal(py.pay, true); assert.ok(py.max <= 8);
+  assert.deepEqual(SEL.branch.names, ['יהודה הנשיא', 'נחל לכיש']);
+  assert.ok(!JSON.stringify(SEL.flows).includes('יהודה הנשיא') && !JSON.stringify(SEL.flows).includes('נחל לכיש'), 'אף זרימה לא נוגעת בבחירת הסניף');
+});
+
+test('screen (0.1.12): בלי כותרת "ממתין לטעינה" – כותרות אחרות, כותרות טבלה ומספר שורות, מה שמסביב לשדה הקובץ, דיאלוג; בלי תוכן תאים', async () => {
+  await page.setContent(`<!doctype html><html dir="rtl"><body>
+<h2>טעינת קבצים</h2><ul class="nav nav-tabs"><li><a class="nav-link" href="#/a">טעינה מקובץ</a></li><li><a class="nav-link" href="#/b">היסטוריה</a></li></ul>
+<div class="card"><div class="card-header">בחירת קובץ</div><div class="form-group"><label for="up">בחר קובץ</label><input type="file" id="up" accept=".csv,.xlsx" multiple></div>
+<input type="file" id="hid" style="display:none"></div>
+<h4>קבצים בהמתנה (1)</h4><table><thead><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr></thead><tbody><tr><td>לקוח-סודי-0521234567.csv</td><td>עדכון</td><td><button>הסר</button></td></tr></tbody></table>
+<h4>טעינות קודמות</h4><table><thead><tr><th>מזהה</th><th>שם</th></tr></thead><tbody><tr><td>25520</td><td>ישראל ישראלי.csv</td></tr><tr><td>25521</td><td>פרטי.csv</td></tr></tbody></table>
+<button>העלה קבצים והרץ טעינה</button><button>משה כהן</button><a href="#/promotions/77/new">הוסף מבצע</a>
+<div role="dialog" aria-modal="true"><h5 class="modal-title">אישור טעינה</h5><p>טקסט ארוך בתוך החלון</p></div>
+</body></html>`);
+  await page.addScriptTag({ content: SRC });
+  const r = await page.evaluate(() => { window.ev = []; document.addEventListener('click', () => window.ev.push('click'), true); document.addEventListener('change', () => window.ev.push('change'), true); return window.CxSel.screen(document, { head: 'ממתין לטעינה', marks: true }); });
+  assert.deepEqual(r.marks.map((m) => [m.t, m.h]), [['טעינה מקובץ', '#/a'], ['בחר קובץ', undefined], ['העלה קבצים והרץ טעינה', undefined], ['הוסף מבצע', '#/promotions/{n}/new']], JSON.stringify(r.marks));
+  assert.ok(!/promotions/.test(await page.evaluate(() => location.hash)), 'לא ניווטנו');
+  assert.equal(r.qhead, 'none');
+  for (const h of ['טעינת קבצים', 'טעינה מקובץ', 'היסטוריה', 'בחירת קובץ', 'קבצים בהמתנה (1)', 'טעינות קודמות', 'אישור טעינה']) assert.ok(r.heads.includes(h), h + ' ' + JSON.stringify(r.heads));
+  assert.ok(r.wait.some((w) => w.t === 'קבצים בהמתנה (1)' && w.vis), JSON.stringify(r.wait));
+  assert.deepEqual(r.tables.map((t) => [t.rows, t.th]), [[1, ['שם', 'סוג קובץ', 'פעולות']], [2, ['מזהה', 'שם']]]);
+  assert.deepEqual(r.btns, ['העלה קבצים והרץ טעינה'], 'רק מילות פעולה, לא כפתור עם שם ולא כפתור בתוך טבלה');
+  assert.equal(r.files.length, 2);
+  assert.deepEqual([r.files[0].vis, r.files[0].multi, r.files[0].accept, r.files[0].lbl, r.files[1].vis], [true, true, '.csv,.xlsx', 'בחר קובץ', false]);
+  assert.ok(r.files[0].up[0].t === 'בחר קובץ' && /form-group/.test(r.files[0].up[0].tag), JSON.stringify(r.files[0].up));
+  assert.deepEqual(r.dialogs.map((d) => d.t), ['אישור טעינה']);
+  const s = JSON.stringify(r);
+  for (const x of ['לקוח-סודי', '0521234567', 'ישראל ישראלי', 'פרטי.csv', '25521', 'משה', 'טקסט ארוך']) assert.ok(!s.includes(x), x + ' ' + s);
+  assert.deepEqual(await page.evaluate(() => window.ev), [], 'קריאה בלבד – בלי לחיצה ובלי שינוי');
+  // הכותרת המקורית קיימת → exact; קיימת רק בתוך טקסט ארוך יותר → part
+  await page.evaluate(() => { document.querySelector('h4').textContent = 'ממתין לטעינה'; });
+  assert.equal(await page.evaluate(() => window.CxSel.screen(document, {}).qhead), 'exact');
+  await page.evaluate(() => { document.querySelector('h4').textContent = 'ממתין לטעינה (1)'; });
+  assert.equal(await page.evaluate(() => window.CxSel.screen(document, {}).qhead), 'part');
 });

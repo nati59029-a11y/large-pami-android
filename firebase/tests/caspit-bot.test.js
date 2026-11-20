@@ -351,6 +351,23 @@ describe('רובוט כספית – חוזה מול הלקוח של התוסף (
     assert.equal(await code(cl(TOK).call('export', { kind: 'new', max: 1, log: h.runId })), 'limit', '2 פריטים חדשים ממתינים, מגבלה 1');
     await cl(TOK).call('report', { run: h.runId, kind: 'run', st: 'fail', err: { code: 'limit', msg: 'x', step: 'exportNew' }, steps: [], info: { days: h.days, sales: {} } });
   });
+  it('0.1.12: info.scr (תמונת מסך הייבוא) בדיווח ריצה שנכשל → נשמר, ובאפליקציה (info.runs[].scr) רק השדות הצפויים, מקוצרים', async () => {
+    const h = await cl(TOK).call('hello', { mode: 'sync', manual: true });
+    const scr = { v: 1, flow: 'importPrice', op: 'setFile', err: 'no-queue', qhead: 'none', heads: ['טעינות קודמות', 'x'.repeat(200)], wait: [{ tag: 'h4', t: 'קבצים ממתינים', vis: true, zz: 1 }],
+      tables: [{ vis: true, rows: 3, th: ['שם', 'סוג קובץ'], cells: ['סודי'] }], btns: ['העלה קבצים והרץ טעינה'], files: [{ css: 'input#a', vis: false, multi: true, accept: '.csv', n: 1, val: true, lbl: 'בחר קובץ', up: [{ tag: 'div', t: 'בחר קובץ', len: 8 }, { tag: 'div', t: '', len: 900 }] }],
+      dialogs: [{ tag: 'div', role: 'dialog', t: 'שים לב' }], evil: '<script>' };
+    await cl(TOK).call('report', { run: h.runId, kind: 'run', st: 'fail', err: { code: 'selector-miss', msg: 'עדכון מחירים: ...', step: 'exportPrice' }, steps: [], info: { days: h.days, sales: {}, scr } });
+    const r = (await ok('cxBotTok', MGR, { op: 'info' })).runs.find((x) => x.id === h.runId);
+    assert.ok(r && r.scr, JSON.stringify(r));
+    assert.deepEqual(Object.keys(r.scr).sort(), ['btns', 'dialogs', 'err', 'files', 'flow', 'heads', 'op', 'qhead', 'tables', 'wait']);
+    assert.equal(r.scr.heads[1].length, 60);
+    assert.deepEqual(r.scr.wait, [{ t: 'קבצים ממתינים', vis: true }]);
+    assert.deepEqual(r.scr.tables, [{ rows: 3, vis: true, th: ['שם', 'סוג קובץ'] }]);
+    assert.deepEqual(r.scr.files, [{ vis: false, multi: true, accept: '.csv', n: 1, val: true, lbl: 'בחר קובץ', up: ['בחר קובץ'] }]);
+    assert.deepEqual(r.scr.dialogs, ['שים לב']);
+    assert.ok(!JSON.stringify(r.scr).includes('סודי') && !JSON.stringify(r.scr).includes('script'));
+    assert.equal(BOT.scrOut(null), null); assert.equal(BOT.scrOut([1]), null);
+  });
 });
 
 describe('רובוט כספית – "סנכרן עכשיו" מהטלפון (cxBotTok op:now, poll, hello עם req)', () => {

@@ -10,7 +10,9 @@ const out = {}; let fail = 0;
 const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
 const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cxSales'].map((k) => [k, true])); // cxSales – תוספת "מכירות כספית" (19.11.2026)
 const T0 = Date.UTC(2026, 10, 18, 1, 10);
-const RUNS = [{ id: 'r2', at: T0, end: T0 + 600e3, st: 'fail', manual: false, days: ['2026-11-17'], err: { code: 'selector-miss', msg: 'עדכון מחירים: התור ריק אחרי בחירת הקובץ', step: 'queue' }, imp: null },
+const RUNS = [{ id: 'r2', at: T0, end: T0 + 600e3, st: 'fail', manual: false, days: ['2026-11-17'], err: { code: 'selector-miss', msg: 'עדכון מחירים: התור ריק אחרי בחירת הקובץ', step: 'queue' }, imp: null,
+  // 0.1.12: תמונת מסך הייבוא (r.scr) – ב"פירוט" מקופל; טקסט עם תגית HTML מוצג כטקסט
+  scr: { flow: 'importPrice', op: 'setFile', err: 'no-queue', qhead: 'none', heads: ['קבצים ממתינים', 'טעינות קודמות', '<img src=x onerror=alert(1)>'], wait: [{ t: 'קבצים ממתינים', vis: true }], tables: [{ rows: 1, vis: true, th: ['שם', 'סוג קובץ', 'פעולות'] }], btns: ['העלה קבצים והרץ טעינה'], files: [{ vis: false, multi: false, accept: '.csv', n: 1, val: true, lbl: 'בחר קובץ', up: ['בחר קובץ'] }], dialogs: ['שים לב'] } },
   { id: 'r1', at: T0 - 864e5, st: 'ok', manual: true, days: ['2026-11-15', '2026-11-16'], err: null, imp: { price: { n: 3, ok: true, text: '', id: 25520, status: 'בוצע', errors: 0, loaded: 3 } } }];
 
 async function scenario(browser, www, sa, shots) {
@@ -96,6 +98,10 @@ async function scenario(browser, www, sa, shots) {
   await page.click('[data-a=cxBotRuns]'); await H.settle(page, 400);
   v = await q(); await shot((sa ? 'sa-' : '') + 'bot-4-runs');
   check(P + '4 הריצות האחרונות: אוטומטי/ידני, ימים, תקלה, טעינת מחירים', /ידני – "סנכרן עכשיו"/.test(v.text) && /אוטומטי/.test(v.text) && /15\/11, 16\/11/.test(v.text) && /מסך בכספית השתנה/.test(v.text) && /פירוט: עדכון מחירים: התור ריק אחרי בחירת הקובץ \(צעד queue\)/.test(v.text) && /מחירים לכספית: 3 \(טעינה 25520: נטענו 3, שגויים 0\)/.test(v.text) && fine(v), v.small);
+  await page.evaluate(() => { document.querySelectorAll('#dlg details').forEach((d) => { d.open = true; }); }); await H.settle(page, 200);
+  v = await q(); await shot((sa ? 'sa-' : '') + 'bot-4b-scr');
+  const inj = await page.evaluate(() => !!document.querySelector('#dlg img'));
+  check(P + '4ב פירוט מסך הייבוא (0.1.12): כותרת התור לא נמצאה, כותרות, טבלה, כפתור, שדה קובץ, חלון קופץ; בלי HTML מוזרק', /פירוט מסך הייבוא בכספית/.test(v.text) && /הכותרת "ממתין לטעינה": לא נמצאה במסך/.test(v.text) && /כותרות במסך: קבצים ממתינים · טעינות קודמות/.test(v.text) && /טבלאות: 1 – שם \| סוג קובץ \| פעולות \(1 שורות\)/.test(v.text) && /כפתורים: העלה קבצים והרץ טעינה/.test(v.text) && /מוסתר, נבחר קובץ, סוגים: \.csv, תווית: בחר קובץ/.test(v.text) && /חלון קופץ: שים לב/.test(v.text) && !inj && fine(v), v.text.slice(v.text.indexOf('פירוט מסך'), v.text.indexOf('פירוט מסך') + 400));
   await page.evaluate(() => closeDlg()); await H.settle(page, 300);
   await page.fill('form[data-f=cxBotMaxF] input[name=n]', '5');
   await page.click('form[data-f=cxBotMaxF] button'); await H.settle(page, 400);

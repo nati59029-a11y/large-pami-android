@@ -290,7 +290,56 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
   const HKP = ['hk-customers', 'hk-reports', 'hk-cust-reports', 'hk-sales-lines', 'hk-sales-total', 'hk-monthly', 'hk-merakez', 'hk-shipments'];
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours', ...HKP]);
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours', ...HKP, 'imp-screen', 'promos', 'pay-1', 'pay-2']);
+  // 0.1.12 דוחות אמצעי תשלום (findAll): "דוח אמצעי תשלום" + "סיכום קופה יומי" מתפריט "דוחות" (לא "דוח מלאי"); רק "יצוא לאקסל" נלחץ
+  const p1 = rep.pages.find((p) => p.name === 'pay-1'), p2 = rep.pages.find((p) => p.name === 'pay-2');
+  assert.deepEqual([p1.hash, p1.src, p2.hash, p2.src], ['#/payment-methods-report', 'דוח אמצעי תשלום', '#/cash-register-summary', 'סיכום קופה יומי'], JSON.stringify([p1, p2]).slice(0, 400));
+  assert.deepEqual(p1.heads, [['תאריך', 'סניף', 'מזומן', 'אשראי', 'הקפה', 'סה"כ']]);
+  assert.deepEqual(p1.probe.map((x) => [x.op, x.found, x.done]), [['click', true, true]]);
+  assert.equal(p2.probe[0].found, false, 'בלי יצוא – לא לוחצים כלום');
+  assert.ok(p1.controls.some((c) => c.id === 'payStore' && c.tag === 'select') && p1.controls.some((c) => c.id === 'payDay'));
+  const payF = rep.files.filter((f) => f.flow === 'hkExport' && /^pay-/.test(f.page));
+  assert.deepEqual(payF.map((f) => [f.page, !f.none]), [['pay-1', true], ['pay-2', false]]);
+  assert.deepEqual(payF[0].hdr, ['תאריך', 'סניף', 'מזומן', 'אשראי', 'הקפה', 'סה"כ']); assert.deepEqual(payF[0].kinds[1], ['date', 'text', 'num', 'num', 'num', 'num']);
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('payX')), '1');
+  assert.ok(!rep.pages.some((p) => p.hash === '#/stock-report'), 'דוח שלא קשור לאמצעי תשלום – לא נפתח');
+  for (const nm of ['4321.5', '8765.25', '345.75', '13432.5']) assert.ok(!txt.includes(nm), 'סכום מהדוח: ' + nm);
+  // 0.1.12 בחירת סניף: מתועד בכל מסך, בלי select / click / פוקוס על הפקד (attHits למטה, branch-*)
+  const br = rep.branch.picks.find((b) => b.css === 'select#brSel');
+  assert.ok(br, JSON.stringify(rep.branch));
+  assert.equal(br.kind, 'select'); assert.equal(br.aria, 'בחירת סניף'); assert.deepEqual(br.opts, ['יהודה הנשיא', 'נחל לכיש']); assert.equal(br.cur, 'יהודה הנשיא');
+  assert.ok(br.on.includes('catalogs') && br.on.includes('hk-customers') && br.on.includes('pay-1'), JSON.stringify(br.on));
+  assert.ok(rep.branch.store.includes("לארג' פעמי חנות: לארג' פעמי-יהודה הנשיא"), JSON.stringify(rep.branch.store));
+  const hkB = rep.branch.picks.find((b) => b.css === 'select#hkStore');
+  assert.ok(hkB && hkB.opts.every((o) => o === 'נחל לכיש' || o === 'יהודה הנשיא'), 'בדף priv – רק שמות סניפים: ' + JSON.stringify(hkB));
+  assert.equal(await caspitPage().evaluate(() => document.getElementById('brSel').value), 'יהודה הנשיא', 'הבחירה לא השתנתה');
+  // 0.1.12 מבצעים: "כרטיס הטבות" (מעבר עכבר) ← "מבצעים"; הלחיצה היחידה – "יצוא לאקסל"; "הוסף מבצע" / ייבוא – רק מתועדים (בלי לחיצה ובלי ניווט)
+  const pr = rep.pages.find((p) => p.name === 'promos');
+  assert.equal(pr.ok, true, JSON.stringify(pr)); assert.equal(pr.hash, '#/promotions');
+  assert.deepEqual(pr.probe.map((x) => [x.op, x.found, x.done]), [['click', true, true]]);
+  assert.deepEqual(pr.heads, [['מספר מבצע', 'שם מבצע', 'מתאריך', 'עד תאריך', 'סוג מבצע', 'מחיר מבצע', 'סטטוס', 'פעולות']]);
+  const mk = pr.scr.marks.map((m) => m.t);
+  for (const t of ['ייבוא מבצעים', 'הוסף מבצע', 'ייבוא מבצעים מקובץ']) assert.ok(mk.includes(t), t + ' ' + JSON.stringify(pr.scr.marks));
+  assert.equal(pr.scr.marks.find((m) => m.t === 'הוסף מבצע').h, '#/promotions/new', 'hash של "הוסף מבצע" – מתועד בלבד');
+  assert.ok(pr.scr.files.some((f) => f.accept === '.xlsx,.csv' && !f.vis), 'שדה הקובץ (מוסתר) של הייבוא – מתועד');
+  assert.ok(pr.controls.some((c) => c.text === 'יצוא לאקסל'));
+  for (const h of ['#/promotions/new', '#/promotions-import']) assert.ok(rep.menu.some((l) => l.h === h), 'קישורי התת-תפריט של "כרטיס הטבות": ' + h);
+  const pf = rep.files.find((f) => f.page === 'promos');
+  assert.ok(pf && !pf.none, JSON.stringify(rep.files));
+  assert.equal(pf.hi, 1); assert.deepEqual(pf.hdr, ['מספר מבצע', 'שם מבצע', 'מתאריך', 'עד תאריך', 'סוג מבצע', 'מחיר מבצע', 'סטטוס']);
+  assert.deepEqual(pf.kinds[2], ['num', 'text', 'date', 'date', 'text', 'num', 'text']);
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('prmX')), '1', '"יצוא לאקסל" נלחץ פעם אחת');
+  for (const nm of ['קוקה קולה', 'במבה', 'X+Y', '30/11/2026']) assert.ok(!txt.includes(nm), 'תוכן מבצע בדוח: ' + nm);
+  // 0.1.12: מסך הייבוא – קריאה בלבד: בלי שום לחיצה / פוקוס / שינוי (impClicks של הרינדור האחרון), בלי בחירת סוג ובלי קובץ
+  const is = rep.pages.find((p) => p.name === 'imp-screen');
+  assert.equal(is.ok, true); assert.equal(is.ro, true); assert.equal(is.hash, '#/csv-imports'); assert.equal(is.probe, undefined);
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('impClicks')), '0', 'במסך הייבוא לא נלחץ כלום');
+  assert.ok(is.controls.some((c) => c.id === 'job_type') && !is.controls.some((c) => c.id === 'positive-file-uploader'), 'הסוג לא נבחר – שדה הקובץ לא נחשף');
+  assert.ok(is.scr && is.scr.heads.includes('טעינות קודמות') && is.scr.qhead === 'none', JSON.stringify(is.scr));
+  assert.deepEqual(is.scr.files, []);
+  assert.ok(is.scr.tables.some((t) => t.th.includes('סוג קובץ') && t.rows >= 2), JSON.stringify(is.scr.tables));
+  assert.ok(is.scr.btns.includes('העלה קבצים והרץ טעינה'), JSON.stringify(is.scr.btns));
+  assert.ok(!JSON.stringify(is).includes('ישן.csv') && !JSON.stringify(is).includes('בעל העסק'), 'בלי תוכן תאים מהטבלה');
   // עובדים (0.1.9): רשימת העובדים – קריאה בלבד, בכתובת ישירה; כותרות הטבלה בלי השורות, טקסט רק של כפתורי פעולה
   const emp = rep.pages[3];
   assert.equal(emp.ok, true, JSON.stringify(emp));
@@ -338,7 +387,7 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.equal(hp('hk-sales-total').probe[0].found, false, 'אין יצוא – לא לוחצים כלום');
   const tr = hp('hk-shipments').probe[0];
   assert.equal(tr.err, 'denied', '"שמירה ויצוא לאקסל" – נחסם: ' + JSON.stringify(tr)); assert.equal(tr.done, false);
-  const hf2 = rep.files.filter((f) => f.flow === 'hkExport');
+  const hf2 = rep.files.filter((f) => f.flow === 'hkExport' && /^hk-/.test(f.page)); // 0.1.12: גם מבצעים / אמצעי תשלום משתמשים ב-hkExport
   assert.deepEqual(hf2.map((f) => [f.page, !f.none]), [['hk-customers', true], ['hk-reports', true], ['hk-cust-reports', true], ['hk-sales-lines', true], ['hk-sales-total', false], ['hk-merakez', true], ['hk-shipments', false]], JSON.stringify(hf2));
   for (const f of hf2.filter((x) => !x.none)) {
     assert.equal(f.ext, 'csv'); assert.equal(f.rows, 4); assert.equal(f.hi, 1);
@@ -564,6 +613,42 @@ test('העלאה: הקובץ לא נקלט בשום דרך → selector-miss ע�
   const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
   assert.ok(!evs.includes('run'), 'לא נלחץ "העלה קבצים והרץ טעינה": ' + evs.join('|'));
   await cp.evaluate(() => localStorage.removeItem('upmode'));
+});
+
+// 0.1.12 – האבחון מ-20.11: הקובץ נבחר, אבל הכותרת "ממתין לטעינה" לא נמצאה. האבחון המורחב (info.scr) מראה מה כן יש במסך
+test('העלאה: אין כותרת "ממתין לטעינה" → selector-miss כמו קודם + תמונת מסך מסוננת (info.scr) בדיווח, בלי תוכן תאים ובלי לחיצה על "העלה"', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('upmode'); localStorage.setItem('qhead', 'קבצים ממתינים'); });
+  await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  try {
+    assert.equal(s.st.lastRun.code, 'selector-miss', JSON.stringify(s.st.lastRun));
+    assert.equal(s.st.lastRun.step, 'exportPrice');
+    assert.match(s.st.lastRun.msg, /אין כותרת ממתין/, s.st.lastRun.msg);
+    const rp = srv.ops('report').at(-1);
+    assert.equal(rp.err.code, 'selector-miss');
+    const sc = rp.info && rp.info.scr;
+    assert.ok(sc, 'info.scr נשלח: ' + JSON.stringify(rp.info));
+    assert.equal(sc.flow, 'importPrice'); assert.equal(sc.op, 'setFile'); assert.equal(sc.err, 'no-queue');
+    assert.equal(sc.qhead, 'none');
+    for (const h of ['קבצים ממתינים', 'טעינות קודמות', 'שים לב']) assert.ok(sc.heads.includes(h), h + ' ' + JSON.stringify(sc.heads));
+    assert.ok(sc.wait.some((w) => w.t === 'קבצים ממתינים'), JSON.stringify(sc.wait));
+    assert.ok(sc.tables.some((t) => t.th.join('|') === 'שם|סוג קובץ|פעולות' && t.rows >= 1), JSON.stringify(sc.tables));
+    assert.ok(sc.btns.includes('העלה קבצים והרץ טעינה'), JSON.stringify(sc.btns));
+    assert.equal(sc.files.length, 1); assert.equal(sc.files[0].lbl, 'בחר קובץ'); assert.equal(sc.files[0].css, 'input#positive-file-uploader');
+    assert.deepEqual(sc.dialogs.map((d) => d.t), ['שים לב']);
+    const txt = JSON.stringify(sc);
+    for (const x of ['lp-price-', 'ישן.csv', 'עדכון מחיר (1).csv', 'בעל העסק', '0521234567', 'הודעה בתוך החלון']) assert.ok(!txt.includes(x), 'בלי תוכן תאים / טקסט חופשי: ' + x);
+    assert.ok(txt.length <= 4000, 'קטן: ' + txt.length);
+    assert.equal(imports.length, nImp, 'לא הועלה כלום');
+    const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+    const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+    assert.ok(!evs.includes('run'), 'לא נלחץ "העלה קבצים והרץ טעינה": ' + evs.join('|'));
+  } finally { await cp.evaluate(() => localStorage.removeItem('qhead')); }
 });
 
 test('ייבוא עם שגויים בכספית → import-errors (עם המספרים), בלי ניסיון חוזר; זמן קצוב → import-timeout', async () => {
