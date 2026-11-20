@@ -71,6 +71,9 @@ async function open(browser, www) {
   await H.login(page, who + '@x.co');
   await page.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden && ACT.startBlank) ACT.startBlank(); });
   await H.settle(page, 800);
+  // 19.11.2026: בעסק שאינו לארג' פעמי יש קופה אחת (ZREG = "קופה" בלבד, ui-zreg-gen.js). הבדיקה הזו בודקת את זרימות ההתראות של סגירת קופה
+  // עם שני סניפים (בנוסח השרת של לארג' פעמי) – ולכן מגדירה כאן את שתי הקופות של לארג' פעמי, כמו בעסק לארג' פעמי
+  await page.evaluate(() => { ZREG = { i_yh: { n: 'יהודה הנשיא', no: '6346053', k: /יהודה|הנשיא/ }, i_nl: { n: 'נחל לכיש', no: '6328947', k: /נחל|לכיש/ } }; });
   await page.evaluate(() => { window.__toasts = []; const t0 = window.toast; window.toast = (t) => { window.__toasts.push(t); t0(t); }; });
   // נתונים מקומיים: ספק בדיקה עם חשבונית פתוחה INV77 (500 ₪)
   await page.evaluate(() => {

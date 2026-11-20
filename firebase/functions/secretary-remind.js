@@ -283,7 +283,7 @@ async function remindBiz(opts) {
     const base = [];
     if (F) base.push(...R.finCands(F.fin, today, { invDue: true, chk: true }));
     if (need('task')) { const [tk, ns] = await Promise.all([tasksGet(), db.collection('staff').limit(300).get()]); const names = {}; ns.docs.forEach((x) => { names[x.id] = String(x.get('name') || '').slice(0, 40); }); base.push(...R.taskCands(tk, names, now, today)); }
-    if (need('close')) base.push(...R.closeCands(await closGet(), today));
+    if (need('close')) base.push(...R.closeCands(await closGet(), today, scope.bizId !== T.BIZ0));
     if (need('backup')) base.push(...R.backupCands((await db.collection('app_backup_status').limit(100).get()).docs.map((x) => Object.assign({ id: x.id }, x.data())), now, today));
     // שלב 8 (7.3): חשבוניות שהתקבלו ומחכות – לכל מנהל לפי הסניפים שלו (כמו ב-secInv)
     const invL = mgrs.some((m) => m.nt.rt.inv) ? (await db.collection('sec_inv').where('st', 'in', R.INV_WAIT).limit(300).get()).docs.map((x) => x.data()) : [];
