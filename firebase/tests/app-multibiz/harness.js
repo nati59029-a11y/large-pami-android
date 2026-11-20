@@ -36,10 +36,10 @@ function firestoreReply(cfg, method, p, body) {
     const pre = segs[0] === 'b' ? 'b/' + segs[1] + '/' : ''; const s2 = segs[0] === 'b' ? segs.slice(2) : segs;
     // 18.11.2026: admins: {'<prefix>|uid': { perms: { pos, posMgr } }} – מתגי הקופה של מנהל (מנהל־על מדליק). 1 = מסמך בלי שדות, כמו קודם
     if (s2[0] === 'admins' && s2.length === 2) { const a = (cfg.admins || {})[pre + '|' + s2[1]]; return a ? [200, doc(p, a && typeof a === 'object' && a.perms ? { perms: { mapValue: { fields: Object.fromEntries(Object.entries(a.perms).map(([k, v]) => [k, { booleanValue: v }])) } } } : undefined)] : [404, { error: { code: 404, message: 'NOT_FOUND' } }]; }
-    // 19.11.2026: staff: {'<prefix>|uid': { cxS?, perms? }} – שדות נוספים במסמך העובד. 1 = רק active, כמו קודם
+    // 19.11.2026: staff: {'<prefix>|uid': { cxS?, incA? (20.11 – כל ההכנסות), perms? }} – שדות נוספים במסמך העובד. 1 = רק active, כמו קודם
     if (s2[0] === 'staff' && s2.length === 2) { const st = (cfg.staff || {})[pre + '|' + s2[1]]; if (!st) return [404, { error: { code: 404, message: 'NOT_FOUND' } }];
       const x = st && typeof st === 'object' ? st : {};
-      return [200, doc(p, Object.assign({ active: { booleanValue: true } }, x.cxS ? { cxS: { booleanValue: true } } : {}, x.perms ? { perms: { mapValue: { fields: Object.fromEntries(Object.entries(x.perms).map(([k, v]) => [k, { booleanValue: v }])) } } } : {}))]; }
+      return [200, doc(p, Object.assign({ active: { booleanValue: true } }, x.cxS ? { cxS: { booleanValue: true } } : {}, x.incA ? { incA: { booleanValue: true } } : {}, x.perms ? { perms: { mapValue: { fields: Object.fromEntries(Object.entries(x.perms).map(([k, v]) => [k, { booleanValue: v }])) } } } : {}))]; }
     return [404, { error: { code: 404, message: 'NOT_FOUND' } }];
   }
   if (method === 'DELETE') return [200, {}];
