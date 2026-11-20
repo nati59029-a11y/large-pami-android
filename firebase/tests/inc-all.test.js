@@ -10,9 +10,9 @@ const path = require('node:path');
 const { assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
-const A = 'biz-ia', B = 'biz-ib', C = 'biz-ic';
+const A = 'biz-ia', B = 'biz-ib', C = 'biz-ic', D = 'biz-id';
 const ALL = { cashClose: true, pos: true, cxSales: true, orders: true };
-const MGR = 'i_mgr', E1 = 'i_e1', E2 = 'i_e2', MB = 'i_mb', MC = 'i_mc';
+const MGR = 'i_mgr', E1 = 'i_e1', E2 = 'i_e2', MB = 'i_mb', MC = 'i_mc', MD = 'i_md';
 const FN = path.join(H.ROOT, 'functions');
 let FX;
 async function call(name, uid, data) {
@@ -37,8 +37,8 @@ before(async () => {
   await env.withSecurityRulesDisabled(async (c) => {
     const d = c.firestore(); const b = d.batch();
     const biz = (id, features) => b.set(d.doc('b/' + id), { name: id, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features, org: { v: 1, branches: [], banks: [], cards: [] } });
-    biz(A, ALL); biz(B, ALL); biz(C, {});
-    for (const [bz, m] of [[A, MGR], [B, MB], [C, MC]]) {
+    biz(A, ALL); biz(B, ALL); biz(C, {}); biz(D, { cashClose: true });
+    for (const [bz, m] of [[A, MGR], [B, MB], [C, MC], [D, MD]]) {
       b.set(d.doc(`b/${bz}/admins/${m}`), { email: m + '@x.invalid' });
       b.set(d.doc(`b/${bz}/staff/${m}`), { name: m, role: 'manager', active: true });
       b.set(d.doc('users/' + m), { bizId: bz, role: 'admin', active: true, bizStatus: 'active', email: m + '@x.invalid', createdAt: 1 });
@@ -55,12 +55,13 @@ before(async () => {
     b.set(d.doc(`b/${A}/closings/c5`), zcDoc('ok', '2026-11-17', { credit: '1,234.56', cash: '(10)' }, { reg: 'i_nl', no: '7' }));
     // קופה חדשה (אגורות)
     const sale = (id, soldAt, gross, extra) => b.set(d.doc(`b/${A}/possale/${id}`), Object.assign({ id, dev: 'K1', seq: +id.slice(-1), br: '_', cashier: E1, gross, debt: 0, paid: gross, st: 'ok', soldAt, at: soldAt + 1000, lines: [] }, extra || {}));
-    sale('K1-S1', IL('2026-11-16', '10:00'), 1234, { debt: 500, custName: 'לקוח א' });
+    sale('K1-S1', IL('2026-11-16', '10:00'), 1234, { debt: 500, custName: 'לקוח א', docs: [{ t: 'ir', id: 'irD-K1-1', no: 1 }] });
+    sale('K1-S6', IL('2026-11-16', '10:30'), 4000, { docs: [{ t: 'inv', id: 'invD7', no: 7 }, { t: 'rc', id: 'rcD7', no: 7 }] }); // סדרת מסמכים של העסק (docSeries 'biz')
     sale('K1-S2', IL('2026-11-16', '23:30'), 1000);
     sale('K1-S3', IL('2026-11-17', '00:10'), 777); // אחרי חצות בישראל – יום 17 (ב-UTC עוד 16)
     sale('K1-S4', IL('2026-11-16', '11:00'), 9999, { st: 'void' });
     sale('K1-S5', IL('2026-11-15', '23:59'), 5555); // לפני הטווח
-    b.set(d.doc(`b/${A}/posret/K1-R1`), { id: 'K1-R1', dev: 'K1', br: '_', sale: 'K1-S1', amt: 234, by: E1, at: IL('2026-11-16', '12:00'), lines: [] });
+    b.set(d.doc(`b/${A}/posret/K1-R1`), { id: 'K1-R1', dev: 'K1', br: '_', sale: 'K1-S1', amt: 234, by: E1, at: IL('2026-11-16', '12:00'), lines: [], docs: [{ t: 'cr', id: 'crD-K1-1', no: 1 }] });
     // כספית: 16 סופי, 17 חלקי
     b.set(d.doc(`b/${A}/cxDay/6200_20261116`), { d: '2026-11-16', bk: '6200', bn: 'יהודה הנשיא', gross: 200, ret: 10, disc: 5, ntx: 3, nl: 4, sp: 0, un: 0, it: { x: { n: 'סוד', q: 1 } } });
     b.set(d.doc(`b/${A}/cxDayP/6200_20261117`), { d: '2026-11-17', bk: '6200', bn: 'יהודה הנשיא', gross: 50, ret: 0, disc: 0, ntx: 1, nl: 1, sp: 0, un: 0, pt: { at: 1, hm: '13:00' } });
@@ -89,7 +90,9 @@ describe('כל ההכנסות – incAll', () => {
     assert.equal(c1.reg, 'i_yh'); assert.equal(c1.od, '2026-11-16'); assert.equal(c1.no, '55');
     assert.equal(r.zc.list[1].amt, 1224.56, 'פסיק אלפים ומינוס בסוגריים');
     assert.equal(r.pos.on, true);
-    assert.deepEqual(r.pos.days['2026-11-16'], { s: 22.34, n: 2, r: 2.34, rn: 1, debt: 5 });
+    assert.deepEqual(r.pos.days['2026-11-16'], { s: 62.34, n: 3, r: 2.34, rn: 1, debt: 5 });
+    assert.deepEqual(r.pos.docs.slice().sort(), ['crD-K1-1', 'invD7', 'irD-K1-1', 'rcD7'], 'מסמכי הקופה – כדי שהאפליקציה לא תספור אותם שוב ב"אחר"');
+    assert.equal(r.zc.more, false);
     assert.deepEqual(r.pos.days['2026-11-17'], { s: 7.77, n: 1, r: 0, rn: 0, debt: 0 });
     assert.equal(r.pos.days['2026-11-15'], undefined);
     assert.equal(r.cx.on, true); assert.deepEqual(r.cx.reg, { 6200: 'i_yh' });
@@ -99,7 +102,7 @@ describe('כל ההכנסות – incAll', () => {
   });
   it('יום בקופה החדשה: מכירות (כולל מבוטלת, מסומנת), החזרות, שעה בישראל', async () => {
     const r = await ok(MGR, { op: 'day', d: '2026-11-16' });
-    assert.deepEqual(r.sales.map((x) => [x.id, x.hm, x.gross, x.st]), [['K1-S1', '10:00', 12.34, 'ok'], ['K1-S4', '11:00', 99.99, 'void'], ['K1-S2', '23:30', 10, 'ok']]);
+    assert.deepEqual(r.sales.map((x) => [x.id, x.hm, x.gross, x.st]), [['K1-S1', '10:00', 12.34, 'ok'], ['K1-S6', '10:30', 40, 'ok'], ['K1-S4', '11:00', 99.99, 'void'], ['K1-S2', '23:30', 10, 'ok']]);
     assert.equal(r.sales[0].debt, 5); assert.equal(r.sales[0].cust, 'לקוח א');
     assert.deepEqual(r.rets.map((x) => [x.id, x.amt, x.sale]), [['K1-R1', 2.34, 'K1-S1']]);
     assert.deepEqual((await ok(MGR, { op: 'day', d: '2026-11-17' })).sales.map((x) => x.id), ['K1-S3']);
@@ -141,11 +144,21 @@ describe('כל ההכנסות – incAll', () => {
     await ok(MGR, { op: 'see', uid: E2, on: false });
     assert.equal((await call('incAll', E2, R)).reason, 'no-perm');
   });
+  it('יותר מ-2,000 סגירות בטווח – more:true (לא נחתך בשקט)', async () => {
+    const d = adm();
+    for (let k = 0; k < 5; k++) { const b = d.batch(); for (let i = 0; i < 401; i++) b.set(d.doc(`b/${D}/closings/m${k}_${i}`), zcDoc('ok', '2026-11-16', { credit: '1' })); await b.commit(); }
+    const r = await ok(MD, R);
+    assert.equal(r.zc.more, true); assert.equal(r.zc.list.length, 2000);
+  });
   it('ליבה: חישוב שורות הסגירה ותחילת יום בישראל (חורף/קיץ)', () => {
     const K = require('../functions/inc-all.js')._core;
     assert.deepEqual(K.zcRows({ cash: '', round: '0.4', credit: '₪ 10' }), { rows: [['אשראי', 10], ['מזומן', 0.4]], amt: 10.4 });
     assert.deepEqual(K.zcRows({}), { rows: [], amt: 0 });
     assert.equal(K.zcRows({ credit: '0.1', checks: '0.2' }).amt, 0.3);
+    assert.equal(K.r2(1.005), 1.01, 'עיגול כמו rnd באפליקציה');
+    assert.equal(K.r2('1.005'), 1.01);
+    assert.equal(K.zcRows({ credit: '1.005' }).amt, 1.01);
+    assert.equal(K.r2(-1.005), -1, 'כמו rnd: Math.round עם EPSILON');
     assert.equal(K.dayStart('2026-11-16'), Date.parse('2026-11-15T22:00:00Z'));
     assert.equal(K.dayStart('2026-07-01'), Date.parse('2026-06-30T21:00:00Z'));
   });

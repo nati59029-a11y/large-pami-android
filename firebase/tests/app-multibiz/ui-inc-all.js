@@ -18,7 +18,7 @@ const STAFF = { documents: [
 const GET = { from: '2026-11-16', to: '2026-11-17',
   zc: { on: true, list: [{ id: 'zq1', reg: 'i_yh', d: '2026-11-16', od: '2026-11-16', tm: '21:00', no: '55', by: 'דנה', amt: 443.6, rows: [['אשראי', 300], ['מזומן', 143.6]] },
     { id: 'zcl', reg: 'i_nl', d: '2026-11-17', od: '2026-11-17', tm: '20:00', no: '9', by: 'יוסי', amt: 100, rows: [['אשראי', 100]] }] },
-  pos: { on: true, days: { '2026-11-16': { s: 22.34, n: 2, r: 2.34, rn: 1, debt: 5 }, '2026-11-17': { s: 7.77, n: 1, r: 0, rn: 0, debt: 0 } } },
+  pos: { on: true, docs: ['irD-K1-1', 'invD77'], days: { '2026-11-16': { s: 22.34, n: 2, r: 2.34, rn: 1, debt: 5 }, '2026-11-17': { s: 7.77, n: 1, r: 0, rn: 0, debt: 0 } } },
   cx: { on: true, reg: { 6200: 'i_yh' }, days: [{ d: '2026-11-16', bk: '6200', bn: 'יהודה הנשיא', gross: 200, ret: 10, disc: 5, ntx: 3, sp: 0 }, { d: '2026-11-17', bk: '6200', bn: 'יהודה הנשיא', gross: 50, ret: 0, disc: 0, ntx: 1, sp: 0, pt: { hm: '13:00' } }] } };
 const DAY = { sales: [{ id: 'K1-S1', dev: 'K1', seq: 1, hm: '10:00', gross: 12.34, debt: 5, st: 'ok', cust: 'לקוח א' }, { id: 'K1-S4', dev: 'K1', seq: 4, hm: '11:00', gross: 99.99, debt: 0, st: 'void' }, { id: 'K1-S2', dev: 'K1', seq: 2, hm: '23:30', gross: 10, debt: 0, st: 'ok' }],
   rets: [{ id: 'K1-R1', dev: 'K1', hm: '12:00', amt: 2.34, st: 'ok', sale: 'K1-S1' }] };
@@ -72,7 +72,12 @@ const range = async (page) => {
       await pg.evaluate(() => { S.zc = S.zc || []; S.zc.push({ id: 'zq1', reg: 'i_yh', d: '2026-11-16', tm: '21:00', od: '2026-11-16', no: '55', by: 'דנה', at: 1, tx: ['ztx1', 'ztx2'] });
         S.tx.push({ id: 'ztx1', src: 'zc:zq1', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 300, note: 'סגירת קופה', pays: [] }, { id: 'ztx2', src: 'zc:zq1', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 143.6, note: 'סגירת קופה', pays: [] },
           { id: 'o1', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 50, note: 'אירוע פרטי', pays: [] }, { id: 'o2', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: -20, note: 'זיכוי ללקוח', pays: [] },
-          { id: 'o3', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 999, note: 'נמחק', x: 1, pays: [] }, { id: 'e1', t: 'exp', cat: 'e_own', date: '2026-11-16', amt: 70, pays: [] }); });
+          { id: 'o3', t: 'inc', cat: 'i_yh', date: '2026-11-16', amt: 999, note: 'נמחק', x: 1, pays: [] },
+          // ar-inc.js: מסמכי הקופה החדשה כתנועות הכנסה – לא נספרים שוב ב"אחר" (לפי possale.docs, ולפי סדרת מסמכים של קופה); חשבונית של הזמנה – כן
+          { id: 'ar_irD-K1-1', ardoc: 'irD-K1-1', t: 'inc', cat: 'c_ordinc', date: '2026-11-16', amt: 12.34, note: 'חשבונית מס קבלה #1', pays: [] },
+          { id: 'ar_crD-K2-4', ardoc: 'crD-K2-4', t: 'inc', cat: 'c_ordinc', date: '2026-11-16', amt: -2.34, note: 'זיכוי #4', pays: [] },
+          { id: 'ar_invD77', ardoc: 'invD77', t: 'inc', cat: 'c_ordinc', date: '2026-11-17', amt: 40, note: 'חשבונית מס #77', pays: [] },
+          { id: 'ar_invD5', ardoc: 'invD5', t: 'inc', cat: 'c_ordinc', date: '2026-11-16', amt: 40, note: 'חשבונית מס #5 · לקוח הזמנה', pays: [] }, { id: 'e1', t: 'exp', cat: 'e_own', date: '2026-11-16', amt: 70, pays: [] }); });
       await pg.evaluate(() => { NAV = [{ v: 'home' }]; go('more'); }); await H.settle(pg, 500);
       const mo = await q(pg);
       check('1 "עוד" (מנהל): "כל ההכנסות"', /כל ההכנסות/.test(mo.text) && fine(mo), { small: mo.small });
@@ -81,10 +86,16 @@ const range = async (page) => {
       check('2 כניסה: תקופה "היום" – בקשה אחת לשרת עם תאריך אחד', g0 && g0.d.from === g0.d.to && /^\d{4}-\d{2}-\d{2}$/.test(g0.d.from), g0 && g0.d);
       await range(pg);
       const g1 = x.calls.filter((c) => c.n === 'incAll' && c.d.op === 'get').pop();
+      await pg.click('[data-a=incPer][data-k=custom]'); await H.settle(pg, 500);
+      const n0 = x.calls.filter((c) => c.n === 'incAll').length;
+      await pg.fill('form[data-f=incRange] input[name=from]', '2025-01-01'); await pg.fill('form[data-f=incRange] input[name=to]', '2026-11-17');
+      await pg.click('form[data-f=incRange] button'); await H.settle(pg, 400);
+      check('3א טווח של יותר מ-400 ימים נחסם בלי בקשה לשרת', x.calls.filter((c) => c.n === 'incAll').length === n0 && /עד 400 ימים/.test(await pg.evaluate(() => document.body.innerText)));
+      await range(pg);
       check('3 טווח חופשי נשלח לשרת (16–17.11)', g1 && g1.d.from === '2026-11-16' && g1.d.to === '2026-11-17', g1 && g1.d);
       const s = await q(pg); await x.shot('summary');
-      // סגירות 443.60 (מכשיר) + 100 (ענן) = 543.60; קופה חדשה 22.34 − 2.34 + 7.77 = 27.77; אחר 50 − 20 = 30; סך 601.37. כספית 185 + 50 = 235; הפרש 16.11: 185 − 443.60 = −258.60
-      check('4 משבצות: סך 601.37, סגירות 543.60, קופה חדשה 27.77, אחר 30.00; מגע ≥44, RTL, בלי גלילה לצד', fine(s) && /סך ההכנסות\s*601\.37/.test(s.text) && /סגירות קופה\s*543\.60/.test(s.text) && /קופה חדשה\s*27\.77/.test(s.text) && /הכנסות אחרות\s*30\.00/.test(s.text), { small: s.small, t: s.text.slice(0, 500) });
+      // סגירות 443.60 (מכשיר) + 100 (ענן) = 543.60; קופה חדשה 22.34 − 2.34 + 7.77 = 27.77; אחר 50 − 20 + 40 (חשבונית הזמנה) = 70 – בלי מסמכי הקופה; סך 641.37. כספית 185 + 50 = 235; הפרש 16.11: 185 − 443.60 = −258.60
+      check('4 משבצות: סך 641.37, סגירות 543.60, קופה חדשה 27.77, אחר 70.00 (מכירה בקופה עם מסמך נספרת פעם אחת); מגע ≥44, RTL, בלי גלילה לצד', fine(s) && /סך ההכנסות\s*641\.37/.test(s.text) && /סגירות קופה\s*543\.60/.test(s.text) && /קופה חדשה\s*27\.77/.test(s.text) && /הכנסות אחרות\s*70\.00/.test(s.text), { small: s.small, t: s.text.slice(0, 500) });
       check('5 כספית בנפרד: 235.00, "לא נכלל בסך", הפרש 258.60- ליום אחד שאפשר להשוות', /כספית – להשוואה בלבד/.test(s.text) && /מכירות כספית \(נטו\)\s*235\.00[^\n]*\s*לא נכלל בסך/.test(s.text) && /הפרש כספית מול סגירות\s*(-258\.60|258\.60-)[^\n]*\s*1 ימים/.test(s.text), s.text.slice(0, 900));
       check('6 הקפה בקופה החדשה + סגירה מהענן מוסברות', /בהקפה: 5\.00/.test(s.text) && /נוספה מהענן/.test(s.text));
       check('7 לפי יום: 17.11 עם "חלקי – עד השעה 13:00", 16.11 עם "פער"', /17\/11\/2026[\s\S]*חלקי – עד השעה 13:00/.test(s.text) && /16\/11\/2026[\s\S]*פער/.test(s.text), s.text.slice(-700));
@@ -114,7 +125,7 @@ const range = async (page) => {
       await pg.click('[data-a=incDl][data-k=oth]'); await H.settle(pg, 300);
       await pg.click('#dlg [data-a=incDay][data-k=oth][data-d="2026-11-16"]'); await H.settle(pg, 300);
       const o1 = await q(pg);
-      check('13 הכנסות אחרות: אירוע פרטי 50, זיכוי −20, בלי הנמחקת ובלי ההוצאה, סה"כ 30.00', /אירוע פרטי/.test(o1.text) && /זיכוי ללקוח/.test(o1.text) && /(-20\.00|20\.00-)/.test(o1.text) && !/נמחק/.test(o1.text) && /סה"כ\s*30\.00/.test(o1.text) && o1.small.length === 0, o1.text.slice(0, 300));
+      check('13 הכנסות אחרות: אירוע פרטי 50, זיכוי −20, חשבונית הזמנה 40; בלי הנמחקת, בלי ההוצאה ובלי מסמכי הקופה; סה"כ 70.00', /אירוע פרטי/.test(o1.text) && /זיכוי ללקוח/.test(o1.text) && /(-20\.00|20\.00-)/.test(o1.text) && !/נמחק/.test(o1.text) && /חשבונית מס #5/.test(o1.text) && !/חשבונית מס קבלה #1|זיכוי #4/.test(o1.text) && /סה"כ\s*70\.00/.test(o1.text) && o1.small.length === 0, o1.text.slice(0, 300));
       await pg.evaluate(() => closeDlg());
       // כספית → יום → הסניפים, עם ההפרש
       await pg.click('[data-a=incDl][data-k=cx]'); await H.settle(pg, 300);
@@ -150,7 +161,7 @@ const range = async (page) => {
       await range(pg);
       const s = await q(pg); await x.shot('summary');
       // בלי "אחר": סגירות מהשרת 543.60 + קופה חדשה 27.77 = 571.37
-      check('21 עובד: סך 571.37 (סגירות מהשרת + קופה חדשה), בלי משבצת "אחר", עם הסבר; בלי בחירת עובדים', fine(s) && /סך ההכנסות\s*571\.37/.test(s.text) && !/הכנסות אחרות\s*[\d-]/.test(s.text) && /נשמרות רק במכשיר המנהל/.test(s.text) && !/עובדים שרואים/.test(s.text), { small: s.small, t: s.text.slice(0, 500) });
+      check('21 עובד: סך 571.37 (סגירות מהשרת + קופה חדשה), בלי משבצת "אחר", עם הסבר; בלי בחירת עובדים', fine(s) && /סך ההכנסות\s*571\.37/.test(s.text) && !/הכנסות אחרות\s*[\d-]/.test(s.text) && /נשמרות רק במכשיר המנהל/.test(s.text) && /הסגירות מוצגות כפי שנשלחו ואושרו/.test(s.text) && !/עובדים שרואים/.test(s.text), { small: s.small, t: s.text.slice(0, 500) });
       await pg.evaluate(() => { NAV = [{ v: 'incSee' }]; render(0); }); await sleep(600);
       check('22 עובד לא נכנס לבחירת העובדים', /למנהל בלבד/.test((await q(pg)).text));
       check('23 בלי שגיאות JavaScript (עובד מסומן)', !pg.__errors.length, pg.__errors.slice(0, 3));

@@ -5,8 +5,8 @@
 //   באפליקציה (רק במכשיר המנהל – S.tx, לא בשרת). מכירות כספית (cxDay / cxDayP) – בנפרד, להשוואה בלבד, לא בסך (אותו כסף כמו הסגירה).
 //   הרשאה: מנהל, או עובד שהמנהל סימן (staff/{uid}.incA = true, נכתב רק כאן – op:'see'). עובד בלי הסימון לא מקבל נתונים.
 //
-//   incAll({ op:'get', from, to })  – עד 92 ימים → { zc:{ on, list:[{ id, reg, d, od, tm, no, by, amt, rows:[[שם, סכום]] }] },
-//                                     pos:{ on, days:{ 'YYYY-MM-DD': { s, n, r, rn, debt } }, more? }, cx:{ on, days:[{ d, bk, bn, gross, ret, disc, ntx, sp, pt? }], reg } }
+//   incAll({ op:'get', from, to })  – עד 92 ימים → { zc:{ on, list:[{ id, reg, d, od, tm, no, by, amt, rows:[[שם, סכום]] }], more? },
+//                                     pos:{ on, days:{ 'YYYY-MM-DD': { s, n, r, rn, debt } }, docs:[מזהי ardoc של מכירות/החזרות], more? }, cx:{ on, days:[{ d, bk, bn, gross, ret, disc, ntx, sp, pt? }], reg } }
 //                                     כל הסכומים בשקלים, מעוגלים לאגורות (בקופה החדשה – חישוב באגורות שלמות). מקור כבוי בעסק → on:false בלי נתונים.
 //   incAll({ op:'day', d })         – הרשומות של הקופה החדשה ביום אחד → { sales:[{ id, dev, seq, hm, gross, debt, st, cust?, chk? }], rets:[{ id, dev, hm, amt, sale? }], more? }
 //   incAll({ op:'see', uid, on })   – מנהל בלבד: עובד רואה / לא רואה את המסך (staff/{uid}.incA). מנהל רואה תמיד (is-admin).
@@ -31,7 +31,7 @@ const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason 
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
 const on = (biz, k) => !!(biz && biz.features && biz.features[k] === true);
 const ag = (v) => (Number.isInteger(v) ? v : 0);
-const r2 = (n) => Math.round((+n || 0) * 100) / 100;
+const r2 = (n) => Math.round(((+n || 0) + Number.EPSILON) * 100) / 100; // כמו rnd ב-index.html
 function onlyKeys(input, keys) { for (const k of Object.keys(input)) if (!keys.includes(k)) throw bad('bad-field', 'שדה לא מוכר: ' + k); }
 
 // ---------- תאריכים לפי שעון ישראל ----------
@@ -83,9 +83,9 @@ function zcRows(f) {
   return { rows, amt: a / 100 };
 }
 async function closings(db, from, to) {
-  const s = await db.collection('closings').where('d', '>=', from).where('d', '<=', to).limit(ZC_MAX).get();
+  const s = await db.collection('closings').where('d', '>=', from).where('d', '<=', to).limit(ZC_MAX + 1).get();
   const list = [];
-  for (const doc of s.docs) {
+  for (const doc of s.docs.slice(0, ZC_MAX)) {
     const x = doc.data();
     if (x.st !== 'ok' || typeof x.d !== 'string' || !DATE_RE.test(x.d)) continue; // ממתינה לאישור / נדחתה – עוד לא הכנסה
     let j = {}; try { j = JSON.parse(typeof x.data === 'string' ? x.data : '{}'); } catch (e) { j = {}; }
@@ -94,29 +94,33 @@ async function closings(db, from, to) {
     list.push({ id: doc.id, reg: String(x.reg || ''), d: x.d, od: typeof x.od === 'string' ? x.od : '', tm: typeof x.tm === 'string' ? x.tm : '', no: String(x.no || '').slice(0, 30), by: String(x.by || '').slice(0, 100), amt: z.amt, rows: z.rows });
   }
   list.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : (a.tm < b.tm ? -1 : 1)));
-  return list;
+  return { on: true, list, more: s.size > ZC_MAX }; // יותר מ-2,000 סגירות בבקשה – לא חותכים בשקט
 }
 
 // ---------- הקופה החדשה (POS): possale לפי רגע המכירה (soldAt), posret לפי זמן הרישום (at) – יום לפי שעון ישראל ----------
 async function posDays(db, from, to) {
   const a = dayStart(from), b = dayStart(addDay(to, 1));
   const [s, r] = await Promise.all([
-    db.collection('possale').where('soldAt', '>=', a).where('soldAt', '<', b).select('soldAt', 'gross', 'debt', 'st').limit(POS_MAX).get(),
-    db.collection('posret').where('at', '>=', a).where('at', '<', b).select('at', 'amt', 'gross', 'st').limit(POS_MAX).get()]);
-  const days = {};
+    db.collection('possale').where('soldAt', '>=', a).where('soldAt', '<', b).select('soldAt', 'gross', 'debt', 'st', 'docs').limit(POS_MAX).get(),
+    db.collection('posret').where('at', '>=', a).where('at', '<', b).select('at', 'amt', 'gross', 'st', 'docs').limit(POS_MAX).get()]);
+  const days = {}, docs = new Set();
+  // מסמכי הקופה (ardoc) – ar-inc.js באפליקציה הופך אותם גם לתנועות הכנסה (ar_<id>); האפליקציה מוציאה אותן מ"אחר" כדי לא לספור פעמיים
+  const docOf = (x) => { for (const o of Array.isArray(x.docs) ? x.docs : []) if (o && typeof o.id === 'string' && o.id.length <= 80) docs.add(o.id); };
   const day = (d) => days[d] || (days[d] = { s: 0, n: 0, r: 0, rn: 0, debt: 0 });
   for (const doc of s.docs) {
     const x = doc.data();
+    docOf(x);
     if (x.st === 'void' || !Number.isFinite(x.soldAt)) continue;
     const o = day(ymd(x.soldAt)); o.s += ag(x.gross); o.n++; o.debt += ag(x.debt);
   }
   for (const doc of r.docs) {
     const x = doc.data();
+    docOf(x);
     if (x.st === 'void' || !Number.isFinite(x.at)) continue;
     const o = day(ymd(x.at)); o.r += Number.isInteger(x.amt) ? x.amt : ag(x.gross); o.rn++;
   }
   for (const o of Object.values(days)) { o.s /= 100; o.r /= 100; o.debt /= 100; }
-  return { on: true, days, more: s.size >= POS_MAX || r.size >= POS_MAX };
+  return { on: true, days, docs: [...docs], more: s.size >= POS_MAX || r.size >= POS_MAX };
 }
 async function posDay(db, d) {
   const a = dayStart(d), b = dayStart(addDay(d, 1));
@@ -156,7 +160,7 @@ async function get(w, input) {
   const [from, to] = rangeOf(input);
   const db = T.tdb();
   const [zc, pos, cx] = await Promise.all([
-    on(w.biz, 'cashClose') ? closings(db, from, to).then((list) => ({ on: true, list })) : { on: false, list: [] },
+    on(w.biz, 'cashClose') ? closings(db, from, to) : { on: false, list: [] },
     on(w.biz, 'pos') ? posDays(db, from, to) : { on: false, days: {} },
     on(w.biz, 'cxSales') ? cxDays(db, from, to) : { on: false, days: [], reg: {} }]);
   return { from, to, zc, pos, cx };
@@ -200,4 +204,4 @@ exports.incAll = onCall(T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 }));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { zcRows, num, dayStart, ymd, rangeOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { zcRows, num, r2, dayStart, ymd, rangeOf } });

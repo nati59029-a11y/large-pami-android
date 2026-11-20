@@ -32,10 +32,10 @@ const PER=[['today','היום'],['yday','אתמול'],['week','שבוע'],['mont
 /* השרת מחזיר עד 92 ימים בבקשה – טווח ארוך נשלח בחלקים */
 function chunks(f,t){const o=[];for(let a=f;a<=t;a=addD(a,92)){const b=addD(a,91);o.push([a,b<t?b:t])}return o}
 async function load(){const [f,t]=range(Q.per);Q.load=1;Q.err='';
- try{const R={zc:{on:false,list:[]},pos:{on:false,days:{},more:false},cx:{on:false,days:[],reg:{}}};
+ try{const R={zc:{on:false,list:[],more:false},pos:{on:false,days:{},docs:[],more:false},cx:{on:false,days:[],reg:{}}};
   for(const [a,b] of chunks(f,t)){const x=await fnCall('incAll',{op:'get',from:a,to:b})||{};
-   if(x.zc&&x.zc.on){R.zc.on=true;R.zc.list=R.zc.list.concat(Array.isArray(x.zc.list)?x.zc.list:[])}
-   if(x.pos&&x.pos.on){R.pos.on=true;Object.assign(R.pos.days,x.pos.days||{});if(x.pos.more)R.pos.more=true}
+   if(x.zc&&x.zc.on){R.zc.on=true;R.zc.list=R.zc.list.concat(Array.isArray(x.zc.list)?x.zc.list:[]);if(x.zc.more)R.zc.more=true}
+   if(x.pos&&x.pos.on){R.pos.on=true;Object.assign(R.pos.days,x.pos.days||{});if(Array.isArray(x.pos.docs))R.pos.docs=R.pos.docs.concat(x.pos.docs);if(x.pos.more)R.pos.more=true}
    if(x.cx&&x.cx.on){R.cx.on=true;R.cx.days=R.cx.days.concat(Array.isArray(x.cx.days)?x.cx.days:[]);R.cx.reg=x.cx.reg||{}}}
   Q.D=Object.assign(R,{f,t});Q.PD={}}catch(e){Q.err=e&&e.message||'הטעינה נכשלה';Q.D=null}
  Q.load=0;try{if(cur().v==='incAll')rerender()}catch(e){}}
@@ -51,12 +51,17 @@ function devZc(f,t){const Z=new Map(((S&&S.zc)||[]).map(z=>[z&&z.id,z])),by=new 
  return[...by.values()].map(r=>Object.assign(r,{amt:M2(r.ag)}))}
 /* סגירות שהמכשיר כבר מכיר (גם אם ההכנסה שלהן נמחקה) – לא מוסיפים אותן מהשרת */
 function known(){const k=new Set(((S&&S.zc)||[]).map(z=>z&&z.id));for(const x of S.tx)if(x&&isZc(x))k.add(x.src.slice(3));return k}
-function othList(f,t){return live().filter(x=>x&&x.t==='inc'&&!isZc(x)&&x.date&&x.date>=f&&x.date<=t).map(x=>({id:x.id,d:x.date,c:(typeof cat==='function'&&(cat(x.cat)||{}).name)||'',s:subName(x),note:x.note||'',amt:x.amt}))}
-/* ההפרש כספית מול סגירה – אותו חישוב כמו במסך ההתאמה. בלי חיבור קופות – הסך היומי מול הסך היומי */
+/* תיקון בדיקה עצמאית (סבב 1): מסמך שהקופה החדשה הוציאה (חשבונית מס קבלה / חשבונית / זיכוי) הופך ב-ar-inc.js גם לתנועה ar_<מזהה המסמך>.
+   המכירה כבר נספרת ב"קופה חדשה" (possale), ולכן התנועה הזו לא נספרת ב"אחר". זיהוי: possale.docs / posret.docs מהשרת (מקור ראשי),
+   וגם מזהה בסדרת מסמכים של קופה (<סוג><D|O>-K<מספר קופה>-<מספר> – רק Book עם dev, כלומר pos-doc.js) – למקרה של מסמך שתאריכו ביום אחר מהמכירה */
+const POSDOC=/^(inv|ir|rc|cr)[DO]-K[1-9][0-9]{0,3}-[0-9]+$/;
+const arDoc=x=>typeof x.ardoc==='string'&&x.ardoc?x.ardoc:typeof x.id==='string'&&x.id.indexOf('ar_')===0?x.id.slice(3):'';
+function isPos(x,P){const d=arDoc(x);return !!d&&(P.has(d)||POSDOC.test(d))}
+function othList(f,t){const P=new Set((Q.D&&Q.D.pos&&Q.D.pos.docs)||[]);return live().filter(x=>x&&x.t==='inc'&&!isZc(x)&&!isPos(x,P)&&x.date&&x.date>=f&&x.date<=t).map(x=>({id:x.id,d:x.date,c:(typeof cat==='function'&&(cat(x.cat)||{}).name)||'',s:subName(x),note:x.note||'',amt:x.amt}))}
+/* ההפרש כספית מול סגירה – בדיוק כמו במסך ההתאמה (caspit-sales.js recH): CaspitCore.recon עם חיבור הקופות, הסף וקופות הסגירה. בלי חיבור – אין הפרש */
 function recMap(zc,cx){const C=window.CaspitCore;if(!cx.on||!C||typeof C.recon!=='function')return{};
- const pt=new Set(cx.days.filter(x=>x.pt).map(x=>x.d));let reg=Object.assign({},cx.reg||{}),regs=typeof ZREG!=='undefined'?Object.keys(ZREG):[];
+ const pt=new Set(cx.days.filter(x=>x.pt).map(x=>x.d));const reg=Object.assign({},cx.reg||{}),regs=typeof ZREG!=='undefined'?Object.keys(ZREG):[];
  const Z=zc.filter(z=>!pt.has(z.d)).map(z=>({id:z.id,reg:z.reg,d:z.d,od:z.od||'',amt:z.amt})),days=cx.days.filter(x=>!x.pt);
- if(!Object.keys(reg).length){reg={};days.forEach(x=>{reg[x.bk]='_'});Z.forEach(z=>{z.reg='_'});regs=['_']}
  const th=typeof zcThr==='function'?zcThr()||0:0,o={};try{for(const r of C.recon(days,reg,Z,th,regs))o[r.d]=r.tot}catch(e){}return o}
 function model(){const D=Q.D,f=D.f,t=D.t,M=dev(),m=new Map();
  const dd=d=>{let x=m.get(d);if(!x){x={d,zc:0,zn:0,ps:0,pr:0,pn:0,rn:0,debt:0,oth:0,on:0,cx:0,hasCx:false,pt:''};m.set(d,x)}return x};
@@ -85,10 +90,11 @@ V.incAll=()=>{const T='כל ההכנסות';if(!view())return{t:T,h:'<div class=
  if(!Q.D)return{t:T,s:Q.per==='custom'&&!(Q.from&&Q.to)?'בחרו טווח תאריכים':'טוען…',h:per};
  const X=Q.M=model(),D=Q.D,t=X.T;
  const tiles=`<div class="kg">${tile('סך ההכנסות',M2(t.all),'pos','all',X.M?'סגירות + קופה חדשה + אחר':'סגירות + קופה חדשה')}${X.zcOn?tile('סגירות קופה',M2(t.zc),'','zc'):''}${X.posOn?tile('קופה חדשה',M2(t.pos),'','pos',t.pr?'אחרי החזרות <bdi dir="ltr">'+ils(M2(t.pr))+'</bdi>':''):''}${X.M?tile('הכנסות אחרות',M2(t.oth),'','oth'):''}</div>`;
- const notes=[X.M?'':'הכנסות אחרות (שנרשמו ידנית באפליקציה) נשמרות רק במכשיר המנהל ולא מוצגות כאן.',
+ const notes=[X.M?'':'הכנסות אחרות (שנרשמו ידנית באפליקציה) נשמרות רק במכשיר המנהל ולא מוצגות כאן. הסגירות מוצגות כפי שנשלחו ואושרו, בלי תיקונים שהמנהל עשה אחר כך בספר ההכנסות.',
+  D.zc.more?'⚠ יש יותר מ-2,000 סגירות בטווח הזה – חלק לא נספרו. בחרו טווח קצר יותר.':'',
   X.zc.some(z=>z.cl)?'סגירה שהוכנסה בענן ולא נמצאה בהכנסות במכשיר נוספה מהענן (מסומנת "מהענן").':'',
   D.pos.more?'יש יותר מדי מכירות בקופה החדשה בטווח הזה – בחרו טווח קצר יותר.':'',t.debt?'מתוך הקופה החדשה, בהקפה: <bdi dir="ltr">'+ils(M2(t.debt))+'</bdi>.':''].filter(Boolean);
- const cxC=X.cxOn?`<div class="card"><h3 style="margin-top:0">כספית – להשוואה בלבד</h3><div class="kg">${tile('מכירות כספית (נטו)',M2(t.cx),'','cx','לא נכלל בסך')}${X.zcOn&&X.gn?tile('הפרש כספית מול סגירות',M2(X.gap),X.gap?'neg':'','gap',X.gn+' ימים שאפשר להשוות'):''}</div><p class="note" style="margin-bottom:0">מכירות כספית והסגירה של אותה קופה הן אותו כסף, ולכן כספית לא נספרת בסך. ההפרש = כספית פחות הסגירה, לכל יום שאפשר להשוות (יום חלקי מהרובוט לא נכלל).</p></div>`:'';
+ const cxC=X.cxOn?`<div class="card"><h3 style="margin-top:0">כספית – להשוואה בלבד</h3><div class="kg">${tile('מכירות כספית (נטו)',M2(t.cx),'','cx','לא נכלל בסך')}${X.zcOn&&X.gn?tile('הפרש כספית מול סגירות',M2(X.gap),X.gap?'neg':'','gap',X.gn+' ימים שאפשר להשוות'):''}</div>${X.zcOn&&!Object.keys(D.cx.reg||{}).length?'<p class="note">כדי לראות הפרש, מחברים פעם אחת את קופות כספית לקופות של סגירת הקופה – במסך "מכירות כספית", לשונית "התאמה לסגירת קופה".</p>':''}<p class="note" style="margin-bottom:0">מכירות כספית והסגירה של אותה קופה הן אותו כסף, ולכן כספית לא נספרת בסך. ההפרש = כספית פחות הסגירה, לכל יום שאפשר להשוות (יום חלקי מהרובוט לא נכלל).</p></div>`:'';
  const dayC=x=>{const r=X.rec[x.d],line=(k,l,ex)=>hasK(x,k)?`<div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="note" style="margin:0">${l}</span><span class="row" style="gap:6px;align-items:center;flex-wrap:wrap">${ex||''}${money('incDay',k,x.d,M2(dayAmt(x,k)))}</span></div>`:'';
   return `<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><b>${esc(df(x.d))}</b><b dir="ltr">${ils(M2(dayAmt(x,'all')))}</b></div>
   ${line('zc','סגירות קופה')}${line('pos','קופה חדשה')}${X.M?line('oth','הכנסות אחרות'):''}${X.cxOn&&x.hasCx?`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:2px">${line('cx','כספית – להשוואה',ptTag(x.pt)+rTag(r))}</div>`:''}</div>`};
@@ -97,7 +103,7 @@ V.incAll=()=>{const T='כל ההכנסות';if(!view())return{t:T,h:'<div class=
  <h3 style="margin:14px 0 4px">לפי יום</h3>${X.days.length?X.days.map(dayC).join(''):'<div class="empty">אין הכנסות בתקופה הזו</div>'}`}};
 ACT.incPer=el=>{Q.per=el.dataset.k;Q.D=null;Q.err='';rerender()};
 ACT.incRe=()=>{Q.D=null;Q.err='';rerender()};
-FRM.incRange=f=>{const x=fd(f);if(!x.from||!x.to||x.from>x.to)return toast('טווח תאריכים לא תקין');Q.from=x.from;Q.to=x.to;Q.D=null;Q.err='';rerender()};
+FRM.incRange=f=>{const x=fd(f);if(!x.from||!x.to||x.from>x.to)return toast('טווח תאריכים לא תקין');if((Date.parse(x.to)-Date.parse(x.from))/864e5>400)return toast('טווח של עד 400 ימים');Q.from=x.from;Q.to=x.to;Q.D=null;Q.err='';rerender()};
 
 /* ---------- משבצת → לפי יום ---------- */
 ACT.incDl=el=>{const X=Q.M;if(!X)return;let k=el.dataset.k;
