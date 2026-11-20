@@ -8,6 +8,7 @@ const { chromium } = require('playwright');
 
 const SRC = fs.readFileSync(path.join(__dirname, '../src/lib/selectors.js'), 'utf8');
 const SEL = JSON.parse(fs.readFileSync(path.join(__dirname, '../src/selectors.json'), 'utf8'));
+const SEL_DENY = require('../src/lib/selectors.js').DENY_HE;
 const HTML = `<!doctype html><html dir="rtl"><body>
 <nav><span>ממשקים</span><div id="sub" hidden><a href="#/rep">דוח מכירות לפריטים</a></div></nav>
 <div class="menu"><div><button id="exp1">ייצוא לאקסל</button></div><button style="display:none">ייצוא לאקסל נסתר</button></div>
@@ -165,7 +166,51 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; עו�
   assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
   // פרטיות: לא מחכים על הכותרת עם שם העובד
   assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
-  assert.equal(SEL.v, 5);
+  assert.equal(SEL.v, 6);
+});
+
+test('selectors.json v6: לקוחות הקפה – 8 מסכים priv בכתובת ישירה; hkExport לוחץ רק "יצוא לאקסל"; הפקת חשבוניות מרכזות – בלי זרימה', () => {
+  const H = ['#/hakafa-customers', '#/hakafa-reports', '#/hakafa-customer-reports', '#/customer-sales-report', '#/total-sales-per-customer', '#/hakafa_monthly_charge_customers', '#/merakez_invoices', '#/customer-shipments'];
+  const P = SEL.disc.filter((p) => /^hk-/.test(p.name));
+  assert.deepEqual(P.map((p) => p.hash), H);
+  assert.ok(P.every((p) => p.priv === true && !p.peek && (!p.flow || p.flow === 'hkExport')));
+  assert.equal(P.find((p) => p.hash === '#/hakafa_monthly_charge_customers').flow, undefined);
+  const F = SEL.flows.hkExport;
+  assert.equal(F.length, 1); assert.equal(F[0].op, 'click'); assert.equal(F[0].at, '{hash}'); assert.ok(F[0].capture && F[0].safe && F[0].stop && !F[0].submit);
+  assert.ok(F[0].t.textAny.every((x) => /^(ייצוא|יצוא) ל-?(אקסל|Excel)$/.test(x)), JSON.stringify(F[0].t));
+  // כל צעד click בכל הזרימות לא מכוון לכפתור עם מילה אסורה (אחרת denied היה חוסם אותו בהיכרות)
+  for (const [n, fl] of Object.entries(SEL.flows)) for (const x of fl) if (x.op === 'click' && x.safe) for (const t of x.t.textAny || [x.t.text || '']) assert.ok(!SEL_DENY.some((w) => t.includes(w)), n + ': ' + t);
+});
+
+test('denied (0.1.11): בהיכרות לא לוחצים על שמירה / מחיקה / הפקה / טעינה – גם בצעד safe; מחוץ להיכרות – בלי שינוי', async () => {
+  await page.evaluate(() => {
+    const d = document.createElement('div'); d.id = 'dn';
+    d.innerHTML = ['שמירה ויצוא לאקסל', 'מחיקה', 'הפקת חשבוניות מרכזות', 'טעינת לקוחות', 'ייצוא לאקסל של לקוחות', 'Save', 'יצוא לאקסל ושליחה במייל', 'הנפקת חשבונית', 'ביצוע חיוב', 'שלח ב-Email'].map((x, k) => '<button id="dn' + k + '">' + x + '</button>').join('');
+    document.body.appendChild(d);
+    d.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => window.ev.push('dn:' + b.id)));
+  });
+  for (const [k, txt] of [[0, 'שמירה ויצוא לאקסל'], [1, 'מחיקה'], [2, 'הפקת חשבוניות מרכזות'], [3, 'טעינת לקוחות'], [5, 'Save'], [6, 'יצוא לאקסל ושליחה במייל'], [7, 'הנפקת חשבונית'], [8, 'ביצוע חיוב'], [9, 'שלח ב-Email']]) {
+    const r = await run([{ op: 'click', t: { text: txt, tag: 'button' }, safe: true }, { op: 'click', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true });
+    assert.equal(r.steps[0].err, 'denied', txt); assert.equal(r.ok, false); assert.equal(r.steps.length, 1, 'הזרימה נעצרה – ' + k);
+  }
+  assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), [], 'שום כפתור לא נלחץ');
+  const r = await run([{ op: 'click', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true });
+  assert.equal(r.ok, true);
+  assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), ['dn:dn4']);
+  // "יצוא לאקסל" שמוכל ב"יצוא לאקסל ושליחה במייל" (התאמה חלקית, כמו hkExport) – נחסם
+  const r2 = await run([{ op: 'click', t: { textAny: ['יצוא לאקסל'], tag: 'button#dn6' }, safe: true }], { probe: true });
+  assert.equal(r2.steps[0].err, 'denied', JSON.stringify(r2.steps[0]));
+  assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), ['dn:dn4'], 'השליחה במייל לא נלחצה');
+  // at "{hash}" (hkExport): לא במסך שההיכרות עברה אליו (המעבר נכשל) / בלי המשתנה – לא לוחצים
+  for (const vars of [{ hash: '#/hakafa-customers' }, {}]) {
+    const r3 = await run([{ op: 'click', at: '{hash}', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true, vars });
+    assert.equal(r3.steps[0].err, 'wrong-hash', JSON.stringify(vars));
+  }
+  await page.evaluate(() => { location.hash = '#/hakafa-customers'; });
+  const r4 = await run([{ op: 'click', at: '{hash}', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true, vars: { hash: '#/hakafa-customers' } });
+  assert.equal(r4.ok, true);
+  assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), ['dn:dn4', 'dn:dn4']);
+  await page.evaluate(() => document.getElementById('dn').remove());
 });
 
 test('click עם check: תיבת סימון דרך התווית – מסמנים רק אם לא מסומנת; at/stop עוצרים גם בהיכרות', async () => {
