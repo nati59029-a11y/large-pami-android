@@ -347,7 +347,13 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   }
   assert.equal(await bo0.evaluate(() => localStorage.getItem('hkX')), 'hakafa-customers;hakafa-reports;hakafa-customer-reports;customer-sales-report;merakez_invoices;', 'יצוא לאקסל – רק במסכים שמותר');
   // פרטיות: אין שמות לקוחות, טלפונים, ע.מ, כתובות או סכומים מהמסכים / מהקבצים
-  for (const nm of ['שלומציון', 'ברקוביץ', 'פנינת', 'מרכולית', '514789632', '036547891', '9876543', '6712345', 'הדקל', 'אשקלון', 'שדרות', '1234.5', '88.2', 'סיווג פנימי']) assert.ok(!txt.includes(nm), 'פרט לקוח בדוח: ' + nm);
+  for (const nm of ['שלומציון', 'ברקוביץ', 'פנינת', 'מרכולית', '514789632', '036547891', '9876543', '6712345', 'הדקל', 'אשקלון', 'שדרות', '1234.5', '88.2', 'סיווג פנימי', 'כהן', 'משה', 'כרטסת', 'c-4521', 'pick-c1001', 'cust_1001', 'cust_']) assert.ok(!txt.includes(nm), 'פרט לקוח בדוח: ' + nm);
+  // תיקוני בודק 0.1.11: מהרכיב שנלחץ / נחסם – רק tag ו-css; פקד בתוך טבלה – בלי id/name; יומן הרשת – מקטע עם ספרה → '?'
+  for (const n of HKP) for (const x of hp(n).probe || []) assert.ok(!x.el || (x.el.text === undefined && Object.keys(x.el).every((k) => k === 'tag' || k === 'css')), n + ' ' + JSON.stringify(x.el));
+  assert.equal(hp('hk-cust-reports').probe[0].done, true, 'יצוא עם שם על הכפתור – נלחץ (יצוא מותר), אבל השם לא נשלח');
+  assert.ok(hp('hk-customers').controls.some((c) => c.inData && c.type === 'checkbox' && c.id === undefined && c.name === undefined), JSON.stringify(hp('hk-customers').controls.filter((c) => c.inData)));
+  assert.ok(rep.net.some((e) => e.pv && e.p === '/bo/api/customers/?/docs'), JSON.stringify(rep.net.filter((e) => e.pv).map((e) => e.p)));
+  assert.ok(rep.net.some((e) => !e.pv && /^\/bo\//.test(e.p)), 'בקשות לפני הדף הפרטי הראשון – כמו קודם');
   assert.ok(rep.menu.some((l) => l.t === 'לקוחות הקפה' && l.h === '#/hakafa-customers'), JSON.stringify(rep.menu));
   const imp = rep.pages[1];
   assert.ok(!imp.controls.some((c) => c.type === 'password'));

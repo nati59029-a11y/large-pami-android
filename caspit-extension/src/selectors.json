@@ -328,6 +328,7 @@
     "hkExport": [
       {
         "op": "click",
+        "at": "{hash}",
         "t": {
           "textAny": [
             "יצוא לאקסל",

@@ -176,7 +176,7 @@ test('selectors.json v6: לקוחות הקפה – 8 מסכים priv בכתוב�
   assert.ok(P.every((p) => p.priv === true && !p.peek && (!p.flow || p.flow === 'hkExport')));
   assert.equal(P.find((p) => p.hash === '#/hakafa_monthly_charge_customers').flow, undefined);
   const F = SEL.flows.hkExport;
-  assert.equal(F.length, 1); assert.equal(F[0].op, 'click'); assert.ok(F[0].capture && F[0].safe && F[0].stop && !F[0].submit);
+  assert.equal(F.length, 1); assert.equal(F[0].op, 'click'); assert.equal(F[0].at, '{hash}'); assert.ok(F[0].capture && F[0].safe && F[0].stop && !F[0].submit);
   assert.ok(F[0].t.textAny.every((x) => /^(ייצוא|יצוא) ל-?(אקסל|Excel)$/.test(x)), JSON.stringify(F[0].t));
   // כל צעד click בכל הזרימות לא מכוון לכפתור עם מילה אסורה (אחרת denied היה חוסם אותו בהיכרות)
   for (const [n, fl] of Object.entries(SEL.flows)) for (const x of fl) if (x.op === 'click' && x.safe) for (const t of x.t.textAny || [x.t.text || '']) assert.ok(!SEL_DENY.some((w) => t.includes(w)), n + ': ' + t);
@@ -185,11 +185,11 @@ test('selectors.json v6: לקוחות הקפה – 8 מסכים priv בכתוב�
 test('denied (0.1.11): בהיכרות לא לוחצים על שמירה / מחיקה / הפקה / טעינה – גם בצעד safe; מחוץ להיכרות – בלי שינוי', async () => {
   await page.evaluate(() => {
     const d = document.createElement('div'); d.id = 'dn';
-    d.innerHTML = ['שמירה ויצוא לאקסל', 'מחיקה', 'הפקת חשבוניות מרכזות', 'טעינת לקוחות', 'ייצוא לאקסל של לקוחות', 'Save'].map((x, k) => '<button id="dn' + k + '">' + x + '</button>').join('');
+    d.innerHTML = ['שמירה ויצוא לאקסל', 'מחיקה', 'הפקת חשבוניות מרכזות', 'טעינת לקוחות', 'ייצוא לאקסל של לקוחות', 'Save', 'יצוא לאקסל ושליחה במייל', 'הנפקת חשבונית', 'ביצוע חיוב', 'שלח ב-Email'].map((x, k) => '<button id="dn' + k + '">' + x + '</button>').join('');
     document.body.appendChild(d);
     d.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => window.ev.push('dn:' + b.id)));
   });
-  for (const [k, txt] of [[0, 'שמירה ויצוא לאקסל'], [1, 'מחיקה'], [2, 'הפקת חשבוניות מרכזות'], [3, 'טעינת לקוחות'], [5, 'Save']]) {
+  for (const [k, txt] of [[0, 'שמירה ויצוא לאקסל'], [1, 'מחיקה'], [2, 'הפקת חשבוניות מרכזות'], [3, 'טעינת לקוחות'], [5, 'Save'], [6, 'יצוא לאקסל ושליחה במייל'], [7, 'הנפקת חשבונית'], [8, 'ביצוע חיוב'], [9, 'שלח ב-Email']]) {
     const r = await run([{ op: 'click', t: { text: txt, tag: 'button' }, safe: true }, { op: 'click', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true });
     assert.equal(r.steps[0].err, 'denied', txt); assert.equal(r.ok, false); assert.equal(r.steps.length, 1, 'הזרימה נעצרה – ' + k);
   }
@@ -197,6 +197,19 @@ test('denied (0.1.11): בהיכרות לא לוחצים על שמירה / מחי
   const r = await run([{ op: 'click', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true });
   assert.equal(r.ok, true);
   assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), ['dn:dn4']);
+  // "יצוא לאקסל" שמוכל ב"יצוא לאקסל ושליחה במייל" (התאמה חלקית, כמו hkExport) – נחסם
+  const r2 = await run([{ op: 'click', t: { textAny: ['יצוא לאקסל'], tag: 'button#dn6' }, safe: true }], { probe: true });
+  assert.equal(r2.steps[0].err, 'denied', JSON.stringify(r2.steps[0]));
+  assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), ['dn:dn4'], 'השליחה במייל לא נלחצה');
+  // at "{hash}" (hkExport): לא במסך שההיכרות עברה אליו (המעבר נכשל) / בלי המשתנה – לא לוחצים
+  for (const vars of [{ hash: '#/hakafa-customers' }, {}]) {
+    const r3 = await run([{ op: 'click', at: '{hash}', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true, vars });
+    assert.equal(r3.steps[0].err, 'wrong-hash', JSON.stringify(vars));
+  }
+  await page.evaluate(() => { location.hash = '#/hakafa-customers'; });
+  const r4 = await run([{ op: 'click', at: '{hash}', t: { text: 'ייצוא לאקסל של לקוחות', tag: 'button' }, safe: true }], { probe: true, vars: { hash: '#/hakafa-customers' } });
+  assert.equal(r4.ok, true);
+  assert.deepEqual((await ev()).filter((x) => x.startsWith('dn:')), ['dn:dn4', 'dn:dn4']);
   await page.evaluate(() => document.getElementById('dn').remove());
 });
 

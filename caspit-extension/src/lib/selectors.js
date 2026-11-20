@@ -17,8 +17,8 @@ function visible(el) {
   return true;
 }
 // מילים שאסור ללחוץ עליהן בהיכרות (0.1.11) – גם בתוך מילה (והפקה, שמירת…); טקסט הרכיב, value ו-aria-label
-const DENY_HE = ['שמור', 'שמיר', 'מחק', 'מחיק', 'הפק', 'טען', 'טעינ', 'שלח', 'עדכן', 'עדכון', 'עריכ', 'ערוך', 'הוסף', 'הוספ', 'הסר', 'ביטול', 'בטל', 'הרץ', 'אישור', 'חדש', 'העלה', 'העלא', 'ייבוא', 'יבוא', 'קליטה', 'חיוב', 'סגירה'];
-const DENY_EN = /\b(save|delete|remove|load|upload|import|submit|send|update|edit|new|cancel|approve|confirm|run|charge)\b/i;
+const DENY_HE = ['שמור', 'שמיר', 'מחק', 'מחיק', 'הפק', 'טען', 'טעינ', 'שלח', 'עדכן', 'עדכון', 'עריכ', 'ערוך', 'הוסף', 'הוספ', 'הסר', 'ביטול', 'בטל', 'הרץ', 'אישור', 'חדש', 'העלה', 'העלא', 'ייבוא', 'יבוא', 'קליטה', 'חיוב', 'סגירה', 'שליח', 'שולח', 'הנפק', 'ביצוע', 'בצע', 'מייל', 'דוא"ל'];
+const DENY_EN = /\b(save|delete|remove|load|upload|import|submit|send|update|edit|new|cancel|approve|confirm|run|charge|e-?mail|mail)\b/i;
 function denied(el) {
   const t = norm([own(el), el.value, el.getAttribute && el.getAttribute('aria-label')].filter((x) => typeof x === 'string').join(' '));
   return DENY_HE.some((w) => t.includes(w)) || DENY_EN.test(t);
@@ -327,7 +327,8 @@ async function runSteps(steps, ctx) {
       continue;
     }
     // at: הצעד רץ רק כשה-hash מתחיל בקידומת הזו (למשל דף השעות של עובד) – אחרת עוצרים את כל הזרימה, גם בהיכרות
-    if (s.at && !(ctx.win && String(ctx.win.location.hash || '').startsWith(s.at))) { rec.err = 'wrong-hash'; res.ok = false; if (res.miss == null) res.miss = i; break; }
+    // at יכול להכיל משתנה (0.1.11: hkExport – "{hash}" = המסך שההיכרות עברה אליו; משתנה חסר → לא תואם → עוצרים)
+    if (s.at && !(ctx.win && String(ctx.win.location.hash || '').startsWith(fill(s.at, ctx.vars)))) { rec.err = 'wrong-hash'; res.ok = false; if (res.miss == null) res.miss = i; break; }
     const el = await waitFind(doc, s.t, ctx.probe ? Math.min(s.ms || 6000, 6000) : s.ms || 15000, sleep, now);
     rec.found = !!el;
     rec.el = desc(el);
@@ -384,6 +385,8 @@ function controls(doc, max, o) {
       delete c.aria; delete c.placeholder;
       if (c.href && c.href !== '(ext)') c.href = '(int)';
       if (tag === 'select') c.optN = (el.options || []).length;
+      // o.priv (0.1.11, לקוחות הקפה): פקד בתוך טבלה – בלי id/name גולמיים (מזהה לקוח/שורה), ובנתיב ה-css ספרות → '?'
+      if (o.priv && el.closest && el.closest(DATA)) { delete c.id; delete c.name; c.css = String(c.css).replace(/\d/g, '?'); c.inData = true; }
       // o.btn: גם טקסט של כפתורים שמחוץ לטבלאות ולרשימות (למשל "הצג", "יצוא לאקסל") – לא תוויות, לא אפשרויות, לא שדות
       if (o.btn && (tag === 'button' || g('role') === 'button' || (tag === 'input' && /^(button|submit)$/i.test(type || ''))) && !(el.closest && el.closest(DATA))) {
         // רק המילים שהן מילות פעולה (התאמה מלאה של מילה) – שם עובד, שעה או מספר על הכפתור לא נכנסים

@@ -724,12 +724,12 @@ const menuIn = async (heads, max, guard) => {
   return { links: out };
 };
 // מסך לקריאה בלבד: כתובת, כותרת, פקדים וכותרות הטבלאות (בלי תוכן השורות) – בקריאה אחת, רק אם הדף ב-/bo
-const roIn = (guard, btn) => {
+const roIn = (guard, btn, priv) => {
   const S = self.CxSel;
   if (!S.onPath(window, guard)) return { wrong: true };
   const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
   // פרטיות: בדף לקריאה בלבד (למשל נוכחות) – בלי טקסט של פקדים ובלי אפשרויות של רשימות בחירה (שמות עובדים); רק תגית/סוג/מזהה ומספר אפשרויות
-  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn }), heads };
+  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn, priv: !!priv }), heads };
 };
 // דף priv (0.1.11): בכתובת נשאר רק המסך עצמו – כל מה שאחרי (מזהה לקוח / עובד) → {id}, ובפרמטרים רק השמות (הערכים → {v})
 function privHash(h) {
@@ -740,6 +740,8 @@ function privHash(h) {
 }
 // כותרות טבלה בדף priv – רק דרך הרשימה הלבנה (תא לא מוכר → '?'), כמו כותרות הקובץ
 const privHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrSafe(row) || []) : []);
+// מהדף הפרטי הראשון ועד סוף ההיכרות – כל בקשת רשת מסומנת pv (גם בקשות שמסתיימות אחרי המעבר למסך הבא)
+const privNet = (tab) => inMain(tab, () => window.__cxHook && window.__cxHook.privMark && window.__cxHook.privMark(true)).catch(() => {});
 // הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
 function menuPick(links, find) {
   const f = String(find || '').trim();
@@ -776,7 +778,8 @@ async function runDisc() {
       await guardBo(tab);
       if (!pg.flow) {
         // מסך לקריאה בלבד: בלי צעדים ובלי שום לחיצה – רק פקדים, כותרות טבלה, כתובת וכותרת
-        const r = (await inIso(tab, roIn, [GUARD, !!pg.btn])) || {};
+        if (pg.priv) await privNet(tab);
+        const r = (await inIso(tab, roIn, [GUARD, !!pg.btn, !!pg.priv])) || {};
         if (r.wrong) throw wrongPage();
         await guardBo(tab);
         // priv (לקוחות הקפה, 0.1.11): בלי כותרת הדף, כתובת בלי מזהים, כותרות טבלה רק מהרשימה הלבנה
@@ -791,8 +794,12 @@ async function runDisc() {
       const got = waitFile(nonce, tab, 120e3);
       got.catch(() => {});
       await arm(tab, nonce);
-      const probe = await runFlow(tab, pg.flow, { day }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
-      const page = { name: pg.name, flow: pg.flow, probe: (probe.steps || []).map((x) => ({ i: x.i, op: x.op, found: x.found, done: x.done, el: x.el, err: x.err })), ok: !!probe.ok };
+      if (pg.priv) await privNet(tab);
+      // hash: למסך עם hash קבוע – צעד עם at "{hash}" (hkExport) רץ רק אם באמת הגענו למסך
+      const probe = await runFlow(tab, pg.flow, { day, hash: pg.hash || '' }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
+      // priv (0.1.11): מהרכיב שנמצא / נחסם – רק תגית ו-css, בלי הטקסט (למשל "יצוא לאקסל – כרטסת <שם לקוח>")
+      const elOf = (e) => (e && pg.priv ? { tag: e.tag, css: String(e.css || '').replace(/\d/g, '?') } : e);
+      const page = { name: pg.name, flow: pg.flow, probe: (probe.steps || []).map((x) => ({ i: x.i, op: x.op, found: x.found, done: x.done, el: elOf(x.el), err: x.err })), ok: !!probe.ok };
       if (pk.length) page.peek = pk;
       const capI = (S0.flows[pg.flow] || []).findIndex((x) => x.capture), hasCap = capI >= 0;
       // 0.1.11: אם כפתור היצוא לא נלחץ (לא נמצא / נחסם) – לא מחכים לקובץ (אחרת כל מסך בלי יצוא מעכב 2 דקות)
@@ -821,14 +828,15 @@ async function runDisc() {
       if (!pg.priv) page.title = String(await inIso(tab, () => document.title) || '').slice(0, 60);
       if (pg.priv) {
         // priv: פקדים כמו בדף לקריאה בלבד – בלי טקסט (רק מילות פעולה של כפתורים), בלי אפשרויות בחירה; כותרות טבלה רק מהרשימה הלבנה
-        const r = (await inIso(tab, roIn, [GUARD, true])) || {};
+        const r = (await inIso(tab, roIn, [GUARD, true, true])) || {};
         if (r.wrong) throw wrongPage();
         page.controls = r.controls || [];
         page.heads = privHeads(r.heads);
       } else page.controls = await inIso(tab, () => self.CxSel.controls(document, 400));
       rep.pages.push(page);
     }
-    rep.net = (await inMain(tab, () => window.__cxHook && window.__cxHook.netLog())) || [];
+    // בקשות שנרשמו מאז הדף הפרטי הראשון (pv): כל מקטע נתיב עם ספרה → '?' (מזהי לקוח/עובד)
+    rep.net = ((await inMain(tab, () => window.__cxHook && window.__cxHook.netLog())) || []).map((e) => (e && e.pv ? Object.assign({}, e, { p: String(e.p || '').split('/').map((x) => (/\d/.test(x) ? '?' : x)).join('/') }) : e));
     rep.ok = true;
   } catch (e) {
     rep.err = { code: e.code || 'fail', msg: String(e.message || '').slice(0, 200) };
