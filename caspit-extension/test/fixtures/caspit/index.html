@@ -9,6 +9,7 @@
   <span id="mnu" role="button">ממשקים</span>
   <div id="sub" hidden><a href="#/sales-items-reports">דוח מכירות לפריטים</a></div>
   <span id="empm" role="button">עובדים</span><div id="empsub"></div>
+  <span id="hkm" role="button">לקוחות</span><div id="hksub"></div>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -25,6 +26,46 @@ document.getElementById('mnu').onclick = () => { document.getElementById('sub').
 document.getElementById('empm').addEventListener('mouseover', () => { document.getElementById('empsub').innerHTML = '<a href="#/employees">רשימת עובדים</a> <a href="#/attendance-report">דוח נוכחות</a> <a href="#/hours-reports">דוח שעות מרוכז</a>'; });
 const hit = (k) => { ev.push(k); localStorage.setItem('attHits', (localStorage.getItem('attHits') || '') + k + ';'); };
 document.getElementById('empm').addEventListener('click', () => hit('emp-click'));
+// תפריט "לקוחות" (0.1.11): קישורי ההקפה נוצרים רק במעבר עכבר; לחיצה – אסורה
+document.getElementById('hkm').addEventListener('mouseover', () => { document.getElementById('hksub').innerHTML = '<a href="#/hakafa-customers">לקוחות הקפה</a> <a href="#/hakafa-reports">דוח לקוחות - הקפה</a> <a href="#/hakafa_monthly_charge_customers">הפקת חשבוניות מרכזות</a>'; });
+document.getElementById('hkm').addEventListener('click', () => hit('hk-menu-click'));
+// מסכי לקוחות הקפה (0.1.11): שמות, טלפונים, ע.מ וסכומים – אסור שיגיעו לדוח; כפתורי שמירה/מחיקה/הפקה/טעינה – אסור ללחוץ (attHits).
+// x: '' – "יצוא לאקסל" רגיל; 'none' – בלי יצוא; 'trap' – רק "שמירה ויצוא לאקסל" (נחסם ב-denied); 'named' – יצוא עם שם לקוח על הכפתור
+const HK_C = [[1001, 'שלומציון ברקוביץ', '514789632', '050-9876543', 'רחוב הדקל 5 אשקלון', '1234.50'], [1002, 'מרכולית פנינת הדרום', '036547891', '08-6712345', 'שדרות הנשיא 17', '-88.20']];
+const HK = {
+  'hakafa-customers': { t: 'לקוחות הקפה', h: ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', 'פעולות'], b: [['לקוח חדש', 'hk-new'], ['טעינת לקוחות', 'hk-load']] },
+  'hakafa-reports': { t: 'דוח לקוחות - הקפה', h: ['תאריך', 'מספר מסמך', 'סוג מסמך', 'שם לקוח', 'סכום', 'מע"מ', 'יתרה'], b: [['הפק דוח', 'hk-make']] },
+  'hakafa-customer-reports': { t: 'ריכוז לקוחות הקפה', h: ['מספר לקוח', 'שם לקוח', 'יתרה', 'לקוח: שלומציון ברקוביץ'], b: [], x: 'named' },
+  'customer-sales-report': { t: 'דוח קניות לקוחות - פירוט שורות בחשבונית', h: ['תאריך', 'מספר מסמך', 'שם לקוח', 'פריט', 'כמות', 'מחיר', 'סכום', 'סניף', 'קופה'], b: [] },
+  'total-sales-per-customer': { t: 'סה"כ מכירות ללקוח', h: ['שם לקוח', 'ח.פ/ע.מ', 'סה"כ', 'קבוצת סיווג פנימי'], b: [], x: 'none' },
+  'hakafa_monthly_charge_customers': { t: 'הפקת חשבוניות מרכזות', h: ['שם לקוח', 'סכום', 'תעודות משלוח'], b: [['הפקת חשבוניות מרכזות', 'hk-charge'], ['שמירה', 'hk-save']] },
+  'merakez_invoices': { t: 'רצף חשבוניות מרכזות', h: ['מספר מסמך', 'תאריך', 'שם לקוח', 'סכום'], b: [['מחיקה', 'hk-del']] },
+  'customer-shipments': { t: 'תעודות משלוח', h: ['מספר מסמך', 'תאריך', 'שם לקוח', 'טלפון', 'סכום'], b: [['ביטול תעודה', 'hk-cancel']], x: 'trap' },
+};
+function hakafa(app, k) {
+  const P = HK[k];
+  app.innerHTML = '<div class="hakafa"><h2>' + P.t + ' – ' + HK_C[0][1] + '</h2><label>מתאריך</label><input type="date" id="hkFrom"><label>עד תאריך</label><input type="date" id="hkTo">'
+    + '<label for="hkStore">סניף</label><select id="hkStore"><option>כל הסניפים</option><option>נחל לכיש</option><option>יהודה הנשיא</option></select>'
+    + '<label for="hkPos">קופה</label><select id="hkPos"><option>כל הקופות</option><option>קופה 1</option></select>'
+    + '<label for="hkCust">לקוח</label><select id="hkCust"><option>כל הלקוחות</option>' + HK_C.map((c) => '<option>' + c[1] + '</option>').join('') + '</select>'
+    + '<input id="hkQ" placeholder="חיפוש לפי שם או טלפון" value="' + HK_C[1][3] + '"><button class="btn" id="hkShow">הצג</button>'
+    + (P.x === 'none' ? '' : P.x === 'trap' ? '<button class="btn" id="hkX">שמירה ויצוא לאקסל</button>' : P.x === 'named' ? '<button class="btn" id="hkX">יצוא לאקסל – כרטסת כהן משה</button>' : '<button class="btn" id="hkX">יצוא לאקסל</button>')
+    + P.b.map((b) => '<button class="btn btn-danger" data-hit="' + b[1] + '">' + b[0] + '</button>').join('')
+    + '<a href="#/hakafa-customers/' + HK_C[0][0] + '">' + HK_C[0][1] + '</a>'
+    + '<table class="table"><thead><tr>' + P.h.map((x) => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>'
+    + HK_C.map((c) => '<tr><td>' + c[0] + '</td><td>' + c[1] + '</td><td>' + c[2] + '</td><td>' + c[3] + '</td><td>' + c[4] + '</td><td>' + c[5] + '</td><td><button class="btn" data-hit="hk-row-edit">עריכה</button><input type="checkbox" id="pick-c' + c[0] + '" name="cust_' + c[0] + '"></td></tr>').join('') + '</tbody></table></div>';
+  fetch('/bo/api/customers/c-4521/docs?from=2026-01-01', { headers: { Authorization: TOK } }).catch(() => {}); // מזהה לקוח בנתיב – אסור שיגיע לדוח
+  document.getElementById('hkShow').onclick = () => hit('hk-show:' + k);
+  app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit + ':' + k); });
+  const x = document.getElementById('hkX');
+  if (x) x.onclick = () => {
+    if (P.x === 'trap') { hit('hk-trap:' + k); return; }
+    ev.push('hk-x:' + k); localStorage.setItem('hkX', (localStorage.getItem('hkX') || '') + k + ';');
+    const csv = '\ufeff' + P.t + ' – ' + HK_C[0][1] + '\n' + ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', 'שלומציון ברקוביץ'].join(',') + '\n'
+      + HK_C.map((c) => [c[0], c[1], c[2], c[3], c[4], c[5], '17/11/2026'].join(',')).join('\n') + '\n';
+    dl(new Blob([csv], { type: 'text/csv' }), k + '.csv');
+  };
+}
 const HE_M = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ']; // כמו בכספית: "נוב 2026"
 const pad = (n) => String(n).padStart(2, '0');
 // משימה של כספית: POST (run-as-job) → { job_id } ואחר כך הקובץ מ-get_job_result
@@ -162,6 +203,8 @@ function render() {
       + '<table class="table"><thead><tr><th>תאריך</th><th>כניסה</th><th>יציאה</th><th>שעות רגילות</th><th>125%</th><th>150%</th><th>175%</th><th>200%</th><th>225%</th><th>250%</th><th>פעולות</th></tr></thead><tbody><tr><td>03/' + mm + '</td><td>07:41</td><td>15:58</td><td>8:17</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td><button class="btn">עריכה</button></td></tr></tbody></table></div>';
     document.getElementById('ttAdd').onclick = () => hit('tt-add');
     document.getElementById('ttX').onclick = () => { ev.push('tt-x:' + id); dl(new Blob(['﻿דוח שעות עובד - ' + nm + '\nתאריך,כניסה,יציאה,שעות רגילות,125%,150%\n03/' + mm + ',07:41,15:58,8:17,0,0\n04/' + mm + ',07:39,16:05,8:26,0,0\n'], { type: 'text/csv' }), 'time_tracks_' + id + '.csv'); };
+  } else if (HK[h.slice(2).split(/[/?]/)[0]]) {
+    hakafa(app, h.slice(2).split(/[/?]/)[0]);
   } else if (h.startsWith('#/attendance-report') || h.startsWith('#/hours-reports') || h.startsWith('#/report-active-employee-on-stores')) {
     // מסך נוכחות מדומה: טבלה עם שמות ושעות (אסור שיגיעו לדוח), וכפתורי פעולה (אסור ללחוץ)
     // גם מחוץ לטבלה: מסנן "עובד" עם שמות, וכרטיסי עובדים (קישור, תווית, כפתור עם שם) – אסור שהשמות יגיעו לדוח

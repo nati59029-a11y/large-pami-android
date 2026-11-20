@@ -283,13 +283,14 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const pop = await ctx.newPage();
   await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
   await pop.click('#disc');
-  const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 180e3, 'discovery');
+  const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 300e3, 'discovery');
   assert.equal(s.discSt.st, 'ok', JSON.stringify(s.disc.rep.err));
   const rep = s.disc.rep;
   const txt = JSON.stringify(rep);
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours']);
+  const HKP = ['hk-customers', 'hk-reports', 'hk-cust-reports', 'hk-sales-lines', 'hk-sales-total', 'hk-monthly', 'hk-merakez', 'hk-shipments'];
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours', ...HKP]);
   // עובדים (0.1.9): רשימת העובדים – קריאה בלבד, בכתובת ישירה; כותרות הטבלה בלי השורות, טקסט רק של כפתורי פעולה
   const emp = rep.pages[3];
   assert.equal(emp.ok, true, JSON.stringify(emp));
@@ -318,6 +319,42 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.ok(rep.menu.some((l) => l.t === 'רשימת עובדים' && l.h === '#/employees'), JSON.stringify(rep.menu));
   // לא נלחצו: "עריכה", "עובד חדש", "הצג רק מנהלים", "יצוא לאקסל" של הרשימה, "הוספת כניסה ויציאה", ולא "עובדים" בתפריט
   assert.equal(await bo0.evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור אסור');
+  // לקוחות הקפה (0.1.11): כל 8 המסכים, קריאה בלבד; "יצוא לאקסל" רק בזרימה hkExport; כותרות – רק מהרשימה הלבנה
+  const HKH = { 'hk-customers': '#/hakafa-customers', 'hk-reports': '#/hakafa-reports', 'hk-cust-reports': '#/hakafa-customer-reports', 'hk-sales-lines': '#/customer-sales-report', 'hk-sales-total': '#/total-sales-per-customer', 'hk-monthly': '#/hakafa_monthly_charge_customers', 'hk-merakez': '#/merakez_invoices', 'hk-shipments': '#/customer-shipments' };
+  for (const n of HKP) {
+    const p = rep.pages.find((x) => x.name === n);
+    assert.equal(p.hash, HKH[n], n + ' ' + p.hash);
+    assert.equal(p.title, undefined, n + ': בלי כותרת הדף');
+    assert.ok(p.controls.length > 5 && p.controls.every((c) => c.options === undefined && c.aria === undefined && c.placeholder === undefined && (c.text === undefined || /^(הצג|יצוא לאקסל|לאקסל|הפק דוח)$/.test(c.text))), n + ' ' + JSON.stringify(p.controls.filter((c) => c.text || c.options)));
+    assert.ok(p.controls.some((c) => c.id === 'hkFrom' && c.type === 'date') && p.controls.some((c) => c.id === 'hkStore' && c.optN === 3), n + ': פקדי הסינון (תאריך, סניף) נאספו');
+    assert.ok(Array.isArray(p.heads) && p.heads.length === 1, n + ' ' + JSON.stringify(p.heads));
+  }
+  const hp = (n) => rep.pages.find((x) => x.name === n);
+  assert.deepEqual(hp('hk-customers').heads, [['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', 'פעולות']]);
+  assert.deepEqual(hp('hk-cust-reports').heads, [['מספר לקוח', 'שם לקוח', 'יתרה', '?']], 'כותרת עם שם לקוח → ?');
+  assert.deepEqual(hp('hk-sales-total').heads, [['שם לקוח', 'ח.פ/ע.מ', 'סה"כ', '?']]);
+  assert.equal(hp('hk-monthly').ro, true); assert.equal(hp('hk-monthly').flow, undefined, 'הפקת חשבוניות מרכזות – בלי זרימה');
+  assert.deepEqual(hp('hk-customers').probe.map((x) => [x.op, x.found, x.done]), [['click', true, true]]);
+  assert.equal(hp('hk-sales-total').probe[0].found, false, 'אין יצוא – לא לוחצים כלום');
+  const tr = hp('hk-shipments').probe[0];
+  assert.equal(tr.err, 'denied', '"שמירה ויצוא לאקסל" – נחסם: ' + JSON.stringify(tr)); assert.equal(tr.done, false);
+  const hf2 = rep.files.filter((f) => f.flow === 'hkExport');
+  assert.deepEqual(hf2.map((f) => [f.page, !f.none]), [['hk-customers', true], ['hk-reports', true], ['hk-cust-reports', true], ['hk-sales-lines', true], ['hk-sales-total', false], ['hk-merakez', true], ['hk-shipments', false]], JSON.stringify(hf2));
+  for (const f of hf2.filter((x) => !x.none)) {
+    assert.equal(f.ext, 'csv'); assert.equal(f.rows, 4); assert.equal(f.hi, 1);
+    assert.deepEqual(f.hdr, ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', '?'], JSON.stringify(f));
+    assert.deepEqual(f.kinds[2], ['num', 'text', 'num', 'text', 'text', 'num', 'date']);
+  }
+  assert.equal(await bo0.evaluate(() => localStorage.getItem('hkX')), 'hakafa-customers;hakafa-reports;hakafa-customer-reports;customer-sales-report;merakez_invoices;', 'יצוא לאקסל – רק במסכים שמותר');
+  // פרטיות: אין שמות לקוחות, טלפונים, ע.מ, כתובות או סכומים מהמסכים / מהקבצים
+  for (const nm of ['שלומציון', 'ברקוביץ', 'פנינת', 'מרכולית', '514789632', '036547891', '9876543', '6712345', 'הדקל', 'אשקלון', 'שדרות', '1234.5', '88.2', 'סיווג פנימי', 'כהן', 'משה', 'כרטסת', 'c-4521', 'pick-c1001', 'cust_1001', 'cust_']) assert.ok(!txt.includes(nm), 'פרט לקוח בדוח: ' + nm);
+  // תיקוני בודק 0.1.11: מהרכיב שנלחץ / נחסם – רק tag ו-css; פקד בתוך טבלה – בלי id/name; יומן הרשת – מקטע עם ספרה → '?'
+  for (const n of HKP) for (const x of hp(n).probe || []) assert.ok(!x.el || (x.el.text === undefined && Object.keys(x.el).every((k) => k === 'tag' || k === 'css')), n + ' ' + JSON.stringify(x.el));
+  assert.equal(hp('hk-cust-reports').probe[0].done, true, 'יצוא עם שם על הכפתור – נלחץ (יצוא מותר), אבל השם לא נשלח');
+  assert.ok(hp('hk-customers').controls.some((c) => c.inData && c.type === 'checkbox' && c.id === undefined && c.name === undefined), JSON.stringify(hp('hk-customers').controls.filter((c) => c.inData)));
+  assert.ok(rep.net.some((e) => e.pv && e.p === '/bo/api/customers/?/docs'), JSON.stringify(rep.net.filter((e) => e.pv).map((e) => e.p)));
+  assert.ok(rep.net.some((e) => !e.pv && /^\/bo\//.test(e.p)), 'בקשות לפני הדף הפרטי הראשון – כמו קודם');
+  assert.ok(rep.menu.some((l) => l.t === 'לקוחות הקפה' && l.h === '#/hakafa-customers'), JSON.stringify(rep.menu));
   const imp = rep.pages[1];
   assert.ok(!imp.controls.some((c) => c.type === 'password'));
   assert.ok(imp.probe.every((p) => !p.done || ['nav', 'waitFor', 'text', 'select', 'histMark'].includes(p.op)), 'no change made on csv-imports: ' + JSON.stringify(imp.probe));

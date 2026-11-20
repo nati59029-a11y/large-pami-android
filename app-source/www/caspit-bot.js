@@ -21,6 +21,8 @@ const ERR={'import-errors':'כספית טענה את הקובץ עם שורות 
  network:'אין חיבור לאינטרנט במחשב החנות.',offline:'אין חיבור לאינטרנט במחשב החנות.',timeout:'הפעולה לקחה יותר מדי זמן.',server:'תקלה זמנית בשרת.',rate:'יותר מדי פניות היום.',stale:'הנתונים השתנו באמצע – ננסה שוב.',busy:'סנכרון אחר רץ באותו זמן.',
  tab:'תקלה זמנית בלשונית של כספית.',parse:'לא הצלחנו לקרוא את הקובץ מכספית.','first-manual':'את הקטלוג הראשון מסנכרנים כאן באפליקציה.',fail:'הסנכרון נכשל.'};
 const errTxt=(code,msg)=>ERR[code]||msg||ERR.fail;
+/* פירוט התקלה מהתוסף (מסך וצעד) – מוצג בנוסף להסבר הכללי, כדי לדעת איפה הריצה נעצרה */
+const errDet=e=>{if(!e)return'';const m=String(e.msg||'').trim(),st=String(e.step||'').trim();return m&&ERR[e.code]&&m!==ERR[e.code]?'פירוט: '+m+(st?' (צעד '+st+')':''):''};
 async function load(){if(B.ld)return;B.ld=1;try{B.i=await fnCall('cxBotTok',{op:'info'});B.at=Date.now();B.err=''}catch(e){B.err=e&&e.message||'הטעינה נכשלה'}B.ld=0;if(cur().v==='cxSync')rerender()}
 const tm=t=>t?new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}):'';
 const verLt=(a,b)=>{const p=v=>String(v||'0').split('.').map(x=>parseInt(x,10)||0),x=p(a),y=p(b);for(let k=0;k<3;k++)if((x[k]||0)!==(y[k]||0))return(x[k]||0)<(y[k]||0);return false};
@@ -63,7 +65,7 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
     else h+=`<p class="note">עדכון אוטומטי של התוסף: תקין (נבדק ${dt(u.at)}).</p>`;}
    h+=`<button class="btn g w" ${big} data-a="cxBotUpd" style="min-height:48px;margin-bottom:8px">עדכון המחשב</button>`;
    if(i.tp&&i.tp.d&&i.tp.d===ilToday())h+=`<p class="note">מכירות היום (${dd(i.tp.d)}) עודכנו מהמחשב עד השעה ${esc(String(i.tp.hm||''))} – חלקי, הסכום הסופי נקלט בלילה.</p>`;
-   if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}</p>`;
+   if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}${errDet(lr)?`<br><bdi>${esc(errDet(lr))}</bdi>`:''}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;
    if(i.first)h+='<p class="note">קודם מסנכרנים כאן קטלוג ראשון (בחירת קובץ למעלה). עד אז הרובוט קולט רק מכירות.</p>';
@@ -105,7 +107,7 @@ ACT.cxBotCopy=()=>{const e=document.getElementById('cxBotTok');if(!e)return;cons
 ACT.cxBotRev=()=>ask('לנתק את המחשב? הרובוט יפסיק לסנכרן עד שתחברו מחשב מחדש.',async()=>{try{await fnCall('cxBotTok',{op:'revoke'});toast('המחשב נותק');B.i=null;load()}catch(e){toast(e&&e.message||'הפעולה נכשלה')}},'כן, נתק');
 ACT.cxBotRuns=()=>{const R=(B.i&&B.i.runs)||[];
  const imp=x=>!x?'':['new','price'].filter(k=>x[k]).map(k=>`${k==='new'?'פריטים חדשים':'מחירים'} לכספית: ${x[k].n}${x[k].id?` (טעינה ${x[k].id}: נטענו ${x[k].loaded<0?'?':x[k].loaded}, שגויים ${x[k].errors<0?'?':x[k].errors})`:''}${x[k].ok?'':' – לבדוק'}`).join(' · ');
- dlg(`<h3>הריצות האחרונות</h3><div style="max-height:60vh;overflow:auto">${R.map(r=>`<div class="li" style="cursor:default"><div class="m"><b>${dt(r.at)} · ${esc(ST[r.st]||r.st||'')}</b><small>${r.req?'ידני – "סנכרן עכשיו" מהטלפון':r.manual?'ידני – "סנכרן עכשיו"':'אוטומטי'}${r.days&&r.days.length&&typeof window.cxSalesOk==='function'&&window.cxSalesOk()?' · ימי מכירות: '+r.days.map(dd).join(', '):''}</small>${r.err&&r.err.code&&r.st!=='ok'?`<small>⚠ ${esc(errTxt(r.err.code,r.err.msg))}</small>`:''}${imp(r.imp)?`<small>${esc(imp(r.imp))}</small>`:''}</div></div>`).join('')||'<p class="note">עוד לא היו ריצות.</p>'}</div><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>הריצות האחרונות</h3><div style="max-height:60vh;overflow:auto">${R.map(r=>`<div class="li" style="cursor:default"><div class="m"><b>${dt(r.at)} · ${esc(ST[r.st]||r.st||'')}</b><small>${r.req?'ידני – "סנכרן עכשיו" מהטלפון':r.manual?'ידני – "סנכרן עכשיו"':'אוטומטי'}${r.days&&r.days.length&&typeof window.cxSalesOk==='function'&&window.cxSalesOk()?' · ימי מכירות: '+r.days.map(dd).join(', '):''}</small>${r.err&&r.err.code&&r.st!=='ok'?`<small>⚠ ${esc(errTxt(r.err.code,r.err.msg))}</small>${errDet(r.err)?`<small><bdi>${esc(errDet(r.err))}</bdi></small>`:''}`:''}${imp(r.imp)?`<small>${esc(imp(r.imp))}</small>`:''}</div></div>`).join('')||'<p class="note">עוד לא היו ריצות.</p>'}</div><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)};
 FRM.cxBotMaxF=async f=>{const n=Math.round(+fd(f).n);if(!Number.isInteger(n)||n<0||n>50)return toast('מספר בין 0 ל-50');const b=f.querySelector('button');b.disabled=true;
  try{await fnCall('cxSetCfg',{newMax:n});toast('נשמר');if(B.i)B.i.newMax=n;rerender()}catch(e){b.disabled=false;toast(e&&e.message||'הפעולה נכשלה')}};
 /* התוסף: release caspit-ext-v<גרסה> במאגר (ציבורי) – בלי פונקציה בשרת */

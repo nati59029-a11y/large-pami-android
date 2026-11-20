@@ -1,6 +1,6 @@
 {
-  "v": 5,
-  "note": "גרסה 5 (19.11.2026) – היכרות שעות עובדים לפי הסבר בעל העסק: \"עובדים\" (#/employees, קריאה בלבד) ו\"שעות לעובד\" (#/employee-time-tracks/<מזהה>). הזרימה empHours רק בהיכרות (לא בסנכרון הלילי): מסמנים \"הצג רק עובדים פעילים\", נכנסים לעובד הראשון ולוחצים \"יצוא לאקסל\" של דף השעות (החודש הנוכחי). לא לוחצים \"עריכה\", \"עובד חדש\", \"הוספת כניסה ויציאה\" או \"יצוא לאקסל\" של רשימת העובדים. גרסה 2 (18.11.2026): קטלוג ודוח מכירות – אומתו; העלאה לכספית: בחירת סוג → בחירת קובץ → \"העלה קבצים והרץ טעינה\" → שורה חדשה ב\"טעינות קודמות\" עד \"בוצע\".",
+  "v": 6,
+  "note": "גרסה 6 (19.11.2026) – היכרות לקוחות הקפה (קריאה בלבד, priv): 8 מסכי ההקפה בכתובת ישירה. בכל מסך: פקדים בלי טקסט חופשי, כותרות טבלה רק מרשימה לבנה, כתובת בלי מזהים. הזרימה hkExport (רק בהיכרות) לוחצת רק \"יצוא לאקסל\" ואוספת מהקובץ רק כותרות (רשימה לבנה) וסוג תא; בהיכרות לא נלחץ אף רכיב עם מילת שמירה/מחיקה/הפקה/טעינה (selectors.js denied). \"הפקת חשבוניות מרכזות\" – בלי זרימה בכלל. גרסה 5 (19.11.2026) – היכרות שעות עובדים לפי הסבר בעל העסק: \"עובדים\" (#/employees, קריאה בלבד) ו\"שעות לעובד\" (#/employee-time-tracks/<מזהה>). הזרימה empHours רק בהיכרות (לא בסנכרון הלילי): מסמנים \"הצג רק עובדים פעילים\", נכנסים לעובד הראשון ולוחצים \"יצוא לאקסל\" של דף השעות (החודש הנוכחי). לא לוחצים \"עריכה\", \"עובד חדש\", \"הוספת כניסה ויציאה\" או \"יצוא לאקסל\" של רשימת העובדים. גרסה 2 (18.11.2026): קטלוג ודוח מכירות – אומתו; העלאה לכספית: בחירת סוג → בחירת קובץ → \"העלה קבצים והרץ טעינה\" → שורה חדשה ב\"טעינות קודמות\" עד \"בוצע\".",
   "base": "https://caspit.valu.co.il/bo",
   "start": "#/catalogs",
   "importEnabled": true,
@@ -324,6 +324,27 @@
         "stop": true,
         "ms": 30000
       }
+    ],
+    "hkExport": [
+      {
+        "op": "click",
+        "at": "{hash}",
+        "t": {
+          "textAny": [
+            "יצוא לאקסל",
+            "ייצוא לאקסל",
+            "יצוא ל-Excel",
+            "ייצוא ל-Excel",
+            "יצוא לExcel",
+            "ייצוא לExcel"
+          ],
+          "tag": "button,a,[role=button],input[type=button]"
+        },
+        "capture": true,
+        "safe": true,
+        "stop": true,
+        "ms": 6000
+      }
     ]
   },
   "disc": [
@@ -377,6 +398,57 @@
     {
       "name": "emp-hours",
       "flow": "empHours",
+      "priv": true
+    },
+    {
+      "name": "hk-customers",
+      "hash": "#/hakafa-customers",
+      "menu": [
+        "לקוחות"
+      ],
+      "flow": "hkExport",
+      "priv": true
+    },
+    {
+      "name": "hk-reports",
+      "hash": "#/hakafa-reports",
+      "flow": "hkExport",
+      "priv": true
+    },
+    {
+      "name": "hk-cust-reports",
+      "hash": "#/hakafa-customer-reports",
+      "flow": "hkExport",
+      "priv": true
+    },
+    {
+      "name": "hk-sales-lines",
+      "hash": "#/customer-sales-report",
+      "flow": "hkExport",
+      "priv": true
+    },
+    {
+      "name": "hk-sales-total",
+      "hash": "#/total-sales-per-customer",
+      "flow": "hkExport",
+      "priv": true
+    },
+    {
+      "name": "hk-monthly",
+      "hash": "#/hakafa_monthly_charge_customers",
+      "btn": true,
+      "priv": true
+    },
+    {
+      "name": "hk-merakez",
+      "hash": "#/merakez_invoices",
+      "flow": "hkExport",
+      "priv": true
+    },
+    {
+      "name": "hk-shipments",
+      "hash": "#/customer-shipments",
+      "flow": "hkExport",
       "priv": true
     }
   ]

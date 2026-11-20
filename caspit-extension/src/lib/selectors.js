@@ -1,6 +1,6 @@
 // תוסף כספית – מריץ צעדי מסך (selectors.json) בתוך הלשונית של כספית, בעולם המבודד של התוסף (לא נגיש לדף).
 // סט צעדים קבוע בלבד: nav | waitFor | click | select | setDate | setFile | text. אין הרצת קוד מהקובץ.
-// אפשרויות צעד: safe (מבוצע גם בהיכרות), stop (רכיב חסר עוצר גם בהיכרות), at (קידומת hash נדרשת), check (תיבת סימון – רק אם לא מסומנת).
+// אפשרויות צעד: safe (מבוצע גם בהיכרות; 0.1.11 – אף פעם לא על רכיב עם מילת שמירה/מחיקה/הפקה/טעינה, ראו denied), stop (רכיב חסר עוצר גם בהיכרות), at (קידומת hash נדרשת), check (תיבת סימון – רק אם לא מסומנת).
 // מטרה (t): { css, text, textAny:[], aria, tag, nth, hidden, alt:{מטרה חלופית} } (hidden: גם רכיב מוסתר – רק לשדה קובץ) – קודם css/aria, אחר כך טקסט מדויק, ואז טקסט מוכל. רק רכיבים גלויים.
 // מצב probe (היכרות): מבצע רק nav וצעדים שמסומנים safe; צעד submit לעולם לא מבוצע; מדווח לכל צעד אם נמצא.
 // לעולם לא ממלא סיסמה או שם משתמש: setDate/setFile מסרבים לשדות סיסמה, ואין צעד "הקלדה" כללי.
@@ -15,6 +15,13 @@ function visible(el) {
   if (typeof el.getClientRects === 'function') { const r = el.getClientRects(); if (r && r.length === 0) return false; }
   if (el.hidden) return false;
   return true;
+}
+// מילים שאסור ללחוץ עליהן בהיכרות (0.1.11) – גם בתוך מילה (והפקה, שמירת…); טקסט הרכיב, value ו-aria-label
+const DENY_HE = ['שמור', 'שמיר', 'מחק', 'מחיק', 'הפק', 'טען', 'טעינ', 'שלח', 'עדכן', 'עדכון', 'עריכ', 'ערוך', 'הוסף', 'הוספ', 'הסר', 'ביטול', 'בטל', 'הרץ', 'אישור', 'חדש', 'העלה', 'העלא', 'ייבוא', 'יבוא', 'קליטה', 'חיוב', 'סגירה', 'שליח', 'שולח', 'הנפק', 'ביצוע', 'בצע', 'מייל', 'דוא"ל'];
+const DENY_EN = /\b(save|delete|remove|load|upload|import|submit|send|update|edit|new|cancel|approve|confirm|run|charge|e-?mail|mail)\b/i;
+function denied(el) {
+  const t = norm([own(el), el.value, el.getAttribute && el.getAttribute('aria-label')].filter((x) => typeof x === 'string').join(' '));
+  return DENY_HE.some((w) => t.includes(w)) || DENY_EN.test(t);
 }
 const isPass = (el) => el && String(el.tagName).toLowerCase() === 'input' && String(el.type || el.getAttribute && el.getAttribute('type') || '').toLowerCase() === 'password';
 function all(doc, css) { try { return Array.from(doc.querySelectorAll(css)); } catch (e) { return []; } }
@@ -320,7 +327,8 @@ async function runSteps(steps, ctx) {
       continue;
     }
     // at: הצעד רץ רק כשה-hash מתחיל בקידומת הזו (למשל דף השעות של עובד) – אחרת עוצרים את כל הזרימה, גם בהיכרות
-    if (s.at && !(ctx.win && String(ctx.win.location.hash || '').startsWith(s.at))) { rec.err = 'wrong-hash'; res.ok = false; if (res.miss == null) res.miss = i; break; }
+    // at יכול להכיל משתנה (0.1.11: hkExport – "{hash}" = המסך שההיכרות עברה אליו; משתנה חסר → לא תואם → עוצרים)
+    if (s.at && !(ctx.win && String(ctx.win.location.hash || '').startsWith(fill(s.at, ctx.vars)))) { rec.err = 'wrong-hash'; res.ok = false; if (res.miss == null) res.miss = i; break; }
     const el = await waitFind(doc, s.t, ctx.probe ? Math.min(s.ms || 6000, 6000) : s.ms || 15000, sleep, now);
     rec.found = !!el;
     rec.el = desc(el);
@@ -329,6 +337,8 @@ async function runSteps(steps, ctx) {
     if (s.op === 'waitFor') { rec.done = true; continue; }
     if (s.op === 'text') { res.text = own(el).slice(0, 500); rec.done = true; continue; }
     if (ctx.probe && (s.submit || !s.safe)) continue; // היכרות: לא משנים כלום בכספית
+    // היכרות (0.1.11): גם צעד safe לא לוחץ על רכיב שהטקסט שלו נראה כמו שמירה / מחיקה / הפקה / טעינה / עריכה – עוצרים את הזרימה
+    if (ctx.probe && s.op === 'click' && denied(el)) { rec.err = 'denied'; res.ok = false; if (res.miss == null) res.miss = i; break; }
     if (isPass(el)) { rec.err = 'password-field'; res.ok = false; res.miss = i; break; }
     if (s.op === 'click') {
       if (s.capture && typeof ctx.onCapture === 'function') await ctx.onCapture(i);
@@ -375,6 +385,8 @@ function controls(doc, max, o) {
       delete c.aria; delete c.placeholder;
       if (c.href && c.href !== '(ext)') c.href = '(int)';
       if (tag === 'select') c.optN = (el.options || []).length;
+      // o.priv (0.1.11, לקוחות הקפה): פקד בתוך טבלה – בלי id/name גולמיים (מזהה לקוח/שורה), ובנתיב ה-css ספרות → '?'
+      if (o.priv && el.closest && el.closest(DATA)) { delete c.id; delete c.name; c.css = String(c.css).replace(/\d/g, '?'); c.inData = true; }
       // o.btn: גם טקסט של כפתורים שמחוץ לטבלאות ולרשימות (למשל "הצג", "יצוא לאקסל") – לא תוויות, לא אפשרויות, לא שדות
       if (o.btn && (tag === 'button' || g('role') === 'button' || (tag === 'input' && /^(button|submit)$/i.test(type || ''))) && !(el.closest && el.closest(DATA))) {
         // רק המילים שהן מילות פעולה (התאמה מלאה של מילה) – שם עובד, שעה או מספר על הכפתור לא נכנסים
@@ -402,6 +414,6 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, isLogin, dateFor, fill, cssPath, b64bytes };
+const api = { OPS, DENY_HE, denied, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, isLogin, dateFor, fill, cssPath, b64bytes };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);
