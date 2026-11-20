@@ -35,13 +35,15 @@ const reasonOf = (e) => (e && ((e.details && e.details.reason) || e.reason)) || 
 const perm = (reason, msg) => { const e = new Error(msg); e.code = 'failed-precondition'; e.details = { reason }; return e; };
 function rid(rand) { const a = rand(9); return 'r' + Date.now().toString(36) + Array.from(a, (b) => b.toString(16).padStart(2, '0')).join(''); }
 const defRand = (n) => { const a = new Uint8Array(n); if (root && root.crypto && root.crypto.getRandomValues) root.crypto.getRandomValues(a); else for (let i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256); return a; };
+// ברקודים נוספים של המוצר: bcs (נוספו בקופה) + bcx (ברקודים משניים מכספית) – לסריקה בקופה. בלי הראשי, בלי כפולים, עד 40
+const xbc = (d) => { const m = d.barcode ? String(d.barcode) : '', o = []; for (const b of [].concat(Array.isArray(d.bcs) ? d.bcs : [], Array.isArray(d.bcx) ? d.bcx : [])) { const c = b == null ? '' : String(b).trim(); if (c && c !== m && !o.includes(c) && o.length < 40) o.push(c); } return o; };
 // מוצר מ-Firestore (prod) → מוצר קופה. price בשקלים → אגורות; מחיר סניף (bp) קודם. מוצר כבוי (on:false) – לא נכנס
 function toProd(d, br) {
   if (!d || !d.id || !d.name || d.on === false) return null;
   const sh = d.bp && typeof d.bp === 'object' && typeof d.bp[br] === 'number' ? d.bp[br] : +d.price;
   if (!Number.isFinite(sh) || sh < 0) return null;
   // POS:W2: cat – הקטגוריה של המוצר (prod.cat, כמו בשרת): אריחים לפי קטגוריה, ומבצע על קטגוריה מחושב במכשיר כמו ב-posSale
-  return { id: String(d.id), name: String(d.name), barcode: d.barcode ? String(d.barcode) : '', sku: d.sku ? String(d.sku) : '', price: Math.round(Math.round(sh * 10000) / 100), al: Array.isArray(d.al) ? d.al.filter((x) => typeof x === 'string') : [], cat: typeof d.cat === 'string' ? d.cat : '' };
+  return { id: String(d.id), name: String(d.name), barcode: d.barcode ? String(d.barcode) : '', sku: d.sku ? String(d.sku) : '', price: Math.round(Math.round(sh * 10000) / 100), al: Array.isArray(d.al) ? d.al.filter((x) => typeof x === 'string') : [], cat: typeof d.cat === 'string' ? d.cat : '', bx: xbc(d) };
 }
 
 /* deps: { store, key, dev()→'K1'|'', inst()→string, br()→'_', cashier()→{id,name}, call(fn,data)→Promise, devSeq()→Promise<lastSeq>,

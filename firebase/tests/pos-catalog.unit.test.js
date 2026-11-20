@@ -44,6 +44,12 @@ describe('pos-catalog – חיפוש', () => {
     assert.equal(cat.byCode('k900').id, 'cola');
     assert.equal(cat.byCode('9999'), null);
   });
+  it('ברקודים נוספים (bx – bcs + bcx מכספית): נמצאים בסריקה; ברקוד ראשי של מוצר אחר קודם', () => {
+    const c2 = C.build([{ id: 'p1', name: 'מוצר א', barcode: '7290000000111', bx: ['7290000000999', '7290000000222'] }, { id: 'p2', name: 'מוצר ב', barcode: '7290000000222' }]);
+    assert.equal(c2.byCode('7290000000999').id, 'p1');
+    assert.equal(c2.byCode('7290000000111').id, 'p1');
+    assert.equal(c2.byCode('7290000000222').id, 'p2');
+  });
   it('ברקוד חלקי: הספרות האחרונות קודם, אחר כך תחילת הברקוד', () => {
     assert.equal(ids('22233')[0], 'cola');
     assert.equal(ids('566677')[0], 'tissue');
