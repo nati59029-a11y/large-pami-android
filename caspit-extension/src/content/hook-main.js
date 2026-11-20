@@ -37,7 +37,8 @@
     if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).slice(0, 40)) o[k.slice(0, 40)] = shape(v[k], d + 1); return o; }
     return v === null ? 'null' : typeof v;
   };
-  const rec = (e) => { if (!disc) return; log.push(e); if (log.length > LOG_MAX) log.shift(); };
+  let pv = false; // 0.1.11: מהדף הפרטי הראשון בהיכרות – הבקשות מסומנות, וה-service worker מסתיר בהן מקטעי נתיב עם ספרות
+  const rec = (e) => { if (!disc) return; if (pv) e.pv = 1; log.push(e); if (log.length > LOG_MAX) log.shift(); };
   const fileName = (cd, url) => {
     const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd || '');
     if (m) { try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; } }
@@ -160,7 +161,8 @@
   const api = Object.freeze({
     arm(n) { armed = typeof n === 'string' && n.length >= 16 ? n : null; sent = 0; return !!armed; },
     disarm() { armed = null; },
-    discover(on) { disc = !!on; if (!disc) log.length = 0; return disc; },
+    discover(on) { disc = !!on; if (!disc) { log.length = 0; pv = false; } return disc; },
+    privMark(on) { pv = !!on; return pv; },
     netLog() { return log.slice(); },
     sent() { return sent; },
     call,

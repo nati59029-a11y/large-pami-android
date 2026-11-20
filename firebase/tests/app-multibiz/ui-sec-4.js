@@ -186,17 +186,17 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.click('#secNBan'); await H.settle(page, 700);
     const bv = await page.evaluate(() => NAV[NAV.length - 1].v), bt = await txt(page);
     check('בית: לחיצה על הפס – ישר ללשונית ההתראות', bv === 'sec' && /חשבונית לתשלום היום/.test(bt), { bv, t: bt.slice(0, 120) });
-    check('רשימה: שם הסניף ויום בשבוע במקום i_nl ו-2026-11-12', /סניף נחל לכיש/.test(bt) && /יום חמישי 12\.11/.test(bt) && !/i_nl/.test(bt), bt.slice(0, 600));
+    check('רשימה: שם הקופה ויום בשבוע במקום i_nl ו-2026-11-12 (עסק חדש – "קופה", בלי שמות לארג\' פעמי)', /• קופה: לא נשלחה/.test(bt) && !/נחל לכיש|סניף קופה/.test(bt) && /יום חמישי 12\.11/.test(bt) && !/i_nl/.test(bt), bt.slice(0, 600));
     await page.click('.secnb[data-id=n4]'); await H.settle(page, 400);
     const d1 = await dlgText(page);
-    check('לחיצה על התראה ברשימה – חלון פרטים: סוג, נוצרה, כמה פעמים, מצב, מה לעשות', /סגירת קופה חסרה או עם הפרש/.test(d1) && /נוצרה/.test(d1) && /נשלחה:\s*2 פעמים/.test(d1) && /תחזור עוד 2 פעמים/.test(d1) && /סניף נחל לכיש/.test(d1) && /מה לעשות/.test(d1) && !!(await page.$('#dlg [data-a=secNZc]')), d1.slice(0, 400));
+    check('לחיצה על התראה ברשימה – חלון פרטים: סוג, נוצרה, כמה פעמים, מצב, מה לעשות', /סגירת קופה חסרה או עם הפרש/.test(d1) && /נוצרה/.test(d1) && /נשלחה:\s*2 פעמים/.test(d1) && /תחזור עוד 2 פעמים/.test(d1) && /• קופה: לא נשלחה/.test(d1) && !/נחל לכיש/.test(d1) && /מה לעשות/.test(d1) && !!(await page.$('#dlg [data-a=secNZc]')), d1.slice(0, 400));
     await page.click('#dlg [data-a=secNZc]'); await H.settle(page, 500);
     check('"פתיחת מסך סגירת הקופה" – מסך סגירת הקופה', (await page.evaluate(() => NAV[NAV.length - 1].v)) === 'zc');
     // פתיחה מאפס: הלחיצה מגיעה, ואחריה האפליקציה מציגה את הבית (כמו טעינה/כניסה) – ההתראות נפתחות שוב בכל זאת, עם פרטי ההתראה שנשלחה
     await page.evaluate(() => { window.__pnL.pushNotificationActionPerformed({ actionId: 'tap', notification: { data: { k: 'sec', v: 'notes', id: 'n4' } } }); NAV = [{ v: 'home' }]; render(0); });
     await H.settle(page, 2500);
     const cv = await page.evaluate(() => NAV[NAV.length - 1].v), d2 = await dlgText(page);
-    check('לחיצה על התראה בטלפון ואחריה מסך הבית – בסוף לשונית ההתראות, ופרטי ההתראה פתוחים', cv === 'sec' && /סניף נחל לכיש/.test(d2) && /מה לעשות/.test(d2), { cv, d: d2.slice(0, 160) });
+    check('לחיצה על התראה בטלפון ואחריה מסך הבית – בסוף לשונית ההתראות, ופרטי ההתראה פתוחים', cv === 'sec' && /• קופה: לא נשלחה/.test(d2) && !/נחל לכיש/.test(d2) && /מה לעשות/.test(d2), { cv, d: d2.slice(0, 160) });
     await page.evaluate(() => closeDlg()); await page.evaluate(() => { NAV = [{ v: 'home' }]; go('home'); }); await H.settle(page, 3500);
     check('אחרי שההתראות הוצגו – אין חזרה כפויה למזכירה', (await page.evaluate(() => NAV[NAV.length - 1].v)) === 'home');
     check('בלי גלילה לרוחב ובלי שגיאות JS', (await sx(page)) <= 0 && page.__errors.length === 0, page.__errors);
