@@ -275,7 +275,8 @@ test('selectors.json v7 (0.1.12): מסך הייבוא בהיכרות – קרי�
   assert.equal(pr.flow, 'hkExport'); assert.equal(pr.promo, true); assert.equal(pr.priv, undefined); assert.equal(pr.hash, undefined);
   // אמצעי תשלום: findAll לפי המילים, רק hkExport; בחירת סניף – רק שמות לזיהוי (אין צעד שבוחר סניף)
   const py = SEL.disc.find((x) => x.name === 'pay');
-  assert.deepEqual(py.findAll, ['אמצעי תשלום', 'תקבולים', 'סיכום קופה', 'דוח z', 'מזומן', 'אשראי', 'דוח קופאים']);
+  assert.deepEqual(py.findAll, ['דוח אמצעי תשלום', 'דוח תקבולים', 'סיכום קופה', 'דוח z', 'דוח קופאים'], 'ביטויי דוח מפורשים – בלי "מזומן" / "אשראי" כלליים');
+  assert.deepEqual(py.menu, ['דוחות', 'קופות']);
   assert.equal(py.flow, 'hkExport'); assert.equal(py.pay, true); assert.ok(py.max <= 8);
   assert.deepEqual(SEL.branch.names, ['יהודה הנשיא', 'נחל לכיש']);
   assert.ok(!JSON.stringify(SEL.flows).includes('יהודה הנשיא') && !JSON.stringify(SEL.flows).includes('נחל לכיש'), 'אף זרימה לא נוגעת בבחירת הסניף');
@@ -287,7 +288,8 @@ test('screen (0.1.12): בלי כותרת "ממתין לטעינה" – כותר�
 <div class="card"><div class="card-header">בחירת קובץ</div><div class="form-group"><label for="up">בחר קובץ</label><input type="file" id="up" accept=".csv,.xlsx" multiple></div>
 <input type="file" id="hid" style="display:none"></div>
 <h4>קבצים בהמתנה (1)</h4><table><thead><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr></thead><tbody><tr><td>לקוח-סודי-0521234567.csv</td><td>עדכון</td><td><button>הסר</button></td></tr></tbody></table>
-<h4>טעינות קודמות</h4><table><thead><tr><th>מזהה</th><th>שם</th></tr></thead><tbody><tr><td>25520</td><td>ישראל ישראלי.csv</td></tr><tr><td>25521</td><td>פרטי.csv</td></tr></tbody></table>
+<h4>טעינות קודמות</h4><table><thead><tr><th>מזהה</th><th>שם</th></tr></thead><tbody><tr><td>25520</td><td>ישראל ישראלי.csv</td></tr><tr><td>25521</td><td>פרטי.csv</td></tr></tbody><tfoot><tr><th>סה"כ 777123</th></tr></tfoot></table>
+<div class="up-box"><span>נבחר: lp-price-abc123XYZ.csv</span><input type="file" id="up2"></div>
 <button>העלה קבצים והרץ טעינה</button><button>משה כהן</button><a href="#/promotions/77/new">הוסף מבצע</a>
 <div role="dialog" aria-modal="true"><h5 class="modal-title">אישור טעינה</h5><p>טקסט ארוך בתוך החלון</p></div>
 </body></html>`);
@@ -300,16 +302,23 @@ test('screen (0.1.12): בלי כותרת "ממתין לטעינה" – כותר�
   assert.ok(r.wait.some((w) => w.t === 'קבצים בהמתנה (1)' && w.vis), JSON.stringify(r.wait));
   assert.deepEqual(r.tables.map((t) => [t.rows, t.th]), [[1, ['שם', 'סוג קובץ', 'פעולות']], [2, ['מזהה', 'שם']]]);
   assert.deepEqual(r.btns, ['העלה קבצים והרץ טעינה'], 'רק מילות פעולה, לא כפתור עם שם ולא כפתור בתוך טבלה');
-  assert.equal(r.files.length, 2);
+  assert.equal(r.files.length, 3);
   assert.deepEqual([r.files[0].vis, r.files[0].multi, r.files[0].accept, r.files[0].lbl, r.files[1].vis], [true, true, '.csv,.xlsx', 'בחר קובץ', false]);
   assert.ok(r.files[0].up[0].t === 'בחר קובץ' && /form-group/.test(r.files[0].up[0].tag), JSON.stringify(r.files[0].up));
   assert.deepEqual(r.dialogs.map((d) => d.t), ['אישור טעינה']);
   const s = JSON.stringify(r);
-  for (const x of ['לקוח-סודי', '0521234567', 'ישראל ישראלי', 'פרטי.csv', '25521', 'משה', 'טקסט ארוך']) assert.ok(!s.includes(x), x + ' ' + s);
+  for (const x of ['לקוח-סודי', '0521234567', 'ישראל ישראלי', 'פרטי.csv', '25521', 'משה', 'טקסט ארוך', '777123', 'lp-price']) assert.ok(!s.includes(x), x + ' ' + s);
+  assert.ok(r.files.some((f) => f.up.some((u) => u.t === 'נבחר: {file}')), 'שם הקובץ שלנו מוחלף ב-{file}: ' + JSON.stringify(r.files.map((f) => f.up)));
   assert.deepEqual(await page.evaluate(() => window.ev), [], 'קריאה בלבד – בלי לחיצה ובלי שינוי');
   // הכותרת המקורית קיימת → exact; קיימת רק בתוך טקסט ארוך יותר → part
   await page.evaluate(() => { document.querySelector('h4').textContent = 'ממתין לטעינה'; });
   assert.equal(await page.evaluate(() => window.CxSel.screen(document, {}).qhead), 'exact');
   await page.evaluate(() => { document.querySelector('h4').textContent = 'ממתין לטעינה (1)'; });
   assert.equal(await page.evaluate(() => window.CxSel.screen(document, {}).qhead), 'part');
+});
+
+test('deniedLink (0.1.12): "מבצעים" מותר (למרות "בצע"), "הוספת מבצעים" / "ייבוא מבצעים" / "ביצוע" / "הגדרות"? – לפי DENY', () => {
+  const X = require('../src/lib/selectors.js');
+  for (const t of ['מבצעים', 'מבצע', 'רשימת מבצעים', 'דוח אמצעי תשלום', 'סיכום קופה יומי']) assert.equal(X.deniedLink(t), false, t);
+  for (const t of ['הוספת מבצעים', 'ייבוא מבצעים', 'הוסף מבצע', 'ביצוע חיוב', 'מחיקת מבצע', 'הוסף אמצעי תשלום', 'ייבוא תקבולים']) assert.equal(X.deniedLink(t), true, t);
 });

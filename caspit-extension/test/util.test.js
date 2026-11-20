@@ -74,3 +74,24 @@ test('לקוח cxBot: זמן קצוב → timeout', async () => {
   const c = A.client({ url: 'https://x.test/cxBot', token, ver: '1', fetch: (u, init) => new Promise((res, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))) });
   await assert.rejects(c.call('hello', {}, { timeout: 50 }), { code: 'timeout' });
 });
+
+test('menuPick / menuAll (היכרות 0.1.12, תיקוני בודק): רק התאמה מדויקת; קישור bad / לא תחת התפריט – לא נבחר', () => {
+  // בלי "מבצעים" מדויק: "ייבוא מבצעים" / "הוספת מבצעים" (bad) ו"רשימת מבצעים" (חלקי) – אף אחד לא נבחר
+  const noExact = [{ t: 'ייבוא מבצעים', h: '#/pi', u: 'כרטיס הטבות', bad: true }, { t: 'הוספת מבצעים', h: '#/pa', u: 'כרטיס הטבות', bad: true }, { t: 'רשימת מבצעים', h: '#/pl', u: 'כרטיס הטבות' }];
+  assert.equal(U.menuPick(noExact, 'מבצעים'), null);
+  assert.equal(U.menuPick([{ t: 'מבצעים', h: '#/x', bad: true }], 'מבצעים'), null, 'מדויק אבל bad – לא');
+  assert.equal(U.menuPick(noExact.concat([{ t: 'מבצעים', h: '#/promotions', u: 'כרטיס הטבות' }]), 'מבצעים').h, '#/promotions');
+  const L = [
+    { t: 'הגדרות אשראי', h: '#/credit-settings', u: 'דוחות', bad: true },
+    { t: 'ייבוא תקבולים', h: '#/receipts-import', u: 'דוחות', bad: true },
+    { t: 'הוסף אמצעי תשלום', h: '#/pm/new', u: 'דוחות', bad: true },
+    { t: 'דוח תקבולים', h: '#/receipts-outside' },
+    { t: 'דוח אמצעי תשלום', h: '#/payment-methods-report', u: 'דוחות' },
+    { t: 'סיכום קופה יומי', h: '#/cash-register-summary', u: 'קופות' },
+    { t: 'דוח Z', h: '#/catalogs', u: 'דוחות' },
+    { t: 'דוח מלאי', h: '#/stock', u: 'דוחות' },
+  ];
+  const got = U.menuAll(L, ['דוח אמצעי תשלום', 'דוח תקבולים', 'סיכום קופה', 'דוח z', 'דוח קופאים'], ['דוחות', 'קופות'], ['#/catalogs'], 8, /^#\/[\w\-/?=&.%]*$/);
+  assert.deepEqual(got.map((l) => l.h), ['#/payment-methods-report', '#/cash-register-summary']);
+  assert.equal(U.menuAll(L, ['דוח אמצעי תשלום', 'סיכום קופה'], ['דוחות', 'קופות'], [], 1).length, 1, 'עד max');
+});

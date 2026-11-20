@@ -698,6 +698,7 @@ async function loop(run0) {
         if (!navigator.onLine) throw P.err('offline');
         const info = await STEP[step](run);
         run = P.advance(run, Date.now(), info);
+        if (run.info && run.info.scr) delete run.info.scr; // 0.1.12: ניסיון חוזר שהצליח – בלי אבחון ישן בדיווח
       } catch (e) {
         // שגיאה בלי קוד (למשל של chrome.tabs / scripting – הלשונית נסגרה או נטענה מחדש באמצע) → תקלה זמנית, ניסיון חוזר
         run = P.fail(run, Date.now(), e && typeof e.code === 'string' ? e : P.err('tab', String((e && e.message) || e).slice(0, 200)));
@@ -729,11 +730,17 @@ async function finalize(run) {
 const menuIn = async (heads, max, guard) => {
   const S = self.CxSel;
   if (!S.onPath(window, guard)) return { wrong: true };
+  // 0.1.12: לכל קישור – תחת איזו כותרת תפריט הוא נחשף (u): קישור שהופיע (או נעשה גלוי) אחרי המעבר על הכותרת, או שנמצא בתוך הפריט שלה
+  const visA = () => new Set(Array.from(document.querySelectorAll('a[href]')).filter((a) => a.getClientRects().length));
+  const under = new Map();
   for (const t of heads || []) {
     const el = S.find(document, { text: t }) || S.find(document, { textAny: [t] });
     if (!el) continue;
+    const before = visA();
     for (const ty of ['mouseover', 'mouseenter']) el.dispatchEvent(new MouseEvent(ty, { bubbles: ty === 'mouseover' }));
     await new Promise((r) => setTimeout(r, 700));
+    const box = el.closest && el.closest('li,.dropdown,.nav-item,.menu-item,.submenu');
+    for (const a of visA()) if (!under.has(a) && (!before.has(a) || (box && box !== document.body && box.contains(a)))) under.set(a, t);
   }
   const out = [], seen = new Set();
   for (const a of Array.from(document.querySelectorAll('a[href]'))) {
@@ -743,7 +750,8 @@ const menuIn = async (heads, max, guard) => {
     const t = S.norm(a.textContent).slice(0, 40);
     if (!t || seen.has(t + '|' + h)) continue;
     seen.add(t + '|' + h);
-    out.push({ t, h: h.slice(0, 80) });
+    // bad: קישור עם מילה אסורה (שמירה / מחיקה / הוספה / ייבוא / טעינה…), "הגדר" (הגדרות) – בהיכרות לא נפתח בשום מקרה
+    out.push(Object.assign({ t, h: h.slice(0, 80) }, under.has(a) ? { u: under.get(a) } : {}, S.deniedLink([S.norm(a.textContent), a.getAttribute('aria-label') || ''].join(' ')) || /הגדר|ייבוא|יבוא/.test(t) ? { bad: true } : {}));
   }
   return { links: out };
 };
@@ -753,7 +761,7 @@ const roIn = (guard, btn, priv, scr) => {
   if (!S.onPath(window, guard)) return { wrong: true };
   // 0.1.12 (מסך הייבוא, imp): גם תמונת המסך – כותרות, אזורים / לשוניות, כותרות טבלה ומספר שורות, שדות הקובץ (accept, multiple, נראות)
   const sc = scr ? S.screen(document, { marks: true }) : undefined;
-  const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
+  const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).filter((th) => !th.closest('tfoot')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
   // פרטיות: בדף לקריאה בלבד (למשל נוכחות) – בלי טקסט של פקדים ובלי אפשרויות של רשימות בחירה (שמות עובדים); רק תגית/סוג/מזהה ומספר אפשרויות
   return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn, priv: !!priv }), heads, scr: sc };
 };
@@ -767,34 +775,35 @@ function privHash(h) {
 // כותרות טבלה בדף priv – רק דרך הרשימה הלבנה (תא לא מוכר → '?'), כמו כותרות הקובץ
 // פקד בחירת הסניף במשרד האחורי (0.1.12) – קריאה בלבד. פקד: select / רשימה נפתחת / קישור / כפתור שהטקסט שלו (או אחת מאפשרויות ה-select)
 // כולל שם סניף מ-cfg.names; האפשרויות רק אם כבר קיימות ב-DOM (option, או פריטי תפריט נפתח שכבר מצוירים), בלי לפתוח. מחוץ לטבלאות.
-// store: טקסטים קצרים (עד 120) עם "חנות:" – מה כתוב בדף על הסניף הנוכחי. בדף priv – רק אפשרויות שהן שמות סניפים
+// store: שם הסניף שכתוב ליד "חנות:" בדף (הסניף הנוכחי). מכל טקסט – רק שם סניף מ-cfg.names, אף פעם לא הטקסט המלא
 const brIn = (cfg, priv, guard) => {
   const X = self.CxSel;
   if (!X.onPath(window, guard)) return { wrong: true };
-  const N = (cfg.names || []).map(X.norm).filter(Boolean), has = (t) => N.some((n) => X.norm(t).includes(n));
+  // 0.1.12 (תיקון בודק): מכל טקסט יוצא רק שם הסניף שזוהה מתוך cfg.names (nm) – לא הטקסט המלא (למשל "נחל לכיש: ₪12,345.00" → "נחל לכיש")
+  const N = (cfg.names || []).map(X.norm).filter(Boolean), nm = (t) => N.find((n) => X.norm(t).includes(n)) || '', has = (t) => !!nm(t);
+  const uniq = (a) => [...new Set(a.filter(Boolean))], aria = (e) => String(e.getAttribute('aria-label') || '').replace(/[\d₪]+/g, '').slice(0, 60);
   const DATA = 'table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell]';
   const vis = (e) => e.getClientRects().length > 0, txt = (e) => X.norm(e.innerText || e.textContent);
   const ok = (e) => !(e.closest && e.closest(DATA));
   const out = [];
   for (const e of Array.from(document.querySelectorAll('select'))) {
     if (!ok(e)) continue;
-    const op = Array.from(e.options || []).map((o) => X.norm(o.textContent).slice(0, 40));
+    const op = Array.from(e.options || []).map((o) => X.norm(o.textContent));
     if (!op.some(has)) continue;
-    const sel = e.selectedIndex >= 0 ? op[e.selectedIndex] : '';
-    out.push({ kind: 'select', css: X.cssPath(e), id: e.id || '', aria: String(e.getAttribute('aria-label') || '').slice(0, 60), vis: vis(e), n: op.length, opts: (priv || op.length > 15 ? op.filter(has) : op), cur: has(sel) || !priv ? sel : '' });
+    out.push({ kind: 'select', css: X.cssPath(e), id: e.id || '', aria: aria(e), vis: vis(e), n: op.length, opts: uniq(op.map(nm)), cur: e.selectedIndex >= 0 ? nm(op[e.selectedIndex]) : '' });
   }
   const C = 'button,a,[role=combobox],[role=button],[role=listbox],.dropdown-toggle,.multiselect,.v-select,.navbar-text,.store-name,span,div';
   const cand = Array.from(document.querySelectorAll(C)).filter((e) => ok(e) && vis(e) && txt(e).length <= 60 && has(txt(e)) && !(e.closest && e.closest('select')));
   for (const e of cand.filter((e) => !cand.some((o) => o !== e && e.contains(o))).slice(0, 4)) {
     const tag = String(e.tagName).toLowerCase(), role = String(e.getAttribute('role') || '');
     const box = e.closest('.dropdown,.multiselect,.v-select,[role=combobox],li,.nav-item') || e.parentElement;
-    const items = box ? Array.from(box.querySelectorAll('.dropdown-item,.multiselect__option,[role=option],[role=menuitem],li a')).filter((x) => x !== e).map(txt).filter(Boolean).slice(0, 15) : [];
+    const items = box ? uniq(Array.from(box.querySelectorAll('.dropdown-item,.multiselect__option,[role=option],[role=menuitem],li a')).filter((x) => x !== e).slice(0, 30).map((x) => nm(txt(x)))) : [];
     const kind = tag === 'a' ? 'link' : role === 'combobox' || /multiselect|v-select|dropdown/.test(String(e.className) + ' ' + String(box && box.className)) ? 'dropdown' : tag === 'button' || role === 'button' ? 'button' : 'text';
     const h = tag === 'a' ? String(e.getAttribute('href') || '') : '';
-    out.push(Object.assign({ kind, tag, css: X.cssPath(e), aria: String(e.getAttribute('aria-label') || '').slice(0, 60), t: txt(e).slice(0, 60), opts: priv ? items.filter(has) : items }, /^#\//.test(h) ? { h: h.slice(0, 80) } : h ? { h: '(ext)' } : {}));
+    out.push(Object.assign({ kind, tag, css: X.cssPath(e), aria: aria(e), t: nm(txt(e)), opts: items }, /^#\//.test(h) ? { h: h.slice(0, 80).replace(/\d+/g, '{n}') } : h ? { h: '(ext)' } : {}));
   }
   const st = Array.from(document.querySelectorAll('body *')).filter((e) => ok(e) && vis(e) && /חנות\s*:/.test(e.textContent || '') && X.norm(e.textContent).length <= 120);
-  const store = st.filter((e) => !st.some((o) => o !== e && e.contains(o))).slice(0, 3).map((e) => txt(e).slice(0, 120));
+  const store = uniq(st.filter((e) => !st.some((o) => o !== e && e.contains(o))).slice(0, 3).map((e) => nm(txt(e)))); // רק שם הסניף שכתוב ליד "חנות:"
   return { picks: out.slice(0, 6), store };
 };
 async function branchAdd(tab, acc, pg, cfg) {
@@ -811,14 +820,10 @@ async function branchAdd(tab, acc, pg, cfg) {
   for (const t of r.store || []) if (!acc.store.includes(t) && acc.store.length < 5) acc.store.push(t);
 }
 const privHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrSafe(row) || []) : []);
+// מבצעים / אמצעי תשלום (0.1.12): כמו privHeads, ובנוסף כל תא עם ספרה או ₪ → '?' (סכום, מספר, שם קופאי בכותרת לא יוצאים)
+const safeHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrStrict(row) || []) : []);
 // מהדף הפרטי הראשון ועד סוף ההיכרות – כל בקשת רשת מסומנת pv (גם בקשות שמסתיימות אחרי המעבר למסך הבא)
 const privNet = (tab) => inMain(tab, () => window.__cxHook && window.__cxHook.privMark && window.__cxHook.privMark(true)).catch(() => {});
-// הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
-function menuPick(links, find) {
-  const f = String(find || '').trim();
-  if (!f) return null;
-  return links.find((l) => l.t === f) || links.find((l) => l.t.includes(f)) || null;
-}
 async function runDisc() {
   if (busy) return { ok: false, code: 'busy' };
   busy = true;
@@ -839,30 +844,24 @@ async function runDisc() {
     const mr = await inIso(tab, menuIn, [heads, 200, GUARD]);
     if (mr && mr.wrong) throw wrongPage();
     const links = (mr && mr.links) || [];
-    rep.menu = links.map((l) => ({ t: l.t, h: l.h.replace(/\d+/g, '{n}') }));
-    // findAll (0.1.12, דוחות אמצעי תשלום): כל קישור בתפריט שהטקסט שלו כולל אחת המילים (בלי רישיות) → דף משלו (hash מהקישור), עד max.
-    // מסך שכבר בהגדרה (hash) – לא שוב. בלי אף קישור – שורה אחת not-found
-    const known = new Set((S0.disc || []).map((p) => p.hash).filter(Boolean)), pages = [];
+    rep.menu = links.map((l) => Object.assign({ t: l.t, h: l.h.replace(/\d+/g, '{n}') }, l.u ? { u: l.u } : {}, l.bad ? { bad: true } : {}));
+    // findAll (0.1.12, דוחות אמצעי תשלום): רק קישורים שנחשפו תחת כותרות התפריט של הדף (menu: "דוחות" / "קופות"), בלי מילה אסורה / "הגדר" / "ייבוא",
+    // שהטקסט שלהם כולל ביטוי דוח מפורש (U.menuAll) → דף משלו (hash מהקישור), עד max. מסך שכבר בהגדרה – לא שוב. בלי אף קישור – שורה אחת not-found
+    const known = (S0.disc || []).map((p) => p.hash).filter(Boolean), pages = [];
     for (const pg of S0.disc || []) {
       if (!Array.isArray(pg.findAll)) { pages.push(pg); continue; }
-      const W = pg.findAll.map((w) => String(w).toLowerCase()).filter(Boolean);
-      let k = 0;
-      for (const ln of links) {
-        if (k >= (+pg.max || 8)) break;
-        if (!W.some((w) => ln.t.toLowerCase().includes(w)) || known.has(ln.h) || !HASH_RE.test(ln.h)) continue;
-        known.add(ln.h); k++;
-        pages.push(Object.assign({}, pg, { findAll: undefined, name: pg.name + '-' + k, hash: ln.h, src: ln.t }));
-      }
-      if (!k) pages.push({ name: pg.name, none: true, find: pg.findAll.join(',') });
+      const L = U.menuAll(links, pg.findAll, pg.menu, known, +pg.max || 8, HASH_RE);
+      L.forEach((ln, k) => { known.push(ln.h); pages.push(Object.assign({}, pg, { findAll: undefined, name: pg.name + '-' + (k + 1), hash: ln.h, src: ln.t })); });
+      if (!L.length) pages.push({ name: pg.name, none: true, find: pg.findAll.join(',') });
     }
     rep.branch = { picks: [], store: [], pages: 0 };
     for (const pg of pages) {
       if (pg.none) { rep.pages.push({ name: pg.name, ok: false, nav: 'not-found', find: String(pg.find).slice(0, 120) }); continue; }
       // מסך בלי hash קבוע (למשל נוכחות תחת "עובדים"): הכתובת מקישור התפריט לפי הטקסט. רק #/... בתוך /bo (navTo + guardBo)
-      // find: מחרוזת או רשימה לפי סדר עדיפות (0.1.12 מבצעים: "מבצעים", ואחרת "מבצע"); הקישור שנמצא – גם ל-{hash} של הזרימה
+      // find: מחרוזת או רשימה לפי סדר עדיפות (0.1.12 מבצעים: רק "מבצעים" מדויק). רק התאמה מדויקת ולא קישור bad (U.menuPick); הקישור – גם ל-{hash} של הזרימה
       let l = null;
       if (pg.find) {
-        l = (Array.isArray(pg.find) ? pg.find : [pg.find]).map((f) => menuPick(links, f)).find(Boolean) || null;
+        l = (Array.isArray(pg.find) ? pg.find : [pg.find]).map((f) => U.menuPick(links, f)).find(Boolean) || null;
         if (!l || !(await navTo(tab, l.h, false, 3000))) { rep.pages.push({ name: pg.name, ok: false, nav: l ? 'bad-hash' : 'not-found', find: String(pg.find).slice(0, 40) }); continue; }
       } else if (pg.hash) await navTo(tab, pg.hash, false, 3000);
       await guardBo(tab);
@@ -929,10 +928,13 @@ async function runDisc() {
       } else page.controls = await inIso(tab, () => self.CxSel.controls(document, 400));
       if (pg.src) page.src = String(pg.src).slice(0, 40); // findAll: טקסט הקישור בתפריט
       if ((pg.promo || pg.pay) && !pg.priv) {
-        // מבצעים (0.1.12): גם כותרות הטבלה (בלי השורות) ותמונת המסך – כותרות, לשוניות, ומה שקיים לייבוא / מבצע חדש (marks) – בלי ללחוץ
+        // מבצעים / אמצעי תשלום (0.1.12): פקדים בלי טקסט חופשי (noText – רק מילות פעולה של כפתורים, בלי אפשרויות select; פקד הסניף – ב-rep.branch),
+        // כותרות טבלה רק דרך הרשימה הלבנה (ספרה / ₪ → '?'), ותמונת המסך – כותרות, לשוניות, ומה שקיים לייבוא / מבצע חדש (marks) – בלי ללחוץ
         const r = (await inIso(tab, roIn, [GUARD, true, false, true])) || {};
         if (r.wrong) throw wrongPage();
-        page.heads = r.heads || [];
+        page.controls = r.controls || [];
+        page.heads = safeHeads(r.heads);
+        if (r.scr && Array.isArray(r.scr.tables)) r.scr.tables = r.scr.tables.map((t) => Object.assign({}, t, { th: safeHeads([t.th])[0] || [] }));
         page.scr = r.scr;
       }
       rep.pages.push(page);

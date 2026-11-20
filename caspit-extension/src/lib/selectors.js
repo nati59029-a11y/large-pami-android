@@ -19,10 +19,12 @@ function visible(el) {
 // מילים שאסור ללחוץ עליהן בהיכרות (0.1.11) – גם בתוך מילה (והפקה, שמירת…); טקסט הרכיב, value ו-aria-label
 const DENY_HE = ['שמור', 'שמיר', 'מחק', 'מחיק', 'הפק', 'טען', 'טעינ', 'שלח', 'עדכן', 'עדכון', 'עריכ', 'ערוך', 'הוסף', 'הוספ', 'הסר', 'ביטול', 'בטל', 'הרץ', 'אישור', 'חדש', 'העלה', 'העלא', 'ייבוא', 'יבוא', 'קליטה', 'חיוב', 'סגירה', 'שליח', 'שולח', 'הנפק', 'ביצוע', 'בצע', 'מייל', 'דוא"ל'];
 const DENY_EN = /\b(save|delete|remove|load|upload|import|submit|send|update|edit|new|cancel|approve|confirm|run|charge|e-?mail|mail)\b/i;
+const deniedText = (s) => { const t = norm(s); return DENY_HE.some((w) => t.includes(w)) || DENY_EN.test(t); };
 function denied(el) {
-  const t = norm([own(el), el.value, el.getAttribute && el.getAttribute('aria-label')].filter((x) => typeof x === 'string').join(' '));
-  return DENY_HE.some((w) => t.includes(w)) || DENY_EN.test(t);
+  return deniedText([own(el), el.value, el.getAttribute && el.getAttribute('aria-label')].filter((x) => typeof x === 'string').join(' '));
 }
+// קישור תפריט בהיכרות (0.1.12): כמו denied, אבל המילה "מבצע…" עצמה (שמכילה "בצע") לא נחשבת אסורה – "הוספת מבצעים" / "ייבוא מבצעים" עדיין אסורים
+const deniedLink = (s) => deniedText(String(s || '').replace(/מבצע[\u05d0-\u05ea]*/g, ' '));
 const isPass = (el) => el && String(el.tagName).toLowerCase() === 'input' && String(el.type || el.getAttribute && el.getAttribute('type') || '').toLowerCase() === 'password';
 function all(doc, css) { try { return Array.from(doc.querySelectorAll(css)); } catch (e) { return []; } }
 // הרכיב הקטן ביותר שהטקסט שלו מתאים (כדי ללחוץ על הכפתור ולא על כל התפריט)
@@ -411,6 +413,8 @@ function controls(doc, max, o) {
 const SCR_HEAD = 'h1,h2,h3,h4,legend,.card-header,.card-title,.panel-heading,.panel-title,.modal-title,.nav-tabs a,.nav-link,[role=tab],.tab-title';
 const SCR_ACT = new Set([...ACT, 'העלה', 'העלאה', 'העלאת', 'העלו', 'טען', 'טעינה', 'טעינת', 'הרץ', 'הסר', 'בחר', 'בחירה', 'בחירת', 'קבצים', 'גרור', 'ייבוא', 'יבוא', 'הורד', 'הורדה', 'דוגמה', 'דוגמא', 'שמור', 'שמירה', 'ביטול', 'בטל', 'אישור', 'אשר', 'סגור', 'המשך', 'upload', 'browse', 'choose', 'file', 'files', 'remove', 'ok', 'close', 'run', 'import']);
 const SCR_WAIT = /ממתין|ממתינים|בהמתנה|לטעינה/;
+// שם הקובץ שלנו (lp-new-… / lp-price-….csv) לא יוצא בטקסטים של האבחון
+const noFile = (t) => String(t).replace(/lp-[\w-]*\.(csv|xlsx?)/gi, '{file}');
 function screen(doc, o) {
   const opt = o || {};
   const out = {};
@@ -430,11 +434,11 @@ function screen(doc, o) {
   out.qhead = byText(doc, [qh], HT, true).length ? 'exact' : byText(doc, [qh], HT, false).length ? 'part' : all(doc, HT).some((e) => norm(e.textContent).includes(qh)) ? 'hidden' : 'none';
   // טקסטים קצרים עם "ממתין / בהמתנה / לטעינה" מחוץ לטבלאות (אולי הכותרת האמיתית של התור שונה)
   const wc = all(doc, 'body *').filter((e) => free(e) && SCR_WAIT.test(e.textContent || '') && norm(e.textContent).length <= 80);
-  out.wait = wc.filter((e) => !wc.some((x) => x !== e && e.contains(x))).slice(0, 8).map((e) => ({ tag: String(e.tagName).toLowerCase(), t: own(e).slice(0, 60), vis: visible(e) }));
+  out.wait = wc.filter((e) => !wc.some((x) => x !== e && e.contains(x))).slice(0, 8).map((e) => ({ tag: String(e.tagName).toLowerCase(), t: noFile(own(e)).slice(0, 60), vis: visible(e) }));
   out.tables = all(doc, 'table,[role=grid]').slice(0, 8).map((t) => ({
     vis: visible(t),
     rows: all(t, 'tr,[role=row]').filter((r) => r.querySelectorAll('td,[role=gridcell],[role=cell]').length).length,
-    th: all(t, 'th,[role=columnheader]').slice(0, 15).map((x) => own(x).slice(0, 30)),
+    th: all(t, 'th,[role=columnheader]').filter((x) => !(x.closest && x.closest('tfoot'))).slice(0, 15).map((x) => own(x).slice(0, 30)), // בלי שורת הסיכום (tfoot)
   }));
   const bs = new Set();
   for (const el of all(doc, 'button,[role=button],input[type=button],input[type=submit]')) {
@@ -451,13 +455,13 @@ function screen(doc, o) {
     if (el.disabled) f.dis = true;
     let lb = null;
     try { lb = (el.id && doc.querySelector('label[for="' + el.id.replace(/["\\]/g, '') + '"]')) || (el.closest && el.closest('label')); } catch (e) { lb = null; }
-    if (lb) f.lbl = own(lb).slice(0, 60);
+    if (lb) f.lbl = noFile(own(lb)).slice(0, 60);
     // ההורים הקרובים (עד 4): תגית, 2 מחלקות, וטקסט קצר (עד 100) – רק כשאין בתוכם טבלה
     f.up = [];
     for (let p = el.parentElement, k = 0; p && p !== doc.body && k < 4; p = p.parentElement, k++) {
       const cls = String(typeof p.className === 'string' ? p.className : '').split(/\s+/).filter((c) => c && !/\d{3,}/.test(c)).slice(0, 2);
       const t = hasTable(p) ? '' : own(p);
-      f.up.push({ tag: String(p.tagName).toLowerCase() + (cls.length ? '.' + cls.join('.') : ''), t: t.length <= 100 ? t : '', len: t.length });
+      f.up.push({ tag: String(p.tagName).toLowerCase() + (cls.length ? '.' + cls.join('.') : ''), t: t.length <= 100 ? noFile(t) : '', len: t.length });
     }
     return f;
   });
@@ -495,6 +499,6 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, DENY_HE, denied, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes };
+const api = { OPS, DENY_HE, denied, deniedLink, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);

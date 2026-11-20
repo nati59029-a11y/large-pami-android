@@ -12,7 +12,7 @@
   <span id="hkm" role="button">לקוחות</span><div id="hksub"></div>
   <span id="prm" role="button">כרטיס הטבות</span><div id="prmsub"></div>
   <span id="repm" role="button">דוחות</span><div id="repsub"></div>
-  <select id="brSel" aria-label="בחירת סניף"><option>יהודה הנשיא</option><option>נחל לכיש</option></select><span class="store-line">לארג' פעמי חנות: לארג' פעמי-יהודה הנשיא</span>
+  <select id="brSel" aria-label="בחירת סניף"><option>יהודה הנשיא</option><option>נחל לכיש</option></select><span class="store-line">לארג' פעמי חנות: לארג' פעמי-יהודה הנשיא</span><a href="#/receipts-outside">דוח תקבולים</a>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -35,21 +35,21 @@ document.getElementById('hkm').addEventListener('click', () => hit('hk-menu-clic
 // פקד הסניף (0.1.12): אסור לשנות / ללחוץ / לפקס – כל אירוע נרשם (attHits)
 for (const ty of ['click', 'mousedown', 'focus', 'change', 'input']) document.getElementById('brSel').addEventListener(ty, () => hit('branch-' + ty));
 // תפריט "דוחות" (0.1.12): קישורים במעבר עכבר – שניים של אמצעי תשלום / קופה, ואחד שלא קשור
-document.getElementById('repm').addEventListener('mouseover', () => { document.getElementById('repsub').innerHTML = '<a href="#/payment-methods-report">דוח אמצעי תשלום</a> <a href="#/cash-register-summary">סיכום קופה יומי</a> <a href="#/stock-report">דוח מלאי</a>'; });
+document.getElementById('repm').addEventListener('mouseover', () => { document.getElementById('repsub').innerHTML = '<a href="#/credit-settings">הגדרות אשראי</a> <a href="#/receipts-import">ייבוא תקבולים</a> <a href="#/payment-methods/new">הוסף אמצעי תשלום</a> <a href="#/payment-methods-report">דוח אמצעי תשלום</a> <a href="#/cash-register-summary">סיכום קופה יומי</a> <a href="#/stock-report">דוח מלאי</a>'; });
 document.getElementById('repm').addEventListener('click', () => hit('rep-menu-click'));
 // מסכי דוחות תשלום: סכומים בטבלה ובקובץ – אסור שיגיעו לדוח; "שמירה" / "סגירת קופה" – אסור ללחוץ
 function payRep(app, k) {
   const X = k === 'payment-methods-report';
   app.innerHTML = '<div class="pay-rep"><h2>' + (X ? 'דוח אמצעי תשלום' : 'סיכום קופה יומי') + '</h2><label for="payDay">תאריך</label><input type="date" id="payDay"><label for="payStore">סניף</label><select id="payStore"><option>יהודה הנשיא</option><option>נחל לכיש</option></select>'
-    + '<button class="btn" id="payShow">הצג</button>' + (X ? '<button class="btn" id="payX">יצוא לאקסל</button>' : '') + '<button class="btn btn-danger" data-hit="pay-save">שמירה</button><button class="btn btn-danger" data-hit="pay-close">סגירת קופה</button>'
-    + '<table class="table"><thead><tr><th>תאריך</th><th>סניף</th><th>מזומן</th><th>אשראי</th><th>הקפה</th><th>סה"כ</th></tr></thead><tbody><tr><td>17/11/2026</td><td>יהודה הנשיא</td><td>4321.5</td><td>8765.25</td><td>345.75</td><td>13432.5</td></tr></tbody></table></div>';
+    + '<span class="store-name">נחל לכיש: ₪12,345.00</span><button class="btn" id="payShow">הצג</button>' + (X ? '<button class="btn" id="payX">יצוא לאקסל</button>' : '') + '<button class="btn btn-danger" data-hit="pay-save">שמירה</button><button class="btn btn-danger" data-hit="pay-close">סגירת קופה</button>'
+    + '<table class="table"><thead><tr><th>תאריך</th><th>סניף</th><th>מזומן</th><th>אשראי</th><th>הקפה</th><th>סה"כ</th></tr></thead><tbody><tr><td>17/11/2026</td><td>יהודה הנשיא</td><td>4321.5</td><td>8765.25</td><td>345.75</td><td>13432.5</td></tr></tbody><tfoot><tr><th>סה"כ</th><th>99887.5</th></tr></tfoot></table></div>';
   document.getElementById('payShow').onclick = () => hit('pay-show');
   app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit); });
   const x = document.getElementById('payX');
   if (x) x.onclick = () => { ev.push('pay-x'); localStorage.setItem('payX', String(+(localStorage.getItem('payX') || 0) + 1)); dl(new Blob(['\ufeffתאריך,סניף,מזומן,אשראי,הקפה,סה"כ\n17/11/2026,יהודה הנשיא,4321.5,8765.25,345.75,13432.5\n'], { type: 'text/csv' }), 'payments.csv'); };
 }
 // תפריט "כרטיס הטבות" (0.1.12, לפי בעל העסק): "הוסף מבצע", "מבצעים", "ייבוא מבצעים" – נוצרים רק במעבר עכבר; לחיצה על התפריט – אסורה
-document.getElementById('prm').addEventListener('mouseover', () => { document.getElementById('prmsub').innerHTML = '<a href="#/promotions/new">הוסף מבצע</a> <a href="#/promotions">מבצעים</a> <a href="#/promotions-import">ייבוא מבצעים</a>'; });
+document.getElementById('prm').addEventListener('mouseover', () => { document.getElementById('prmsub').innerHTML = '<a href="#/promotions-import">ייבוא מבצעים</a> <a href="#/promotions/add">הוספת מבצעים</a> <a href="#/promotions/new">הוסף מבצע</a> <a href="#/promotions">מבצעים</a>'; });
 document.getElementById('prm').addEventListener('click', () => hit('prm-menu-click'));
 // מסך המבצעים (0.1.12): רשימה, לשונית "ייבוא מבצעים", "הוסף מבצע" (קישור), "ייבוא מבצעים מקובץ", עריכה/מחיקה/ביטול בשורות – אסור ללחוץ (attHits);
 // מותר רק "יצוא לאקסל" (prmX). שמות המבצעים בטבלה ובקובץ – אסור שיגיעו לדוח
@@ -248,6 +248,8 @@ function render() {
       + '<table class="table"><thead><tr><th>תאריך</th><th>כניסה</th><th>יציאה</th><th>שעות רגילות</th><th>125%</th><th>150%</th><th>175%</th><th>200%</th><th>225%</th><th>250%</th><th>פעולות</th></tr></thead><tbody><tr><td>03/' + mm + '</td><td>07:41</td><td>15:58</td><td>8:17</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td><button class="btn">עריכה</button></td></tr></tbody></table></div>';
     document.getElementById('ttAdd').onclick = () => hit('tt-add');
     document.getElementById('ttX').onclick = () => { ev.push('tt-x:' + id); dl(new Blob(['﻿דוח שעות עובד - ' + nm + '\nתאריך,כניסה,יציאה,שעות רגילות,125%,150%\n03/' + mm + ',07:41,15:58,8:17,0,0\n04/' + mm + ',07:39,16:05,8:26,0,0\n'], { type: 'text/csv' }), 'time_tracks_' + id + '.csv'); };
+  } else if (['#/credit-settings', '#/receipts-import', '#/payment-methods/new', '#/receipts-outside', '#/stock-report'].includes(h)) {
+    hit('pay-bad-nav:' + h); app.innerHTML = '<h2>מסך שאסור להיכנס אליו בהיכרות</h2>'; // 0.1.12: קישור אסור / לא תחת "דוחות" – אסור לפתוח
   } else if (h === '#/payment-methods-report' || h === '#/cash-register-summary') {
     payRep(app, h.slice(2));
   } else if (h === '#/promotions') {

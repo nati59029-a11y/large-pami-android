@@ -73,7 +73,10 @@ const HDR_WORDS = new Set(('תאריך תאריכים יום ימים כניסה
   'דוא"ל מייל אימייל איש קשר יתרה יתרת חוב חובה זכות זכאי אשראי מסגרת תנאי תשלום תשלומים שוטף פירעון מסמך מסמכים חשבונית חשבוניות מס מרכזת מרכזות ' +
   'קבלה קבלות תעודה תעודת תעודות משלוח זיכוי סכום סכומים מע"מ מעמ לפני אחרי קופה קופות קופאי מזהה קוד פריט פריטים כמות מחיר יחידה הנחה ברקוד תיאור ' +
   'שורה שורות פתוח פתוחה פתוחים סגור שולם לא כן אחרון אחרונה קנייה קניות רכישה רכישות מכירה מכירות תקופה שנה חודשי חודשית חיוב אסמכתא ערך מטבע ש"ח ₪ ' +
-  'מזומן אמצעי הפקה הנפקה מקורי קבוצה קבוצת הערה סיכום ריכוז פירוט דוח מצב פעיל נטו ברוטו רשימה').split(' '));
+  'מזומן אמצעי הפקה הנפקה מקורי קבוצה קבוצת הערה סיכום ריכוז פירוט דוח מצב פעיל נטו ברוטו רשימה ' +
+  // 0.1.12 – מבצעים ואמצעי תשלום (כותרות צפויות: שם מבצע, מתאריך, סוג מבצע, מחיר מבצע; מזומן, אשראי, הקפה, צ'ק, תקבולים, קופאי…)
+  'מבצע מבצעים הטבה הטבות מועדון חבר חברי נקודות תוקף אחוז קנה קבל מינימום מקסימום מוצר מוצרים ' +
+  'אשראי צ\'ק צק שיק המחאה המחאות תקבול תקבולים העברה העברות בנקאית ביט פייבוקס שובר שוברים תו תווים קופאים ויזה החזר החזרים ביטולים עסקאות עסקה').split(' '));
 const HDR_PCT = /^\d{2,3}(?:\.\d)?%$/;
 // תא כותרת → אותו תא (מנורמל) אם כל המילים בו מוכרות (גם עם ו/ה/ב/ל/מ בתחילת מילה), אחרת '?'
 function hdrCell(v) {
@@ -86,6 +89,8 @@ function hdrCell(v) {
   return words.every(known) ? t : '?';
 }
 const hdrSafe = (row) => (Array.isArray(row) ? row.slice(0, 40).map(hdrCell) : null);
+// 0.1.12 (מבצעים / אמצעי תשלום): כמו hdrSafe, ובנוסף תא עם ספרה או ₪ → '?' תמיד (גם אם המילים מוכרות, למשל "125%" או "מזומן 1,234")
+const hdrStrict = (row) => (Array.isArray(row) ? row.slice(0, 40).map((v) => (/[\d₪]/.test(String(v == null ? '' : v)) ? '?' : hdrCell(v))) : null);
 function cellKind(v) {
   if (v == null) return 'empty';
   if (typeof v === 'number') return Number.isFinite(v) ? 'num' : 'text';
@@ -109,8 +114,8 @@ function fileShape(rows, n) {
   }
   return { hi, hdr: hi >= 0 ? hdrSafe(R[hi]) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
 }
-// קובץ יצוא של דף שאינו priv (מבצעים, 0.1.12): שורת הכותרות כמו שהיא (עד 40 תאים, 40 תווים) – השורה הראשונה מבין 10 עם לפחות 2 תאים
-// ושכל התאים בה טקסט (לא מספר / תאריך / שעה); מהשורות הראשונות (עד n) – רק סוג התא. בלי ערכים של שורות הנתונים
+// קובץ יצוא של מבצעים / אמצעי תשלום (0.1.12): שורת הכותרות – השורה הראשונה מבין 10 עם לפחות 2 תאים ושכל התאים בה טקסט (לא מספר / תאריך / שעה).
+// כל תא עובר את הרשימה הלבנה (hdrStrict: תא לא מוכר, או עם ספרה / ₪ → '?') – כך שורת נתונים שנבחרה בטעות לא מדליפה. מהשורות (עד n) – רק סוג התא
 function hdrRaw(rows, n) {
   const R = Array.isArray(rows) ? rows : [];
   let hi = -1;
@@ -118,8 +123,8 @@ function hdrRaw(rows, n) {
     const r = Array.isArray(R[i]) ? R[i] : [], k = r.map(cellKind), full = k.filter((x) => x !== 'empty').length;
     if (full >= 2 && k.every((x) => x === 'text' || x === 'empty')) hi = i;
   }
-  return { hi, hdr: hi >= 0 ? R[hi].slice(0, 40).map((x) => String(x == null ? '' : x).trim().slice(0, 40)) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
+  return { hi, hdr: hi >= 0 ? hdrStrict(R[hi]) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
 }
-const api = { MAX_BYTES, hdrRaw, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
+const api = { MAX_BYTES, hdrRaw, hdrStrict, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSanitize = api;
 })(typeof self !== 'undefined' ? self : this);

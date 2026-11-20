@@ -303,19 +303,31 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.deepEqual(payF[0].hdr, ['תאריך', 'סניף', 'מזומן', 'אשראי', 'הקפה', 'סה"כ']); assert.deepEqual(payF[0].kinds[1], ['date', 'text', 'num', 'num', 'num', 'num']);
   assert.equal(await caspitPage().evaluate(() => localStorage.getItem('payX')), '1');
   assert.ok(!rep.pages.some((p) => p.hash === '#/stock-report'), 'דוח שלא קשור לאמצעי תשלום – לא נפתח');
+  // תיקון בודק 0.1.12: "הגדרות אשראי", "ייבוא תקבולים", "הוסף אמצעי תשלום" (מילה אסורה / הגדר / ייבוא) ו"דוח תקבולים" שלא תחת "דוחות" – לא נפתחו
+  for (const h of ['#/credit-settings', '#/receipts-import', '#/payment-methods/new', '#/receipts-outside']) assert.ok(!rep.pages.some((p) => p.hash === h), 'נפתח: ' + h);
+  for (const t of ['הגדרות אשראי', 'ייבוא תקבולים', 'הוסף אמצעי תשלום']) assert.equal(rep.menu.find((l) => l.t === t).bad, true, t);
+  assert.equal(rep.menu.find((l) => l.t === 'דוח אמצעי תשלום').u, 'דוחות');
+  assert.equal(rep.menu.find((l) => l.h === '#/receipts-outside').u, undefined, 'קישור מחוץ לתפריט – בלי u');
+  assert.ok(p1.controls.every((c) => c.options === undefined && c.placeholder === undefined && (c.text === undefined || /^(הצג|יצוא לאקסל)$/.test(c.text))), 'noText: ' + JSON.stringify(p1.controls.filter((c) => c.text || c.options)));
+  assert.ok(!JSON.stringify(p1).includes('99887.5'), 'בלי tfoot');
   for (const nm of ['4321.5', '8765.25', '345.75', '13432.5']) assert.ok(!txt.includes(nm), 'סכום מהדוח: ' + nm);
   // 0.1.12 בחירת סניף: מתועד בכל מסך, בלי select / click / פוקוס על הפקד (attHits למטה, branch-*)
   const br = rep.branch.picks.find((b) => b.css === 'select#brSel');
   assert.ok(br, JSON.stringify(rep.branch));
   assert.equal(br.kind, 'select'); assert.equal(br.aria, 'בחירת סניף'); assert.deepEqual(br.opts, ['יהודה הנשיא', 'נחל לכיש']); assert.equal(br.cur, 'יהודה הנשיא');
   assert.ok(br.on.includes('catalogs') && br.on.includes('hk-customers') && br.on.includes('pay-1'), JSON.stringify(br.on));
-  assert.ok(rep.branch.store.includes("לארג' פעמי חנות: לארג' פעמי-יהודה הנשיא"), JSON.stringify(rep.branch.store));
+  assert.deepEqual(rep.branch.store, ['יהודה הנשיא'], 'רק שם הסניף, לא הטקסט המלא: ' + JSON.stringify(rep.branch.store));
+  // תיקון בודק 0.1.12: "נחל לכיש: ₪12,345.00" → רק "נחל לכיש"; שום טקסט מלא / סכום מהפקדים
+  assert.ok(rep.branch.picks.some((b) => b.t === 'נחל לכיש' && b.on.includes('pay-1')), JSON.stringify(rep.branch.picks));
+  const brTxt = JSON.stringify(rep.branch);
+  for (const x of ['12,345', '₪', 'לארג', 'חנות']) assert.ok(!brTxt.includes(x), 'טקסט מלא בפקד הסניף: ' + x + ' ' + brTxt);
   const hkB = rep.branch.picks.find((b) => b.css === 'select#hkStore');
   assert.ok(hkB && hkB.opts.every((o) => o === 'נחל לכיש' || o === 'יהודה הנשיא'), 'בדף priv – רק שמות סניפים: ' + JSON.stringify(hkB));
   assert.equal(await caspitPage().evaluate(() => document.getElementById('brSel').value), 'יהודה הנשיא', 'הבחירה לא השתנתה');
   // 0.1.12 מבצעים: "כרטיס הטבות" (מעבר עכבר) ← "מבצעים"; הלחיצה היחידה – "יצוא לאקסל"; "הוסף מבצע" / ייבוא – רק מתועדים (בלי לחיצה ובלי ניווט)
   const pr = rep.pages.find((p) => p.name === 'promos');
   assert.equal(pr.ok, true, JSON.stringify(pr)); assert.equal(pr.hash, '#/promotions');
+  assert.equal(rep.menu.find((l) => l.t === 'ייבוא מבצעים').bad, true); assert.equal(rep.menu.find((l) => l.t === 'הוספת מבצעים').bad, true);
   assert.deepEqual(pr.probe.map((x) => [x.op, x.found, x.done]), [['click', true, true]]);
   assert.deepEqual(pr.heads, [['מספר מבצע', 'שם מבצע', 'מתאריך', 'עד תאריך', 'סוג מבצע', 'מחיר מבצע', 'סטטוס', 'פעולות']]);
   const mk = pr.scr.marks.map((m) => m.t);
