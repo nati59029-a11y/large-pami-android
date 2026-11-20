@@ -29,6 +29,8 @@ let salesNow = null, noPt = false;
 const stripPt = (x) => Object.assign({}, x, CC.packDays(CC.unpackDays(x).filter((d) => !d.pt)));
 const SALES = { ...CC.packDays(DAYS), cats: { k1: 'כלים', k2: 'נייר' }, cfg: { reg: { 6200: 'i_yh', 7700: 'i_nl' }, br: '_', lastSales: { run: 'r', at: Date.UTC(2026, 10, 17, 10) } }, sa: true };
 const TX = { tx: [{ id: '6200_20261116_9001', d: '2026-11-16', tx: '9001', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 'a', c: '400001', n: 'כוס נייר', a: 20, ds: 0, q: 2, qs: 'sure', t: 14 * 60 + 5 }, { k: 'b', c: '1000', n: 'פריט כללי', a: 23.6, ds: 0, q: null, qs: 'skip' }] }] };
+// 20.11: יום עם החזרה ומכירה רגילה – משבצת "החזרות" מציגה רק את שורת ההחזרה
+const TX17 = { tx: [{ id: '6200_20261117_9003', d: '2026-11-17', tx: '9003', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 'r', c: '400001', n: 'כוס נייר', a: -10, ds: 0, q: -1, qs: 'sure' }] }, { id: '6200_20261117_9004', d: '2026-11-17', tx: '9004', bk: '6200', bn: 'יהודה הנשיא', lines: [{ k: 's', c: '400003', n: 'מפית', a: 30, ds: 0, q: 3, qs: 'sure' }] }] };
 const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '7700', bn: 'נחל לכיש', lines: [{ k: '400002|13|0|0', c: '400002', n: 'צלחת', a: 13, ds: 0, q: 1, qs: 'unsure', why: 'frac', P: 10 }] }] };
 
 (async () => {
@@ -50,7 +52,7 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
     if (n === 'cxSales' && d && d.pt !== undefined && noPt) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'שדה לא מוכר: pt', details: { reason: 'bad-field' } } }) });
     const R = { cxCfg: { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa: false }, cxUpload: { ok: true }, cxPreview: PV,
       cxApply: { done: true, res: { lines: 4, sold: 3, back: 1, unsure: 0, skip: 1, nolink: 0, stock: 3, dup: 0, tx: 3 }, ix: [0, 1, 2, 3] }, cxSales: d && d.pt ? salesNow || SALES : stripPt(salesNow || SALES),
-      cxLines: d && d.un ? UN : TX, cxFix: { ok: true, q: 2, delta: 1, qs: 'own' }, cxSetCfg: { ok: true, reg: d && d.reg }, getCosts: { cost: {} } };
+      cxLines: d && d.un ? UN : d && /20261117$/.test(d.bd || '') ? TX17 : TX, cxFix: { ok: true, q: 2, delta: 1, qs: 'own' }, cxSetCfg: { ok: true, reg: d && d.reg }, getCosts: { cost: {} } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await H.login(page, 'm@x.co');
@@ -124,6 +126,19 @@ const UN = { tx: [{ id: '7700_20261116_9002', d: '2026-11-16', tx: '9002', bk: '
   await page.click('#dlg [data-a=cxYDay][data-d="2026-11-16"]'); await H.settle(page, 500);
   const bds = calls.filter((x) => x.n === 'cxLines').slice(-2).map((x) => x.d.bd);
   check('14 יום → עסקאות שני הסניפים (cxLines לפי יום+סניף)', JSON.stringify(bds.sort()) === '["6200_20261116","7700_20261116"]', bds);
+  await close();
+  // 20.11: משבצת "החזרות" → רק ימים עם החזרות → רק שורות ההחזרה
+  await page.click('[data-a=cxYDl][data-k=ret]'); await H.settle(page, 300);
+  const rd = await q();
+  check('14ב משבצת "החזרות" → רק ימים עם החזרות', /החזרות לפי יום/.test(rd.text) && /17\/11\/2026/.test(rd.text) && !/16\/11\/2026/.test(rd.text), rd.text.slice(0, 200));
+  await page.click('#dlg [data-a=cxYDay][data-d="2026-11-17"]'); await H.settle(page, 500);
+  const rt = await q();
+  check('14ג יום → רק שורות ההחזרה (בלי מכירות רגילות)', /עסקה 9003/.test(rt.text) && !/עסקה 9004/.test(rt.text) && !/מפית/.test(rt.text) && /1 עסקאות/.test(rt.text) && /סה"כ/.test(rt.text), rt.text.slice(0, 300));
+  await close();
+  await page.click('[data-a=cxYDl][data-k=ntx]'); await H.settle(page, 300);
+  await page.click('#dlg [data-a=cxYDay][data-d="2026-11-17"]'); await H.settle(page, 500);
+  const at = await q();
+  check('14ד משבצת "עסקאות" → כל העסקאות של היום', /עסקה 9003/.test(at.text) && /עסקה 9004/.test(at.text), at.text.slice(0, 300));
   await close();
   await page.click('[data-a=cxYTab][data-k=reg]'); await H.settle(page, 200);
   const rg = await q();
