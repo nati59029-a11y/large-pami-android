@@ -55,6 +55,25 @@ function readRows(u8, name, X, C) {
   }
   return parseCsv(C ? C.decode(u8) : new TextDecoder().decode(u8));
 }
-const api = { LIMITS, sha256, toB64, fromB64, rid, parseCsv, readRows };
+// ---------- היכרות: בחירת קישורי תפריט (0.1.12, תיקוני בודק) ----------
+// links מ-menuIn: [{ t, h, u?, bad? }] – u = כותרת התפריט שתחת המעבר עליה הקישור נחשף; bad = בטקסט מילה אסורה (DENY_HE/DENY_EN), "הגדר" או "ייבוא".
+// find: רק התאמה מדויקת של הטקסט, ולא קישור bad (בלי התאמה חלקית: "ייבוא מבצעים" / "הוספת מבצעים" לא ייבחרו במקום "מבצעים")
+function menuPick(links, find) {
+  const f = String(find || '').trim();
+  if (!f) return null;
+  return (links || []).find((l) => l && !l.bad && l.t === f) || null;
+}
+// findAll: רק קישורים שנחשפו תחת אחת מכותרות התפריט (under), לא bad, שהטקסט כולל אחד מביטויי הדוח (בלי רישיות), hash תקין ולא מסך מוכר; עד max
+function menuAll(links, words, under, known, max, hashRe) {
+  const W = (words || []).map((w) => String(w).toLowerCase()).filter(Boolean), U = new Set((under || []).map(String)), K = new Set(known || []), out = [];
+  for (const l of links || []) {
+    if (out.length >= (max || 8)) break;
+    if (!l || l.bad || !U.has(l.u) || K.has(l.h) || (hashRe && !hashRe.test(l.h))) continue;
+    if (!W.some((w) => String(l.t).toLowerCase().includes(w))) continue;
+    K.add(l.h); out.push(l);
+  }
+  return out;
+}
+const api = { LIMITS, sha256, toB64, fromB64, rid, parseCsv, readRows, menuPick, menuAll };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxUtil = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -372,6 +372,23 @@ const fileDiagIn = (t, guard) => {
     .filter((x) => x.getClientRects().length && !(x.closest && x.closest('table'))).map((x) => S.norm(x.textContent).slice(0, 80)).filter(Boolean).slice(0, 3);
   return { ins: ins.length, vis: ins.filter((x) => x.getClientRects().length).length, files: el ? (el.files || []).length : -1, val: el ? !!el.value : false, accept: el ? String(el.getAttribute('accept') || '').slice(0, 60) : '', multi: !!(el && el.multiple), msgs };
 };
+// 0.1.12: תמונה מסוננת של מסך הייבוא כשהצעד setFile / queue נכשל (selectors.js screen) – כותרות, כותרות טבלה ומספר שורות,
+// מילות פעולה של כפתורים, מה שמסביב לשדה הקובץ, דיאלוג גלוי. נשלחת לשרת ב-info.scr של דיווח הריצה (לא בהודעה הקצרה), אחרי sanitize ועד ~4KB
+const SCR_MAX = 4000;
+const scrIn = (head, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return X.screen(document, { head }); };
+async function scrOf(tabId, flow, res) {
+  try {
+    const fl = ((await sel()).flows || {})[flow] || [];
+    const st = res && res.miss != null ? fl[res.miss] || {} : {};
+    if (st.op !== 'setFile' && st.op !== 'queue') return null;
+    const q = fl.find((x) => x && (x.op === 'queue' || x.op === 'queueEmpty')) || {};
+    await guardBo(tabId);
+    const r = await inIso(tabId, scrIn, [q.head || 'ממתין לטעינה', GUARD]);
+    if (!r || r.wrong) return null;
+    const rec = ((res.steps || []).filter((x) => x.i === res.miss).pop()) || {};
+    return S.limit(S.sanitize(Object.assign({ v: 1, flow, op: st.op, err: String(rec.err || '').slice(0, 30) }, r)), SCR_MAX);
+  } catch (e) { return null; }
+}
 async function putFile(tabId, s, q, vars, f) {
   const rec = { found: false, done: false };
   if (!f) return { ok: false, rec: Object.assign(rec, { err: 'no-file' }) };
@@ -605,7 +622,13 @@ async function exportImport(run, kind) {
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
   if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty');
-  if (!res || (!res.ok && !res.already)) { if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login'); if (res && res.diag) throw P.err('selector-miss', ((kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים') + ': ' + res.diag).slice(0, 290)); throw missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}); }
+  if (!res || (!res.ok && !res.already)) {
+    if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login');
+    const scr = await scrOf(tab, kind === 'new' ? 'importNew' : 'importPrice', res); // 0.1.12: רק אבחון – ההחלטה (selector-miss) לא משתנה
+    const x = scr ? { scr } : undefined;
+    if (res && res.diag) throw P.err('selector-miss', ((kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים') + ': ' + res.diag).slice(0, 290), x);
+    throw Object.assign(missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}), x || {});
+  }
   // אחרי "העלה קבצים והרץ טעינה": שורה חדשה (מזהה גדול מהקודם) עם השם שלנו, עד סטטוס סופי. קריאה בלבד, כל 3 שניות
   const r2 = await waitImport(tab, name, res.already ? res.already - 1 : res.hmax || 0, (await sel()).importWaitMs || 600e3);
   const text = `מזהה ${r2.id || '—'} · ${r2.st || ''} · נטענו ${r2.ok == null ? '?' : r2.ok} · שגויים ${r2.err == null ? '?' : r2.err}`;
@@ -637,7 +660,7 @@ async function waitImport(tab, name, after, ms) {
 }
 function summary(run) {
   const i = run.info || {};
-  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags };
+  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
 }
 
 // ---------- ריצה ----------
@@ -675,9 +698,11 @@ async function loop(run0) {
         if (!navigator.onLine) throw P.err('offline');
         const info = await STEP[step](run);
         run = P.advance(run, Date.now(), info);
+        if (run.info && run.info.scr) delete run.info.scr; // 0.1.12: ניסיון חוזר שהצליח – בלי אבחון ישן בדיווח
       } catch (e) {
         // שגיאה בלי קוד (למשל של chrome.tabs / scripting – הלשונית נסגרה או נטענה מחדש באמצע) → תקלה זמנית, ניסיון חוזר
         run = P.fail(run, Date.now(), e && typeof e.code === 'string' ? e : P.err('tab', String((e && e.message) || e).slice(0, 200)));
+        if (e && e.scr) run.info.scr = e.scr; // 0.1.12: תמונת מסך הייבוא (מסוננת) – נשלחת בדיווח (summary)
       }
     }
     await set({ run });
@@ -705,11 +730,17 @@ async function finalize(run) {
 const menuIn = async (heads, max, guard) => {
   const S = self.CxSel;
   if (!S.onPath(window, guard)) return { wrong: true };
+  // 0.1.12: לכל קישור – תחת איזו כותרת תפריט הוא נחשף (u): קישור שהופיע (או נעשה גלוי) אחרי המעבר על הכותרת, או שנמצא בתוך הפריט שלה
+  const visA = () => new Set(Array.from(document.querySelectorAll('a[href]')).filter((a) => a.getClientRects().length));
+  const under = new Map();
   for (const t of heads || []) {
     const el = S.find(document, { text: t }) || S.find(document, { textAny: [t] });
     if (!el) continue;
+    const before = visA();
     for (const ty of ['mouseover', 'mouseenter']) el.dispatchEvent(new MouseEvent(ty, { bubbles: ty === 'mouseover' }));
     await new Promise((r) => setTimeout(r, 700));
+    const box = el.closest && el.closest('li,.dropdown,.nav-item,.menu-item,.submenu');
+    for (const a of visA()) if (!under.has(a) && (!before.has(a) || (box && box !== document.body && box.contains(a)))) under.set(a, t);
   }
   const out = [], seen = new Set();
   for (const a of Array.from(document.querySelectorAll('a[href]'))) {
@@ -719,17 +750,20 @@ const menuIn = async (heads, max, guard) => {
     const t = S.norm(a.textContent).slice(0, 40);
     if (!t || seen.has(t + '|' + h)) continue;
     seen.add(t + '|' + h);
-    out.push({ t, h: h.slice(0, 80) });
+    // bad: קישור עם מילה אסורה (שמירה / מחיקה / הוספה / ייבוא / טעינה…), "הגדר" (הגדרות) – בהיכרות לא נפתח בשום מקרה
+    out.push(Object.assign({ t, h: h.slice(0, 80) }, under.has(a) ? { u: under.get(a) } : {}, S.deniedLink([S.norm(a.textContent), a.getAttribute('aria-label') || ''].join(' ')) || /הגדר|ייבוא|יבוא/.test(t) ? { bad: true } : {}));
   }
   return { links: out };
 };
 // מסך לקריאה בלבד: כתובת, כותרת, פקדים וכותרות הטבלאות (בלי תוכן השורות) – בקריאה אחת, רק אם הדף ב-/bo
-const roIn = (guard, btn, priv) => {
+const roIn = (guard, btn, priv, scr) => {
   const S = self.CxSel;
   if (!S.onPath(window, guard)) return { wrong: true };
-  const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
+  // 0.1.12 (מסך הייבוא, imp): גם תמונת המסך – כותרות, אזורים / לשוניות, כותרות טבלה ומספר שורות, שדות הקובץ (accept, multiple, נראות)
+  const sc = scr ? S.screen(document, { marks: true }) : undefined;
+  const heads = Array.from(document.querySelectorAll('table,[role=grid]')).slice(0, 6).map((t) => Array.from(t.querySelectorAll('th,[role=columnheader]')).filter((th) => !th.closest('tfoot')).slice(0, 30).map((th) => S.norm(th.textContent).slice(0, 40))).filter((x) => x.length);
   // פרטיות: בדף לקריאה בלבד (למשל נוכחות) – בלי טקסט של פקדים ובלי אפשרויות של רשימות בחירה (שמות עובדים); רק תגית/סוג/מזהה ומספר אפשרויות
-  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn, priv: !!priv }), heads };
+  return { hash: location.hash, title: document.title, controls: S.controls(document, 400, { noText: true, btn: !!btn, priv: !!priv }), heads, scr: sc };
 };
 // דף priv (0.1.11): בכתובת נשאר רק המסך עצמו – כל מה שאחרי (מזהה לקוח / עובד) → {id}, ובפרמטרים רק השמות (הערכים → {v})
 function privHash(h) {
@@ -739,15 +773,57 @@ function privHash(h) {
   return m[1] + (m[2] && m[2] !== '/' ? '/{id}' : '') + q;
 }
 // כותרות טבלה בדף priv – רק דרך הרשימה הלבנה (תא לא מוכר → '?'), כמו כותרות הקובץ
+// פקד בחירת הסניף במשרד האחורי (0.1.12) – קריאה בלבד. פקד: select / רשימה נפתחת / קישור / כפתור שהטקסט שלו (או אחת מאפשרויות ה-select)
+// כולל שם סניף מ-cfg.names; האפשרויות רק אם כבר קיימות ב-DOM (option, או פריטי תפריט נפתח שכבר מצוירים), בלי לפתוח. מחוץ לטבלאות.
+// store: שם הסניף שכתוב ליד "חנות:" בדף (הסניף הנוכחי). מכל טקסט – רק שם סניף מ-cfg.names, אף פעם לא הטקסט המלא
+const brIn = (cfg, priv, guard) => {
+  const X = self.CxSel;
+  if (!X.onPath(window, guard)) return { wrong: true };
+  // 0.1.12 (תיקון בודק): מכל טקסט יוצא רק שם הסניף שזוהה מתוך cfg.names (nm) – לא הטקסט המלא (למשל "נחל לכיש: ₪12,345.00" → "נחל לכיש")
+  const N = (cfg.names || []).map(X.norm).filter(Boolean), nm = (t) => N.find((n) => X.norm(t).includes(n)) || '', has = (t) => !!nm(t);
+  const uniq = (a) => [...new Set(a.filter(Boolean))], aria = (e) => String(e.getAttribute('aria-label') || '').replace(/[\d₪]+/g, '').slice(0, 60);
+  const DATA = 'table,tbody,tr,td,[role=grid],[role=row],[role=gridcell],[role=cell]';
+  const vis = (e) => e.getClientRects().length > 0, txt = (e) => X.norm(e.innerText || e.textContent);
+  const ok = (e) => !(e.closest && e.closest(DATA));
+  const out = [];
+  for (const e of Array.from(document.querySelectorAll('select'))) {
+    if (!ok(e)) continue;
+    const op = Array.from(e.options || []).map((o) => X.norm(o.textContent));
+    if (!op.some(has)) continue;
+    out.push({ kind: 'select', css: X.cssPath(e), id: e.id || '', aria: aria(e), vis: vis(e), n: op.length, opts: uniq(op.map(nm)), cur: e.selectedIndex >= 0 ? nm(op[e.selectedIndex]) : '' });
+  }
+  const C = 'button,a,[role=combobox],[role=button],[role=listbox],.dropdown-toggle,.multiselect,.v-select,.navbar-text,.store-name,span,div';
+  const cand = Array.from(document.querySelectorAll(C)).filter((e) => ok(e) && vis(e) && txt(e).length <= 60 && has(txt(e)) && !(e.closest && e.closest('select')));
+  for (const e of cand.filter((e) => !cand.some((o) => o !== e && e.contains(o))).slice(0, 4)) {
+    const tag = String(e.tagName).toLowerCase(), role = String(e.getAttribute('role') || '');
+    const box = e.closest('.dropdown,.multiselect,.v-select,[role=combobox],li,.nav-item') || e.parentElement;
+    const items = box ? uniq(Array.from(box.querySelectorAll('.dropdown-item,.multiselect__option,[role=option],[role=menuitem],li a')).filter((x) => x !== e).slice(0, 30).map((x) => nm(txt(x)))) : [];
+    const kind = tag === 'a' ? 'link' : role === 'combobox' || /multiselect|v-select|dropdown/.test(String(e.className) + ' ' + String(box && box.className)) ? 'dropdown' : tag === 'button' || role === 'button' ? 'button' : 'text';
+    const h = tag === 'a' ? String(e.getAttribute('href') || '') : '';
+    out.push(Object.assign({ kind, tag, css: X.cssPath(e), aria: aria(e), t: nm(txt(e)), opts: items }, /^#\//.test(h) ? { h: h.slice(0, 80).replace(/\d+/g, '{n}') } : h ? { h: '(ext)' } : {}));
+  }
+  const st = Array.from(document.querySelectorAll('body *')).filter((e) => ok(e) && vis(e) && /חנות\s*:/.test(e.textContent || '') && X.norm(e.textContent).length <= 120);
+  const store = uniq(st.filter((e) => !st.some((o) => o !== e && e.contains(o))).slice(0, 3).map((e) => nm(txt(e)))); // רק שם הסניף שכתוב ליד "חנות:"
+  return { picks: out.slice(0, 6), store };
+};
+async function branchAdd(tab, acc, pg, cfg) {
+  if (!cfg || !Array.isArray(cfg.names)) return;
+  const r = await inIso(tab, brIn, [cfg, !!pg.priv, GUARD]).catch(() => null);
+  if (r && r.wrong) throw wrongPage();
+  if (!r) return;
+  acc.pages++;
+  for (const p of r.picks || []) {
+    const k = p.kind + '|' + p.css, old = acc.picks.find((x) => x.k === k);
+    if (old) { if (old.on.length < 30) old.on.push(pg.name); continue; }
+    if (acc.picks.length < 10) acc.picks.push(Object.assign({ k, on: [pg.name] }, p));
+  }
+  for (const t of r.store || []) if (!acc.store.includes(t) && acc.store.length < 5) acc.store.push(t);
+}
 const privHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrSafe(row) || []) : []);
+// מבצעים / אמצעי תשלום (0.1.12): כמו privHeads, ובנוסף כל תא עם ספרה או ₪ → '?' (סכום, מספר, שם קופאי בכותרת לא יוצאים)
+const safeHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrStrict(row) || []) : []);
 // מהדף הפרטי הראשון ועד סוף ההיכרות – כל בקשת רשת מסומנת pv (גם בקשות שמסתיימות אחרי המעבר למסך הבא)
 const privNet = (tab) => inMain(tab, () => window.__cxHook && window.__cxHook.privMark && window.__cxHook.privMark(true)).catch(() => {});
-// הקישור שמתאים לדף: טקסט מדויק, ואחרת מוכל
-function menuPick(links, find) {
-  const f = String(find || '').trim();
-  if (!f) return null;
-  return links.find((l) => l.t === f) || links.find((l) => l.t.includes(f)) || null;
-}
 async function runDisc() {
   if (busy) return { ok: false, code: 'busy' };
   busy = true;
@@ -768,23 +844,39 @@ async function runDisc() {
     const mr = await inIso(tab, menuIn, [heads, 200, GUARD]);
     if (mr && mr.wrong) throw wrongPage();
     const links = (mr && mr.links) || [];
-    rep.menu = links.map((l) => ({ t: l.t, h: l.h.replace(/\d+/g, '{n}') }));
+    rep.menu = links.map((l) => Object.assign({ t: l.t, h: l.h.replace(/\d+/g, '{n}') }, l.u ? { u: l.u } : {}, l.bad ? { bad: true } : {}));
+    // findAll (0.1.12, דוחות אמצעי תשלום): רק קישורים שנחשפו תחת כותרות התפריט של הדף (menu: "דוחות" / "קופות"), בלי מילה אסורה / "הגדר" / "ייבוא",
+    // שהטקסט שלהם כולל ביטוי דוח מפורש (U.menuAll) → דף משלו (hash מהקישור), עד max. מסך שכבר בהגדרה – לא שוב. בלי אף קישור – שורה אחת not-found
+    const known = (S0.disc || []).map((p) => p.hash).filter(Boolean), pages = [];
     for (const pg of S0.disc || []) {
+      if (!Array.isArray(pg.findAll)) { pages.push(pg); continue; }
+      const L = U.menuAll(links, pg.findAll, pg.menu, known, +pg.max || 8, HASH_RE);
+      L.forEach((ln, k) => { known.push(ln.h); pages.push(Object.assign({}, pg, { findAll: undefined, name: pg.name + '-' + (k + 1), hash: ln.h, src: ln.t })); });
+      if (!L.length) pages.push({ name: pg.name, none: true, find: pg.findAll.join(',') });
+    }
+    rep.branch = { picks: [], store: [], pages: 0 };
+    for (const pg of pages) {
+      if (pg.none) { rep.pages.push({ name: pg.name, ok: false, nav: 'not-found', find: String(pg.find).slice(0, 120) }); continue; }
       // מסך בלי hash קבוע (למשל נוכחות תחת "עובדים"): הכתובת מקישור התפריט לפי הטקסט. רק #/... בתוך /bo (navTo + guardBo)
+      // find: מחרוזת או רשימה לפי סדר עדיפות (0.1.12 מבצעים: רק "מבצעים" מדויק). רק התאמה מדויקת ולא קישור bad (U.menuPick); הקישור – גם ל-{hash} של הזרימה
+      let l = null;
       if (pg.find) {
-        const l = menuPick(links, pg.find);
+        l = (Array.isArray(pg.find) ? pg.find : [pg.find]).map((f) => U.menuPick(links, f)).find(Boolean) || null;
         if (!l || !(await navTo(tab, l.h, false, 3000))) { rep.pages.push({ name: pg.name, ok: false, nav: l ? 'bad-hash' : 'not-found', find: String(pg.find).slice(0, 40) }); continue; }
       } else if (pg.hash) await navTo(tab, pg.hash, false, 3000);
       await guardBo(tab);
+      // בחירת סניף (0.1.12): בכל מסך, לפני כל צעד – רק קריאה (בלי select, בלי click, בלי פוקוס על הפקד)
+      await branchAdd(tab, rep.branch, pg, S0.branch);
       if (!pg.flow) {
         // מסך לקריאה בלבד: בלי צעדים ובלי שום לחיצה – רק פקדים, כותרות טבלה, כתובת וכותרת
         if (pg.priv) await privNet(tab);
-        const r = (await inIso(tab, roIn, [GUARD, !!pg.btn, !!pg.priv])) || {};
+        // imp (0.1.12, מסך הייבוא): בלי שום לחיצה, בלי בחירת סוג ובלי קובץ – רק קריאה
+        const r = (await inIso(tab, roIn, [GUARD, !!pg.btn, !!pg.priv, !!pg.imp && !pg.priv])) || {};
         if (r.wrong) throw wrongPage();
         await guardBo(tab);
         // priv (לקוחות הקפה, 0.1.11): בלי כותרת הדף, כתובת בלי מזהים, כותרות טבלה רק מהרשימה הלבנה
         if (pg.priv) rep.pages.push({ name: pg.name, ok: true, ro: true, priv: true, hash: privHash(r.hash).replace(/\d+/g, '{n}').slice(0, 80), controls: r.controls || [], heads: privHeads(r.heads) });
-        else rep.pages.push({ name: pg.name, ok: true, ro: true, hash: String(r.hash || '').replace(/\d+/g, '{n}').slice(0, 80), title: String(r.title || '').slice(0, 60), controls: r.controls || [], heads: r.heads || [] });
+        else rep.pages.push(Object.assign({ name: pg.name, ok: true, ro: true, hash: String(r.hash || '').replace(/\d+/g, '{n}').slice(0, 80), title: String(r.title || '').slice(0, 60), controls: r.controls || [], heads: r.heads || [] }, r.scr ? { scr: r.scr } : {}));
         continue;
       }
       // היכרות v2: פותחים רשימות / לוח שנה רק כדי לראות אותם (בלי לבחור), לפני הצעדים
@@ -796,7 +888,7 @@ async function runDisc() {
       await arm(tab, nonce);
       if (pg.priv) await privNet(tab);
       // hash: למסך עם hash קבוע – צעד עם at "{hash}" (hkExport) רץ רק אם באמת הגענו למסך
-      const probe = await runFlow(tab, pg.flow, { day, hash: pg.hash || '' }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
+      const probe = await runFlow(tab, pg.flow, { day, hash: pg.hash || (l && l.h) || '' }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
       // priv (0.1.11): מהרכיב שנמצא / נחסם – רק תגית ו-css, בלי הטקסט (למשל "יצוא לאקסל – כרטסת <שם לקוח>")
       const elOf = (e) => (e && pg.priv ? { tag: e.tag, css: String(e.css || '').replace(/\d/g, '?') } : e);
       const page = { name: pg.name, flow: pg.flow, probe: (probe.steps || []).map((x) => ({ i: x.i, op: x.op, found: x.found, done: x.done, el: elOf(x.el), err: x.err })), ok: !!probe.ok };
@@ -814,6 +906,7 @@ async function runDisc() {
             // קובץ של דף priv (שעות עובד 0.1.10, לקוחות הקפה 0.1.11): שורת הכותרות רק דרך רשימה לבנה (תא לא מוכר → '?'),
             // ומ-5 השורות הראשונות רק סוג התא – בלי שמות, טלפונים, סכומים או שעות. גם אם הקובץ נראה כמו קטלוג/מכירות
             if (pg.priv || pg.flow === 'empHours') shape = S.fileShape(R, 5);
+            else if (pg.promo || pg.pay) shape = S.hdrRaw(R, 5); // מבצעים / אמצעי תשלום (0.1.12): כותרות כמו שהן + סוג תא, בלי ערכים
             else if (det.kind) hdr = R[det.hi].map((x) => String(x).slice(0, 40));
           } catch (e) { kind = 'unreadable'; }
           rep.files.push(Object.assign({ flow: pg.flow, page: pg.name, ext: (/\.(\w{1,5})$/.exec(f.name || '') || [])[1] || '', mime: f.mime, size: f.size, via: f.via, kind, rows, cols, hdr: shape ? shape.hdr : hdr }, shape ? { hi: shape.hi, kinds: shape.kinds } : {}));
@@ -833,6 +926,17 @@ async function runDisc() {
         page.controls = r.controls || [];
         page.heads = privHeads(r.heads);
       } else page.controls = await inIso(tab, () => self.CxSel.controls(document, 400));
+      if (pg.src) page.src = String(pg.src).slice(0, 40); // findAll: טקסט הקישור בתפריט
+      if ((pg.promo || pg.pay) && !pg.priv) {
+        // מבצעים / אמצעי תשלום (0.1.12): פקדים בלי טקסט חופשי (noText – רק מילות פעולה של כפתורים, בלי אפשרויות select; פקד הסניף – ב-rep.branch),
+        // כותרות טבלה רק דרך הרשימה הלבנה (ספרה / ₪ → '?'), ותמונת המסך – כותרות, לשוניות, ומה שקיים לייבוא / מבצע חדש (marks) – בלי ללחוץ
+        const r = (await inIso(tab, roIn, [GUARD, true, false, true])) || {};
+        if (r.wrong) throw wrongPage();
+        page.controls = r.controls || [];
+        page.heads = safeHeads(r.heads);
+        if (r.scr && Array.isArray(r.scr.tables)) r.scr.tables = r.scr.tables.map((t) => Object.assign({}, t, { th: safeHeads([t.th])[0] || [] }));
+        page.scr = r.scr;
+      }
       rep.pages.push(page);
     }
     // בקשות שנרשמו מאז הדף הפרטי הראשון (pv): כל מקטע נתיב עם ספרה → '?' (מזהי לקוח/עובד)

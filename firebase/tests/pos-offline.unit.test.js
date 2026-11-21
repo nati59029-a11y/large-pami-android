@@ -323,6 +323,9 @@ describe('pos-data – מכירה בלי רשת וסנכרון (מול החוז�
     // POS:W2: הקטגוריה עוברת (אריחים, מבצע על קטגוריה)
     assert.equal(PD.toProd({ id: 'a', name: 'x', price: 10, cat: 'c7' }, '_').cat, 'c7');
     assert.equal(PD.toProd({ id: 'a', name: 'x', price: 10 }, '_').cat, '');
+    // ברקודים נוספים: bcs (קופה) + bcx (משניים מכספית), בלי הראשי ובלי כפולים
+    assert.deepEqual(PD.toProd({ id: 'a', name: 'x', price: 10, barcode: '111', bcs: ['222', '111'], bcx: ['333', '222', ' '] }, '_').bx, ['222', '333']);
+    assert.deepEqual(PD.toProd({ id: 'a', name: 'x', price: 10 }, '_').bx, []);
   });
 
   it('POS:W2: תור עם skipErr – שגיאה קבועה לא עוצרת את הבאים; drop מוציא פריט שנדחה; התשובה שומרת את המסמכים', async () => {

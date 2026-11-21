@@ -4,6 +4,7 @@
    עדכון אוטומטי (19.11, תוסף 0.1.7): שורת מצב לפי i.dev.upd (תקין / נכשל / הורד וממתין לטעינה / לא מותקן).
    "עדכון המחשב" (19.11, תוסף 0.1.10): חלון עם הגרסה המותקנת, מתי המחשב בדק עדכון ומצב (i.dev.upd), ובקשה לתוסף (cxBotTok op:'upd', i.ureq)
    לבדוק אם בדיסק יש גרסה חדשה ולהיטען מחדש אם בטוח. מכירות היום: שורת "עודכנו עד HH:MM" (i.tp).
+   0.1.12: בריצה שנכשלה בהעלאה לכספית – "פירוט מסך הייבוא" מקופל (r.scr: כותרות, טבלאות ומספר שורות, כפתורים, שדה הקובץ, חלון קופץ).
    "סנכרן עכשיו" (18.11): בקשה למחשב החנות (cxBotTok op:'now'); התוסף 0.1.5 בודק כל דקה. בזמן המתנה / ריצה – רענון כל 20 שניות, רק כשהמסך פתוח וגלוי.
    רכיבי העיצוב הקיימים בלבד (.card .btn .kg .k .li .note .f). משתמש ב: V, ACT, FRM, fnCall, esc, toast, dlg, closeDlg, ask, rerender, cur, fd, saveFile, SY, APP_REPO. */
 (function(){
@@ -105,9 +106,20 @@ ACT.cxBotNew=()=>{if(B.i&&B.i.dev)return ask('ליצור קוד חיבור חד�
 ACT.cxBotCopy=()=>{const e=document.getElementById('cxBotTok');if(!e)return;const t=e.textContent;(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('הקוד הועתק'),()=>{try{const r=document.createRange();r.selectNodeContents(e);const s=getSelection();s.removeAllRanges();s.addRange(r);toast('סמנו והעתיקו ידנית')}catch(x){}})};
 {const d=document.getElementById('dlg');if(d)d.addEventListener('close',()=>{if(document.getElementById('cxBotTok'))d.innerHTML=''})} /* הקוד נמחק מהמסך בכל סגירה */
 ACT.cxBotRev=()=>ask('לנתק את המחשב? הרובוט יפסיק לסנכרן עד שתחברו מחשב מחדש.',async()=>{try{await fnCall('cxBotTok',{op:'revoke'});toast('המחשב נותק');B.i=null;load()}catch(e){toast(e&&e.message||'הפעולה נכשלה')}},'כן, נתק');
+/* 0.1.12: תמונת מסך הייבוא בכספית כשהקובץ לא נכנס לתור (r.scr מהשרת – מסוננת, בלי תוכן טבלאות) – לאבחון, בתוך "פירוט" מקופל */
+const QH={none:'לא נמצאה במסך',exact:'נמצאה',part:'נמצאה רק כחלק מטקסט ארוך יותר',hidden:'קיימת אבל מוסתרת'};
+const scrH=x=>{if(!x||typeof x!=='object')return'';const A=a=>Array.isArray(a)?a:[],j=(a,s)=>A(a).filter(Boolean).map(t=>esc(String(t))).join(s||' · '),L=[];
+ L.push('הכותרת "ממתין לטעינה": '+esc(QH[x.qhead]||x.qhead||'—'));
+ if(A(x.heads).length)L.push('כותרות במסך: <bdi>'+j(x.heads)+'</bdi>');
+ if(A(x.wait).length)L.push('טקסטים עם "ממתין" / "לטעינה": <bdi>'+A(x.wait).map(w=>esc(String(w&&w.t||''))+(w&&w.vis?'':' (מוסתר)')).join(' · ')+'</bdi>');
+ L.push('טבלאות: '+A(x.tables).length+(A(x.tables).length?' – <bdi>'+A(x.tables).map(t=>(t&&A(t.th).length?j(t.th,' | '):'בלי כותרות')+' ('+(+(t&&t.rows)||0)+' שורות'+(t&&t.vis?'':', מוסתרת')+')').join(' · ')+'</bdi>':''));
+ if(A(x.btns).length)L.push('כפתורים: <bdi>'+j(x.btns)+'</bdi>');
+ L.push('שדות קובץ: '+A(x.files).length+A(x.files).map((f,k)=>'<br>'+(k+1)+'. '+(f&&f.vis?'גלוי':'מוסתר')+(f&&f.multi?', כמה קבצים':'')+(f&&f.n?', נבחר קובץ':'')+(f&&f.accept?', סוגים: <bdi>'+esc(f.accept)+'</bdi>':'')+(f&&f.lbl?', תווית: <bdi>'+esc(f.lbl)+'</bdi>':'')+(f&&A(f.up).length?', סביב: <bdi>'+j(f.up)+'</bdi>':'')).join(''));
+ if(A(x.dialogs).length)L.push('חלון קופץ: <bdi>'+j(x.dialogs)+'</bdi>');
+ return`<details><summary style="min-height:44px;display:flex;align-items:center"><small>פירוט מסך הייבוא בכספית (לאבחון${x.op?' – צעד '+esc(x.op):''})</small></summary><small style="display:block;line-height:1.6">${L.join('<br>')}</small></details>`};
 ACT.cxBotRuns=()=>{const R=(B.i&&B.i.runs)||[];
  const imp=x=>!x?'':['new','price'].filter(k=>x[k]).map(k=>`${k==='new'?'פריטים חדשים':'מחירים'} לכספית: ${x[k].n}${x[k].id?` (טעינה ${x[k].id}: נטענו ${x[k].loaded<0?'?':x[k].loaded}, שגויים ${x[k].errors<0?'?':x[k].errors})`:''}${x[k].ok?'':' – לבדוק'}`).join(' · ');
- dlg(`<h3>הריצות האחרונות</h3><div style="max-height:60vh;overflow:auto">${R.map(r=>`<div class="li" style="cursor:default"><div class="m"><b>${dt(r.at)} · ${esc(ST[r.st]||r.st||'')}</b><small>${r.req?'ידני – "סנכרן עכשיו" מהטלפון':r.manual?'ידני – "סנכרן עכשיו"':'אוטומטי'}${r.days&&r.days.length&&typeof window.cxSalesOk==='function'&&window.cxSalesOk()?' · ימי מכירות: '+r.days.map(dd).join(', '):''}</small>${r.err&&r.err.code&&r.st!=='ok'?`<small>⚠ ${esc(errTxt(r.err.code,r.err.msg))}</small>${errDet(r.err)?`<small><bdi>${esc(errDet(r.err))}</bdi></small>`:''}`:''}${imp(r.imp)?`<small>${esc(imp(r.imp))}</small>`:''}</div></div>`).join('')||'<p class="note">עוד לא היו ריצות.</p>'}</div><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>הריצות האחרונות</h3><div style="max-height:60vh;overflow:auto">${R.map(r=>`<div class="li" style="cursor:default"><div class="m"><b>${dt(r.at)} · ${esc(ST[r.st]||r.st||'')}</b><small>${r.req?'ידני – "סנכרן עכשיו" מהטלפון':r.manual?'ידני – "סנכרן עכשיו"':'אוטומטי'}${r.days&&r.days.length&&typeof window.cxSalesOk==='function'&&window.cxSalesOk()?' · ימי מכירות: '+r.days.map(dd).join(', '):''}</small>${r.err&&r.err.code&&r.st!=='ok'?`<small>⚠ ${esc(errTxt(r.err.code,r.err.msg))}</small>${errDet(r.err)?`<small><bdi>${esc(errDet(r.err))}</bdi></small>`:''}`:''}${imp(r.imp)?`<small>${esc(imp(r.imp))}</small>`:''}${r.st!=='ok'?scrH(r.scr):''}</div></div>`).join('')||'<p class="note">עוד לא היו ריצות.</p>'}</div><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)};
 FRM.cxBotMaxF=async f=>{const n=Math.round(+fd(f).n);if(!Number.isInteger(n)||n<0||n>50)return toast('מספר בין 0 ל-50');const b=f.querySelector('button');b.disabled=true;
  try{await fnCall('cxSetCfg',{newMax:n});toast('נשמר');if(B.i)B.i.newMax=n;rerender()}catch(e){b.disabled=false;toast(e&&e.message||'הפעולה נכשלה')}};
 /* התוסף: release caspit-ext-v<גרסה> במאגר (ציבורי) – בלי פונקציה בשרת */

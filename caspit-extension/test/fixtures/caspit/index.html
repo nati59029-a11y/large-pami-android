@@ -10,6 +10,9 @@
   <div id="sub" hidden><a href="#/sales-items-reports">דוח מכירות לפריטים</a></div>
   <span id="empm" role="button">עובדים</span><div id="empsub"></div>
   <span id="hkm" role="button">לקוחות</span><div id="hksub"></div>
+  <span id="prm" role="button">כרטיס הטבות</span><div id="prmsub"></div>
+  <span id="repm" role="button">דוחות</span><div id="repsub"></div>
+  <select id="brSel" aria-label="בחירת סניף"><option>יהודה הנשיא</option><option>נחל לכיש</option></select><span class="store-line">לארג' פעמי חנות: לארג' פעמי-יהודה הנשיא</span><a href="#/receipts-outside">דוח תקבולים</a>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -29,6 +32,43 @@ document.getElementById('empm').addEventListener('click', () => hit('emp-click')
 // תפריט "לקוחות" (0.1.11): קישורי ההקפה נוצרים רק במעבר עכבר; לחיצה – אסורה
 document.getElementById('hkm').addEventListener('mouseover', () => { document.getElementById('hksub').innerHTML = '<a href="#/hakafa-customers">לקוחות הקפה</a> <a href="#/hakafa-reports">דוח לקוחות - הקפה</a> <a href="#/hakafa_monthly_charge_customers">הפקת חשבוניות מרכזות</a>'; });
 document.getElementById('hkm').addEventListener('click', () => hit('hk-menu-click'));
+// פקד הסניף (0.1.12): אסור לשנות / ללחוץ / לפקס – כל אירוע נרשם (attHits)
+for (const ty of ['click', 'mousedown', 'focus', 'change', 'input']) document.getElementById('brSel').addEventListener(ty, () => hit('branch-' + ty));
+// תפריט "דוחות" (0.1.12): קישורים במעבר עכבר – שניים של אמצעי תשלום / קופה, ואחד שלא קשור
+document.getElementById('repm').addEventListener('mouseover', () => { document.getElementById('repsub').innerHTML = '<a href="#/credit-settings">הגדרות אשראי</a> <a href="#/receipts-import">ייבוא תקבולים</a> <a href="#/payment-methods/new">הוסף אמצעי תשלום</a> <a href="#/payment-methods-report">דוח אמצעי תשלום</a> <a href="#/cash-register-summary">סיכום קופה יומי</a> <a href="#/stock-report">דוח מלאי</a>'; });
+document.getElementById('repm').addEventListener('click', () => hit('rep-menu-click'));
+// מסכי דוחות תשלום: סכומים בטבלה ובקובץ – אסור שיגיעו לדוח; "שמירה" / "סגירת קופה" – אסור ללחוץ
+function payRep(app, k) {
+  const X = k === 'payment-methods-report';
+  app.innerHTML = '<div class="pay-rep"><h2>' + (X ? 'דוח אמצעי תשלום' : 'סיכום קופה יומי') + '</h2><label for="payDay">תאריך</label><input type="date" id="payDay"><label for="payStore">סניף</label><select id="payStore"><option>יהודה הנשיא</option><option>נחל לכיש</option></select>'
+    + '<span class="store-name">נחל לכיש: ₪12,345.00</span><button class="btn" id="payShow">הצג</button>' + (X ? '<button class="btn" id="payX">יצוא לאקסל</button>' : '') + '<button class="btn btn-danger" data-hit="pay-save">שמירה</button><button class="btn btn-danger" data-hit="pay-close">סגירת קופה</button>'
+    + '<table class="table"><thead><tr><th>תאריך</th><th>סניף</th><th>מזומן</th><th>אשראי</th><th>הקפה</th><th>סה"כ</th></tr></thead><tbody><tr><td>17/11/2026</td><td>יהודה הנשיא</td><td>4321.5</td><td>8765.25</td><td>345.75</td><td>13432.5</td></tr></tbody><tfoot><tr><th>סה"כ</th><th>99887.5</th></tr></tfoot></table></div>';
+  document.getElementById('payShow').onclick = () => hit('pay-show');
+  app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit); });
+  const x = document.getElementById('payX');
+  if (x) x.onclick = () => { ev.push('pay-x'); localStorage.setItem('payX', String(+(localStorage.getItem('payX') || 0) + 1)); dl(new Blob(['\ufeffתאריך,סניף,מזומן,אשראי,הקפה,סה"כ\n17/11/2026,יהודה הנשיא,4321.5,8765.25,345.75,13432.5\n'], { type: 'text/csv' }), 'payments.csv'); };
+}
+// תפריט "כרטיס הטבות" (0.1.12, לפי בעל העסק): "הוסף מבצע", "מבצעים", "ייבוא מבצעים" – נוצרים רק במעבר עכבר; לחיצה על התפריט – אסורה
+document.getElementById('prm').addEventListener('mouseover', () => { document.getElementById('prmsub').innerHTML = '<a href="#/promotions-import">ייבוא מבצעים</a> <a href="#/promotions/add">הוספת מבצעים</a> <a href="#/promotions/new">הוסף מבצע</a> <a href="#/promotions">מבצעים</a>'; });
+document.getElementById('prm').addEventListener('click', () => hit('prm-menu-click'));
+// מסך המבצעים (0.1.12): רשימה, לשונית "ייבוא מבצעים", "הוסף מבצע" (קישור), "ייבוא מבצעים מקובץ", עריכה/מחיקה/ביטול בשורות – אסור ללחוץ (attHits);
+// מותר רק "יצוא לאקסל" (prmX). שמות המבצעים בטבלה ובקובץ – אסור שיגיעו לדוח
+const PRM = [[301, 'קוקה קולה 1+1 סודי', '01/11/2026', '30/11/2026', 'X+Y', '13', 'פעיל'], [302, 'במבה 3 ב-10', '05/11/2026', '20/11/2026', 'כמות במחיר', '10', 'פעיל']];
+function promos(app) {
+  app.innerHTML = '<div class="promotions"><h2>מבצעים</h2><ul class="nav nav-tabs"><li><a class="nav-link" role="tab" id="prmTabList">רשימת מבצעים</a></li><li><a class="nav-link" role="tab" id="prmTabImp">ייבוא מבצעים</a></li></ul>'
+    + '<label for="prmStore">סניף</label><select id="prmStore"><option>כל הסניפים</option><option>נחל לכיש</option></select>'
+    + '<a class="btn btn-primary" id="prmNew" href="#/promotions/new">הוסף מבצע</a><button class="btn" id="prmImp">ייבוא מבצעים מקובץ</button><input type="file" id="prmFile" accept=".xlsx,.csv" style="display:none"><button class="btn" id="prmX">יצוא לאקסל</button>'
+    + '<table class="table"><thead><tr><th>מספר מבצע</th><th>שם מבצע</th><th>מתאריך</th><th>עד תאריך</th><th>סוג מבצע</th><th>מחיר מבצע</th><th>סטטוס</th><th>פעולות</th></tr></thead><tbody>'
+    + PRM.map((p) => '<tr><td>' + p.join('</td><td>') + '</td><td><button class="btn" data-hit="prm-edit">עריכה</button><button class="btn" data-hit="prm-del">מחיקה</button><button class="btn" data-hit="prm-cancel">ביטול מבצע</button></td></tr>').join('') + '</tbody></table></div>';
+  ['prmTabList', 'prmTabImp', 'prmNew', 'prmImp'].forEach((id) => { document.getElementById(id).onclick = () => hit(id); });
+  document.getElementById('prmFile').addEventListener('change', () => hit('prm-file'));
+  app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit); });
+  document.getElementById('prmX').onclick = () => {
+    ev.push('prm-x'); localStorage.setItem('prmX', String(+(localStorage.getItem('prmX') || 0) + 1));
+    const csv = '\ufeffמבצעים\nמספר מבצע,שם מבצע,מתאריך,עד תאריך,סוג מבצע,מחיר מבצע,סטטוס\n' + PRM.map((p) => p.join(',')).join('\n') + '\n';
+    dl(new Blob([csv], { type: 'text/csv' }), 'promotions.csv');
+  };
+}
 // מסכי לקוחות הקפה (0.1.11): שמות, טלפונים, ע.מ וסכומים – אסור שיגיעו לדוח; כפתורי שמירה/מחיקה/הפקה/טעינה – אסור ללחוץ (attHits).
 // x: '' – "יצוא לאקסל" רגיל; 'none' – בלי יצוא; 'trap' – רק "שמירה ויצוא לאקסל" (נחסם ב-denied); 'named' – יצוא עם שם לקוח על הכפתור
 const HK_C = [[1001, 'שלומציון ברקוביץ', '514789632', '050-9876543', 'רחוב הדקל 5 אשקלון', '1234.50'], [1002, 'מרכולית פנינת הדרום', '036547891', '08-6712345', 'שדרות הנשיא 17', '-88.20']];
@@ -127,6 +167,11 @@ function render() {
     app.innerHTML = '<div class="csv-import-form app-page"><p>טעינה עבור חברה: עסק בדיקה חנות: עסק בדיקה-סניף א</p><div class="form-group title-on-top"><label>בחר סוג קובץ טעינה</label><div class="multiselect"><div class="multiselect__tags"><input id="job_type" type="text" class="multiselect__input" placeholder="בחר"></div><div class="multiselect__content-wrapper" style="display:none"><ul class="multiselect__content">'
       + O.map(([v, t]) => '<li class="multiselect__element"><span class="multiselect__option" data-v="' + v + '"><span>\u00a0' + t + ' </span></span></li>').join('') + '</ul></div></div></div><div id="more"></div><div id="queue"></div><button type="button" class="btn btn-primary" id="run">העלה קבצים והרץ טעינה</button><div id="hist"></div>'
       + '<label>סיסמת מנהל <input type="password" id="mp" value="hunter2pass"></label><input id="note" value="owner-secret-value"><div class="result" role="alert"></div></div>';
+    // 0.1.12: כל לחיצה / שינוי / פוקוס במסך הזה נספרים (impClicks) – רק של הרינדור האחרון (היכרות מסך הייבוא – קריאה בלבד)
+    const rid = String(Date.now() + Math.random()); localStorage.setItem('impR', rid); localStorage.setItem('impClicks', '0');
+    for (const ty of ['click', 'change', 'focusin', 'mousedown']) app.addEventListener(ty, () => { if (localStorage.getItem('impR') === rid && location.hash.startsWith('#/csv-imports')) localStorage.setItem('impClicks', String(+localStorage.getItem('impClicks') + 1)); }, true);
+    // qhead (בדיקת אבחון 0.1.12): הקובץ נכנס לתור, אבל הכותרת שלו שונה מ"ממתין לטעינה" (כמו האבחון מ-20.11: "אין כותרת ממתין"), ומוצג חלון קופץ
+    if (localStorage.getItem('qhead')) app.insertAdjacentHTML('beforeend', '<div class="modal show" role="dialog" style="display:block"><div class="modal-dialog"><h5 class="modal-title">שים לב</h5><p>הודעה בתוך החלון 0521234567</p></div></div>');
     const wrap = app.querySelector('.multiselect__content-wrapper'), jt = document.getElementById('job_type');
     let t = '';
     jt.addEventListener('focus', () => { wrap.style.display = 'block'; });
@@ -148,7 +193,7 @@ function render() {
     // קובץ שמישהו כבר הוסיף ולא העלה (בדיקת "התור לא ריק")
     if (localStorage.getItem('preq')) Q.push({ f: new File(['x'], localStorage.getItem('preq')), t: 'upd', tn: 'עדכון פריטים' });
     const drawQ = () => {
-      document.getElementById('queue').innerHTML = Q.length ? '<h4>ממתין לטעינה</h4><table class="table"><thead><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr></thead><tbody>'
+      document.getElementById('queue').innerHTML = Q.length ? '<h4>' + (localStorage.getItem('qhead') || 'ממתין לטעינה') + '</h4><table class="table"><thead><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr></thead><tbody>'
         + Q.map((q, k) => '<tr><td>' + q.f.name + '</td><td>' + q.tn + '</td><td><button class="btn btn-danger" data-rm="' + k + '">הסר</button></td></tr>').join('') + '</tbody></table>' : '';
       document.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => { ev.push('rm'); Q.splice(+b.dataset.rm, 1); drawQ(); }; });
     };
@@ -203,6 +248,14 @@ function render() {
       + '<table class="table"><thead><tr><th>תאריך</th><th>כניסה</th><th>יציאה</th><th>שעות רגילות</th><th>125%</th><th>150%</th><th>175%</th><th>200%</th><th>225%</th><th>250%</th><th>פעולות</th></tr></thead><tbody><tr><td>03/' + mm + '</td><td>07:41</td><td>15:58</td><td>8:17</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td><button class="btn">עריכה</button></td></tr></tbody></table></div>';
     document.getElementById('ttAdd').onclick = () => hit('tt-add');
     document.getElementById('ttX').onclick = () => { ev.push('tt-x:' + id); dl(new Blob(['﻿דוח שעות עובד - ' + nm + '\nתאריך,כניסה,יציאה,שעות רגילות,125%,150%\n03/' + mm + ',07:41,15:58,8:17,0,0\n04/' + mm + ',07:39,16:05,8:26,0,0\n'], { type: 'text/csv' }), 'time_tracks_' + id + '.csv'); };
+  } else if (['#/credit-settings', '#/receipts-import', '#/payment-methods/new', '#/receipts-outside', '#/stock-report'].includes(h)) {
+    hit('pay-bad-nav:' + h); app.innerHTML = '<h2>מסך שאסור להיכנס אליו בהיכרות</h2>'; // 0.1.12: קישור אסור / לא תחת "דוחות" – אסור לפתוח
+  } else if (h === '#/payment-methods-report' || h === '#/cash-register-summary') {
+    payRep(app, h.slice(2));
+  } else if (h === '#/promotions') {
+    promos(app);
+  } else if (h.startsWith('#/promotions/') || h.startsWith('#/promotions-import')) {
+    hit('prm-nav:' + h); app.innerHTML = '<h2>טופס מבצע</h2>'; // אסור להגיע לכאן (רק לתעד את הקישור)
   } else if (HK[h.slice(2).split(/[/?]/)[0]]) {
     hakafa(app, h.slice(2).split(/[/?]/)[0]);
   } else if (h.startsWith('#/attendance-report') || h.startsWith('#/hours-reports') || h.startsWith('#/report-active-employee-on-stores')) {

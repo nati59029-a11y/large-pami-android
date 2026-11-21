@@ -80,3 +80,22 @@ test('שורת כותרות של קובץ השעות: רק מילים מוכרו
   assert.equal(S.fileShape([['דוח שעות עובד - דנה'], ['דנה', 'כהן']]).hdr, null);
   assert.equal(S.fileShape(null).hdr, null);
 });
+
+test('hdrRaw (0.1.12, קובץ מבצעים): שורת הכותרות כמו שהיא – הראשונה עם 2+ תאי טקסט בלבד; מהשורות רק סוג התא', () => {
+  const R = [['מבצעים'], ['מספר מבצע', 'שם מבצע', 'מתאריך', 'מחיר מבצע'], [301, 'קוקה קולה 1+1', '01/11/2026', 12.9], ['302', 'במבה', '05/11/2026', 10]];
+  const o = S.hdrRaw(R, 5);
+  assert.equal(o.hi, 1);
+  assert.deepEqual(o.hdr, ['מספר מבצע', 'שם מבצע', 'מתאריך', 'מחיר מבצע']);
+  assert.deepEqual(o.kinds[2], ['num', 'text', 'date', 'num']);
+  assert.ok(!JSON.stringify(o).includes('קוקה') && !JSON.stringify(o).includes('במבה'));
+  assert.equal(S.hdrRaw([[1, 2], ['x']], 5).hdr, null, 'בלי שורת טקסט – בלי כותרות');
+});
+
+test('hdrRaw (תיקון בודק 0.1.12): כל תא דרך הרשימה הלבנה; ספרה / ₪ → "?" – שורת נתונים לא דולפת', () => {
+  assert.deepEqual(S.hdrRaw([['מזומן', '1,234.50']], 5).hdr, ['מזומן', '?']);
+  assert.deepEqual(S.hdrRaw([['קופאי', 'משה כהן']], 5).hdr, ['קופאי', '?']);
+  assert.deepEqual(S.hdrRaw([['מבצע', '₪ 10', 'קוקה קולה', 'אשראי']], 5).hdr, ['מבצע', '?', '?', 'אשראי']);
+  const t = JSON.stringify([S.hdrRaw([['מזומן', '1,234.50']], 5), S.hdrRaw([['קופאי', 'משה כהן']], 5)]);
+  for (const x of ['1,234', 'משה', 'כהן']) assert.ok(!t.includes(x), x);
+  assert.deepEqual(S.hdrStrict(['125%', 'שעות', 'סה"כ']), ['?', 'שעות', 'סה"כ']);
+});

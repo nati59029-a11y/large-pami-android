@@ -1,7 +1,7 @@
 /* POS:M3 – קופה, גל 2 (ש3): קטלוג וחיפוש מהיר במוצרים (5,000+). פונקציות טהורות, בלי Firestore ובלי DOM.
    אותו קובץ בדיוק בדפדפן (window.PosCatalog) ובבדיקות Node (module.exports) – firebase/tests/pos-catalog.unit.test.js.
 
-   build(products) → קטלוג. מוצר: { id, name, barcode?, sku?, al?: [כינויים], price (אגורות) }. מוצר בלי id או בלי שם – לא נכנס.
+   build(products) → קטלוג. מוצר: { id, name, barcode?, bx?: [ברקודים נוספים], sku?, al?: [כינויים], price (אגורות) }. מוצר בלי id או בלי שם – לא נכנס.
    cat.search(q, limit=50) → [מוצר]   (הסדר: ברקוד/מק"ט מדויק ← ברקוד/מק"ט חלקי ← שם/כינוי לפי ציון ← שם)
    cat.byCode(code)        → מוצר או null (ברקוד או מק"ט מדויק)
    cat.explain(q, limit)   → [{ p, s (ציון), k: 'bc'|'sku'|'bc~'|'sku~'|'name'|'al', n (השם שהתאים) }]  – לבדיקות ולתצוגת "נמצא לפי כינוי"
@@ -80,7 +80,7 @@ function score(q, w, qs, ws) {
 }
 
 function build(products) {
-  const P = [], V = [], VS = [], vid = new Map(), post = [], bc = new Map(), sku = new Map(), codes = [];
+  const P = [], V = [], VS = [], vid = new Map(), post = [], bc = new Map(), sku = new Map(), codes = [], ext = [];
   const put = (m, k, i) => { if (!m.has(k)) m.set(k, i); };
   for (const x of Array.isArray(products) ? products : []) {
     if (!x || x.id == null || !x.name) continue;
@@ -103,9 +103,12 @@ function build(products) {
     P.push({ p: x, names, nm: norm(x.name) });
     const b = digits(x.barcode), s = digits(norm(x.sku));
     if (b) put(bc, b, i);
+    for (const y of Array.isArray(x.bx) ? x.bx : []) { const e = digits(y); if (e) ext.push([e, i]); }
     if (s) put(sku, s, i);
     codes.push([b, s]);
   }
+  // ברקודים נוספים (bx: bcs מהקופה + bcx מכספית) – אחרי כל הראשיים, כך שברקוד ראשי של מוצר אחר תמיד קודם
+  for (const [e, i] of ext) put(bc, e, i);
   const cache = new Map(); // מילת חיפוש → Map(מזהה מילה → ציון)
   function vocab(q) {
     let r = cache.get(q);

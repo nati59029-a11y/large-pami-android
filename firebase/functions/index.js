@@ -396,6 +396,8 @@ Object.assign(exports, require('./biz-apk'));
 Object.assign(exports, require('./caspit'));
 // רובוט כספית – שלב B (18.11.2026): cxBotTok, cxBotDisc (מנהל / מנהל־על), cxBot (HTTP לתוסף Chrome, europe-west1), cxBotWatch (מתוזמנת, us-central1) – caspit-bot.js
 Object.assign(exports, require('./caspit-bot'));
+// כל ההכנסות (20.11.2026): incAll – סגירות + קופה חדשה (+ אחר במכשיר המנהל), כספית להשוואה. מנהל, או עובד מסומן (staff.incA) – inc-all.js
+Object.assign(exports, require('./inc-all'));
 // משמרות – שלב 3 (18.11.2026): shApi (טבלה שבועית, עריכה, משימות למשמרת, הגדרות), shTick (מתוזמנת כל 10 דקות, us-central1) – shifts.js
 Object.assign(exports, require('./shifts'));
 // כלל שכר בכתב חופשי – שלב D (19.11.2026): payRuleAi – מנהל בלבד, עסק במבנה b, 50 פענוחים ביום לעסק; מחזיר רכיבים לאישור, לא שומר (payroll-ai.js + lib/pay-ai.js)
