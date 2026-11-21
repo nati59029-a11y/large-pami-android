@@ -167,10 +167,13 @@ function supTab(){
  /* 20.11.2026: במקום תיבת בחירה – כפתור לכל ספק שיש לו פריטים (עם המספר), ו"הכל" */
  const cb=(id,l,on)=>`<button type="button" class="chip${on?' on':''}" data-a="hsSel" data-id="${esc(id)}" aria-pressed="${on}">${l}</button>`;
  const CH=G0.slice();if(HS.sel&&G[0]&&!CH.some(g=>g.id===HS.sel))CH.push(G[0]);
- const pick=`<div class="hs-tg" role="group" aria-label="הצג ספק">${cb('','הכל',!HS.sel)}${CH.map(g=>cb(g.id,esc(g.name)+' ('+g.L.length+')',HS.sel===g.id)).join('')}</div>`;
+ /* 21.11.2026: "הוזמן" מוצג אצל כל ספקי הפריט; המונה = מה שעוד צריך להזמין, והוזמנו בנפרד ("שמאי (5 · 2 הוזמנו)") */
+ const cnt=g=>{const s=C.split(g.L);return s.need.length+(s.done.length?' · '+s.done.length+' הוזמנו':'')};
+ const pick=`<div class="hs-tg" role="group" aria-label="הצג ספק">${cb('','הכל',!HS.sel)}${CH.map(g=>cb(g.id,esc(g.name)+' ('+cnt(g)+')',HS.sel===g.id)).join('')}</div>`;
  const genN=gen.length?`<p class="note">${gen.length} פריטים כלליים מופיעים אצל כל ספק${G.length?'':' – בחרו ספק כדי לשלוח אותם'}.</p>`:'';
- const row=r=>`<div class="hs-sr"><b>${esc(r.it.n)}</b>${r.it.q?` · כמות ${esc(C.fmtQ(r.it.q))}`:''} ${r.all?'<span class="tag t1">מופיע לכל הספקים</span>':''}</div>`;
- const card=g=>{const ph=HS.ph[g.id];return `<div class="card" data-hsg="${esc(g.id)}"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">${esc(g.name)} (${g.L.length})</h3>${ph?`<button type="button" class="chip" data-a="hsPhEd" data-id="${esc(g.id)}" style="min-height:32px">☎ ${esc(ph)}</button>`:''}</div>
+ const odT=x=>{const o=x.od;if(!o||typeof o!=='object')return '';const l=odLate(x);return `<span class="tag${l?' t1':''}">הוזמן${o.sup?' מ'+esc(o.sup):''}${l?' – באיחור':''}</span>`};
+ const row=r=>`<div class="hs-sr"><b>${esc(r.it.n)}</b>${r.it.q?` · כמות ${esc(C.fmtQ(r.it.q))}`:''} ${r.all?'<span class="tag t1">מופיע לכל הספקים</span>':''}${odT(r.it)}${r.it.od?`<div>${odLine(r.it)}</div>`:''}</div>`;
+ const card=g=>{const ph=HS.ph[g.id];return `<div class="card" data-hsg="${esc(g.id)}"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">${esc(g.name)} (${cnt(g)})</h3>${ph?`<button type="button" class="chip" data-a="hsPhEd" data-id="${esc(g.id)}" style="min-height:32px">☎ ${esc(ph)}</button>`:''}</div>
  ${g.L.map(row).join('')}${g.L.length?'':'<p class="note">אין פריטים לספק הזה.</p>'}
  <div class="hs-acts"><button type="button" class="btn s" data-a="hsWa" data-id="${esc(g.id)}">וואטסאפ לספק</button><button type="button" class="btn g s" data-a="hsPdf" data-k="share" data-id="${esc(g.id)}">קובץ לשיתוף</button><button type="button" class="btn g s" data-a="hsPdf" data-k="print" data-id="${esc(g.id)}">הדפסה</button></div></div>`};
  return pick+genN+(G.length?G.map(card).join(''):`<div class="empty">${HS.sel?'אין פריטים לספק הזה':'אין פריטים משויכים לספקים'}</div>`)}
@@ -347,7 +350,9 @@ async function phGet(id){if(!idOk(id))return '';if(id in HS.ph)return HS.ph[id];
 function phDlg(g,send){dlg(`<h3>הטלפון של ${esc(g.name)}</h3><p class="note">נשמר לפעם הבאה, לכל הצוות.</p><label class="f"><span>טלפון (וואטסאפ)</span><input id="hsPh" type="tel" inputmode="tel" maxlength="20" value="${esc(HS.ph[g.id]||'')}" autocomplete="off"></label>
  <div class="row"><button type="button" class="btn grow" data-a="hsPhSave" data-id="${esc(g.id)}" data-send="${send?1:''}">${send?'שמירה ושליחה':'שמירה'}</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}
 const waSend=(g,ph)=>window.open('https://wa.me/'+C.intl(ph)+'?text='+encodeURIComponent(C.waText(g,'')),'_system');
-ACT.hsWa=async el=>{const g=HS.G[el.dataset.id];if(!g||!idOk(g.id))return;if(!g.L.length&&!g.O.length)return toast('אין פריטים לשלוח לספק הזה');
+/* פריטים שכבר הוזמנו (od) לא נשלחים לאף ספק – לא בוואטסאפ ולא בקובץ */
+const noSend=g=>{if(C.split(g.L).need.length||g.O.length)return '';return g.L.length?'כל הפריטים לספק הזה כבר הוזמנו':''};
+ACT.hsWa=async el=>{const g=HS.G[el.dataset.id];if(!g||!idOk(g.id))return;const ns=noSend(g);if(ns)return toast(ns);if(!g.L.length&&!g.O.length)return toast('אין פריטים לשלוח לספק הזה');
  const ph=await phGet(g.id);if(ph&&C.phOk(ph))return waSend(g,ph);phDlg(g,true)};
 ACT.hsPhEd=el=>{const g=HS.G[el.dataset.id];if(g&&idOk(g.id))phDlg(g,false)};
 ACT.hsPhSave=async el=>{const g=HS.G[el.dataset.id],i=document.getElementById('hsPh');if(!g||!i||!idOk(g.id))return;/* המזהה נכנס לנתיב – רק תבנית מותרת */const v=i.value;if(!C.phOk(v))return toast('מספר טלפון לא תקין');
@@ -361,10 +366,10 @@ function pdfPages(g){const W=1240,H=1754,M=90,LH=60,out=[];let c,x,y;
  const fit=(t,mw)=>{if(x.measureText(t).width<=mw)return t;while(t.length>1&&x.measureText(t+'…').width>mw)t=t.slice(0,-1);return t+'…'};
  np();x.font='bold 54px Arial, sans-serif';x.fillText(fit('רשימת הזמנה – '+g.name,W-2*M),W-M,y+50);y+=90;
  x.font='32px Arial, sans-serif';x.fillStyle='#555';x.fillText(new Date().toLocaleDateString('he-IL'),W-M,y+30);y+=70;x.fillStyle='#111';
- const rows=g.L.map(r=>'• '+r.it.n+(r.it.q?' – כמות '+C.fmtQ(r.it.q):'')).concat(g.O.map(o=>'• '+String(o.n||'')+(typeof o.qty==='number'?' – כמות '+C.fmtQ(o.qty):'')));
+ const rows=C.split(g.L).need.map(r=>'• '+r.it.n+(r.it.q?' – כמות '+C.fmtQ(r.it.q):'')).concat(g.O.map(o=>'• '+String(o.n||'')+(typeof o.qty==='number'?' – כמות '+C.fmtQ(o.qty):'')));
  x.font='40px Arial, sans-serif';rows.forEach(t=>{if(y+LH>H-M){np();x.font='40px Arial, sans-serif'}x.fillText(fit(t,W-2*M),W-M,y+44);y+=LH});
  return out.map(cv=>cv.toDataURL('image/jpeg',.85))}
-ACT.hsPdf=async el=>{const g=HS.G[el.dataset.id],k=el.dataset.k;if(!g||!idOk(g.id))return;if(!g.L.length&&!g.O.length)return toast('אין פריטים לספק הזה');
+ACT.hsPdf=async el=>{const g=HS.G[el.dataset.id],k=el.dataset.k;if(!g||!idOk(g.id))return;const ns=noSend(g);if(ns)return toast(ns);if(!g.L.length&&!g.O.length)return toast('אין פריטים לספק הזה');
  toast('מכין קובץ…');
  try{const pdf=await mkScanPdf(pdfPages(g)),name='LargePami_order_'+new Date().toISOString().slice(0,10)+'.pdf',Cp=window.Capacitor,nat=Cp&&Cp.isNativePlatform&&Cp.isNativePlatform();
   if(k==='print'){if(nat&&Cp.Plugins.PdfPrint){let s='';for(let i=0;i<pdf.length;i+=8192)s+=String.fromCharCode.apply(null,pdf.subarray(i,i+8192));await Cp.Plugins.PdfPrint.print({name,data:btoa(s)})}else window.open(URL.createObjectURL(new Blob([pdf],{type:'application/pdf'})),'_blank')}

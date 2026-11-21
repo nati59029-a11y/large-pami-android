@@ -401,6 +401,53 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   check('48 אין שגיאות JS', mp.__errors.length === 0, mp.__errors);
   await x.ctx.close();
 
+  // ================= 21.11.2026: "הוזמן" אצל כל הספקים, ולא נשלח לאף ספק =================
+  seed(); delete DB.hsr.g1;
+  DB.hsr.m2 = item({ n: S('חלב 3% ליטר'), nk: S('חלב 3 ליטר'), sups: A(['s1', 's2']), supN: A(['תנובה', 'שטראוס']), q: I(3), od: M({ u: S('m'), byN: S('m'), t: I(T0 - 6e4), sup: S('שטראוס'), eta: S('2099-12-30') }) });
+  DB.hsr.o3 = item({ n: S('ביסלי גריל'), nk: S('ביסלי גריל'), sups: A(['s3']), supN: A(['אסם']), od: M({ u: S('m'), byN: S('m'), t: I(T0 - 6e4), sup: S(''), eta: S('2020-01-01') }) });
+  ['s1', 's2', 's3'].forEach((k) => { DB.hsph[k] = { ph: S('97250123456' + k.slice(1)), n: S(k) }; });
+  x = await open('m-hs-od', 'm@x.co'); mp = x.page;
+  await mp.evaluate((L) => { S.subs = S.subs.filter((s) => !/^s\d$/.test(s.id)); L.forEach((s) => S.subs.push({ id: s.id, cat: 'e_sup', name: s.name })); save(); go('hs'); }, SUPS);
+  await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-a=hsTab][data-v=sup]')), 5000);
+  await mp.click('[data-a=hsTab][data-v=sup]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-hsg=s3]')), 5000); await sleep(500);
+  await mp.evaluate(() => { window.__ft = []; const f = CanvasRenderingContext2D.prototype.fillText; CanvasRenderingContext2D.prototype.fillText = function (t, ...r) { window.__ft.push(String(t)); return f.call(this, t, ...r); }; });
+  const gO = await mp.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-hsg]')].map((e) => [e.dataset.hsg, e.innerText])));
+  const rowOf = (t, n) => (t || '').split('\n').filter((l) => l.includes(n)).join(' ');
+  check('50 פריט עם 2 ספקים שהוזמן משטראוס: התג "הוזמן משטראוס" גם אצל תנובה וגם אצל שטראוס, עם המזמין', /חלב 3% ליטר[\s\S]*הוזמן משטראוס/.test(gO.s1 || '') && /חלב 3% ליטר[\s\S]*הוזמן משטראוס/.test(gO.s2 || '') && /הוזמן ע"י מנהל משטראוס/.test(gO.s1 || '') && /הוזמן ע"י מנהל משטראוס/.test(gO.s2 || ''), gO);
+  check('50א פריט שלא הוזמן (קוטג) – בלי תג "הוזמן"', !/הוזמן/.test(rowOf(gO.s1, 'קוטג 5%')), rowOf(gO.s1, 'קוטג 5%'));
+  const tg = await mp.evaluate(() => [...document.querySelectorAll('[data-hsg=s3] .tag')].map((e) => e.innerText + (e.classList.contains('t1') ? '|t1' : '')));
+  check('50ב בלי ספק בסימון – רק "הוזמן"; באיחור – העיצוב הקיים של איחור (t1)', tg.length === 1 && tg[0] === 'הוזמן – באיחור|t1', tg);
+  const tg2 = await mp.evaluate(() => [...document.querySelectorAll('[data-hsg=s2] .tag')].map((e) => e.innerText + (e.classList.contains('t1') ? '|t1' : '')));
+  check('50ג לא באיחור – תג רגיל', tg2.includes('הוזמן משטראוס'), tg2);
+  ch = await chT(); const hd = await mp.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-hsg]')].map((e) => [e.dataset.hsg, e.querySelector('h3').innerText])));
+  check('51 המונה: מה שעוד צריך להזמין, והוזמנו בנפרד – בכפתורים ובכותרות', ch.includes('תנובה (1 · 1 הוזמנו)') && ch.includes('שטראוס (0 · 1 הוזמנו)') && ch.includes('אסם (0 · 1 הוזמנו)') && hd.s1 === 'תנובה (1 · 1 הוזמנו)' && hd.s2 === 'שטראוס (0 · 1 הוזמנו)', { ch, hd });
+  if (process.env.HS_SHOT) await mp.screenshot({ path: process.env.HS_SHOT, fullPage: true }); else await shot(mp, shots, 'hs-10-הוזמן-לפי-ספק');
+  check('51א מסך 360px בלי גלילה לרוחב', await noOverflow(mp));
+  // וואטסאפ: תנובה – רק קוטג; שטראוס ואסם – הכול הוזמן, לא נשלח כלום
+  await mp.evaluate(() => { window.__wa = []; }); await mp.click('[data-a=hsWa][data-id=s1]'); await waitFor(() => mp.evaluate(() => window.__wa.length >= 1));
+  let w1 = await mp.evaluate(() => window.__wa.slice()); const w1t = w1[0] ? decodeURIComponent(w1[0].split('?text=')[1] || '') : '';
+  check('52 וואטסאפ לתנובה: קוטג בלבד, בלי החלב שהוזמן', w1.length === 1 && /• קוטג 5% – כמות 4/.test(w1t) && !/חלב/.test(w1t), w1t);
+  for (const k of ['s2', 's3']) {
+    await mp.evaluate(() => { window.__wa = []; document.querySelectorAll('.toast').forEach((e) => e.remove()); }); await mp.click(`[data-a=hsWa][data-id=${k}]`); await sleep(500);
+    const r = await mp.evaluate(() => ({ wa: window.__wa.length, dlg: !!document.querySelector('#dlg[open]') }));
+    check('52א וואטסאפ ל-' + k + ': כל הפריטים הוזמנו – הודעה, ולא נשלח כלום', r.wa === 0 && !r.dlg && /כל הפריטים לספק הזה כבר הוזמנו/.test(await toasts(mp)), Object.assign(r, { t: await toasts(mp) }));
+  }
+  // קובץ: תנובה – רק קוטג; שטראוס/אסם – לא נוצר קובץ
+  await mp.evaluate(() => { window.__ft = []; });
+  const dl2 = mp.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+  await mp.click('[data-a=hsPdf][data-k=share][data-id=s1]'); const d2 = await dl2;
+  const ft1 = await mp.evaluate(() => window.__ft.slice());
+  check('53 קובץ לתנובה: נוצר, עם קוטג ובלי החלב שהוזמן', !!d2 && ft1.some((t) => /קוטג 5%/.test(t)) && !ft1.some((t) => /חלב/.test(t)), ft1);
+  for (const k of ['s2', 's3']) for (const kk of ['share', 'print']) {
+    await mp.evaluate(() => { window.__ft = []; document.querySelectorAll('.toast').forEach((e) => e.remove()); });
+    const dl3 = mp.waitForEvent('download', { timeout: 1200 }).catch(() => null);
+    await mp.click(`[data-a=hsPdf][data-k=${kk}][data-id=${k}]`); const d3 = await dl3;
+    const r = await mp.evaluate(() => ({ ft: window.__ft.length }));
+    check('53א קובץ (' + kk + ') ל-' + k + ': כל הפריטים הוזמנו – הודעה, בלי קובץ', !d3 && r.ft === 0 && /כל הפריטים לספק הזה כבר הוזמנו/.test(await toasts(mp)), Object.assign(r, { t: await toasts(mp) }));
+  }
+  check('54 אין שגיאות JS', mp.__errors.length === 0, mp.__errors);
+  await x.ctx.close();
+
   // ================= כללים שלא פורסמו (403) =================
   seed(); F403 = true; x = await open('m-hs403', 'm@x.co'); mp = x.page;
   t = await sheetTile(mp); await sleep(800); t = await sheetTile(mp);
