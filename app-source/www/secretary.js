@@ -147,7 +147,7 @@ function secFin(o){o=o||{};
  if(typeof S==='undefined'||!S||!Array.isArray(S.tx)||typeof brMineIds!=='function'||brMineIds())return null;
  const sB=BRSEL,sP=P;BRSEL=[];
  try{const now=Date.now(),m0=NOWM(),td=today(),L=live(),f={v:1,at:now,months:{},open:[],sups:[],late:{sum:0,n:0},due:null,cf:[],wk:null,chk:[]};
-  const cs=catsOf('inc').concat(catsOf('exp'));
+  const cs=catsOf('inc').concat(catsOf('exp').filter(c=>c&&c.id!=='e_dep'));/* הפקדה לבנק – העברה, לא הוצאה (20.11) */
   for(let i=0;i<=MONTHS;i++){const m=addMon(m0,-i);
    P={mode:'month',months:[m],years:[],from:'',to:'',y:+m.slice(0,4),open:false};/* catTotal = הסכום שמסך ההכנסות/ההוצאות מציג לקטגוריה בחודש הזה */
    const cats=cs.map(c=>[String(c.name).slice(0,40),c.kind==='inc'?'i':'e',catTotal(c,L)]).filter(x=>Math.abs(x[2])>0.004);
