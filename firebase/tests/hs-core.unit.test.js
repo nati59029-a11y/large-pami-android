@@ -15,7 +15,7 @@ const it_ = (id, o) => Object.assign({ id, n: 'מוצר ' + id, nk: 'מוצר ' 
 
 describe('חוסרים – hs-core', () => {
   it('נטען בדפדפן מדומה (window.HsCore) עם כל הפונקציות', () => {
-    for (const k of ['build', 'forSup', 'groups', 'suggest', 'xIndex', 'prevIndex', 'picks', 'waText', 'custText', 'intl', 'hAdd']) assert.equal(typeof C[k], 'function', k);
+    for (const k of ['build', 'forSup', 'groups', 'suggest', 'xIndex', 'prevIndex', 'picks', 'split', 'waText', 'custText', 'intl', 'hAdd']) assert.equal(typeof C[k], 'function', k);
   });
 
   it('build: שם ריק או רווחים נדחה; שם ארוך מ-80 נדחה; 80 מותר', () => {
@@ -252,5 +252,30 @@ describe('חוסרים – שלב 2: matchInv', () => {
     assert.equal(C.prevIndex(items, PM, 'd') && J(C.picks('קוטג עיזים', { prev: C.prevIndex(items, PM, 'd') }, PM)).length, 0, 'בלי החוסר שבעריכה – רק b, זהה לשם');
     const many = PM.index(Array.from({ length: 20 }, (_, i) => ({ id: 'q' + i, name: 'חלב ' + i })));
     assert.equal(C.picks('חלב', { prod: many }, PM).length, 6);
+  });
+  it('picks: 2 מקומות שמורים לחוסרים קודמים; בלי חוסרים קודמים – המלאי ממלא; בלי כפילות', () => {
+    const many = PM.index(Array.from({ length: 20 }, (_, i) => ({ id: 'q' + i, name: 'חלב ' + (i + 1) })));
+    const hist = (names) => C.prevIndex(names.map((n, i) => it_('h' + i, { n, t: 10 - i })), PM, '');
+    const L3 = J(C.picks('חלב', { prod: many, prev: hist(['חלב שקדים', 'חלב סויה', 'חלב עיזים']) }, PM));
+    assert.equal(L3.length, 6);
+    assert.deepEqual(L3.map((x) => x.src), ['prod', 'prod', 'prod', 'prod', 'prev', 'prev'], 'המלאי מלא, ובכל זאת 2 מקומות לחוסרים קודמים');
+    const L1 = J(C.picks('חלב', { prod: many, prev: hist(['חלב שקדים']) }, PM));
+    assert.deepEqual(L1.map((x) => x.src), ['prod', 'prod', 'prod', 'prod', 'prod', 'prev'], 'רק חוסר קודם אחד – המלאי ממלא את המקום הפנוי');
+    const L0 = J(C.picks('חלב', { prod: many, prev: null }, PM));
+    assert.deepEqual(L0.map((x) => x.src), Array(6).fill('prod'), 'אין חוסרים קודמים – 6 מהמלאי');
+    const LD = J(C.picks('חלב', { prod: many, prev: hist(['חלב 1', 'חלב 2', 'חלב שקדים']) }, PM));
+    assert.equal(new Set(LD.map((x) => x.k)).size, LD.length, 'בלי כפילויות');
+    assert.ok(LD.length === 6 && LD.filter((x) => x.src === 'prev').length >= 1 && LD.some((x) => x.n === 'חלב שקדים'), 'חוסר קודם שכבר מוצע מהמלאי לא תופס מקום שמור');
+    const few = PM.index([{ id: 'p1', name: 'חלב 1' }]);
+    assert.deepEqual(J(C.picks('חלב', { prod: few, prev: hist(['חלב שקדים', 'חלב סויה', 'חלב עיזים', 'חלב אורז']) }, PM)).map((x) => x.src), ['prod', 'prev', 'prev', 'prev', 'prev'], 'מעט מלאי – חוסרים קודמים ממלאים');
+  });
+  it('split / waText: פריט שהוזמן (od) לא נשלח; ההפרדה שומרת על הסדר', () => {
+    const L = [{ it: { n: 'חלב', q: 2 }, all: false }, { it: { n: 'קוטג', od: { sup: 'תנובה', t: 1 } }, all: false }, { it: { n: 'שקיות' }, all: true }, { it: { n: 'במבה', od: { sup: '' } }, all: true }];
+    const s = C.split(L);
+    assert.deepEqual(J(s.need.map((r) => r.it.n)), ['חלב', 'שקיות']); assert.deepEqual(J(s.done.map((r) => r.it.n)), ['קוטג', 'במבה']);
+    assert.deepEqual(J(C.split(null)), { need: [], done: [] });
+    assert.equal(C.split([null, {}, { it: { n: 'x', od: null } }]).need.length, 1, 'od ריק – עוד צריך להזמין');
+    const t = C.waText({ name: 'תנובה', L, O: [] }, '');
+    assert.match(t, /• חלב – כמות 2/); assert.match(t, /• שקיות/); assert.ok(!/קוטג|במבה/.test(t), t);
   });
 });
