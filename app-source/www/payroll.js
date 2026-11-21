@@ -27,7 +27,7 @@ const str=v=>v==null?'':String(v);
 /* טיוטה של המסך: נשמרת רק ב"שמירה" */
 const PD={sub:'',p:null};
 function draft(s){const p=s.pay&&typeof s.pay==='object'&&!Array.isArray(s.pay)?s.pay:{};
- return{mode:p.mode==='mo'?'mo':'hr',from:monV(p.from)?p.from:'',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'?p.uid:'',tz:str(p.tz),tz0:!!p.tz,
+ return{mode:p.mode==='mo'?'mo':'hr',from:monV(p.from)?p.from:'',rate:str(p.rate),mo:str(p.mo),m:SAL_METHODS.includes(p.m)?p.m:'',slip:!!p.slip,uid:typeof p.uid==='string'&&p.uid?p.uid:(s.ext&&typeof s.ext.suid==='string'?s.ext.suid:'')/* 21.11: כרטיס שנפתח אוטומטית לעובד (emp-autocard.js) – הקישור מוצע מראש */,tz:str(p.tz),tz0:!!p.tz,
   rules:(Array.isArray(p.rules)?p.rules:[]).filter(r=>r&&typeof r==='object').map(r=>({id:typeof r.id==='string'&&r.id?r.id:uid(),d:Array.isArray(r.d)?r.d.map(Number).filter(k=>Number.isInteger(k)&&k>=0&&k<=6):[],s:str(r.s),e:str(r.e),r:str(r.r)})),
   add:(Array.isArray(p.add)?p.add:[]).filter(a=>a&&typeof a==='object').map(a=>({id:typeof a.id==='string'&&a.id?a.id:uid(),n:str(a.n),k:a.k==='day'?'day':'mo',a:str(a.a)}))}}
 /* רכיבי שכר (payroll-comp.js, רשות): comp/show/ab בטיוטה */
