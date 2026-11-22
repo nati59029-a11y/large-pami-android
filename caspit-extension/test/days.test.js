@@ -124,16 +124,29 @@ test('שבת וחג: שישי וערב חג מ-14:00 עד מוצאי 21:00 – �
   }
 });
 
-test('0.1.14 שעות העובדים בבוקר: חצי שעה 07:00–11:00, לא בשבת וחג', () => {
-  const F = 7 * 60, T = 11 * 60;
+test('0.1.15 שעות העובדים במשך היום: חצי שעה 07:00–23:00 (33 משבצות), לא בשבת וחג', () => {
+  const F = 7 * 60, T = 23 * 60;
   assert.equal(D.halfSlot(J('2026-11-18 06:59'), TZ, F, T), null);
   assert.equal(D.halfSlot(J('2026-11-18 07:00'), TZ, F, T), '2026-11-18 07:00');
   assert.equal(D.halfSlot(J('2026-11-18 07:29'), TZ, F, T), '2026-11-18 07:00');
   assert.equal(D.halfSlot(J('2026-11-18 07:30'), TZ, F, T), '2026-11-18 07:30');
-  assert.equal(D.halfSlot(J('2026-11-18 11:10'), TZ, F, T), '2026-11-18 11:00');
-  assert.equal(D.halfSlot(J('2026-11-18 11:30'), TZ, F, T), null);
+  assert.equal(D.halfSlot(J('2026-11-18 11:30'), TZ, F, T), '2026-11-18 11:30', 'אחרי 11:00 – כן (0.1.15)');
+  assert.equal(D.halfSlot(J('2026-11-18 15:10'), TZ, F, T), '2026-11-18 15:00');
+  assert.equal(D.halfSlot(J('2026-11-18 22:30'), TZ, F, T), '2026-11-18 22:30', '22:30 – כן');
+  assert.equal(D.halfSlot(J('2026-11-18 23:00'), TZ, F, T), '2026-11-18 23:00', '23:00 – כן');
+  assert.equal(D.halfSlot(J('2026-11-18 23:29'), TZ, F, T), '2026-11-18 23:00');
+  assert.equal(D.halfSlot(J('2026-11-18 23:30'), TZ, F, T), null, '23:30 – לא');
+  assert.equal(D.halfSlot(J('2026-11-18 23:59'), TZ, F, T), null);
+  const slots = new Set();
+  for (let m = 0; m < 1440; m += 5) { const v = D.halfSlot(J('2026-11-18 ' + String(m / 60 | 0).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')), TZ, F, T); if (v) slots.add(v); }
+  assert.equal(slots.size, 33, '33 משבצות ביום חול');
   assert.equal(D.halfSlot(J('2026-11-21 09:00'), TZ, F, T), null, 'שבת');
+  assert.equal(D.halfSlot(J('2026-11-21 21:30'), TZ, F, T), '2026-11-21 21:30', 'מוצאי שבת אחרי 21:00 – כן');
+  assert.equal(D.halfSlot(J('2026-11-20 13:30'), TZ, F, T), '2026-11-20 13:30', 'שישי לפני 14:00 – כן');
+  assert.equal(D.halfSlot(J('2026-11-20 14:00'), TZ, F, T), null, 'ערב שבת מ-14:00 – לא');
   assert.equal(D.halfSlot(J('2026-09-21 09:00'), TZ, F, T), null, 'יום כיפור');
+  // בשעה עגולה גם מכירות היום רצות (hourSlot) – שתי המשבצות קיימות; ה-service worker מריץ אותן אחת אחרי השנייה (busy)
+  assert.equal(D.hourSlot(J('2026-11-18 15:00'), TZ, 7, 23), '2026-11-18 15');
   const t = J('2026-11-18 07:10');
   assert.equal(D.nextHalf(t) - t, 20 * 60e3);
 });

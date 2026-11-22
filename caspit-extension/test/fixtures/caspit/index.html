@@ -186,6 +186,7 @@ function datePicker(host, init) {
 // ---------- 0.1.14: שעות העובדים (localStorage hrsMode = grid) ----------
 // רשימת עובדים כמו ag-grid: שורות וירטואליות (רק השורות שבתצוגה מצוירות, row-index), גלילה ב-.ag-body-viewport; "שעות לעובד" – כפתור (hrsLink=1: קישור).
 // דף השעות: "בחר חודש" (MM/YYYY, change מחליף חודש; hrsMonthStuck=1 – השינוי לא נקלט), "יצוא לאקסל" לפי העובד, החודש והסניף. hrsFmt=bad – קובץ במבנה לא מוכר.
+// hrsGone=<מזהה> – בחודש הנוכחי אין לעובד אף שורה (נמחקו); hrsFmtOne='<סניף>|<מזהה>' – קובץ במבנה לא מוכר רק לעובד הזה בסניף הזה
 // כל לחיצה אסורה ("עריכה", "עובד חדש", "הוספת כניסה ויציאה", "הצג רק מנהלים", "יצוא לאקסל" של הרשימה) נרשמת ב-attHits; hrsX – כל יצוא שעות (מזהה|חודש|סניף)
 const HE = [[11, 'גלעד שפרינצק', false], [12, 'מיכל רוזנצוויג', true], [13, 'עומר טננבאום', true], [14, 'נגה פרלמוטר', true], [15, 'יואב שטרנברג', true]];
 const ymOf = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1);
@@ -193,6 +194,7 @@ function hrsData(id, ym) {
   const now = new Date(), cur = ymOf(now), prev = ymOf(new Date(now.getFullYear(), now.getMonth() - 1, 1)), nl = STORE() === 'נחל לכיש';
   const [y, m] = ym.split('-'), dd = (d) => d + '/' + m + '/' + y;
   if (ym === cur) {
+    if (localStorage.getItem('hrsGone') === String(id)) return []; // 0.1.15: כל השעות של העובד בחודש נמחקו בכספית
     if (!nl && id === 12) return [[dd('01'), "א'", '07:41', '15:58', '0:30', '7:47'], [dd('02'), "ב'", '22:10', '06:05', '0:15', '7:40'], [dd('03'), "ג'", '07:39', '', '', '']];
     if (!nl && id === 15) return [[dd('02'), "ב'", '09:00', '13:00', '', '4:00']];
     if (nl && id === 13) return [[dd('01'), "א'", '10:00', '18:00', '0:30', '7:30']];
@@ -235,7 +237,7 @@ function hrsPage(app, id) {
   document.getElementById('ttAdd').onclick = () => hit('tt-add');
   document.getElementById('ttX').onclick = () => {
     localStorage.setItem('hrsX', (localStorage.getItem('hrsX') || '') + id + '|' + ym + '|' + STORE() + ';');
-    const bad = localStorage.getItem('hrsFmt') === 'bad';
+    const bad = localStorage.getItem('hrsFmt') === 'bad' || localStorage.getItem('hrsFmtOne') === STORE() + '|' + id; // hrsFmtOne='<סניף>|<מזהה>' – רק לעובד אחד
     const head = bad ? 'מספר,שם,ערך\n' : 'תאריך,יום,כניסה,יציאה,זמן הפסקה,סה"כ שעות,שעות רגילות,125%,150%\n';
     const body = bad ? '1,' + e[1] + ',07:41\n' : hrsData(+id, ym).map((r) => r.join(',') + ',' + r[5] + ',0,0\n').join('') + 'סה"כ,,,,,,,,\n';
     dl(new Blob(['﻿דוח שעות עובד - ' + e[1] + '\n' + head + body], { type: 'text/csv' }), 'time_tracks_' + id + '.csv');
