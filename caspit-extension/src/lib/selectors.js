@@ -141,7 +141,30 @@ function queueRows(doc, s) {
   const F = 4; // Node.DOCUMENT_POSITION_FOLLOWING
   const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & F) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
   if (!tb) return [];
-  return all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+  return all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+}
+// 0.1.15 (תקלה 22.11, 15:02): בכספית האמיתית שורת הכותרת "שם | סוג קובץ | פעולות" נספרה כשורת קובץ, ולכן "שלנו + עוד שורה" → עצירה.
+// שורת כותרת = בתוך thead, או עם תאי th, או ששני התאים הראשונים הם בדיוק "שם" ו"סוג קובץ" (שם קובץ אמיתי לא נראה כך)
+function qHead(r) {
+  if (r.closest && r.closest('thead')) return true;
+  if (r.querySelector && r.querySelector('th')) return true;
+  const td = Array.from(r.querySelectorAll('td')).map((x) => own(x));
+  return td[0] === 'שם' && td[1] === 'סוג קובץ';
+}
+// 0.1.15: פירוט קצר לעצירה בגלל התור (בלי לשנות את ההחלטה): כמה שורות, ולכל שורה – כמה תאים והאם השם / הסוג תואמים. שורה שאינה שלנו –
+// תחילת שני התאים הראשונים (עד 30 תווים, שם קובץ שלנו מוחלף ב-{file}); הסינון (scrub) נעשה ב-sw לפני היציאה
+function queueInfo(doc, s, name, type) {
+  const h = byText(doc, [s.head || 'ממתין לטעינה'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
+  if (!h) return 'אין כותרת ממתין';
+  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & 4) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
+  if (!tb) return 'אין טבלה';
+  const T = all(tb, 'tr'), hd = T.filter((r) => r.querySelectorAll('td').length && qHead(r)).length;
+  const R = queueRows(doc, s) || [];
+  const one = (r, k) => {
+    const nm = norm(r[0]) === name, ty = !type || norm(r[1]) === type;
+    return (k + 1) + ': ' + r.length + ' תאים, שם ' + (nm ? 'תואם' : 'לא תואם') + ', סוג ' + (ty ? 'תואם' : 'לא תואם') + (nm && ty ? '' : ' [' + r.slice(0, 2).map((x) => noFile(x).slice(0, 30)).join(' | ') + ']');
+  };
+  return 'שורות: ' + R.length + (hd ? ' (+' + hd + ' כותרת)' : '') + (R.length ? ' · ' + R.slice(0, 3).map(one).join(' · ') : '');
 }
 // טבלת "טעינות קודמות" (קריאה בלבד – לעולם לא לוחצים בה, גם לא על "ביטול טעינה" או על קישור): עמודות לפי הכותרות.
 // → { rows:[{ id, name, type, st, err, ok }], maxId } או null אם אין טבלה
@@ -171,16 +194,16 @@ async function queueCheck(doc, s, C) {
     if (R && R.length) {
       const mine = (r) => norm(r[0]) === name && (!type || norm(r[1]) === type);
       // רק שורה אחת בדיוק, והיא שלנו (שתי שורות "שלנו" = שארית מניסיון קודם → לא מעלים)
-      if (R.some(mine)) return R.length === 1 ? { ok: true, n: 1 } : { ok: false, code: 'import-queue-not-empty', n: R.length };
+      if (R.some(mine)) return R.length === 1 ? { ok: true, n: 1 } : { ok: false, code: 'import-queue-not-empty', n: R.length, d: queueInfo(doc, s, name, type) };
     }
-    if (C.now() >= end) return { ok: false, code: R ? (R.length ? 'import-queue-not-empty' : 'no-row') : 'no-queue' };
+    if (C.now() >= end) return { ok: false, code: R ? (R.length ? 'import-queue-not-empty' : 'no-row') : 'no-queue', d: queueInfo(doc, s, name, type) };
     await C.sleep(300);
   }
 }
 // לפני setFile: התור "ממתין לטעינה" חייב להיות ריק (אין טבלה / אין שורות). אחרת עוצרים לפני שמוסיפים את הקובץ שלנו
 function queueEmpty(doc, s) {
   const R = queueRows(doc, s);
-  return !R || !R.length ? { ok: true } : { ok: false, code: 'import-queue-not-empty', n: R.length };
+  return !R || !R.length ? { ok: true } : { ok: false, code: 'import-queue-not-empty', n: R.length, d: 'לפני הבחירה · ' + queueInfo(doc, s, '', '') };
 }
 // "טעינות קודמות" חייבת להיות קריאה לפני העלאה (בלי זה אי אפשר לדעת אם הקובץ כבר הועלה): מחכים לה, ואם לא – null
 async function histWait(doc, s, C) {
@@ -309,11 +332,11 @@ async function runSteps(steps, ctx) {
       if (s.op === 'queueEmpty') {
         const q = queueEmpty(doc, s);
         rec.found = q.ok; rec.n = q.n;
-        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; res.code = q.code; break; }
+        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; res.code = q.code; if (q.d) res.qd = q.d; break; }
       } else if (s.op === 'queue') {
         const q = await queueCheck(doc, s, C);
         rec.found = q.ok; rec.n = q.n;
-        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; if (q.code === 'import-queue-not-empty') res.code = q.code; break; }
+        if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; if (q.code === 'import-queue-not-empty') res.code = q.code; if (q.d) res.qd = q.d; break; }
       } else if (!(await queueGone(doc, s, C))) { rec.err = 'queue-stuck'; res.ok = false; res.miss = i; break; }
       rec.found = rec.done = true;
       continue;
