@@ -405,7 +405,13 @@ test('queueRows (0.1.17): "טעינות קודמות" לעולם לא נקראת
     ['כותרת באזור בגובה 0', `${PICK}<div style="height:0;overflow:hidden"><h4>ממתין לטעינה</h4></div><div>${HIST}</div>`, null, true],
     ['כותרת ב-opacity:0', `${PICK}<div style="opacity:0"><h4>ממתין לטעינה</h4></div><div>${HIST}</div>`, null, true],
     ['כותרת אחרי ההיסטוריה, בתוך אותו div', `<div>${PICK}<div>${HIST}</div><h4>ממתין לטעינה</h4></div>`, [], true],
-    ['היסטוריה בלי הכותרת שלה (לפי העמודות מזהה + סטטוס)', `${PICK}<h4>ממתין לטעינה</h4><table><thead><tr><th>מזהה</th><th>שם</th><th>סטטוס</th></tr></thead><tbody><tr><td>1</td><td>a</td><td>בוצע</td></tr></tbody></table>`, [], true],
+    ['כותרת שקופה בלי שורות בתור (רק היסטוריה) – עובר', `${PICK}<h4 style="opacity:0">ממתין לטעינה</h4>${QT('')}<div>${HIST}</div>`, null, true],
+    // תרחישי הבודק (סבב 1) – כולם חייבים לעצור כשבתור קובץ זר
+    ['A: לשונית / קישור "טעינות קודמות" בראש הדף, תור עם קובץ זר', `<ul class="nav nav-tabs"><li><a href="#/x">טעינות קודמות</a></li></ul><div role="tablist"><span role="tab">טעינות קודמות</span></div>${PICK}<h4>ממתין לטעינה</h4>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
+    ['C: כותרת "טעינות קודמות" (בלי טבלה עדיין) מעל התור, תור עם קובץ זר', `<h4>טעינות קודמות</h4><p>טוען...</p>${PICK}<h4>ממתין לטעינה</h4>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
+    ['F: תור עם עמודות "מזהה" ו"סטטוס", קובץ זר', `${PICK}<h4>ממתין לטעינה</h4><table><thead><tr><th>מזהה</th><th>שם</th><th>סטטוס</th></tr></thead><tbody><tr><td>1</td><td>someone-else.csv</td><td>ממתין</td></tr></tbody></table><div>${HIST}</div>`, [['1', 'someone-else.csv', 'ממתין']], false],
+    ['E: כותרת "ממתין לטעינה" שקופה (opacity:0), תור גלוי עם קובץ זר', `${PICK}<h4 style="opacity:0">ממתין לטעינה</h4>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
+    ['E2: כותרת ב-visibility:hidden, תור גלוי עם קובץ זר', `${PICK}<div><h4 style="visibility:hidden">ממתין לטעינה</h4></div>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
     ['טבלת תור ריקה', `${PICK}<h4>ממתין לטעינה</h4>${QT('')}<div>${HIST}</div>`, [], true],
     ['קובץ זר בתור', `${PICK}<h4>ממתין לטעינה</h4>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
     ['קובץ זר בתור, כותרת td', `${PICK}<h4>ממתין לטעינה</h4><table><tbody><tr><td>שם</td><td>סוג קובץ</td><td>פעולות</td></tr><tr><td>x.csv</td><td>עדכון</td><td>הסר</td></tr></tbody></table><div>${HIST}</div>`, [['x.csv', 'עדכון', 'הסר']], false],
@@ -415,13 +421,21 @@ test('queueRows (0.1.17): "טעינות קודמות" לעולם לא נקראת
     await page.addScriptTag({ content: SRC });
     const r = await page.evaluate(async () => {
       const S = window.CxSel;
-      return { R: S.queueRows(document, { head: 'ממתין לטעינה' }), q: await S.runSteps([{ op: 'queueEmpty', head: 'ממתין לטעינה' }], { doc: document, win: window, sleep: async () => {} }) };
+      return { R: S.queueRows(document, { head: 'ממתין לטעינה' }), q: await S.runSteps([{ op: 'queueEmpty', head: 'ממתין לטעינה', ms: 300 }], { doc: document, win: window, sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 30))) }) };
     });
     const q = r.q;
     assert.deepEqual(r.R, rows, name);
     assert.equal(q.ok, empty, name + ' ' + JSON.stringify(q));
     if (!empty) assert.equal(q.code, 'import-queue-not-empty', name);
   }
+  // כותרת שקופה עם קובץ בתור: מחכים (לא עוצרים מיד); הקובץ הוסר בזמן ההמתנה → עובר
+  await page.setContent(`<!doctype html><html dir="rtl"><body>${PICK}<h4 style="opacity:0">ממתין לטעינה</h4>${QT('<tr><td>x.csv</td><td>עדכון</td><td>הסר</td></tr>')}<div>${HIST}</div></body></html>`);
+  await page.addScriptTag({ content: SRC });
+  const w = await page.evaluate(async () => {
+    setTimeout(() => document.querySelector('tbody tr').remove(), 150);
+    return window.CxSel.runSteps([{ op: 'queueEmpty', head: 'ממתין לטעינה', ms: 3000 }], { doc: document, win: window, sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 30))) });
+  });
+  assert.equal(w.ok, true, 'כותרת שקופה: חיכה עד שהתור התרוקן ' + JSON.stringify(w));
 });
 
 test('deniedLink (0.1.12): "מבצעים" מותר (למרות "בצע"), "הוספת מבצעים" / "ייבוא מבצעים" / "ביצוע" / "הגדרות"? – לפי DENY', () => {
