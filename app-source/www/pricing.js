@@ -219,7 +219,8 @@ V.pi=()=>{const T='חשבוניות לתמחור';if(!can())return deny(T);
 ACT.piRe=()=>{LS.err='';lload(true)};
 ACT.piOpen=el=>{const id=el.dataset.id;if(ID_OK(id))go('piEd',id)};
 const lsGet=id=>(LS.L||[]).find(x=>x.id===id);
-let SUPQ='';const supList=()=>{try{return typeof usSupSubs==='function'?usSupSubs().sort((a,b)=>heCmp(a.name,b.name)):[]}catch(e){return[]}};
+/* רשימת הספקים לשינוי ספק (22.11.2026): אצל עובד אין S.subs – לוקחים את הספקים שהמנהל פרסם לעובדים (wkSubsAll), כמו ב-hs.js */
+let SUPQ='';const supList=()=>{try{const W=typeof isW==='function'&&isW(),L=W?(typeof wkSubsAll==='function'?wkSubsAll():[]):(typeof usSupSubs==='function'?usSupSubs():[]);return L.sort((a,b)=>heCmp(a.name,b.name))}catch(e){return[]}};
 const supItems=id=>{const q=SUPQ.trim(),L=supList().filter(s=>!q||String(s.name||'').includes(q)||(s.al||[]).some(a=>String(a).includes(q))).slice(0,200);
  return L.length?L.map(s=>`<button type="button" class="li" data-a="piSup2" data-id="${esc(id)}" data-v="${esc(s.id)}"><div class="m"><b>${esc(s.name)}</b>${(s.al||[]).length?`<small>גם: ${esc(s.al.join(', '))}</small>`:''}</div></button>`).join(''):'<div class="empty">לא נמצא ספק</div>'};
 ACT.piSup=el=>{const x=lsGet(el.dataset.id);if(!x)return;if(!supList().length)return toast('אין ספקים ברשימה');SUPQ='';
