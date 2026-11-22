@@ -100,7 +100,7 @@ const vis = (page, sel) => page.evaluate((s) => { const e = document.querySelect
   check('2 הטופס: שלושה סוגים בבחירה אחת (ברירת מחדל "אחד מהנבחרים" = ההתנהגות הקיימת), תמונה 0-3, הוספת תמונה להוראות', kd.opts.length === 3 && /לעובד אחד/.test(kd.opts[0]) && /כל העובדים שנבחרו צריכים לבצע/.test(kd.opts[1]) && /מי שלוקח ראשון/.test(kd.opts[2]) && kd.sel.join() === 'any' && kd.np === '0,1,2,3' && kd.img && /הוסף תמונה להוראות/.test(kd.imgTxt), kd);
   await mp.evaluate(() => { const e = document.querySelector('input[data-c=tkMimg]'); e.parentElement.scrollIntoView({ block: 'start' }); window.scrollBy(0, -70); }); await shot(mp, shots, 'r2-ב-משימה-חדשה');
   // כל העובדים צריכים לבצע
-  await mp.fill('form[data-f=tkAdd] textarea', 'לנקות את המקרר'); await mp.click('#tkkd [data-v=all]'); await sleep(300);
+  await mp.evaluate(() => { const b = document.querySelector('[data-a=tkwFold]'); if (b) b.click(); }); await sleep(150); await mp.fill('form[data-f=tkAdd] textarea', 'לנקות את המקרר'); await mp.click('#tkkd [data-v=all]'); await sleep(300);
   await mp.click('#tknp [data-v="1"]'); LOG.length = 0;
   await mp.click('form[data-f=tkAdd] button.btn.w'); await waitFor(async () => posts().length >= 3, 6000); await sleep(500);
   const P = posts(), toOf = (p) => p.f.to.arrayValue.values.map((x) => x.stringValue).join();
@@ -110,7 +110,7 @@ const vis = (page, sel) => page.evaluate((s) => { const e = document.querySelect
   const cardsTag = await mp.evaluate(() => [...document.querySelectorAll('#main .card .tag')].map((x) => x.innerText).filter((x) => /ביצעו/.test(x)));
   check('3ג במעקב: "0 מתוך 3 ביצעו" לקבוצה שנוצרה', cardsTag.length >= 1 && cardsTag.every((x) => /0 מתוך 3 ביצעו/.test(x)), cardsTag);
   // לעובד אחד – עם שניים נבחרים נחסם; בבחירת סוג הבחירה מתאפסת
-  await mp.fill('form[data-f=tkAdd] textarea', 'להזמין שקיות'); await mp.click('#tkkd [data-v=one]'); await sleep(300);
+  await mp.evaluate(() => { const b = document.querySelector('[data-a=tkwFold]'); if (b) b.click(); }); await sleep(150); await mp.fill('form[data-f=tkAdd] textarea', 'להזמין שקיות'); await mp.click('#tkkd [data-v=one]'); await sleep(300);
   const sel0 = await mp.evaluate(() => [...(TKN.sel || [])].length);
   LOG.length = 0; await mp.click('form[data-f=tkAdd] button.btn.w'); await sleep(600);
   check('4 "לעובד אחד": מעבר לסוג מאפס את הבחירה; בלי נבחר אין שליחה', sel0 === 0 && posts().length === 0, sel0);
@@ -121,7 +121,7 @@ const vis = (page, sel) => page.evaluate((s) => { const e = document.querySelect
   const P1 = posts();
   check('4ב נוצרה משימה אחת: to=[w3], ow=w3', P1.length === 1 && toOf(P1[0]) === 'w3' && P1[0].f.ow.stringValue === 'w3', P1.map(toOf));
   // אחד מהנבחרים
-  await mp.fill('form[data-f=tkAdd] textarea', 'לפנות קרטונים'); LOG.length = 0;
+  await mp.evaluate(() => { const b = document.querySelector('[data-a=tkwFold]'); if (b) b.click(); }); await sleep(150); await mp.fill('form[data-f=tkAdd] textarea', 'לפנות קרטונים'); LOG.length = 0;
   await mp.click('form[data-f=tkAdd] button.btn.w'); await waitFor(async () => posts().length >= 1, 5000); await sleep(400);
   const P2 = posts();
   check('5 "אחד מהנבחרים" (ברירת מחדל): משימה אחת עם כל הנמענים, ow ריק (מי שלוקח ראשון) – כמו קודם', P2.length === 1 && P2[0].f.to.arrayValue.values.length === 3 && P2[0].f.ow.stringValue === '', P2.map(toOf));

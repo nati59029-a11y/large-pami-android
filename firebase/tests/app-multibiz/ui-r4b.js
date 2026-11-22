@@ -83,7 +83,7 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   await wp.evaluate(() => { localStorage.setItem(LK('lp-snz-' + SY.uid), JSON.stringify({ 't:t3': Date.now() + 36e5 })); window.drPin = () => '<div class="card" id="pin-x">דיווח יומי – נעוץ</div>'; go('tk'); }); await sleep(1100);
   let t = await txt(wp, '#main');
   const one = await wp.evaluate(() => ({ cards: document.querySelectorAll('#main [id^=tkc-]').length, first: (document.querySelector('#main [id^=tkc-]') || {}).id, pinFirst: !!document.querySelector('#pin-x') && !!(document.querySelector('#pin-x').compareDocumentPosition(document.querySelector('#main [id^=tkc-]')) & Node.DOCUMENT_POSITION_FOLLOWING), btn: (document.querySelector('[data-a=tkwAll]') || {}).innerText || '' }));
-  check('1 לעובד משימה אחת במסך (הדחופה ביותר), בלי רשימת "אחר כך"', one.cards === 1 && one.first === 'tkc-t1' && /לסדר את המדף/.test(t) && !/לנקות את הדלפק/.test(t) && !/אחר כך/.test(t), one);
+  check('1 לעובד משימה אחת במסך (הדחופה ביותר), בלי רשימת "אחר כך" (הבאות בתור – שורות)', one.cards === 1 && one.first === 'tkc-t1' && /לסדר את המדף/.test(t) && !/אחר כך/.test(t), one); // סבב 5: השנייה מופיעה ב"הבאות בתור" (שורה, לא כרטיס)
   check('1א הכרטיס הנעוץ של הדיווח היומי נשאר בראש המסך (לפני המשימה)', one.pinFirst, one);
   check('1ב כפתור "כל המשימות (2)"', /כל המשימות \(2\)/.test(one.btn), one.btn);
   await shot(wp, shots, 'r4-ב-מסך-עובד');
