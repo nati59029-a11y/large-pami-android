@@ -80,6 +80,17 @@ if (mode === 'legacy') {
   A.forEach((r, i) => { const b = B2[i], qb = b && pdQ(b); if (!qb || !pdQ(r) || r.url !== b.url) return; const o = JSON.parse(b.body); delete o.structuredQuery.orderBy;
     const nb = JSON.stringify({ structuredQuery: { from: o.structuredQuery.from, limit: o.structuredQuery.limit } }); if (nb === r.body) b.body = nb; });
   console.log(`כספית – עמודי המשך של prod: ענף ${pdN}`);
+  /* כרטיס "דורש טיפול" בבית המנהל (שדרוג משימות, 22.11.2026): בכניסה המנהל טוען את המשימות (tkLoad → runQuery על tasks), לכל היותר פעם ב-3 דקות.
+     חריג צר: שאילתות tasks (runQuery עם select) מוצאות משני הצדדים; לכל משתמש ושלב – בענף לכל היותר אחת יותר מ-main, והתוספת רק אצל מנהל;
+     כל שאילתה בענף זהה לשאילתה של main אחרי נרמול השדות (tkNorm), אם יש ל-main שאילתה כזו */
+  const tqT = (r) => r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && !!tkSel(r);
+  const tqA = A.filter(tqT), tqB = B2.filter(tqT);
+  for (const L of [A, B2]) for (let i = L.length - 1; i >= 0; i--) if (tqT(L[i])) L.splice(i, 1);
+  const tqC = {}; for (const r of tqA) tqC[r.who + '|' + r.step] = (tqC[r.who + '|' + r.step] || 0) - 1; for (const r of tqB) tqC[r.who + '|' + r.step] = (tqC[r.who + '|' + r.step] || 0) + 1;
+  const tqBad = Object.entries(tqC).filter(([k, d]) => d < 0 || d > 1 || (d === 1 && !k.startsWith('m@x.co|')));
+  if (tqBad.length) { console.log('נכשל: מספר שאילתות tasks לא צפוי (ענף פחות main)', tqBad); fail++; }
+  if (tqA.length) for (const b of tqB) { const c = Object.assign({}, b); if (!tqA.some((a) => { const x = Object.assign({}, c); tkNorm(a, x); return x.url === a.url && x.body === a.body; })) { console.log('נכשל: שאילתת tasks בענף שאין כמוה ב-main', b.who, b.step, b.body.slice(0, 300)); fail++; break; } }
+  console.log(`משימות – שאילתות tasks: main ${tqA.length}, ענף ${tqB.length}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');

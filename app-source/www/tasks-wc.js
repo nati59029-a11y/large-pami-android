@@ -516,7 +516,7 @@ W.prefill=(txt,o)=>{o=o||{};txt=String(txt||'').replace(/\s+/g,' ').trim().slice
 window.tkPrefill=W.prefill;
 /* חשבונית פתוחה לתשלום (חלון "סגירת תשלום" – payDlg): כפתור "📋 צור משימה" מתחת לטופס. יעד מוצע: יום התשלום (dueOf) ב-12:00, ואם הגיע / עבר – היום */
 {const o=typeof payDlg==='function'?payDlg:null;if(o)payDlg=function(id){const r=o.apply(this,arguments);try{const f=document.querySelector('#dlg form[data-f=paysave]');
- if(f&&W.pfOk()&&!document.getElementById('tkwPfInv'))f.insertAdjacentHTML('afterend',`<button type="button" id="tkwPfInv" class="btn g w" style="margin-top:8px;min-height:44px" data-a="tkwPfInv" data-id="${esc(String(id||''))}">📋 צור משימה לטיפול בחשבונית</button>`)}catch(e){}return r}}
+ if(f&&W.pfOk()&&!document.getElementById('tkwPfInv'))f.insertAdjacentHTML('afterend',`<button type="button" id="tkwPfInv" class="btn g w" style="margin-top:8px;min-height:44px" data-a="tkwPfInv" data-id="${esc(String(id||''))}">צור משימה לטיפול בחשבונית</button>`)}catch(e){}return r}}
 ACT.tkwPfInv=el=>{let L=[];try{L=S.tx||[]}catch(e){}const t=L.find(x=>x.id===el.dataset.id);if(!t)return;const d=dueOf(t),td=today();
  W.prefill('לטפל בחשבונית '+subName(t)+' '+ils(bal(t))+(t.inv?' (מס׳ '+t.inv+')':'')+' – יעד '+dfmt(d),d>td?{dk:'at',d,tm:'12:00'}:{dk:'td'})};
 /* מבצע שנשלח לקו (yemot-promo.js): "צור משימות פרסום" – שתי משימות פרטיות למנהל עצמו (ptk, אותה כתיבה כמו משימה פרטית בטופס), יעד היום 23:59.
@@ -524,7 +524,7 @@ ACT.tkwPfInv=el=>{let L=[];try{L=S.tx||[]}catch(e){}const t=L.find(x=>x.id===el.
 const PMT=['לפרסם את המבצע בקבוצות הווצאפ','לוודא שהמבצע עלה בקו'];let pmB=0;
 W.promoOk=W.pfOk;
 W.promoAsk=(key,nm)=>{if(!W.promoOk()||!/^[A-Za-z0-9_-]{1,60}$/.test(String(key||'')))return;nm=String(nm||'').replace(/\s+/g,' ').trim().slice(0,60);
- dlg(`<h3>✓ המבצע נשלח לקו</h3><p class="note">ליצור לך משימות פרסום להיום${nm?' – "'+esc(nm)+'"':''}?</p><ul class="note" style="margin:0 0 10px;padding-inline-start:18px">${PMT.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul><div class="row"><button type="button" class="btn grow" style="min-height:44px" data-a="tkwPromo" data-k="${esc(key)}" data-n="${esc(nm)}">📋 צור משימות פרסום</button><button type="button" class="btn g grow" style="min-height:44px" data-a="closeDlg">לא עכשיו</button></div>`)};
+ dlg(`<h3>✓ המבצע נשלח לקו</h3><p class="note">ליצור לך משימות פרסום להיום${nm?' – "'+esc(nm)+'"':''}?</p><ul class="note" style="margin:0 0 10px;padding-inline-start:18px">${PMT.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul><div class="row"><button type="button" class="btn grow" style="min-height:44px" data-a="tkwPromo" data-k="${esc(key)}" data-n="${esc(nm)}">צור משימות פרסום</button><button type="button" class="btn g grow" style="min-height:44px" data-a="closeDlg">לא עכשיו</button></div>`)};
 ACT.tkwPromo=async el=>{const key=String(el.dataset.k||''),nm=String(el.dataset.n||'');if(pmB||!W.promoOk()||!/^[A-Za-z0-9_-]{1,60}$/.test(key))return;pmB=1;el.disabled=true;
  const day=ymd(Date.now()).replace(/-/g,''),now=Date.now(),dl=atDay(0,23,59);let mk=0,ex=0,er='';
  try{for(let i=0;i<PMT.length;i++){const f={owner:sv(SY.uid),by:sv(fbBy()),txt:sv((PMT[i]+(nm?' – '+nm:'')).slice(0,500)),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),sub:iv(0),late:sv('')};
@@ -663,6 +663,6 @@ FRM.tkwDl=f=>{if(!fbAdmin()||!dlOk()){closeDlg();return}const x=fd(f),dm=/^(\d{4
    const now=Date.now();if(on()&&fbAdmin()&&now-hat>18e4&&(!TK.at||now-TK.at>18e4)){hat=now;Promise.resolve(tkLoad()).then(()=>{if(cur().v==='home')rerender()}).catch(()=>{})}
    if(on()&&typeof rqLoad==='function'&&!RQ.b&&now-RQ.at>18e4)rqLoad();
    /* 22.11.2026 (בקשת בעל הפרויקט): הכרטיס מתחת לנתוני העסק (הכנסות/הוצאות/רווח ואריחי התשלום), לא מעליהם */
-   const c=homeCard(r.h),i=r.h.indexOf('id="hcards"'),at=i<0?-1:afterDiv(r.h,r.h.lastIndexOf('<div',i));r.h=at<0?r.h+c:r.h.slice(0,at)+c+r.h.slice(at)}catch(e){}return r}}
+   const c=homeCard(r.h),i=r.h.indexOf('id="hcards"'),at0=i<0?-1:afterDiv(r.h,r.h.lastIndexOf('<div',i)),bm=at0<0?null:/^\s*<button class="ban" id="recBan"[\s\S]*?<\/button>/.exec(r.h.slice(at0)),at=bm?at0+bm[0].length:at0;/* שורת ההתאמות (recBan) נשארת ישר מתחת לאריחים */r.h=at<0?r.h+c:r.h.slice(0,at)+c+r.h.slice(at)}catch(e){}return r}}
 window.TKW=W;
 })();

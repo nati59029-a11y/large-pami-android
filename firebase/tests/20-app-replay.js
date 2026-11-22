@@ -503,6 +503,8 @@ const REPLAY = {
   // feature/rephoto-request: מחיקת חלקי הצילום החדש, ובקשת צילום חדש / סגירתה (inbSt)
   M108: { run: async (uid) => { const r = await fsx(uid, '/zlast/' + 'i_nl'); if (r.status === 200) assert.equal(r.json.fields.id.stringValue, 'z1'); return [r]; } },
   M106: { run: async (uid) => [await fsx(uid, '/chunks/' + `c_${H.OTHER}` + '_' + 0, { method: 'DELETE' })] },
+  // מחיקה מושהית של חלקי צילום (chDel, תור chqFlush) – אותה בקשה כמו M09
+  M126: { run: async (uid) => [await fsx(uid, '/chunks/' + `c_${H.OTHER}` + '_' + 0, { method: 'DELETE' })] },
   M107: { run: async (uid) => [
     await fsx(uid, '/inbox/' + `i_${H.OTHER}` + '?updateMask.fieldPaths=status&updateMask.fieldPaths=req&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { status: sv('rephoto'), req: sv('הצילום חתוך. צלם שוב את כל הדף.') } }) }),
     await fsx(uid, '/inbox/' + `i_${H.OTHER}` + '?updateMask.fieldPaths=status&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { status: sv('imported') } }) })] },
