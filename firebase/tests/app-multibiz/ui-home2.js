@@ -92,9 +92,9 @@ const cardOf = (page, re) => page.evaluate((s) => { const c = [...document.query
   rq('q1', {}); rq('q2', {});
   const m = await open('m-home2', 'm@x.co'); const mp = m.page;
   await mp.evaluate(() => { go('home'); }); await sleep(400); await mp.evaluate(() => tkLoad()); await sleep(800); await mp.evaluate(() => { RQ.at = 0; return rqLoad(); }); await sleep(800); await mp.evaluate(() => rerender()); await sleep(300);
-  const rows = () => mp.evaluate(() => [...document.querySelectorAll('#hmTodo .opt')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()));
+  const rows = () => mp.evaluate(() => [...document.querySelectorAll('#hmTodo button.k')].map((x) => (x.querySelector('small').innerText + ' ' + x.querySelector('b').innerText).replace(/\s+/g, ' ').trim()));
   let r = await rows();
-  check('1 כרטיס "מה דורש טיפול" בראש הבית', await mp.evaluate(() => { const c = document.getElementById('hmTodo'); return !!c && c === document.querySelector('#main').firstElementChild || (c && c.previousElementSibling === null); }));
+  check('1 כרטיס "דורש טיפול" מתחת לנתוני העסק (אחרי אריחי התשלום)', await mp.evaluate(() => { const c = document.getElementById('hmTodo'), k = document.getElementById('hcards'); return !!c && !!k && !!(k.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); }));
   check('1א משימות באיחור 2 / ממתינות 1 / פתוחות 3 (כולל הקבועה וההוחזרה)', r.some((x) => /משימות באיחור 2/.test(x)) && r.some((x) => /ממתינות לאישור 1/.test(x)) && r.some((x) => /משימות פתוחות 3/.test(x)), r);
   check('1ב בקשות עובדים 2 + שגרה יומית 1', r.some((x) => /בקשות עובדים שממתינות 2/.test(x)) && r.some((x) => /שגרה יומית.* 1$/.test(x)), r);
   check('1ג קיצורים: משימה חדשה', await mp.evaluate(() => !!document.querySelector('#hmTodo [data-a=hmTkNew]')));

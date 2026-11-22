@@ -116,6 +116,8 @@ function ymSend(q){
  if(!q.rid||q.sig!==sig){q.rid='ym'+ymRand();q.sig=sig} // אותו תוכן = אותו requestId בניסיון חוזר; תוכן אחר = חדש
  return ymCall({requestId:q.rid,promoKey:q.key,text,until:q.until,withTzintuk:q.withTz===true,...(q.builder?{origin:'builder'}:{}),...(q.engine?{engine:q.engine}:{}),source:{size:q.k,index:q.i,name:String(q.it.n||'').slice(0,80)}})}
 const ymDone=(res,wt)=>res&&typeof res.message==='string'&&/[֐-׿]/.test(res.message)?res.message:res&&res.duplicate?'המבצע הזה כבר נשלח.':wt&&res&&res.tzintuk==='failed'?'ההודעה עלתה לקו, אבל הצינתוק לנרשמים לא נשלח.':wt?'✓ המבצע נשלח לקו, ונשלח צינתוק לנרשמים.':'✓ המבצע הועלה לקו, בלי צינתוק.';
+// 22.11.2026: אחרי שליחה מוצלחת – מנהל עם תוספת המשימות מקבל הצעה "צור משימות פרסום" (tasks-wc.js: TKW.promoAsk; היצירה רק אחרי לחיצה). כפילות/כשל לא נוגעים בשליחה
+function ymAfter(q){try{const T=window.TKW;if(T&&typeof T.promoAsk==='function')T.promoAsk(q.key,q.it&&q.it.n)}catch(e){}}
 ACT.ymSend=el=>ymOpen(el.dataset.k,+el.dataset.i);
 ACT.ymCancel=()=>{if(Q&&Q.busy)return;Q=null;closeDlg()};
 ACT.ymDays=el=>{if(!Q||Q.busy)return;Q.until=addDays(isoDay(new Date()),+el.dataset.v);const i=document.getElementById('ymDate');if(i)i.value=Q.until;if(!Q.edited)ymRetext();ymDraw()};
@@ -123,7 +125,7 @@ ACT.ymMode=el=>{if(!Q||Q.busy||(el.dataset.v==='true'&&Q.tzBlocked))return;Q.wit
 ACT.ymConfirm=async()=>{
  if(!Q||Q.busy||ymValid())return; // נעילה סינכרונית: לחיצה כפולה לא עוברת
  Q.busy=true;ymDraw();const q=Q;
- try{const res=await ymSend(q);if(res&&res.warnings&&res.warnings.length)console.warn('yemot warnings',res.warnings);Q=null;closeDlg();toast(ymDone(res,q.withTz))}
+ try{const res=await ymSend(q);if(res&&res.warnings&&res.warnings.length)console.warn('yemot warnings',res.warnings);Q=null;closeDlg();toast(ymDone(res,q.withTz));ymAfter(q,res)}
  catch(e){q.busy=false;
   // הקול האנושי לא זמין / תקרה: לא עוברים לבד לקול הממוחשב – המשתמש בוחר (שני המסכים)
   if(window.ypIsVoiceErr&&ypIsVoiceErr(e)&&window.ypChoice){ymVoiceChoice(q,e);return}
@@ -132,7 +134,7 @@ function ymVoiceChoice(q,e){
  ypChoice(e,{
   onTts:async()=>{if(Q!==q)throw Object.assign(new Error('gone'),{userMsg:'החלון נסגר. פתחו את המבצע ושלחו שוב.'});
    q.engine='tts';q.busy=true;
-   try{const res=await ymSend(q);Q=null;closeDlg();toast(ymDone(res,q.withTz))}
+   try{const res=await ymSend(q);Q=null;closeDlg();toast(ymDone(res,q.withTz));ymAfter(q,res)}
    catch(err){q.busy=false;q.engine=null;err.userMsg=ymErrMsg(err,q);throw err}},
   onLater:()=>{if(Q===q)Q=null}})}
 // עריכת מבצע (shAdd עם מקום קיים) יוצרת פריט חדש; שומרים עליו את promoKey, כדי שהשרת יחליף את הקובץ בקו ולא יוסיף עוד אחד

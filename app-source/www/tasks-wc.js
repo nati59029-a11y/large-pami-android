@@ -467,7 +467,7 @@ W.fx=()=>{if(!on())return null;const X={msg:'',f:()=>({}),done:id=>{FX=FX0();W.f
  if(!rvNew())return X;
  const now=Date.now();let dl=null;
  const lim=wpLim();
- if(lim){}else if(FX.dk==='td')dl=atDay(0,23,59);else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
+ if(lim){}else if(FX.dk==='td'){dl=atDay(0,23,59);/* 23:59–24:00: "היום" כבר עבר – לא יוצרים משימה שבאיחור מהרגע הראשון */if(dl<=now){X.err='היום כבר נגמר. בחר "מחר" או תאריך ושעה';return X}}else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
  else if(FX.dk==='at'){const dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(FX.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(FX.tm||'');if(!dm||!tm){X.err='בחר תאריך ושעה ליעד';return X}
   dl=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(dl<=now){X.err='היעד שנבחר כבר עבר. בחר זמן עתידי';return X}if(dl>now+399*864e5){X.err='אפשר לקבוע יעד עד שנה קדימה';return X}}
  const c=fxClean();
@@ -505,6 +505,34 @@ ACT.tkwRqTk=el=>{const id=el.dataset.id,x=rqGet(id);if(!x||!rqOk())return;const 
 function rqcBan(){const c=W.rqc;if(!c)return '';
  return `<div class="card" style="margin:6px 0;padding:8px 10px;border-color:var(--acc)"><b>${icd('chat')} משימה מבקשה של ${esc(c.n)}</b><p class="note" style="margin:4px 0 6px">הנמען: ${esc(c.n)}. אחרי יצירת המשימה הבקשה תסומן "בטיפול".</p><button type="button" class="btn g s" data-a="tkwRqX">ביטול</button></div>`}
 ACT.tkwRqX=()=>{const c=W.rqc;W.rqc=null;TKN.sel=null;const f=tkForm();if(f&&c&&f.elements.txt.value===c.txt)f.elements.txt.value='';tkRe()};
+/* ---- חיבורים (22.11.2026): "📋 צור משימה" ממסכים אחרים (חשבונית לתשלום, חוסרים לפי ספק) – טופס "משימה חדשה" הקיים, ממולא מראש
+   (טקסט + יעד מוצע: td היום / tm מחר / at תאריך ושעה). המנהל בוחר עובד ושומר דרך FRM.tkAdd – אין כאן כתיבה. מנהל בלבד, כשתוספת המשימות פעילה ---- */
+W.pfOk=()=>{try{return on()&&fbAdmin()}catch(e){return false}};
+W.prefill=(txt,o)=>{o=o||{};txt=String(txt||'').replace(/\s+/g,' ').trim().slice(0,500);if(!txt||!W.pfOk())return;
+ W.rqc=null;TKN.sel=null;TKN.np=0;TKN.imgs=[];const z=FX0();
+ if(o.dk==='td'||o.dk==='tm')z.dk=o.dk;else if(o.dk==='at'&&/^\d{4}-\d{2}-\d{2}$/.test(o.d||'')){z.dk='at';z.d=o.d;z.tm=/^\d{2}:\d{2}$/.test(o.tm||'')?o.tm:'12:00'}
+ FX=z;closeDlg();TKT='open';W.fo=1;W.d0=1;MGF='';if(cur().v!=='tk')go('tk');else rerender();
+ setTimeout(()=>{const f=tkForm();if(!f)return;if(f.elements.prv&&f.elements.prv.checked){f.elements.prv.checked=false;tkPrvSync()}const ta=f.elements.txt;if(!ta)return;ta.value=txt;f.scrollIntoView({block:'start'});ta.focus()},120)};
+window.tkPrefill=W.prefill;
+/* חשבונית פתוחה לתשלום (חלון "סגירת תשלום" – payDlg): כפתור "📋 צור משימה" מתחת לטופס. יעד מוצע: יום התשלום (dueOf) ב-12:00, ואם הגיע / עבר – היום */
+{const o=typeof payDlg==='function'?payDlg:null;if(o)payDlg=function(id){const r=o.apply(this,arguments);try{const f=document.querySelector('#dlg form[data-f=paysave]');
+ if(f&&W.pfOk()&&!document.getElementById('tkwPfInv'))f.insertAdjacentHTML('afterend',`<button type="button" id="tkwPfInv" class="btn g w" style="margin-top:8px;min-height:44px" data-a="tkwPfInv" data-id="${esc(String(id||''))}">📋 צור משימה לטיפול בחשבונית</button>`)}catch(e){}return r}}
+ACT.tkwPfInv=el=>{let L=[];try{L=S.tx||[]}catch(e){}const t=L.find(x=>x.id===el.dataset.id);if(!t)return;const d=dueOf(t),td=today();
+ W.prefill('לטפל בחשבונית '+subName(t)+' '+ils(bal(t))+(t.inv?' (מס׳ '+t.inv+')':'')+' – יעד '+dfmt(d),d>td?{dk:'at',d,tm:'12:00'}:{dk:'td'})};
+/* מבצע שנשלח לקו (yemot-promo.js): "צור משימות פרסום" – שתי משימות פרטיות למנהל עצמו (ptk, אותה כתיבה כמו משימה פרטית בטופס), יעד היום 23:59.
+   מזהה קבוע לפי היום (שעון ישראל), המבצע (promoKey) ומספר המשימה – לחיצה חוזרת / שליחה חוזרת באותו יום לא יוצרת כפילות (409 = כבר קיימת) */
+const PMT=['לפרסם את המבצע בקבוצות הווצאפ','לוודא שהמבצע עלה בקו'];let pmB=0;
+W.promoOk=W.pfOk;
+W.promoAsk=(key,nm)=>{if(!W.promoOk()||!/^[A-Za-z0-9_-]{1,60}$/.test(String(key||'')))return;nm=String(nm||'').replace(/\s+/g,' ').trim().slice(0,60);
+ dlg(`<h3>✓ המבצע נשלח לקו</h3><p class="note">ליצור לך משימות פרסום להיום${nm?' – "'+esc(nm)+'"':''}?</p><ul class="note" style="margin:0 0 10px;padding-inline-start:18px">${PMT.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul><div class="row"><button type="button" class="btn grow" style="min-height:44px" data-a="tkwPromo" data-k="${esc(key)}" data-n="${esc(nm)}">📋 צור משימות פרסום</button><button type="button" class="btn g grow" style="min-height:44px" data-a="closeDlg">לא עכשיו</button></div>`)};
+ACT.tkwPromo=async el=>{const key=String(el.dataset.k||''),nm=String(el.dataset.n||'');if(pmB||!W.promoOk()||!/^[A-Za-z0-9_-]{1,60}$/.test(key))return;pmB=1;el.disabled=true;
+ const day=ymd(Date.now()).replace(/-/g,''),now=Date.now(),dl=atDay(0,23,59);let mk=0,ex=0,er='';
+ try{for(let i=0;i<PMT.length;i++){const f={owner:sv(SY.uid),by:sv(fbBy()),txt:sv((PMT[i]+(nm?' – '+nm:'')).slice(0,500)),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),sub:iv(0),late:sv('')};
+   if(rvNew()&&dl>now)f.dl=iv(dl);const post=()=>fsx('/ptk?documentId='+encodeURIComponent('ymp'+day+'_'+key+'_'+(i+1)),{method:'POST',body:JSON.stringify({fields:f})});
+   try{try{await post()}catch(e){if(!(e&&e.code===403&&'dl' in f))throw e;rvSet(0);delete f.dl;await post()}mk++}catch(e){if(e&&e.code===409)ex++;else{er=tkErr(e);break}}}}
+ finally{pmB=0}
+ closeDlg();toast(er?(mk?'נוצרו '+mk+' משימות. ':'')+er:mk?'✓ נוצרו '+mk+' משימות פרסום (פרטיות, יעד היום)'+(ex?' · '+ex+' כבר היו קיימות':''):'משימות הפרסום של המבצע הזה כבר נוצרו היום');
+ if(mk){try{await tkLoad()}catch(e){}if(cur().v==='tk')rerender()}};
 function rqcDone(id){const c=W.rqc;if(!id||!c)return;W.rqc=null;const x=rqGet(c.id);
  docPatch('rq',c.id,{ph:'w',tk:String(id)}).then(()=>{if(x){x.ph='w';x.tk=String(id)}}).catch(()=>toast('המשימה נוצרה, אבל סימון הבקשה "בטיפול" נכשל'))}
 /* ---- יציאה מהחשבון: ביטול ההתראות המקומיות ומחיקת המפתחות של המשתמש מהמכשיר (טלפון משותף). לא זורק שגיאות ---- */
@@ -611,7 +639,7 @@ FRM.tkwDl=f=>{const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\
 {const h0=V.home;let hat=0;
  ACT.hmTk=el=>{const v=el.dataset.v;TKT=['late','wait','open'].includes(v)?v:'open';MGF='';W.d0=1;if(cur().v!=='tk')go('tk');else rerender()};
  ACT.hmTkNew=()=>{TKT='open';W.fo=1;W.d0=1;MGF='';if(cur().v!=='tk')go('tk');else rerender();setTimeout(()=>{const t=document.querySelector('form[data-f=tkAdd] textarea');if(t){t.scrollIntoView({block:'center'});t.focus()}},120)};
- const homeCard=r0=>{const rows=[],opt=(a,v,t,n,c)=>n>0?`<button type="button" class="opt" style="min-height:44px" data-a="${a}"${v?` data-v="${v}"`:''}><span>${t}</span><b style="color:${c||'var(--acc)'}">${n}</b></button>`:'';
+ const homeCard=r0=>{const rows=[],opt=(a,v,t,n,c)=>n>0?`<button type="button" class="k" style="min-height:64px;text-align:start;border-inline-start:3px solid ${c||'var(--acc)'}" data-a="${a}"${v?` data-v="${v}"`:''}><b style="color:${c||'var(--acc)'};font-size:1.25rem">${n}</b><small style="display:block;white-space:normal">${t}</small></button>`:'';
   let pend=false;const tk=on()&&fbAdmin();
   if(tk){const L=TK.L||[],now=Date.now(),t0=day0(0),t1=day0(1);let late=0,wait=0,open=0,rc=0;
    L.forEach(x=>{const c=mgCat(x,now,t1);if(c.late)late++;else if(c.wait)wait++;else if(x.st==='open')open++;if(x.rc&&x.st==='open'){const d=tkDl(x);if(d>=t0&&d<t1)rc++}});
@@ -625,11 +653,14 @@ FRM.tkwDl=f=>{const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\
   if(tk)sc.push('<button type="button" class="chip" style="min-height:44px" data-a="hmTkNew">＋ משימה חדשה</button>');
   if(/id="secHome"/.test(r0)&&typeof ACT.secOpen==='function')sc.push('<button type="button" class="chip" style="min-height:44px" data-a="secOpen">המזכירה</button>');
   if(bzF('scan'))sc.push('<button type="button" class="chip" style="min-height:44px" data-a="go" data-v="scan">סריקת חשבונית</button>');
-  return `<div class="card" id="hmTodo" style="margin:0 0 10px"><h3 style="margin:0 0 8px">${icd('bell')} מה דורש טיפול היום</h3>${any?rows.join(''):pend?'<p class="note" style="margin:0">טוען…</p>':'<p class="note" style="margin:0;color:var(--st-done)">✓ אין דברים פתוחים</p>'}${sc.length?`<div class="chips" style="margin:8px 0 0">${sc.join('')}</div>`:''}</div>`};
+  return `<div class="card" id="hmTodo" style="margin:0 0 10px"><h3 style="margin:0 0 8px">${icd('bell')} דורש טיפול</h3>${any?`<div class="kg" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${rows.join('')}</div>`:pend?'<p class="note" style="margin:0">טוען…</p>':'<p class="note" style="margin:0;color:var(--st-done)">✓ אין דברים פתוחים</p>'}${sc.length?`<div class="chips" style="margin:8px 0 0">${sc.join('')}</div>`:''}</div>`};
+ /* סוף ה-div שמתחיל ב-st (ספירת פתיחות/סגירות של div); -1 אם לא נמצא */
+ const afterDiv=(h,st)=>{if(st<0)return -1;const re=/<div\b|<\/div>/g;re.lastIndex=st;let d=0,m;while((m=re.exec(h))){d+=m[0]==='</div>'?-1:1;if(!d)return re.lastIndex}return -1};
  if(typeof h0==='function')V.home=function(){const r=h0.apply(this,arguments);
   try{if(!r||typeof r.h!=='string'||!(typeof isA==='function'&&isA())||isW())return r;
    const now=Date.now();if(on()&&fbAdmin()&&now-hat>18e4&&(!TK.at||now-TK.at>18e4)){hat=now;Promise.resolve(tkLoad()).then(()=>{if(cur().v==='home')rerender()}).catch(()=>{})}
    if(on()&&typeof rqLoad==='function'&&!RQ.b&&now-RQ.at>18e4)rqLoad();
-   r.h=homeCard(r.h)+r.h}catch(e){}return r}}
+   /* 22.11.2026 (בקשת בעל הפרויקט): הכרטיס מתחת לנתוני העסק (הכנסות/הוצאות/רווח ואריחי התשלום), לא מעליהם */
+   const c=homeCard(r.h),i=r.h.indexOf('id="hcards"'),at=i<0?-1:afterDiv(r.h,r.h.lastIndexOf('<div',i));r.h=at<0?r.h+c:r.h.slice(0,at)+c+r.h.slice(at)}catch(e){}return r}}
 window.TKW=W;
 })();

@@ -175,7 +175,7 @@ function supTab(){
  const row=r=>`<div class="hs-sr"><b>${esc(r.it.n)}</b>${r.it.q?` · כמות ${esc(C.fmtQ(r.it.q))}`:''} ${r.all?'<span class="tag t1">מופיע לכל הספקים</span>':''}${odT(r.it)}${r.it.od?`<div>${odLine(r.it)}</div>`:''}</div>`;
  const card=g=>{const ph=HS.ph[g.id];return `<div class="card" data-hsg="${esc(g.id)}"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">${esc(g.name)} (${cnt(g)})</h3>${ph?`<button type="button" class="chip" data-a="hsPhEd" data-id="${esc(g.id)}" style="min-height:32px">☎ ${esc(ph)}</button>`:''}</div>
  ${g.L.map(row).join('')}${g.L.length?'':'<p class="note">אין פריטים לספק הזה.</p>'}
- <div class="hs-acts"><button type="button" class="btn s" data-a="hsWa" data-id="${esc(g.id)}">וואטסאפ לספק</button><button type="button" class="btn g s" data-a="hsPdf" data-k="share" data-id="${esc(g.id)}">קובץ לשיתוף</button><button type="button" class="btn g s" data-a="hsPdf" data-k="print" data-id="${esc(g.id)}">הדפסה</button></div></div>`};
+ <div class="hs-acts"><button type="button" class="btn s" data-a="hsWa" data-id="${esc(g.id)}">וואטסאפ לספק</button><button type="button" class="btn g s" data-a="hsPdf" data-k="share" data-id="${esc(g.id)}">קובץ לשיתוף</button><button type="button" class="btn g s" data-a="hsPdf" data-k="print" data-id="${esc(g.id)}">הדפסה</button>${tkOk()&&C.split(g.L).need.length?`<button type="button" class="btn g s" style="min-height:44px" data-a="hsTk" data-id="${esc(g.id)}">📋 צור משימת הזמנה</button>`:''}</div></div>`};
  return pick+genN+(G.length?G.map(card).join(''):`<div class="empty">${HS.sel?'אין פריטים לספק הזה':'אין פריטים משויכים לספקים'}</div>`)}
 
 V.hs=()=>{const T='חוסרים';if(!on())return{t:T,h:'<div class="empty">המסך הזה לא זמין</div>'};chk();
@@ -354,6 +354,10 @@ const waSend=(g,ph)=>window.open('https://wa.me/'+C.intl(ph)+'?text='+encodeURIC
 const noSend=g=>{if(C.split(g.L).need.length||g.O.length)return '';return g.L.length?'כל הפריטים לספק הזה כבר הוזמנו':''};
 ACT.hsWa=async el=>{const g=HS.G[el.dataset.id];if(!g||!idOk(g.id))return;const ns=noSend(g);if(ns)return toast(ns);if(!g.L.length&&!g.O.length)return toast('אין פריטים לשלוח לספק הזה');
  const ph=await phGet(g.id);if(ph&&C.phOk(ph))return waSend(g,ph);phDlg(g,true)};
+/* 22.11.2026: "צור משימת הזמנה" – טופס "משימה חדשה" ממולא מראש (tasks-wc.js: TKW.prefill), יעד מוצע היום. מנהל בלבד, כשתוספת המשימות פעילה. בלי כתיבה מכאן */
+const tkOk=()=>{try{return !!(window.TKW&&typeof TKW.pfOk==='function'&&TKW.pfOk())}catch(e){return false}};
+ACT.hsTk=el=>{const g=HS.G[el.dataset.id];if(!g||!tkOk())return;const N=C.split(g.L).need.map(r=>r.it.n+(r.it.q?' ×'+C.fmtQ(r.it.q):''));if(!N.length)return toast('כל הפריטים לספק הזה כבר הוזמנו');
+ TKW.prefill('להזמין מ'+g.name+': '+N.slice(0,6).join(', ')+(N.length>6?' ועוד '+(N.length-6):''),{dk:'td'})};
 ACT.hsPhEd=el=>{const g=HS.G[el.dataset.id];if(g&&idOk(g.id))phDlg(g,false)};
 ACT.hsPhSave=async el=>{const g=HS.G[el.dataset.id],i=document.getElementById('hsPh');if(!g||!i||!idOk(g.id))return;/* המזהה נכנס לנתיב – רק תבנית מותרת */const v=i.value;if(!C.phOk(v))return toast('מספר טלפון לא תקין');
  const ph=C.intl(v),send=!!el.dataset.send;el.disabled=true;
