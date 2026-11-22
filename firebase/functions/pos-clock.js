@@ -5,11 +5,13 @@
 //
 //   op 'in' | 'out', { uid?, pin?, dev? }  → { id, in, out?, min? } – החתמה. בלי uid – המתחבר עצמו.
 //                                          uid של עובד אחר (מסך קופה משותף) – חובה pin של אותו עובד (נעילה אחרי 5 שגויים, כמו בכל מקום).
+//                                          כניסה מאוחרת ממשמרת היום (shifts.js posLate) → התראה למנהל, פעם ביום לעובד (גם מול כספית).
 //   op 'status', { uid? }                  → { open: null | { id, in } } – לעצמי; לעובד אחר – אחראי / מנהל.
 //   op 'list',  { from, to, uid? }         → { recs, sum } – מנהל: רשומות בטווח (עד 62 יום) וסיכום דקות לכל עובד.
 //   op 'fix',   { id, in?, out?, note }    → { ok } – מנהל: תיקון החתמה (הערך הקודם נשמר ב-fix, ונרשם ב-poslog).
 // שגיאות: bad-op, bad-input, bad-time, clocked-in, not-in, no-rec, no-user, not-manager, not-lead, + שגיאות PIN.
 
+const logger = require('firebase-functions/logger');
 const { onCall } = require('./lib/region');
 const { inputObject } = require('./lib/roles');
 const AG = require('./lib/pos-agg');
@@ -63,6 +65,11 @@ async function clock(request) {
     out = { ok: true, id: d.id, in: d.get('in'), out: now, min: AG.clockMin({ in: d.get('in'), out: now }, now).min };
   });
   if (r && !r.ok) { await G.pinAlert(db, who, uid, r); G.pinThrow(r); }
+  // התראת איחור למנהל (shifts.js posLate – אותו רישום כפילויות כמו בכספית, shfsent/{day}.late). תקלה כאן לא מפילה את ההחתמה
+  if (op === 'in' && out) {
+    const send = G.O.send ? async (t, m, meta) => { await G.O.send(t, m, meta); return t.map((token) => ({ token, ok: true })); } : undefined;
+    try { await require('./shifts')._core.posLate(uid, now, send ? { send } : {}); } catch (e) { logger.warn('posClock: late check failed', { name: e && e.name, code: e && e.code }); }
+  }
   return out;
 }
 

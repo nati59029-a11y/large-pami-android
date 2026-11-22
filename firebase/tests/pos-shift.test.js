@@ -358,4 +358,32 @@ describe('ש5 – שעון נוכחות', () => {
     await assertFails(fs(CASH).doc(`b/${A}/posclock/${CASH2}_${t}`).get());
     await assertFails(fs(CASH).doc(`b/${A}/posclock/${CASH}_${t}`).update({ out: 1 }));
   });
+  // 22.11.2026: התראת איחור משעון הקופה (shifts.js posLate). השעה האמיתית – בשבת / חג (או 00:00–00:10) לא מצפים להתראה
+  it('כניסה מאוחרת ב-6 דקות ממשמרת היום → התראה אחת למנהל (shfsent.late); כניסה חוזרת באותו יום → אין; עובד בלי משמרת → אין', async () => {
+    const SC = require('../functions/lib/shifts-core.js');
+    const now = Date.now(), st = now - 6 * 60000, today = SC.todayOf(now);
+    const can = !SC.quiet(now) && SC.todayOf(st) === today && SC.todayOf(now + 3600000) === today;
+    await put(`b/${A}/shf/PL1`, { d: today, s: SC.hmOf(st), e: SC.hmOf(now + 3600000), u: CASH, nm: 'קופאית', fx: false });
+    PUSH.length = 0;
+    assert.equal(R(await clk(CASH, { op: 'in', dev: 'K1' })), 'ok');
+    assert.equal(R(await clk(CASH2, { op: 'in', dev: 'K1' })), 'ok', 'בלי משמרת');
+    const lt = () => PUSH.filter((x) => /^lt/.test(x.msg.id));
+    if (!can) { assert.equal(lt().length, 0); return; }
+    assert.equal(lt().length, 1, JSON.stringify(PUSH.map((x) => x.msg)));
+    assert.deepEqual(lt()[0].tokens, [TOK]); assert.match(lt()[0].msg.body, /^קופאית החתים\/ה כניסה בקופה ב-/); assert.match(lt()[0].msg.body, /לפי שעון הקופה/);
+    assert.ok((await get(`b/${A}/shfsent/${today}`)).late[CASH]);
+    assert.equal(R(await clk(CASH, { op: 'out' })), 'ok');
+    assert.equal(R(await clk(CASH, { op: 'in' })), 'ok');
+    assert.equal(lt().length, 1, 'פעם ביום');
+  });
+
+  it('תקלה בבדיקת האיחור לא מפילה את ההחתמה', async () => {
+    const SH = require('../functions/shifts.js')._core, orig = SH.posLate;
+    SH.posLate = async () => { throw new Error('boom'); };
+    try {
+      const i = await clk(CASH, { op: 'in', dev: 'K1' });
+      assert.equal(R(i), 'ok');
+      assert.equal((await get(`b/${A}/posclock/${i.r.id}`)).out, null);
+    } finally { SH.posLate = orig; }
+  });
 });

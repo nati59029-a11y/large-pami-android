@@ -2719,8 +2719,18 @@ let RPL={L:[],miss:0,ok:0};
 function wkNewCS(d){if(!d||d.kind==='check'||d.reg)return;const K=v=>heKey(s_(v)).replace(/\s+/g,' ');
  if(d.ncat){const nm=s_(d.catName).slice(0,60);delete d.ncat;if(!nm)return;let c=S.cats.find(x=>x.kind==='exp'&&!x.hid&&K(x.name)===K(nm));if(!c){c={id:'c_'+uid(),kind:'exp',name:nm,beh:'simple'};S.cats.push(c);wkNewCS.n=1}else if(c.off){c.off=false;wkNewCS.n=1}d.cat=c.id;d.catName=c.name}
  if(d.nsub){const nm=s_(d.subName).slice(0,60);delete d.nsub;const c=cat(d.cat);if(!nm||!c||!S.cats.includes(c))return;let x=S.subs.find(s=>s.cat===c.id&&K(s.name)===K(nm));if(!x){x={id:uid(),cat:c.id,name:nm};S.subs.push(x);wkNewCS.n=1}else if(x.off){x.off=false;wkNewCS.n=1}d.sub=x.id;d.subName=x.name}}
-async function pullInbox2(){inbHeal();await rqFlush();const docs=await runQ('status','new');let n=0;const done=[];RPL={L:[],miss:0,ok:0};
- for(const d of docs){const id=idOf(d);if(!idOk(id))continue;if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id||(x.srcs||[]).includes(id)||(x.pays||[]).some(p=>p&&p.src===id))){done.push(id);continue}
+/* 22.11.2026 (שלב 2): צילום (chunks) של הוצאת עובד שנשלחה לפני פחות מ-5 דקות (לפי inbox.t, ms) לא נמחק מיד – השרת (piInbox) קורא אותו כדי ליצור חשבונית לתמחור.
+   הוא נרשם בתור במכשיר (lp-chq: [{id,np,due}]) ונמחק במשיכה הראשונה אחרי due (לכל היותר 5 דקות מהמשיכה). בלי t (פריט ישן) – נמחק מיד, כמו קודם.
+   בלי רשת – נשאר בתור לפעם הבאה; כל שגיאה אחרת – יוצא מהתור (כמו המחיקה המיידית, שמתעלמת משגיאות) */
+const CHQ=LK('lp-chq'),CHMS=5*60e3,chqL=()=>{try{const a=JSON.parse(localStorage.getItem(CHQ));return Array.isArray(a)?a:[]}catch(e){return[]}},chqSet=a=>{try{localStorage.setItem(CHQ,JSON.stringify(a))}catch(e){}};
+const inbT=d=>{const f=d&&d.fields&&d.fields.t;return f?+(f.integerValue||f.doubleValue||0)||0:0};
+async function chDel(id,np){let off=0;for(let k=0;k<np;k++){try{await fsx('/chunks/'+id+'_'+k,{method:'DELETE'})}catch(e){if(e&&e.offline)off=1}}return!off}
+async function chqFlush(){const q=chqL();if(!q.length)return;const now=Date.now(),due=q.filter(x=>x&&!(x.due>now));if(!due.length)return;const keep=[];
+ for(const x of due){if(!x||!idOk(String(x.id||''))||!(+x.np>0))continue;if(!await chDel(x.id,Math.min(+x.np,12)))keep.push(x)}
+ const ids=new Set(due.map(x=>x&&x.id));chqSet(chqL().filter(x=>!ids.has(x&&x.id)).concat(keep))}
+function chLater(id,np,t){const now=Date.now(),age=now-t,q=chqL().filter(x=>x&&x.id!==id);q.push({id,np,due:now+Math.min(CHMS,CHMS-age)});chqSet(q)}
+async function pullInbox2(){inbHeal();await rqFlush();await chqFlush();const docs=await runQ('status','new');let n=0;const done=[],tm={};RPL={L:[],miss:0,ok:0};
+ for(const d of docs){const id=idOf(d);if(!idOk(id))continue;tm[id]=inbT(d);if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id||(x.srcs||[]).includes(id)||(x.pays||[]).some(p=>p&&p.src===id))){done.push(id);continue}
   let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}if(!data||typeof data!=='object')data={};if(data.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(data.date)))data.date='';
   /* k=='check' (עובד בלי expW): רק שדות צ'ק, תמיד kind=check – אף פעם לא הוצאה רגילה */if(gv(d,'k')==='check'){const q=data;data={kind:'check',amt:rnd(Math.max(0,+q.amt||0)),date:cfDt(q.date)?q.date:'',cdate:cfDt(q.cdate)?q.cdate:'',no:s_(q.no).replace(/\D/g,'').slice(0,20),bank:stlScrub(s_(q.bank)).slice(0,60),payee:stlScrub(s_(q.payee)).slice(0,80),fid:s_(q.fid).replace(/[^A-Za-z0-9_-]/g,'').slice(0,40),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};if(q.low)data.low=1;if(typeof q.br==='string'&&ORG_ID.test(q.br))data.br=q.br}else if(data.kind==='check')delete data.kind;
   let f='';const np=+gv(d,'parts')||0;if(np){try{for(let k=0;k<np;k++){const c=await fsx('/chunks/'+id+'_'+k);f+=gv(c,'data')}}catch(e){continue}}else f=gv(d,'file');if(f){try{await fput('i'+id,f)}catch(e){continue}}
@@ -2732,7 +2742,7 @@ async function pullInbox2(){inbHeal();await rqFlush();const docs=await runQ('sta
  for(const r of RPL.L){for(let k=0;k<r.np;k++){try{await fsx('/chunks/'+r.id+'_'+k,{method:'DELETE'})}catch(e){}}if(r.o)await inbClose(r.o)}
  if(RPL.ok)toast(RPL.ok>1?'התקבלו '+RPL.ok+' צילומים חדשים מהעובדים':'התקבל צילום חדש מהעובד');
  if(RPL.miss)toast('הגיע צילום חדש להוצאה שכבר אושרה או נדחתה, או שלא ביקשת עבורה צילום. הוא לא נשמר');
- for(const id of done){const it=S.inbox.find(x=>x.id===id);if(it&&it.np)for(let k=0;k<it.np;k++){try{await fsx('/chunks/'+id+'_'+k,{method:'DELETE'})}catch(e){}}try{await fsx('/inbox/'+id+'?updateMask.fieldPaths=status',{method:'PATCH',body:JSON.stringify({fields:{status:sv('imported')}})})}catch(e){}}
+ for(const id of done){const it=S.inbox.find(x=>x.id===id);if(it&&it.np){const t=tm[id]||0;if(t>0&&Date.now()-t<CHMS)chLater(id,it.np,t);else for(let k=0;k<it.np;k++){try{await fsx('/chunks/'+id+'_'+k,{method:'DELETE'})}catch(e){}}}try{await fsx('/inbox/'+id+'?updateMask.fieldPaths=status',{method:'PATCH',body:JSON.stringify({fields:{status:sv('imported')}})})}catch(e){}}
  return n}
 /* ---- שלב 2.6ג: הכנסות מהאתר (site_income_daily) – מנהל בלבד, ורק בגרסת הבדיקה (אמולטור או בנייה עם SITE_BACKEND=test). בגרסה הרגילה כבוי.
    תנועת הכנסה אחת ליום, בקטגוריה "מכירות אתר", באותו מבנה של תנועת הכנסה רגילה (בלי שדה חדש). המפתח: src='site_income_daily/<תאריך>'.
