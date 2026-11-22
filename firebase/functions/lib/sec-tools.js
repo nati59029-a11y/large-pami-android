@@ -107,7 +107,7 @@ const DECL = {
   getTasks: { description: 'משימות עובדים מהענף: כמה פתוחות, בוצעו, באיחור, לפי עובד.', parameters: S({ employee: str('שם עובד (לא חובה)'), status: { type: 'string', enum: ['open', 'done', 'late', 'all'] }, days: numP('כמה ימים אחורה, ברירת מחדל 30') }) },
   getCashClosings: { description: 'סגירות קופה בטווח תאריכים.', parameters: S({ from: str('מתאריך YYYY-MM-DD'), to: str('עד תאריך YYYY-MM-DD') }) },
   getOrders: { description: 'הזמנות לקוחות בטווח תאריכים: כמות, סכום, לפי סטטוס.', parameters: S({ from: str('מתאריך YYYY-MM-DD'), to: str('עד תאריך YYYY-MM-DD') }) },
-  getPayroll: { description: 'שכר: סך לכל עובד לחודש, לפי מה שנרשם באפליקציה.', parameters: S({ employee: str('שם עובד (לא חובה)'), month: str('YYYY-MM') }) },
+  getPayroll: { description: 'שכר: סך לכל עובד לחודש, לפי מה שנרשם באפליקציה. לתקופה של כמה חודשים (למשל "בשנה האחרונה" = 12 החודשים האחרונים עד החודש הנוכחי) – קריאה אחת עם from ו-to, ולא קריאה לכל חודש.', parameters: S({ employee: str('שם עובד (לא חובה)'), month: str('YYYY-MM – חודש אחד'), from: str('YYYY-MM – תחילת טווח (כולל)'), to: str('YYYY-MM – סוף טווח (כולל)') }) },
   getEmployeeActivity: { description: 'נתוני עובד: משימות (בזמן/באיחור), סגירות קופה, הוצאות שהגיש. תמיד עם "מה לא ידוע".', parameters: S({ employee: str('שם העובד'), days: numP('כמה ימים אחורה, ברירת מחדל 60') }, ['employee']) },
   ...KT.DECL,
   getEmployeeNotes: { description: 'הערות שהמנהל רשם בכרטיסי העובדים (מהמכשיר, עד 60 האחרונות): שם העובד, תאריך וטקסט. מידע פנימי למנהל בלבד – רק להסבר ולתזכורת; לא להעביר לעובד ולא כבסיס יחיד להחלטה נגד עובד.', parameters: S({ employee: str('שם העובד (לא חובה)') }) },
@@ -143,7 +143,7 @@ const LABEL = {
   ...KT.LABEL,
   getMonthSummary: (a) => 'סיכום חודש ' + (a.month || ''), getRecentEntries: () => 'פעולות אחרונות שנרשמו', getOpenInvoices: () => 'חשבוניות לתשלום', getSupplierBalance: (a) => 'כרטיס ספק – ' + (a.supplier || ''),
   getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים',
-  getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (a.month ? ' ' + a.month : ''),
+  getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (MON_RE.test(a.from) || MON_RE.test(a.to) ? ' ' + (a.from || '') + '–' + (a.to || '') : a.month ? ' ' + a.month : ''),
   getEmployeeActivity: (a) => 'נתוני עובד – ' + (a.employee || ''), loanCalc: () => 'חישוב הלוואה (לפי ההנחות)', getAppHelp: () => 'מדריך העזרה של האפליקציה',
   getEmployeeNotes: () => 'הערות על עובדים (מוצפן)',
 };
@@ -345,8 +345,25 @@ async function runTool(name, args, ctx) {
       const pay = ctx.pay;
       if (!pay || !Object.keys(pay).length) return { error: 'no-data', note: 'אין נתוני שכר במכשיר או במראה.' };
       const ms = Object.keys(pay).sort();
-      const mon = MON_RE.test(a.month) && pay[a.month] ? a.month : ms[ms.length - 1];
-      const rows = (pay[mon] || []).filter((r) => !a.employee || match(r[0], a.employee));
+      const pick = (m) => (pay[m] || []).filter((r) => !a.employee || match(r[0], a.employee));
+      // 22.11.2026: טווח חודשים בקריאה אחת (from/to) – אחרת "בשנה האחרונה" דרש 12 קריאות והסבבים נגמרו לפני התשובה
+      if (MON_RE.test(a.from) || MON_RE.test(a.to)) {
+        const to = MON_RE.test(a.to) ? a.to : ms[ms.length - 1];
+        const from = MON_RE.test(a.from) ? a.from : to;
+        if (from > to) return { error: 'bad-range', note: 'תחילת הטווח אחרי סופו.' };
+        const L = [];
+        for (let [y, m] = from.split('-').map(Number); L.length < 36; m++) { if (m > 12) { m = 1; y++; } const k = y + '-' + String(m).padStart(2, '0'); if (k > to) break; L.push(k); }
+        const inR = L.filter((m) => pay[m]), missing = L.filter((m) => !pay[m]);
+        const by = {};
+        const months = inR.map((m) => { const rows = pick(m); rows.forEach((r) => { by[r[0]] = rnd((by[r[0]] || 0) + r[1]); }); return { month: m, total: rnd(rows.reduce((s, r) => s + r[1], 0)) }; });
+        const emps = Object.keys(by).slice(0, 50).map((n) => ({ name: n, total: by[n] }));
+        return { from, to, total: rnd(months.reduce((s, x) => s + x.total, 0)), months, employees: emps, missingMonths: missing,
+          note: (missing.length ? 'אין נתוני שכר לחודשים שב-missingMonths – לציין זאת בתשובה. ' : '') + (a.employee && !emps.length ? 'לא נמצא עובד בשם הזה בנתוני השכר של הטווח.' : '') };
+      }
+      // חודש שביקשו ואין עליו נתונים – אומרים זאת (בעבר הוחזר בשקט החודש האחרון, והמודל ניסה שוב ושוב)
+      if (MON_RE.test(a.month) && !pay[a.month]) return { error: 'no-month', month: a.month, note: 'אין נתוני שכר לחודש הזה.', availableFrom: ms[0], availableTo: ms[ms.length - 1] };
+      const mon = MON_RE.test(a.month) ? a.month : ms[ms.length - 1];
+      const rows = pick(mon);
       return { month: mon, total: rnd(rows.reduce((s, r) => s + r[1], 0)), monthTotal: rnd((pay[mon] || []).reduce((s, r) => s + r[1], 0)), employees: rows.slice(0, 50).map((r) => ({ name: r[0], total: r[1] })) };
     }
     case 'getEmployeeActivity': {
