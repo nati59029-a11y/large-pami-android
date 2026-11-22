@@ -114,9 +114,17 @@ function hourSlot(now, tz, from, to) {
   if (p.h < from || p.h > to || quiet(now, tz)) return null;
   return `${p.y}-${p2(p.m)}-${p2(p.d)} ${p2(p.h)}`;
 }
+// שעות העובדים בבוקר (0.1.14): חצי השעה הנוכחית כמזהה 'YYYY-MM-DD HH:MM' (MM = 00 / 30) – רק מ-from עד to (דקות מחצות, כולל, שעון tz)
+// ולא בחלון השקט (שבת וחג); אחרת null
+function halfSlot(now, tz, from, to) {
+  const p = parts(now, tz), m = p.h * 60 + p.mi, s = p.h * 60 + (p.mi < 30 ? 0 : 30);
+  if (m < from || s > to || quiet(now, tz)) return null;
+  return `${p.y}-${p2(p.m)}-${p2(p.d)} ${p2(p.h)}:${p.mi < 30 ? '00' : '30'}`;
+}
+const nextHalf = (now) => Math.floor(now / 1800e3) * 1800e3 + 1800e3;
 // השעה העגולה הבאה (בישראל ההפרש מ-UTC הוא שעות שלמות – גם בשעון קיץ)
 const nextHour = (now) => Math.floor(now / 3600e3) * 3600e3 + 3600e3;
 const hmOf = (now, tz) => { const p = parts(now, tz); return `${p2(p.h)}:${p2(p.mi)}`; };
-const api = { TZ, AT, MAX_DAYS, parts, dayStr, addDays, slotDay, isDue, offset, zonedToUtc, nextAt, daysToFetch, safeDays, restDay, quiet, hourSlot, nextHour, hmOf };
+const api = { TZ, AT, MAX_DAYS, parts, dayStr, addDays, slotDay, isDue, offset, zonedToUtc, nextAt, daysToFetch, safeDays, restDay, quiet, hourSlot, nextHour, hmOf, halfSlot, nextHalf };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxDays = api;
 })(typeof self !== 'undefined' ? self : this);
