@@ -1593,6 +1593,9 @@ function chatEnter(){if(X.sending)return;X.msgs=[];X.media={};X.msgErr='';X.ey=n
   return{t:S0.name||'המזכירה',s:"צ'אט קודם",h:stopH()+tabsH()+prevH()}}
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='eyes'){const S0=X.st;
   return{t:S0.name||'המזכירה',s:'מול העיניים',h:stopH()+tabsH()+eyH()}}
+ /* 22.11.2026: "התראות מהטלפון" – המסך ב-sec-notif.js (הלשונית נוספת שם ל-TABS) */
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='notif'&&typeof window.__secNotifH==='function'){const S0=X.st;
+  return{t:S0.name||'המזכירה',s:'התראות מהטלפון',h:stopH()+tabsH()+window.__secNotifH()}}
  /* מספר הפריטים הפתוחים ללשונית – נטען ברקע (בלי לסמן "ביקור") */
  try{if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.ey&&!X.eyb)eyLoad(false)}catch(e){}
  return r10()}}
@@ -1948,4 +1951,6 @@ function cxCardH(c,mid){const box=(h,x)=>`<div class="card${x?' secdone':''}" st
  return ''}
 
 window.__sec=X;
+/* 22.11.2026: ל-sec-notif.js ("התראות מהטלפון") – הלשוניות, ופתיחת משימה באותו קוד בדיוק כמו אישור כרטיס משימה כאן (cxCreate) */
+window.__secTabs=TABS;window.__secCx={on:cxOn,create:cxCreate,staff:cxStaff,rvNow:cxRvNow,dueL:cxDueL,P:cxP};
 })();

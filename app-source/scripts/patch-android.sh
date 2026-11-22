@@ -179,6 +179,7 @@ cat > android/app/src/main/res/xml/lp_backup_rules.xml <<'XML'
 <full-backup-content>
     <exclude domain="sharedpref" path="lp_notif_snz.xml" />
     <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+    <exclude domain="sharedpref" path="lp_notif_in.xml" />
 </full-backup-content>
 XML
 cat > android/app/src/main/res/xml/lp_data_extraction_rules.xml <<'XML'
@@ -187,10 +188,12 @@ cat > android/app/src/main/res/xml/lp_data_extraction_rules.xml <<'XML'
     <cloud-backup>
         <exclude domain="sharedpref" path="lp_notif_snz.xml" />
         <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+        <exclude domain="sharedpref" path="lp_notif_in.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="lp_notif_snz.xml" />
         <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+        <exclude domain="sharedpref" path="lp_notif_in.xml" />
     </device-transfer>
 </data-extraction-rules>
 XML
@@ -360,6 +363,46 @@ GRADLE
 grep -q 'lp-pos-hw' android/app/build.gradle || { echo "::error::pos hw: gradle block missing"; exit 1; }
 # --- POS-HW END ---
 
+# --- NOTIF-IN BEGIN ---
+# Notifications from the phone for the secretary (22.11.2026, LpNotifListen + LpNotifPlugin, www/sec-notif.js).
+# A notification listener service: Android binds it only after the manager turns on "notification access" for the app
+# in the phone's settings (no runtime prompt, nothing happens before that). Android 11+: the launcher-apps query lets
+# getApps() list the installed apps the manager can choose from (no QUERY_ALL_PACKAGES). Running twice adds nothing twice.
+python3 - "$M" <<'PY7'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+if "LpNotifListen" not in s:
+    i = s.rfind("</application>")
+    if i < 0:
+        sys.exit("::error::notif in: </application> not found")
+    s = s[:i] + ('\n        <!-- Notifications from the phone for the secretary (patch-android.sh) -->'
+                 '\n        <service android:name="com.largepami.finance.LpNotifListen" android:label="@string/app_name" android:exported="true"'
+                 ' android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">'
+                 '\n            <intent-filter>'
+                 '\n                <action android:name="android.service.notification.NotificationListenerService" />'
+                 '\n            </intent-filter>'
+                 '\n        </service>'
+                 '\n    ') + s[i:]
+if "lp-notif-in-apps" not in s:
+    q = ('\n        <!-- lp-notif-in-apps -->\n        <intent>\n            <action android:name="android.intent.action.MAIN" />'
+         '\n            <category android:name="android.intent.category.LAUNCHER" />\n        </intent>')
+    i = s.find("<queries>")
+    if i >= 0:
+        s = s[:i + len("<queries>")] + q + s[i + len("<queries>"):]
+    else:
+        j = s.find("<application")
+        if j < 0:
+            sys.exit("::error::notif in: <application> not found")
+        s = s[:j] + "<queries>" + q + "\n    </queries>\n    " + s[j:]
+open(p, "w", encoding="utf-8").write(s)
+assert s.count("LpNotifListen") == 1 and s.count("android.service.notification.NotificationListenerService") == 1, "notif in: service"
+assert 'android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"' in s, "notif in: bind permission"
+assert s.count("lp-notif-in-apps") == 1, "notif in: queries"
+print("notif in manifest: OK (LpNotifListen, BIND_NOTIFICATION_LISTENER_SERVICE, launcher-apps query)")
+PY7
+# --- NOTIF-IN END ---
+
 J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java
 cp android-plugin/AppUpdatePlugin.java $J/AppUpdatePlugin.java
@@ -383,6 +426,8 @@ cp android-plugin/LpWorkService.java $J/LpWorkService.java
 cp android-plugin/LpWorkPlugin.java $J/LpWorkPlugin.java
 # POS hardware (17.11.2026): printer (ESC/POS over USB/Bluetooth/network), drawer, customer display
 for f in LpPosEscPos LpPosTransport LpPosBtUsb LpPosRender LpPosDisplay LpPosPlugin; do cp android-plugin/$f.java $J/$f.java; done
+# Notifications from the phone for the secretary (22.11.2026): listener service + plugin (www/sec-notif.js)
+for f in LpNotifListen LpNotifPlugin; do cp android-plugin/$f.java $J/$f.java; done
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -409,6 +454,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LpWorkPlugin.class);
         // POS hardware: receipt printer, cash drawer, customer display (www/pos-hw.js)
         registerPlugin(LpPosPlugin.class);
+        // Notifications from the phone for the secretary: allow list, queue, "notification access" settings (www/sec-notif.js)
+        registerPlugin(LpNotifPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them
