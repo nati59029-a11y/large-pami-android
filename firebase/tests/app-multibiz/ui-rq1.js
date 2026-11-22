@@ -95,7 +95,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('6א המנהל שולף את כל ה-ptk (בלי סינון owner)', QLOG.some((q) => q.who === 'm' && q.c === 'ptk' && !q.where));
 
   // יצירת משימה פרטית
-  await page.fill('form[data-f=tkAdd] textarea', 'לבדוק מלאי יין');
+  await page.click('[data-a=tkwFold]'); await page.fill('form[data-f=tkAdd] textarea', 'לבדוק מלאי יין');
   await page.check('form[data-f=tkAdd] input[name=prv]');
   const hid = await page.evaluate(() => document.getElementById('tkx').hidden);
   check('7 סימון "משימה פרטית" מסתיר את בחירת הנמענים', hid === true);
@@ -175,7 +175,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   // בקשות – מסך מנהל
   await page.evaluate(() => { go('rq'); }); await sleep(600);
   const rm = await txt(page, '#main');
-  check('20 מסך בקשות מנהל: לשוניות חדשות/טופלו, הבקשה והכפתור "שרשור ותשובה"', /חדשות \(1\)/.test(rm) && /טופלו/.test(rm) && /אפשר לקחת יום חופש/.test(rm) && /שרשור ותשובה/.test(rm), rm.slice(0, 250));
+  check('20 מסך בקשות מנהל: לשוניות חדשות/טופלו, הבקשה והכפתור "השב"', /חדשות \(1\)/.test(rm) && /טופלו/.test(rm) && /אפשר לקחת יום חופש/.test(rm) && /השב/.test(rm), rm.slice(0, 250));
   await shot(page, shots, 'm-rq');
   await page.click('[data-a=rqThread]'); await sleep(500);
   const th0 = await txt(page, '#dlg');

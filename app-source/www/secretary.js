@@ -220,6 +220,8 @@ css2.textContent='.secmsg{max-width:88%;padding:10px 12px;border-radius:14px;mar
 +'@media(prefers-reduced-motion:reduce){.sectyp,.sectypt,.sectypd i{animation:none!important;clip-path:none!important}}';
 document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
+/* 22.11.2026: קיצורי משימות (מנהל, תוספת משימות פעילה) – מטופלים בתוך האפליקציה (cxTry), בלי AI */
+const QT=['משימה חדשה לעובד','מה באיחור?','ממתין לאישור'];const qsL=()=>{try{return cxOn()?QS.concat(QT):QS}catch(e){return QS}};
 const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 /* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
@@ -239,7 +241,7 @@ function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const body=X.mb&&!L.length?'<div class="empty">טוען…</div>':(L.length?L.map(bub).join(''):`<div class="secmsg a">${hi}אני ${esc(S.name)}. אפשר לשאול אותי על הכספים, הספקים, העובדים, המשימות וההזמנות של העסק, על היומן, על כל שאלה בניהול העסק – וגם איך עושים משהו באפליקציה או מה לעשות כשמשהו לא עובד.</div>`)+(X.msgErr?`<p class="note">${esc(X.msgErr)}</p>`:'');
  const busy=X.sending||X.mst?`<div class="secmsg a sectyp" id="secWait" role="status" aria-live="polite"><span class="sectypt">${X.mst?esc(String(X.mst).replace(/…$/,'')):X.deep?'חושבת לעומק':'כותבת'}</span><span class="sectypd" aria-hidden="true"><i></i><i></i><i></i></span></div>`:'';
  return bar+warn+`<div id="secChat">${body}${busy}</div>
- <div class="chips" style="margin:10px 0 6px">${QS.map(q=>`<button class="chip" data-a="secQ" data-v="${esc(q)}" style="min-height:40px">${esc(q)}</button>`).join('')}</div>
+ <div class="chips" style="margin:10px 0 6px">${qsL().map(q=>`<button class="chip" data-a="secQ" data-v="${esc(q)}" style="min-height:40px">${esc(q)}</button>`).join('')}</div>
  <form data-f="secAskF" id="secForm"><textarea class="secin" name="q" maxlength="2000" placeholder="כתבו שאלה על העסק…" aria-label="שאלה למזכירה"${typeof RC!=='undefined'&&RC.live&&RC.tgt==='chat'?' readonly':''}>${esc(X.draft||'')}</textarea>
  ${mediaH()}
  <div class="row" style="margin-top:8px"><button class="btn grow" name="go" value="n"${X.sending?' disabled':''}>שליחה</button><button class="btn g grow" name="go" value="d"${X.sending?' disabled':''} title="מודל איכותי – עולה יותר בתקרה">חשבי לעומק</button></div></form>
@@ -272,6 +274,8 @@ const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');i
 // 13.11.2026: קוד הסיבה כשספק ה-AI נכשל (reason מ-functions/lib/sec-ai.js), כדי שיהיה אפשר לאבחן מהמסך
 const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-model':'מודל ה-AI לא נמצא בשירות','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
 async function ask2(q,deep,via){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
+ /* 22.11.2026: פקודת משימה מזוהה – מטופלת כאן בלי AI (sec-cmd.js). לא מזוהה – הזרימה לשרת כמו קודם */
+ try{if(await cxTry(q,via))return}catch(e){X.sending=0}
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,via:via==='voice'?'voice':undefined,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';X.vdr=0;rerender();scrollEnd();
  try{const fin=secFin({pay:!!X.st.pay,rec:true,notes:X.st.sens===true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
@@ -311,7 +315,7 @@ function cardSum(c){if(c.k==='cal')return (c.rem?'תזכורת: ':'')+c.title+' 
 function cardDone(c){const d=X.done[c.id]||(c.st?{st:c.st}:null);if(!d)return '';const st=CST[d.st]?d.st:'gone';
  const det=st==='ok'?(c.k==='fact'?'נשמר במידע על העסק.':c.k==='cal'?(c.rem?'התזכורת נקבעה – תופיע ב"מול העיניים" ותישלח התראה בזמן.':'נקבע ביומן'+(c.okD&&c.okD!==c.d?' ל-'+dShort(c.okD):'')+'.'):c.k==='route'?'הכלל נשמר ב"הכללים שלי".':c.k==='scan'?'נפתח מסך הסריקה.':c.k==='task'?'המשימה נפתחה.':''):st==='no'?(c.k==='fact'?'לא נשמר.':c.k==='cal'?'לא נקבע.':'לא נשמר כלל.'):'';
  return `<div class="card secdone" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}" data-st="${st}"><b>${CST[st]}</b> <small class="note">${esc(cardSum(c))}</small>${det?`<small class="note" style="display:block">${esc(det)}</small>`:''}</div>`}
-function cardH(c,mid){if(X.done[c.id]||c.st)return cardDone(c);
+function cardH(c,mid){if(c.loc)return cxCardH(c,mid);if(X.done[c.id]||c.st)return cardDone(c);
  if(c.k==='route')return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>כלל ניתוב</b><p style="margin:4px 0">${esc(rtL(c))}</p><div class="secrow"><button class="chip" data-a="secRtOk" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">אשר</button><button class="chip" data-a="secRtNo" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">בטל</button></div></div>`;
  if(c.k==='fact'){const cf=(c.conflict||[]).map(x=>`<li>${esc(x.text)}</li>`).join('');
   return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>לשמור במידע על העסק?</b><p style="margin:4px 0">${esc(c.text)}${c.exp?` <span class="sectags">עד ${esc(dShort(c.exp))}</span>`:''}</p>
@@ -1798,6 +1802,150 @@ ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||
  try{await scMark(id,mid,'ok')}catch(e){}
  doneSt(id,'ok');mdFree(mid);toast(dup?'✓ המשימה כבר נפתחה':'✓ המשימה נוספה');try{await tkLoad()}catch(e){}
  if(cur().v==='sec')rerender()};
+
+/* =====================================================================================
+   22.11.2026 (החלטת בעל הפרויקט): פקודות משימה בצ'אט – בתוך האפליקציה, בלי AI ובלי שינוי שרת.
+   הפענוח ב-sec-cmd.js (SecCmd). רק מנהל (isA) ורק כשתוספת המשימות פעילה; אחרת – הזרימה הרגילה לשרת.
+   יצירה: כרטיס אישור ("אשר ופתח" / "בטל" / שינוי יעד מהיר), וכתיבה כמו ACT.secTkOk ו-FRM.tkAdd (אותם שדות, מזהה נגזר מהכרטיס – אישור חוזר = 409).
+   יעד מדויק (dl) ודחוף (pri) – רק כשהגלאי rv/tk2 מצא כללים חדשים (TKW.rv), כמו בטופס; כללים ישנים – יעד 3 ימי עסקים, בלי עדיפות.
+   מעקב: מחושב מהמשימות שכבר נטענו (TK.L, טעינה מחדש רק אם עברה דקה – כמו tkPend). "הזכר לעובד" = ACT.tkwNd, "העבר לעובד" = ACT.tkMv / FRM.tkMv הקיימים.
+   ההודעות והכרטיסים כאן נשמרים רק בשיחה הנוכחית (לא בהיסטוריה בשרת).
+   ===================================================================================== */
+function cxOn(){try{return !!(window.SecCmd&&typeof isA==='function'&&isA()&&typeof bzF==='function'&&bzF('tasks')&&typeof fsx==='function'&&typeof tkDue==='function')}catch(e){return false}}
+const cxId=()=>'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const CXF=(()=>{try{return new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric'})}catch(e){return null}})();
+const cxP=ms=>{let o;if(!CXF){const x=new Date(ms);o={y:x.getFullYear(),m:x.getMonth(),d:x.getDate(),h:x.getHours(),n:x.getMinutes()}}else{const p={};CXF.formatToParts(new Date(ms)).forEach(x=>p[x.type]=+x.value);o={y:p.year,m:p.month-1,d:p.day,h:p.hour%24,n:p.minute}}o.dow=new Date(Date.UTC(o.y,o.m,o.d)).getUTCDay();return o};
+const cxMs=d=>typeof tkIL!=='undefined'&&tkIL&&tkIL.at?tkIL.at(d.y,d.m,d.d,d.h,d.n):new Date(d.y,d.m,d.d,d.h,d.n).getTime();
+const cxWhen=ms=>ms>0&&ms<Infinity?SecCmd.label(cxP(ms),cxP(Date.now())):'בלי יעד';
+const cxDl=t=>typeof tkDl==='function'?tkDl(t):(t.dl>0?t.dl:t.dl===0?Infinity:t.due);
+/* האם הכללים החדשים (dl/pri) פורסמו: נקבע פעם אחת לכל כרטיס (c.rv), כדי שמה שמוצג בכרטיס הוא בדיוק מה שנכתב */
+const cxRv=c=>!!(c&&c.rv&&!c.old);
+async function cxRvNow(){try{if(window.TKW&&typeof TKW.rv==='function'&&TKW.rv())return true;if(X.cxRv&&Date.now()-X.cxRv.t<6e5)return X.cxRv.v;if(typeof tkRv!=='function')return false;const v=await tkRv();X.cxRv={v:v===1,t:Date.now()};try{if(window.TKW&&typeof TKW.rvChk==='function')TKW.rvChk(1)}catch(e){}return v===1}catch(e){return false}}
+const cxCard=id=>allCards().find(c=>c.loc&&c.id===id)||null;
+const cxRe=()=>{if(cur().v==='sec')rerender()};
+const cxB=(a,id,l,x)=>`<button class="chip" style="min-height:44px" data-a="${a}" data-id="${esc(id)}"${x||''}>${l}</button>`;
+async function cxStaff(){if(typeof TKST==='undefined')return [];if(!TKST.L&&typeof tkStaffLoad==='function'){try{await tkStaffLoad()}catch(e){}}return Array.isArray(TKST.L)?TKST.L:[]}
+async function cxTasks(){if(typeof TK==='undefined')return [];if((!TK.at||Date.now()-TK.at>60000)&&typeof tkLoad==='function'){try{await tkLoad()}catch(e){}}return TK.L||[]}
+const cxTk=id=>typeof TK!=='undefined'?(TK.L||[]).find(t=>t.id===id)||null:null;
+const cxWho=t=>t.owN||((t.toN||[]).length?(t.toN.slice(0,3).join(', ')+(t.toN.length>3?' ועוד '+(t.toN.length-3):'')):(t.role==='w'?'בקשה של '+(t.by||'עובד'):'כל הצוות'));
+const cxSay=(text,cards)=>{X.msgs=X.msgs||[];X.msgs.push({role:'a',text,cards:cards||[],t:Date.now()});cxRe();scrollEnd()};
+const cxPick=(act,opts,o)=>Object.assign({loc:1,k:'pick',id:cxId(),act,opts},o||{});
+const cxStaffOpts=(S,all)=>S.slice(0,30).map(z=>({l:z.name,v:z.uid})).concat(all?[{l:S.length?'כל העובדים':'כל הצוות',v:'*'}]:[]);
+const cxNames=c=>c.all?'כל העובדים':(c.to||[]).map(z=>z.name).join(' ו');
+
+/* מיירט ב-ask2: true = טופל כאן */
+async function cxTry(q,via){if(!cxOn())return false;const C=window.SecCmd;let k=C.intent(q);
+ const pc=X.cq&&cxCard(X.cq.cid);let pend=pc&&!pc.st?X.cq:null;if(!pend)X.cq=null;
+ /* ממתינה לתיאור משימה, אבל נשאלה שאלה (סימן שאלה) – השאלה הולכת לזרימה הרגילה והבקשה הפתוחה מבוטלת */
+ if(pend&&!k&&/[?？]\s*$/.test(q)){pc.st='no';X.cq=null;pend=null}
+ if(!k&&!pend)return false;
+ X.msgs=X.msgs||[];const um={role:'u',text:q,via:via==='voice'?'voice':undefined,t:Date.now()};X.msgs.push(um);X.sending=1;X.draft='';X.vdr=0;cxRe();scrollEnd();
+ let r;try{r=await cxRun(q,k,pend)}catch(e){X.msgs.push({role:'a',text:'לא הצלחתי לטפל בבקשה. '+((e&&e.message)||'נסו שוב.'),t:Date.now()});r=true}finally{X.sending=0}
+ if(r===false){const i=X.msgs.indexOf(um);if(i>=0)X.msgs.splice(i,1);cxRe();return false}
+ cxRe();scrollEnd();return true}
+async function cxRun(q,k,pend){const C=window.SecCmd,now=cxP(Date.now());
+ if(!k&&pend){/* תשובה לשאלה "מה צריך לעשות?" */const pc=cxCard(pend.cid);if(pc)pc.st='ok';X.cq=null;const b=C.body(q,now);return cxNew(Object.assign({},pend.d,{txt:b.txt,due:b.due,err:b.err,pri:b.pri}))}
+ if(pend){const pc=cxCard(pend.cid);if(pc)pc.st='no';X.cq=null}
+ if(['late','wait','status','lag','today','urg'].includes(k))return cxTrack(k);
+ const S=await cxStaff(),r=C.parse(q,{staff:S,now});if(!r)return false;
+ if(r.k==='new')return cxNew(r);
+ return cxRef(r)}
+
+/* ---------- יצירה ---------- */
+async function cxNew(d){const S=await cxStaff();
+ if(d.err){cxSay(d.err==='past'?'היעד שזוהה כבר עבר, ולכן הוגדר יעד של 3 ימי עסקים. אפשר לשנות בכרטיס.':'אפשר לקבוע יעד עד שנה קדימה, ולכן הוגדר יעד של 3 ימי עסקים. אפשר לשנות בכרטיס.');d.due=null;d.err=''}
+ if(d.amb){const L=d.amb.list,nm=d.amb.nm||'';d.amb=null;return cxSay(`יש ${L.length} עובדים בשם "${nm}". למי התכוונת?`,[cxPick('who',L.map(z=>({l:z.name,v:z.uid})),{d})])}
+ if(d.unk){const u=d.unk;d.unk='';return cxSay(S.length?`לא מצאתי עובד בשם "${u}" ברשימת העובדים הפעילים. למי לפתוח את המשימה?`:'רשימת העובדים לא נטענה, ולכן לא זיהיתי את העובד. אפשר לפתוח לכל הצוות, או לנסות שוב בעוד רגע.',[cxPick('who',cxStaffOpts(S,true),{d})])}
+ if(!d.all&&!(d.to||[]).length)return cxSay(S.length?'למי לפתוח את המשימה?':'רשימת העובדים לא נטענה. אפשר לפתוח לכל הצוות, או לנסות שוב בעוד רגע.',[cxPick('who',cxStaffOpts(S,true),{d})]);
+ if(!d.txt){const c={loc:1,k:'ask',id:cxId()};X.cq={cid:c.id,d};cxSay(`מה ${d.all?'העובדים צריכים':(d.to.length>1?'הם צריכים':d.to[0].name+' צריך/ה')} לעשות? כתבו במשפט אחד, אפשר עם יעד ועדיפות (למשל: לנקות את המחסן עד מחר דחוף).`,[c]);setTimeout(()=>{const f=document.getElementById('secForm');if(f&&f.q)f.q.focus()},60);return}
+ const c={loc:1,k:'new',id:cxId(),txt:d.txt.slice(0,500),all:!!d.all,to:(d.to||[]).map(z=>({uid:z.uid,name:z.name})),due:d.due||null,pri:d.pri==='h'?'h':'',rv:await cxRvNow()};
+ cxSay('זה מה שהבנתי. לאשר?',[c])}
+function cxDueL(c){return c.due&&cxRv(c)?SecCmd.label(c.due,cxP(Date.now())):'3 ימי עסקים ('+cxWhen(tkDue(Date.now()))+')'}
+async function cxCreate(c){const now=Date.now(),tid='sec'+String(c.id).replace(/[^A-Za-z0-9]/g,''),rv=cxRv(c),bad=m=>{const e=new Error(m);e.cx=m;return e};
+ let SL=c.to;if(c.all){const S=await cxStaff();if(S.length>30)throw bad('יש יותר מ-30 עובדים פעילים. משימה לכולם פותחים ממסך המשימות');SL=S}
+ const fields={owner:sv(SY.uid),by:sv(fbBy()),role:sv('a'),txt:sv(c.txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv('')};
+ /* כמו FRM.tkAdd: עובד אחד – תפוסה אצלו; כמה – מי שלוקח ראשון; אין רשימת עובדים – משימה ישנה לכל הצוות (בלי to) */
+ if(SL&&SL.length){const one=SL.length===1;Object.assign(fields,{to:{arrayValue:{values:SL.map(z=>sv(z.uid))}},toN:{arrayValue:{values:SL.map(z=>sv(z.name))}},ow:sv(one?SL[0].uid:''),owN:sv(one?SL[0].name:''),clt:iv(one?now:0),np:iv(0),wp:iv(0),mi:iv(0)})}
+ const dl=c.due&&rv?cxMs(c.due):null;if(dl!=null&&dl<=now)throw bad('היעד שנבחר כבר עבר. בחרו יעד אחר');
+ if(rv){if(dl!=null)fields.dl=iv(dl);if(c.pri==='h')fields.pri=sv('h')}
+ const post=()=>fsx('/tasks?documentId='+encodeURIComponent(tid),{method:'POST',body:JSON.stringify({fields})});let dup=0,np=0;
+ try{await post()}catch(e){if(e&&e.code===409)dup=1;
+  else if(e&&e.code===403&&('dl' in fields||'pri' in fields)){/* כללים ישנים (כמו X.old ב-tasks-wc.js) */c.old=1;
+   if('dl' in fields){c.due=null;throw bad('השרת עוד לא עודכן ליעד גמיש, ולכן המשימה לא נפתחה. אפשר לאשר שוב עם יעד של 3 ימי עסקים.')}
+   delete fields.pri;np=1;try{await post()}catch(e2){if(e2&&e2.code===409)dup=1;else throw e2}}
+  else throw e}
+ return {dup,np,dlL:dl!=null?SecCmd.label(c.due,cxP(now)):'3 ימי עסקים ('+cxWhen(tkDue(now))+')'}}
+ACT.secCxOk=async el=>{const c=cxCard(el.dataset.id);if(!c||c.st||c.busy)return;if(!cxOn())return toast('אי אפשר לפתוח משימה כאן');c.busy=1;el.disabled=true;
+ try{const r=await cxCreate(c);c.st='ok';c.res=r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה ל'+cxNames(c)+', יעד: '+r.dlL+(r.np?' (בלי עדיפות – תופעל אחרי עדכון השרת)':'');toast(c.res);try{await tkLoad()}catch(e){}}
+ catch(e){toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
+ finally{c.busy=0;cxRe()}};
+ACT.secCxNo=el=>{const c=cxCard(el.dataset.id);if(!c||c.st||c.busy)return;c.st='no';if(X.cq&&X.cq.cid===c.id)X.cq=null;cxRe()};
+ACT.secCxDue=el=>{const c=cxCard(el.dataset.id);if(!c||c.st||c.busy)return;const v=el.dataset.v,n=cxP(Date.now());
+ if(v==='b3')c.due=null;else{const x=SecCmd.dayAdd(n,v==='tm'?1:0);c.due={y:x.y,m:x.m,d:x.d,h:23,n:59}}cxRe()};
+
+/* ---------- בחירה (עובד / משימה) ---------- */
+ACT.secCxPick=async el=>{const c=cxCard(el.dataset.id);if(!c||c.st)return;const o=(c.opts||[])[+el.dataset.i];if(!o)return;c.st='ok';c.res='נבחר: '+o.l;cxRe();
+ if(c.act==='who'){const d=Object.assign({},c.d);if(o.v==='*'){d.all=true;d.to=[]}else{const z=(await cxStaff()).find(x=>x.uid===o.v);if(!z){c.st='';return toast('העובד לא נמצא ברשימה. נסו שוב')}d.all=false;d.to=[z]}return cxNew(d)}
+ const r=Object.assign({},c.r);if(c.act==='task')r.tid=o.v;else if(c.act==='rto'){const z=(await cxStaff()).find(x=>x.uid===o.v);if(!z){c.st='';return toast('העובד לא נמצא ברשימה. נסו שוב')}r.to=[z];r.amb=null;r.unk=''}
+ cxRef(r)};
+
+/* ---------- "הזכירי ל… על המשימה של …" / "תעבירי את המשימה של … ל…" ---------- */
+async function cxRef(r){const S=await cxStaff(),nd=r.k==='nd';
+ if(r.amb){const L=r.amb.list,nm=r.amb.nm||'';r.amb=null;return cxSay(`יש ${L.length} עובדים בשם "${nm}". ${nd?'למי להזכיר?':'למי להעביר?'}`,[cxPick('rto',L.map(z=>({l:z.name,v:z.uid})),{r})])}
+ if(r.unk){const u=r.unk;r.unk='';if(nd)cxSay(`לא מצאתי עובד בשם "${u}". מחפשת בכל המשימות הפתוחות.`);else return cxSay(`לא מצאתי עובד בשם "${u}" ברשימת העובדים הפעילים. למי להעביר?`,[cxPick('rto',cxStaffOpts(S,false),{r})])}
+ if(!r.tid){const L=SecCmd.matchTasks(r.q,await cxTasks(),{uid:nd&&r.to[0]?r.to[0].uid:''});
+  if(!L.length)return cxSay(`לא מצאתי משימה פתוחה${r.q.length?' שמתאימה ל"'+r.q.join(' ')+'"':''}${nd&&r.to[0]?' של '+r.to[0].name:''}.`,[{loc:1,k:'go',id:cxId()}]);
+  if(L.length>1)return cxSay(`מצאתי ${L.length} משימות פתוחות שמתאימות. על איזו מדובר?`,[cxPick('task',L.slice(0,6).map(t=>({l:String(t.txt||'').slice(0,60)+' · '+cxWho(t)+' · '+cxWhen(cxDl(t)),v:t.id})),{r})]);
+  r.tid=L[0].id}
+ const t=cxTk(r.tid);if(!t||t.st!=='open')return cxSay('המשימה כבר לא פתוחה.',[{loc:1,k:'go',id:cxId()}]);
+ if(!nd&&!r.to.length)return cxSay(`למי להעביר את המשימה "${String(t.txt||'').slice(0,60)}"?`,[cxPick('rto',cxStaffOpts(S,false),{r})]);
+ if(!nd&&t.ow===r.to[0].uid)return cxSay(`המשימה כבר בטיפול של ${r.to[0].name}.`);
+ cxSay(nd?'לשלוח תזכורת על המשימה הזו?':'להעביר את המשימה?',[{loc:1,k:nd?'nd':'mv',id:cxId(),tid:t.id,txt:String(t.txt||'').slice(0,200),who:cxWho(t),to:nd?null:{uid:r.to[0].uid,name:r.to[0].name}}])}
+/* מעקב אחרי פעולה קיימת (שמסיימת בעצמה ב-toast): הכרטיס מסומן "בוצע" כשהשינוי נראה במשימות שנטענו */
+function cxWatch(c,ok,res){let k=0;const tm=setInterval(()=>{if(ok()){clearInterval(tm);c.st='ok';c.res=res;cxRe()}else if(++k>40)clearInterval(tm)},500)}
+ACT.secCxNd=el=>{const id=el.dataset.tid||(cxCard(el.dataset.id)||{}).tid,t=cxTk(id);if(!t)return toast('המשימה לא נמצאה. רעננו את מסך המשימות');
+ if(typeof ACT.tkwNd!=='function')return toast('"הזכר לעובד" לא זמין בגרסה הזו');const c=el.dataset.id&&cxCard(el.dataset.id),b=t.nd||0;
+ ACT.tkwNd({dataset:{id:t.id}});/* החלון "לשלוח לעובד תזכורת?" והמגבלה של 30 דקות – של הפעולה הקיימת */
+ if(c&&!c.st)cxWatch(c,()=>{const x=cxTk(t.id);return !!(x&&(x.nd||0)>b)},'✓ התזכורת נשלחה ל'+cxWho(t))};
+ACT.secCxMv=async el=>{const id=el.dataset.tid;if(!cxTk(id))return toast('המשימה לא נמצאה. רעננו את מסך המשימות');await cxStaff();
+ if(typeof ACT.tkMv!=='function')return toast('העברה לא זמינה כאן');ACT.tkMv({dataset:{id}})};
+ACT.secCxMvGo=async el=>{const c=cxCard(el.dataset.id);if(!c||c.st||!c.to)return;const t=cxTk(c.tid);if(!t||t.st!=='open'){c.st='gone';cxRe();return toast('המשימה כבר לא פתוחה')}
+ if(!(await cxStaff()).some(z=>z.uid===c.to.uid))return toast('העובד לא נמצא ברשימת העובדים הפעילים');
+ if(typeof FRM.tkMv!=='function')return toast('העברה לא זמינה כאן');
+ /* אותה פעולה כמו "העבר לעובד" במסך המשימות (FRM.tkMv): טופס זמני עם העובד שנבחר */
+ const f=document.createElement('form');f.dataset.id=t.id;const i=document.createElement('input');i.type='hidden';i.name='u';i.value=c.to.uid;f.appendChild(i);
+ el.disabled=true;FRM.tkMv(f);cxWatch(c,()=>{const x=cxTk(t.id);return !!(x&&x.ow===c.to.uid)},'✓ המשימה הועברה ל'+c.to.name)};
+ACT.secCxGo=el=>{if(el.dataset.w){if(ACT.tkGoWait)return ACT.tkGoWait();}if(el.dataset.tid&&ACT.tkGoIt)return ACT.tkGoIt({dataset:{id:el.dataset.tid}});if(V.tk)go('tk')};
+
+/* ---------- מעקב ---------- */
+async function cxTrack(k){const L=await cxTasks(),n=Date.now(),p=cxP(n),d0=cxMs({y:p.y,m:p.m,d:p.d,h:0,n:0}),t1=SecCmd.dayAdd(p,1),d1=cxMs({y:t1.y,m:t1.m,d:t1.d,h:0,n:0});
+ const op=L.filter(t=>t.st==='open'),late=op.filter(t=>cxDl(t)<n).sort((a,b)=>cxDl(a)-cxDl(b)),wait=L.filter(t=>t.st==='wait').sort((a,b)=>(a.sub||0)-(b.sub||0));
+ const today=op.filter(t=>{const x=cxDl(t);return x>=d0&&x<d1}).sort((a,b)=>cxDl(a)-cxDl(b)),urg=op.filter(t=>t.pri==='h').sort((a,b)=>cxDl(a)-cxDl(b));
+ const sum=`פתוחות: ${op.length} · באיחור: ${late.length} · ממתינות לאישור: ${wait.length} · להיום: ${today.length} · דחופות: ${urg.length}`;
+ if(k==='lag'){const t30=n-30*864e5,m={};L.filter(t=>(t.cr||0)>=t30&&(typeof tkIsLate==='function'?tkIsLate(t):(t.st==='open'&&cxDl(t)<n)||t.late==='1')).forEach(t=>{const w=t.owN||((t.toN||[]).length===1?t.toN[0]:'')||(t.st!=='open'?t.doneBy:'')||'';if(!w)return;const o=m[w]||(m[w]={n:0,o:0});o.n++;if(t.st==='open')o.o++});
+  const R=Object.entries(m).sort((a,b)=>b[1].n-a[1].n).slice(0,8);
+  return cxSay(R.length?'משימות שעברו את היעד ב-30 הימים האחרונים, לפי עובד:\n'+R.map(([w,o])=>`• ${w}: ${o.n}${o.o?' (מהן '+o.o+' עדיין פתוחות)':''}`).join('\n'):'ב-30 הימים האחרונים אין משימות של עובד מסוים שעברו את היעד.',[{loc:1,k:'go',id:cxId()}])}
+ const M={late:['באיחור',late],wait:['ממתינות לאישור',wait],today:['ליעד היום',today],urg:['דחופות (פתוחות)',urg],status:['באיחור ולהיום',late.concat(today.filter(t=>!late.includes(t)))]}[k];
+ const A=M[1],items=A.slice(0,8).map(t=>({id:t.id,txt:String(t.txt||'').slice(0,120),who:cxWho(t),due:cxWhen(cxDl(t)),st:t.st,nd:!!(t.ow||(t.to||[]).length)}));
+ cxSay(`**${k==='status'?'מצב המשימות':M[0]+': '+A.length}**\n${sum}${A.length?'':'\nאין משימות '+M[0]+'.'}${A.length>8?'\nמוצגות 8 הראשונות מתוך '+A.length+'.':''}`,[{loc:1,k:'list',id:cxId(),items}])}
+
+/* ---------- כרטיסים ---------- */
+function cxCardH(c,mid){const box=(h,x)=>`<div class="card${x?' secdone':''}" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}">${h}</div>`;
+ const goB=`<button class="chip" style="min-height:44px" data-a="secCxGo">למשימות</button>`;
+ if(c.k==='go')return box(`<div class="secrow">${goB}</div>`);
+ if(c.k==='list'){if(!c.items.length)return box(`<div class="secrow">${goB}</div>`);
+  return box(c.items.map(t=>`<div class="secli"><p><b>${esc(t.txt)}</b></p><small class="note">${esc(t.who)} · ${t.st==='wait'?'ממתינה לאישור':'יעד: '+esc(t.due)}</small><div class="secrow">${t.st==='wait'?`<button class="chip" style="min-height:44px" data-a="secCxGo" data-w="1">לאישור</button>`:(t.nd?`<button class="chip" style="min-height:44px" data-a="secCxNd" data-tid="${esc(t.id)}">הזכר לעובד</button>`:'')+`<button class="chip" style="min-height:44px" data-a="secCxMv" data-tid="${esc(t.id)}">העבר לעובד</button><button class="chip" style="min-height:44px" data-a="secCxGo" data-tid="${esc(t.id)}">פתח משימה</button>`}</div></div>`).join(''))}
+ if(c.st==='no')return box(`<b>בוטל</b>${c.txt?` <small class="note">${esc(c.txt)}</small>`:''}`,1);
+ if(c.st==='gone')return box('<b>כבר לא רלוונטי</b>',1);
+ if(c.st==='ok')return box(`<b>${esc(c.res||'בוצע ✓')}</b>${c.k==='new'||c.k==='nd'||c.k==='mv'?`<div class="secrow">${goB}</div>`:''}`,1);
+ if(c.k==='ask')return box(`<small class="note">ממתינה לתיאור המשימה בהודעה הבאה.</small><div class="secrow">${cxB('secCxNo',c.id,'בטל')}</div>`);
+ if(c.k==='pick')return box(`<div class="secrow">${(c.opts||[]).map((o,i)=>cxB('secCxPick',c.id,esc(o.l),` data-i="${i}"`)).join('')}</div>`);
+ if(c.k==='nd')return box(`<b>תזכורת לעובד</b><p style="margin:4px 0">${esc(c.txt)}</p><small class="note">${esc(c.who)}</small><div class="secrow">${cxB('secCxNd',c.id,'שלח תזכורת')}${cxB('secCxNo',c.id,'בטל')}</div>`);
+ if(c.k==='mv')return box(`<b>העברה לעובד</b><p style="margin:4px 0">${esc(c.txt)}</p><small class="note">עכשיו: ${esc(c.who)} ← אחרי ההעברה: ${esc(c.to.name)}</small><div class="secrow">${cxB('secCxMvGo',c.id,'אשר והעבר')}${cxB('secCxNo',c.id,'בטל')}</div>`);
+ if(c.k==='new'){const rv=cxRv(c),dk=!c.due?'b3':(()=>{const n=cxP(Date.now()),k=Math.round((Date.UTC(c.due.y,c.due.m,c.due.d)-Date.UTC(n.y,n.m,n.d))/864e5);return c.due.h===23&&c.due.n===59&&k>=0&&k<=1?(k?'tm':'td'):''})();
+  const q=(v,l)=>`<button class="chip${dk===v?' on':''}" style="min-height:44px" data-a="secCxDue" data-id="${esc(c.id)}" data-v="${v}" aria-pressed="${dk===v}">${l}</button>`;
+  return box(`<b>לפתוח משימה?</b><p style="margin:4px 0"><b>מה:</b> ${esc(c.txt)}</p><p style="margin:4px 0"><b>למי:</b> ${esc(cxNames(c))}${c.to.length>1?' <small class="note">(מי שלוקח ראשון)</small>':''}</p><p style="margin:4px 0"><b>יעד:</b> ${esc(cxDueL(c))}</p><p style="margin:4px 0"><b>עדיפות:</b> ${c.pri==='h'&&rv?'דחוף':'רגילה'}</p>${!rv&&(c.due||c.pri)?'<p class="note" style="margin:4px 0">יעד מדויק ועדיפות יופעלו אחרי עדכון השרת. בינתיים המשימה תיפתח עם יעד של 3 ימי עסקים ובעדיפות רגילה.</p>':''}${rv?`<div class="secrow" role="group" aria-label="שינוי יעד">${q('td','היום')}${q('tm','מחר')}${q('b3','3 ימי עסקים')}</div>`:''}<div class="secrow">${cxB('secCxOk',c.id,'אשר ופתח')}${cxB('secCxNo',c.id,'בטל')}</div>`)}
+ return ''}
 
 window.__sec=X;
 })();

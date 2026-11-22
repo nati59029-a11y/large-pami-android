@@ -407,7 +407,7 @@ const ckN=x=>{const n=(x.ck||[]).length,s=new Set((x.ckd||[]).filter(i=>i>=0&&i<
 function xTags(x){let s='';if(x.pri==='h')s+=`<span class="tag t4">${icd('warn')} דחוף</span> `;else if(x.pri==='l')s+='<span class="tag" style="color:var(--mut)">נמוכה</span> ';
  if(x.cat)s+=`<span class="tag t2">${esc(x.cat)}</span> `;if(x.est>0)s+=`<span class="tag t1">${icd('clock')} ${esc(estTx(x.est))}</span> `;
  const c=ckN(x);if(c[1])s+=`<span class="tag ${c[0]===c[1]?'t3':'t1'}">☑ ${c[0]}/${c[1]}</span> `;return s}
-W.bar=x=>!on()?'':x.pri==='h'?';border-inline-start:5px solid var(--bad)':x.pri==='l'?';border-inline-start:5px solid var(--mut)':'';
+W.bar=x=>!on()?'':x.pri==='h'?';border-inline-start:5px solid var(--st-urg,var(--bad))':x.pri==='l'?';border-inline-start:5px solid var(--mut)':'';
 const ckCan=x=>rvNew()&&(x.pv?(x.st!=='done'&&(x.owner===SY.uid||fbAdmin())):(x.st==='open'&&(fbAdmin()||x.ow===SY.uid||(!tkNew(x)&&!x.ow))));
 const ckO=new Set(),ckC=new Set();
 W.ckH=x=>{if(!on())return '';const c=ckN(x);if(!c[1])return '';const k=(x.pv?'p':'t'),can=ckCan(x),did=esc(x.id);
@@ -427,7 +427,7 @@ const FX0=()=>({dk:'d3',d:'',tm:'',est:0,pri:'',cat:'',ck:[],more:0});let FX=FX0
 const NOTE72='<p class="note" style="margin:2px 0 8px">3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p>';
 function cats(){const m=new Set();(TK.L||[]).concat(PT.L||[]).forEach(x=>{if(x&&x.cat)m.add(x.cat)});tplL().concat(TPC.L||[]).forEach(t=>{if(t.cat)m.add(String(t.cat).slice(0,30))});return [...m].slice(0,30).sort((a,b)=>a.localeCompare(b,'he'))}
 const fxClean=()=>({cat:String(FX.cat||'').trim().slice(0,30),ck:(FX.ck||[]).map(x=>String(x||'').trim().slice(0,120)).filter(Boolean).slice(0,20)});
-W.fold=tab=>on()&&tab==='my'&&!W.fo;
+W.fold=tab=>on()&&(tab==='my'||(tab==='open'&&fbAdmin()))&&!W.fo;
 ACT.tkwFold=()=>{W.fo=1;rerender();setTimeout(()=>{const t=document.querySelector('form[data-f=tkAdd] textarea');if(t){t.scrollIntoView({block:'center'});t.focus()}},60)};
 W.formX=()=>{if(!on())return '';
  if(!rvNew())return '<p class="note" style="margin:4px 0 2px">יעד לביצוע: '+NOTE72.replace(/^<p[^>]*>|<\/p>$/g,'')+'</p><p class="note" style="margin:0 0 8px">יעד גמיש, עדיפות, נושא ורשימת סימון – יופעל אחרי עדכון השרת.</p>';
@@ -555,5 +555,52 @@ CHG.tkSndOn=async el=>{const uid=el.dataset.uid,u=(SNDS.L||[]).find(x=>x.uid===u
 {const o=V.tk;if(typeof o==='function')V.tk=function(){const r=o.apply(this,arguments);
  try{if(on()&&fbAdmin()&&r&&typeof r.h==='string'){const m='<button class="btn g w" data-a="tkRefresh"';
   if(r.h.includes(m))r.h=r.h.replace(m,()=>`<button class="opt" data-a="go" data-v="tkSnd" style="margin-top:8px"><span>${icd('user')} מי שולח משימות לעובדים<small>מתג לכל עובד: מי יכול לשלוח משימות לעובדים אחרים</small></span></button>`+m)}}catch(e){}return r}}
+/* ---- לוח מנהל (לשונית "פתוחות"): מונים לחיצים, סטטוס אחיד בכרטיס, פעולות מהירות ---- */
+/* הגדרות אחידות: באיחור = פתוחה והיעד עבר; ממתין לאישור = st wait; היום = יעד היום (ולא באיחור); דחוף = pri h פתוחה; בהמשך = שאר הפתוחות.
+   "לא טופלו" = באיחור + ממתין לאישור יותר מ-24 שעות. מיון: באיחור ← ממתין ← דחוף ← היום ← בהמשך */
+let MGF='';
+const STK=x=>x.st==='done'?'done':x.st==='wait'?'wait':Date.now()>tkDl(x)?'late':'open';
+const mgCat=(x,now,t1)=>{const o={late:0,wait:0,today:0,urg:0,later:0,stale:0};
+ if(x.st==='wait'){o.wait=1;if(now-(x.sub||x.cr||now)>864e5)o.stale=1;return o}
+ if(x.st!=='open')return o;
+ const dl=tkDl(x);if(now>dl){o.late=1;o.stale=1}else if(dl<t1)o.today=1;
+ if(x.pri==='h')o.urg=1;if(!o.late&&!o.today&&!o.urg)o.later=1;return o};
+const mgRank=c=>c.late?0:c.wait?1:c.urg?2:c.today?3:4;
+W.mgBar=L=>{if(!on()||!fbAdmin())return '';const now=Date.now(),t1=day0(1),n={today:0,urg:0,late:0,wait:0,later:0,stale:0};
+ L.forEach(x=>{const c=mgCat(x,now,t1);for(const k in n)n[k]+=c[k]});
+ const K=[['today','היום','var(--acc)'],['urg','דחוף','var(--st-urg)'],['late','באיחור','var(--st-late)'],['wait','ממתין לאישור','var(--st-wait)'],['later','בהמשך',''],['stale','לא טופלו','var(--st-late)']];
+ return `<div class="tkmg" role="group" aria-label="סינון מהיר">${K.map(k=>`<button type="button" class="tkm ${MGF===k[0]?'on':''} ${n[k[0]]?'':'z'}" data-a="tkwMg" data-v="${k[0]}" aria-pressed="${MGF===k[0]}" style="${k[2]&&n[k[0]]?'--mc:'+k[2]:''}"><b>${n[k[0]]}</b><span>${k[1]}</span></button>`).join('')}</div>`+(MGF?`<p class="note" style="margin:-4px 0 8px">מסונן: ${esc(K.find(k=>k[0]===MGF)[1])} · <a href="#" data-a="tkwMg" data-v="${esc(MGF)}">הצג הכל</a></p>`:'')};
+W.mg=L=>{if(!on()||!fbAdmin())return L;const now=Date.now(),t1=day0(1),A=L.map(x=>({x,c:mgCat(x,now,t1)})).filter(a=>!MGF||a.c[MGF]);
+ A.sort((a,b)=>(mgRank(a.c)-mgRank(b.c))||((tkDl(a.x)-tkDl(b.x))||0));return A.map(a=>a.x)};
+ACT.tkwMg=el=>{const v=el.dataset.v;MGF=MGF===v?'':v;rerender()};
+/* יעד קריא: "היום 18:00" / "מחר 09:00" / "באיחור 2 ימים" */
+const lateTx=t=>{const d=Math.floor((Date.now()-tkDl(t))/864e5);return d>=2?'באיחור '+d+' ימים':d===1?'באיחור יום':'באיחור'};
+W.dlTx=t=>{const dl=tkDl(t);if(!(dl<Infinity))return 'בלי יעד';return t.st==='open'&&Date.now()>dl?lateTx(t)+' ('+whenTx(dl)+')':whenTx(dl)};
+W.stTag=(t,wl)=>{if(!on())return '';const k=STK(t);
+ return k==='late'?`<span class="tag tk-late">${lateTx(t)}</span> `:k==='wait'?`<span class="tag tk-wait">${esc(wl||'ממתין לאישור')}</span> `:k==='done'?`<span class="tag tk-done">בוצע</span>${tkIsLate(t)?' <span class="tag tk-late">באיחור</span>':''} `:'<span class="tag tk-open">פתוחה</span> '};
+/* כפתור ראשי אחד לפי מצב + תפריט "⋯" (משתמש בפעולות הקיימות: tkOk, tkDone, tkRej, tkMv, tkUnclaim, tkCm, tkwNd, tkReq, tkPics, tkImg, tkDel) */
+W.mgAct=(t,cn)=>{if(!on()||!fbAdmin())return null;const did=esc(t.id),nw=Array.isArray(t.to)&&t.to.length>0;let a='';
+ if(t.st==='wait'){if(t.pr==='1')a+=`<button class="btn g" data-a="tkImg" data-id="${did}">הצג תמונה</button>`;a+=`<button class="btn" data-a="tkOk" data-id="${did}">✓ אשר</button>`}
+ else if(t.st==='open')a+=`<button class="btn" data-a="tkDone" data-id="${did}">✓ בוצע</button>`;
+ return a+`<button class="btn g" data-a="tkwMenu" data-id="${did}" aria-label="עוד פעולות">⋯${cn?' <span class="tag tk-wait" style="margin:0 4px">הערה חדשה</span>':''}</button>`};
+ACT.tkwMenu=el=>{const t=tkGet(el.dataset.id);if(!t)return;const did=esc(t.id),nw=Array.isArray(t.to)&&t.to.length>0,B=(go,tx)=>`<button class="btn g" data-a="tkwMi" data-go="${go}" data-id="${did}">${tx}</button>`;let m='';
+ if(t.st==='wait')m+=B('tkRej',t.pr==='1'?'דחה':'החזר לעובד');
+ if(t.st!=='done'){if(nw)m+=B('tkMv','העבר לעובד…');if(nw&&t.ow)m+=B('tkUnclaim','בטל תפיסה');m+=B('tkwDl','שנה תאריך יעד')}
+ m+=B('tkCm',icd('chat')+' הערה / תגובות');
+ if(t.st==='open'&&nw)m+=B('tkwNd',icd('bell')+' תזכורת לעובד');
+ if(t.st==='open'&&t.pr!=='1'&&!(t.np>0))m+=B('tkReq',icd('cam')+' בקש תמונה');
+ if(t.st==='done'&&t.pr==='1')m+=B('tkImg','הצג תמונה');
+ if(nw&&(t.mi>0||t.wp>0))m+=B('tkPics',icd('img')+' תמונות');
+ m+=B('tkDel',icd('trash')+' מחק');
+ dlg(`<h3>פעולות במשימה</h3><p class="note" style="white-space:pre-wrap">${esc(String(t.txt||'').slice(0,100))}</p><div class="tkmenu">${m}<button class="btn g" data-a="closeDlg">סגור</button></div>`)};
+ACT.tkwMi=el=>{const f=ACT[el.dataset.go];closeDlg();if(typeof f==='function')f(el)};
+/* שינוי יעד: dl בלבד (המנהל רשאי לעדכן משימה בחוקים; due לא משתנה) */
+ACT.tkwDl=el=>{const t=tkGet(el.dataset.id);if(!t||!fbAdmin())return;const did=esc(t.id),B=(v,tx)=>`<button class="btn g" data-a="tkwDlGo" data-id="${did}" data-v="${v}">${tx}<small style="display:block;opacity:.7">${v>0?esc(whenTx(v)):''}</small></button>`,at=Date.now()+H;
+ dlg(`<h3>${icd('clock')} שינוי תאריך יעד</h3><p class="note">היעד הנוכחי: ${esc(W.dlTx(t))}</p><div class="tkmenu">${B(atDay(0,23,59),'היום 23:59')}${B(atDay(1,18,0),'מחר 18:00')}${B(atDay(3,18,0),'בעוד 3 ימים')}${B(0,'בלי יעד')}</div>
+ <form data-f="tkwDl" data-id="${did}" style="margin-top:10px"><div class="row" style="gap:8px"><label class="f grow"><span>תאריך</span><input type="date" name="d" value="${ymd(at)}" required></label><label class="f grow"><span>שעה</span><input type="time" name="tm" value="${hhmm(at)}" required></label></div><div class="row"><button class="btn grow">עדכן יעד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.tkwDlGo=el=>{const id=el.dataset.id,v=Math.max(0,+el.dataset.v||0);closeDlg();tkDo(()=>tkPatch(id,{dl:v}),'✓ היעד עודכן: '+(v?whenTx(v):'בלי יעד'))};
+FRM.tkwDl=f=>{const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(x.tm||'');if(!dm||!tm)return toast('בחר תאריך ושעה');
+ const at=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(at<Date.now()-MIN)return toast('הזמן שנבחר כבר עבר');if(at>Date.now()+365*864e5)return toast('אפשר עד שנה קדימה');
+ const id=f.dataset.id;closeDlg();tkDo(()=>tkPatch(id,{dl:at}),'✓ היעד עודכן: '+whenTx(at))};
 window.TKW=W;
 })();
