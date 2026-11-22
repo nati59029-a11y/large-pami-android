@@ -136,12 +136,47 @@ async function choose(doc, el, option, ctx) {
 }
 // טבלת "ממתין לטעינה" במסך הייבוא של כספית: הטבלה הראשונה אחרי הכותרת (head). → שורות [[שם, סוג]] או null אם אין כותרת
 function queueRows(doc, s) {
-  const h = byText(doc, [s.head || 'ממתין לטעינה'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
-  if (!h) return null;
+  const Q = qTable(doc, s);
+  if (!Q.h) return null;
+  if (!Q.tb) return [];
+  return all(Q.tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+}
+// 0.1.17 (תקלה 22.11, 14:59 ו-19:19 – import-queue-not-empty כשהתור ריק): כשהכותרת "ממתין לטעינה" גלויה בלי טבלה משלה (תור ריק / רשימה שאינה
+// טבלה), "הטבלה הראשונה אחרי הכותרת" הייתה "טעינות קודמות" – והשורות שלה (קבצים שכבר נטענו) נספרו כקבצים בתור.
+// עכשיו: (1) כותרת מוסתרת (visibility / שקיפות / בתוך אזור בגובה 0) – כאילו אין כותרת; (2) טבלת "טעינות קודמות" לעולם לא נחשבת לתור:
+// לא הטבלה שאחרי הכותרת שלה, לא טבלה שהכותרת "טעינות קודמות" מפרידה בינה לבין "ממתין לטעינה", ולא טבלה עם העמודות "מזהה" ו"סטטוס".
+// → { h: כותרת התור או null, tb: טבלת התור או null, hist: true אם הטבלה שנדחתה היא "טעינות קודמות" }
+const Q_HT = 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b';
+function shown(el) {
+  if (!visible(el)) return false;
+  try {
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true })) return false;
+    const W = el.ownerDocument && el.ownerDocument.defaultView;
+    if (!W || !W.getComputedStyle) return true;
+    for (let p = el; p && p.nodeType === 1; p = p.parentElement) {
+      const cs = W.getComputedStyle(p), r = p.getBoundingClientRect();
+      if (p === el && (cs.visibility !== 'visible' || !(r.width > 0 && r.height > 0))) return false;
+      if (p !== el && cs.overflow !== 'visible' && !(r.width > 0 && r.height > 0)) return false;
+    }
+  } catch (e) { /* */ }
+  return true;
+}
+function histTable(doc, t, hh) {
+  const H = all(t, 'th').map((x) => own(x));
+  if (H.includes('מזהה') && H.includes('סטטוס')) return true;
+  return !!hh && all(doc, 'table').find((x) => hh.compareDocumentPosition(x) & 4) === t;
+}
+function qTable(doc, s) {
+  const h = byText(doc, [s.head || 'ממתין לטעינה'], Q_HT, true).filter(shown)[0];
+  if (!h) return { h: null, tb: null };
+  const hh = byText(doc, [s.hist || 'טעינות קודמות'], Q_HT, true)[0] || null;
   const F = 4; // Node.DOCUMENT_POSITION_FOLLOWING
-  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & F) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
-  if (!tb) return [];
-  return all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+  const box = h.closest && h.closest('section,div');
+  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & F) || (box && box.querySelector('table'));
+  if (!tb) return { h, tb: null };
+  const between = hh && (h.compareDocumentPosition(hh) & F) && (hh.compareDocumentPosition(tb) & F);
+  if (between || histTable(doc, tb, hh)) return { h, tb: null, hist: true };
+  return { h, tb };
 }
 // 0.1.16 (תקלה 22.11, 15:02): בכספית האמיתית שורת הכותרת "שם | סוג קובץ | פעולות" נספרה כשורת קובץ, ולכן "שלנו + עוד שורה" → עצירה.
 // שורת כותרת = בתוך thead, או עם תאי th, או ששני התאים הראשונים הם בדיוק "שם" ו"סוג קובץ" (שם קובץ אמיתי לא נראה כך)
@@ -154,10 +189,9 @@ function qHead(r) {
 // 0.1.16: פירוט קצר לעצירה בגלל התור (בלי לשנות את ההחלטה): כמה שורות, ולכל שורה – כמה תאים והאם השם / הסוג תואמים. שורה שאינה שלנו –
 // תחילת שני התאים הראשונים (עד 30 תווים, שם קובץ שלנו מוחלף ב-{file}); הסינון (scrub) נעשה ב-sw לפני היציאה
 function queueInfo(doc, s, name, type) {
-  const h = byText(doc, [s.head || 'ממתין לטעינה'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
-  if (!h) return 'אין כותרת ממתין';
-  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & 4) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
-  if (!tb) return 'אין טבלה';
+  const Q = qTable(doc, s), tb = Q.tb;
+  if (!Q.h) return 'אין כותרת ממתין';
+  if (!tb) return Q.hist ? 'אין טבלה (רק "טעינות קודמות", לא נספרת)' : 'אין טבלה';
   const T = all(tb, 'tr'), hd = T.filter((r) => r.querySelectorAll('td').length && qHead(r)).length;
   const R = queueRows(doc, s) || [];
   const one = (r, k) => {

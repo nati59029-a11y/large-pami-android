@@ -619,6 +619,50 @@ test('0.1.16 קובץ של מישהו אחר בתור (כותרת td) → import
   await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.removeItem('qtdhead'); });
 });
 
+// 0.1.17 – התקלה של 22.11 (14:59, 19:19): הכותרת "ממתין לטעינה" גלויה כשהתור ריק, והטבלה הבאה היא "טעינות קודמות" (שורות "בוצע").
+// קודם: השורות של "טעינות קודמות" נספרו כתור → import-queue-not-empty. עכשיו: תור ריק עובר, והקובץ שלנו מועלה פעם אחת
+test('0.1.17 תור ריק + כותרת "ממתין לטעינה" גלויה + טבלת "טעינות קודמות" → לא נעצר; מועלה פעם אחת', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.removeItem('qtdhead'); localStorage.setItem('qhalways', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  try {
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+    assert.equal(imports.at(-1).type, 'price');
+  } finally { await cp.evaluate(() => localStorage.removeItem('qhalways')); }
+});
+
+test('0.1.17 קובץ של מישהו אחר בתור (כותרת גלויה תמיד) → עדיין import-queue-not-empty + פירוט מסך הייבוא (info.scr, op queueEmpty); בלי העלאה ובלי "הסר"', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.setItem('qhalways', '1'); localStorage.setItem('preq', 'someone-else.csv'); });
+  await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  try {
+    assert.equal(s.st.lastRun.code, 'import-queue-not-empty', JSON.stringify(s.st.lastRun));
+    assert.equal(s.st.lastRun.step, 'exportPrice');
+    assert.equal(imports.length, nImp, 'שום קובץ לא הועלה');
+    assert.ok(/לפני הבחירה · שורות: 1 · 1: 3 תאים, שם לא תואם/.test(String(s.st.lastRun.msg || '')), s.st.lastRun.msg);
+    const rp = srv.ops('report').at(-1);
+    assert.equal(rp.err.code, 'import-queue-not-empty');
+    const sc = rp.info && rp.info.scr;
+    assert.ok(sc, 'info.scr נשלח: ' + JSON.stringify(rp.info));
+    assert.equal(sc.flow, 'importPrice'); assert.equal(sc.op, 'queueEmpty'); assert.equal(sc.err, 'import-queue-not-empty');
+    assert.equal(sc.qhead, 'exact');
+    assert.ok(!JSON.stringify(sc).includes('someone-else'), 'בלי תוכן תאים: ' + JSON.stringify(sc));
+    const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
+    const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
+    assert.ok(!evs.includes('run') && !evs.includes('rm'), evs.join('|'));
+  } finally { await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.removeItem('qhalways'); }); }
+});
+
 test('ניסיון חוזר: הקובץ של הריצה כבר ב"טעינות קודמות" → לא מעלים שוב, התוצאה נקראת מהשורה הקיימת', async () => {
   const cp = caspitPage();
   srv.runId = 'retryrun1';

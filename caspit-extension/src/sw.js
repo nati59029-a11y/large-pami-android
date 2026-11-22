@@ -450,7 +450,7 @@ async function scrOf(tabId, flow, res) {
   try {
     const fl = ((await sel()).flows || {})[flow] || [];
     const st = res && res.miss != null ? fl[res.miss] || {} : {};
-    if (st.op !== 'setFile' && st.op !== 'queue') return null;
+    if (st.op !== 'setFile' && st.op !== 'queue' && st.op !== 'queueEmpty') return null; // 0.1.17: גם כשהעצירה לפני הבחירה (queueEmpty)
     const q = fl.find((x) => x && (x.op === 'queue' || x.op === 'queueEmpty')) || {};
     await guardBo(tabId);
     const r = await inIso(tabId, scrIn, [q.head || 'ממתין לטעינה', GUARD]);
@@ -1120,7 +1120,11 @@ async function exportImport(run, kind) {
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
   // 0.1.16: עם פירוט התור (מסונן) – ההחלטה לא משתנה
-  if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty', res.qd ? (P.msgOf('import-queue-not-empty') + ' · ' + S.scrub(res.qd)).slice(0, 290) : undefined);
+  // 0.1.17: ועם "פירוט מסך הייבוא" (info.scr) – רק אבחון
+  if (res && res.code === 'import-queue-not-empty') {
+    const scr = await scrOf(tab, kind === 'new' ? 'importNew' : 'importPrice', res);
+    throw P.err('import-queue-not-empty', res.qd ? (P.msgOf('import-queue-not-empty') + ' · ' + S.scrub(res.qd)).slice(0, 290) : undefined, scr ? { scr } : undefined);
+  }
   if (!res || (!res.ok && !res.already)) {
     if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login');
     const scr = await scrOf(tab, kind === 'new' ? 'importNew' : 'importPrice', res); // 0.1.12: רק אבחון – ההחלטה (selector-miss) לא משתנה

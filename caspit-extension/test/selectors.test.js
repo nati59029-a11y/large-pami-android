@@ -394,6 +394,36 @@ test('screen (0.1.12): בלי כותרת "ממתין לטעינה" – כותר�
   assert.equal(await page.evaluate(() => window.CxSel.screen(document, {}).qhead), 'part');
 });
 
+test('queueRows (0.1.17): "טעינות קודמות" לעולם לא נקראת כתור; כותרת מוסתרת = אין תור; קובץ זר בתור – נספר', async () => {
+  const HIST = '<h4>טעינות קודמות</h4><table><thead><tr><th>מזהה</th><th>שם</th><th>סוג קובץ</th><th>סטטוס</th></tr></thead><tbody><tr><td>25520</td><td>a.csv</td><td>עדכון</td><td>בוצע</td></tr></tbody></table>';
+  const PICK = '<span><input type="file" id="positive-file-uploader" style="display:none"></span><div><label for="v">בחר קובץ</label><input type="file" id="v"></div>';
+  const QT = (rows) => '<table><thead><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  const C = [
+    ['כמו במסך האמיתי: בלי כותרת, רק "טעינות קודמות"', `${PICK}<div>${HIST}</div>`, null, true],
+    ['כותרת גלויה בלי טבלה משלה – הטבלה הבאה היא ההיסטוריה', `${PICK}<h4>ממתין לטעינה</h4><button>העלה קבצים והרץ טעינה</button><div>${HIST}</div>`, [], true],
+    ['כותרת ב-visibility:hidden', `${PICK}<div style="visibility:hidden"><h4>ממתין לטעינה</h4></div><div>${HIST}</div>`, null, true],
+    ['כותרת באזור בגובה 0', `${PICK}<div style="height:0;overflow:hidden"><h4>ממתין לטעינה</h4></div><div>${HIST}</div>`, null, true],
+    ['כותרת ב-opacity:0', `${PICK}<div style="opacity:0"><h4>ממתין לטעינה</h4></div><div>${HIST}</div>`, null, true],
+    ['כותרת אחרי ההיסטוריה, בתוך אותו div', `<div>${PICK}<div>${HIST}</div><h4>ממתין לטעינה</h4></div>`, [], true],
+    ['היסטוריה בלי הכותרת שלה (לפי העמודות מזהה + סטטוס)', `${PICK}<h4>ממתין לטעינה</h4><table><thead><tr><th>מזהה</th><th>שם</th><th>סטטוס</th></tr></thead><tbody><tr><td>1</td><td>a</td><td>בוצע</td></tr></tbody></table>`, [], true],
+    ['טבלת תור ריקה', `${PICK}<h4>ממתין לטעינה</h4>${QT('')}<div>${HIST}</div>`, [], true],
+    ['קובץ זר בתור', `${PICK}<h4>ממתין לטעינה</h4>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
+    ['קובץ זר בתור, כותרת td', `${PICK}<h4>ממתין לטעינה</h4><table><tbody><tr><td>שם</td><td>סוג קובץ</td><td>פעולות</td></tr><tr><td>x.csv</td><td>עדכון</td><td>הסר</td></tr></tbody></table><div>${HIST}</div>`, [['x.csv', 'עדכון', 'הסר']], false],
+  ];
+  for (const [name, body, rows, empty] of C) {
+    await page.setContent('<!doctype html><html dir="rtl"><body>' + body + '</body></html>');
+    await page.addScriptTag({ content: SRC });
+    const r = await page.evaluate(async () => {
+      const S = window.CxSel;
+      return { R: S.queueRows(document, { head: 'ממתין לטעינה' }), q: await S.runSteps([{ op: 'queueEmpty', head: 'ממתין לטעינה' }], { doc: document, win: window, sleep: async () => {} }) };
+    });
+    const q = r.q;
+    assert.deepEqual(r.R, rows, name);
+    assert.equal(q.ok, empty, name + ' ' + JSON.stringify(q));
+    if (!empty) assert.equal(q.code, 'import-queue-not-empty', name);
+  }
+});
+
 test('deniedLink (0.1.12): "מבצעים" מותר (למרות "בצע"), "הוספת מבצעים" / "ייבוא מבצעים" / "ביצוע" / "הגדרות"? – לפי DENY', () => {
   const X = require('../src/lib/selectors.js');
   for (const t of ['מבצעים', 'מבצע', 'רשימת מבצעים', 'דוח אמצעי תשלום', 'סיכום קופה יומי']) assert.equal(X.deniedLink(t), false, t);
