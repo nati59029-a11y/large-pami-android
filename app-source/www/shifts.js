@@ -45,7 +45,7 @@ const reload=()=>{S.w=null;S.err='';load()};
 
 /* ---------- הטבלה השבועית ---------- */
 function chip(o,w){const n=((w.tasks||{})[o.id]||[]).length,nm=o.u?(o.nm||nmOf(o.u)||'עובד'):'בלי עובד';
- return `<button class="shc${o.u?'':' op'}" data-a="shOpen" data-k="${esc(o.id)}"><b>${esc(o.s)}–${esc(o.e)}${o.x?' ☾':''}</b><small>${esc(nm)}</small>${o.fx||n?`<small>${o.fx?'🔁 קבועה':''}${o.fx&&n?' · ':''}${n?'📋 '+n+' משימות':''}</small>`:''}</button>`}
+ return `<button class="shc${o.u?'':' op'}" data-a="sftOpen" data-k="${esc(o.id)}"><b>${esc(o.s)}–${esc(o.e)}${o.x?' ☾':''}</b><small>${esc(nm)}</small>${o.fx||n?`<small>${o.fx?'🔁 קבועה':''}${o.fx&&n?' · ':''}${n?'📋 '+n+' משימות':''}</small>`:''}</button>`}
 V.shf=()=>{const T='משמרות';if(!on())return{t:T,h:'<div class="empty">המסך זמין כשתוספת המשימות פעילה</div>'};
  if(!S.w&&!S.err)load();const w=S.w;
  if(S.err)return{t:T,h:`<div class="card"><p class="note">${esc(S.err)}</p><button class="btn g w" ${big} data-a="shRe">נסו שוב</button></div>`};
@@ -66,7 +66,7 @@ ACT.shRe=()=>reload();
 ACT.shWk=el=>{const n=+el.dataset.v;const base=S.w?S.w.from:'';S.from=n&&base?addD(base,n):'';reload();rerender()};
 
 /* ---------- לחיצה על משמרת: פרטים, משימות, עריכה, מחיקה ---------- */
-ACT.shOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
+ACT.sftOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
  const nm=o.u?(o.nm||nmOf(o.u)||'עובד'):'בלי עובד',L=(w.tasks||{})[o.id]||[],ended=o.end<=Date.now();
  let h=`<h3>${esc(nm)} · יום ${DN[dow(o.day)]} ${dm(o.day)}</h3><p class="note" style="margin-top:0"><span dir="ltr">${esc(o.s)}–${esc(o.e)}</span>${o.x?' (נגמרת למחרת)':''} · ${o.fx?'משמרת קבועה (כל שבוע)':'משמרת חד־פעמית'}${o.nt?'<br>'+esc(o.nt):''}</p>`;
  if(!w.full)return dlg(h+`<button class="btn g w" ${big} data-a="closeDlg">סגור</button>`);
@@ -74,7 +74,7 @@ ACT.shOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
  if(!o.u)h+='<p class="note">אין עובד במשמרת – קודם בחרו עובד (עריכה) ואז שלחו משימות.</p>';
  else if(ended)h+='<p class="note">המשמרת הסתיימה.</p>';
  else h+=`<form data-f="shTaskF" data-k="${esc(o.id)}" style="margin-top:8px"><label class="f"><span>משימה חדשה ל${esc(nm)}</span><textarea name="txt" rows="2" maxlength="500" required placeholder="למשל: לסדר את מדף החלב"></textarea></label><button class="btn w" ${big}>שליחה ${o.start<=Date.now()?'עכשיו':'– תוצג בתחילת המשמרת'}</button></form>`;
- h+=o.day<w.today?`<p class="note">משמרת שעברה – אי אפשר לשנות.</p><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`:`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="shEdit" data-k="${esc(o.id)}">עריכה</button><button class="btn g grow" ${big} data-a="shDel" data-k="${esc(o.id)}">מחיקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`;
+ h+=o.day<w.today?`<p class="note">משמרת שעברה – אי אפשר לשנות.</p><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`:`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="sftEdit" data-k="${esc(o.id)}">עריכה</button><button class="btn g grow" ${big} data-a="sftDel" data-k="${esc(o.id)}">מחיקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`;
  dlg(h)};
 FRM.shTaskF=async f=>{const occ=f.dataset.k,txt=String(fd(f).txt||'').trim();if(!txt)return toast('כתבו משימה');if(txt.length>500)return toast('עד 500 תווים');
  const b=f.querySelector('button');b.disabled=true;
@@ -94,7 +94,7 @@ function formH(o){const w=S.w,st=(w&&w.staff)||[],d=o?o.day:(w&&w.days&&w.days.i
  <label class="f"><span>הערה (לא חובה)</span><input name="nt" maxlength="200" value="${esc(o?o.nt:'')}" style="min-height:48px"></label>
  <div class="row" style="margin-top:8px"><button class="btn grow" ${big}>שמירה</button><button type="button" class="btn g grow" ${big} data-a="closeDlg">ביטול</button></div></form>`}
 ACT.shNew=()=>{if(!S.w||!S.w.full)return;dlg(formH(null))};
-ACT.shEdit=el=>{const o=occOf(el.dataset.k);if(o)dlg(formH(o))};
+ACT.sftEdit=el=>{const o=occOf(el.dataset.k);if(o)dlg(formH(o))};
 const sidOf=o=>o.sid||o.id.slice(0,o.id.length-11);
 async function saveRun(data,b){try{await fnCall('shApi',data);toast('נשמר');closeDlg();reload()}catch(e){if(b)b.disabled=false;err(e)}}
 /* שאלה: רק הפעם / מכאן והלאה (משמרת קבועה) */
@@ -110,7 +110,7 @@ FRM.shSaveF=f=>{const x=fd(f),o=f.dataset.k?occOf(f.dataset.k):null;
  data.id=sidOf(o);
  if(!o.fx){b.disabled=true;return saveRun(data,b)}
  data.day=o.day;askMode('שמירת השינוי',m=>{if(m==='fwd'&&data.d<o.day)return toast('ב"מכאן והלאה" התאריך לא יכול להיות לפני '+dm(o.day));saveRun(Object.assign(data,{mode:m}))})};
-ACT.shDel=el=>{const o=occOf(el.dataset.k);if(!o)return;const id=sidOf(o);
+ACT.sftDel=el=>{const o=occOf(el.dataset.k);if(!o)return;const id=sidOf(o);
  if(!o.fx)return ask('למחוק את המשמרת? משימות שממתינות לה יבוטלו.',()=>saveRun({op:'del',id}),'כן, מחק');
  askMode('מחיקת משמרת',m=>saveRun({op:'del',id,day:o.day,mode:m}))};
 
