@@ -89,7 +89,10 @@ if (mode === 'legacy') {
   const tqC = {}; for (const r of tqA) tqC[r.who + '|' + r.step] = (tqC[r.who + '|' + r.step] || 0) - 1; for (const r of tqB) tqC[r.who + '|' + r.step] = (tqC[r.who + '|' + r.step] || 0) + 1;
   const tqBad = Object.entries(tqC).filter(([k, d]) => d < 0 || d > 1 || (d === 1 && !k.startsWith('m@x.co|')));
   if (tqBad.length) { console.log('נכשל: מספר שאילתות tasks לא צפוי (ענף פחות main)', tqBad); fail++; }
-  if (tqA.length) for (const b of tqB) { const c = Object.assign({}, b); if (!tqA.some((a) => { const x = Object.assign({}, c); tkNorm(a, x); return x.url === a.url && x.body === a.body; })) { console.log('נכשל: שאילתת tasks בענף שאין כמוה ב-main', b.who, b.step, b.body.slice(0, 300)); fail++; break; } }
+  /* מנהל ב-main לא שולח שאילתת tasks בתרחיש (רק העובד, עם where) – לכן משווים גם בלי where: אותם שדות (ועוד), אותה כתובת ואותו limit */
+  const noW = (r) => { const o = JSON.parse(r.body); delete o.structuredQuery.where; return Object.assign({}, r, { body: JSON.stringify(o) }); };
+  const tqEq = (a, b) => { const x = Object.assign({}, b); tkNorm(a, x); return x.url === a.url && x.body === a.body; };
+  if (tqA.length) for (const b of tqB) { if (!tqA.some((a) => tqEq(a, b) || tqEq(noW(a), noW(b)))) { console.log('נכשל: שאילתת tasks בענף שאין כמוה ב-main', b.who, b.step, b.body.slice(0, 300)); fail++; break; } }
   console.log(`משימות – שאילתות tasks: main ${tqA.length}, ענף ${tqB.length}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
