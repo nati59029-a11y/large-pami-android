@@ -17,6 +17,11 @@
 //   ואין הוספת שורות, וחשבונית ריקה הייתה חוסמת (dup) את הטלפון של העובד, שבגרסה הנוכחית ממשיך לנסות בעצמו עם ניסיונות חוזרים.
 //   זיהוי שהצליח אבל בלי שורות – נוצרת חשבונית עם 0 שורות, בדיוק כמו בטלפון.
 // "חוסרים" (hsOnInv, hs.js) – נשאר בטלפון בלבד; השרת לא קורא לו.
+// תקופת מעבר (עד שלב 2): APK קיים ממשיך לזהות בעצמו (ההוק על pushItem ב-www/pricing.js), ולכן רוב החשבוניות מזוהות פעמיים –
+//   פעמיים במכסה של העובד ופעמיים עלות Gemini (רק הראשון שיוצר את pinv נשמר; השני מקבל dup). שלב 2: להסיר את ההוק מהאפליקציה.
+// דרישה לשלב 2 (לא משנים את app-source עכשיו): אפליקציית המנהל (pullInbox2 ב-index.html) מוחקת את chunks של הוצאה מיד אחרי המשיכה.
+//   היא חייבת לא למחוק chunks של פריט inbox שנשלח לפני פחות מכמה דקות (לפי inbox.t), אחרת הטריגר עלול לא למצוא את הצילום (no-chunk).
+// כל דילוג נרשם ביומן: logger.info('piInbox skip', { reason, biz }) – בלי פרטים אישיים ובלי תוכן הצילום.
 // אזור: europe-west1 בלבד, בלי ניסיון חוזר. שגיאה נרשמת ביומן (בלי תוכן הצילום ובלי פרטים אישיים) ולא נזרקת.
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
@@ -27,6 +32,7 @@ const scan = require('./lib/scan');
 const PL = require('./lib/pricing-lines');
 const { hasPerm } = require('./lib/roles');
 const P = require('./pricing')._core;
+const { getFirestore } = require('firebase-admin/firestore');
 
 // אותם פרמטרים כמו ב-index.js (אותו שם = אותו פרמטר)
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
@@ -44,26 +50,33 @@ const s_ = (v) => String(v == null ? '' : v).trim();
 const rqOf = (fid) => { let s = ('pi' + String(fid || '')).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40); while (s.length < 8) s += '0'; return s; };
 
 // התנאים של ההוק באפליקציה, על ההוצאה עצמה (בלי קריאה מהמסד)
+// מחזיר { d, np } או { r: קוד הסיבה לדילוג }
 function eligible(doc) {
-  if (!doc || typeof doc !== 'object' || doc.status !== 'new' || !ID_RE.test(String(doc.owner || ''))) return null;
+  if (!doc || typeof doc !== 'object' || doc.status !== 'new' || !ID_RE.test(String(doc.owner || ''))) return { r: 'bad-doc' };
   let d = null;
-  try { d = JSON.parse(typeof doc.data === 'string' ? doc.data : ''); } catch (e) { return null; }
-  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
-  if (d.repl || d.reg || d.kind === 'check' || doc.k === 'check' || !(num(d.amt) > 0)) return null;
+  try { d = JSON.parse(typeof doc.data === 'string' ? doc.data : ''); } catch (e) { return { r: 'bad-data' }; }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return { r: 'bad-data' };
+  if (d.repl) return { r: 'repl' };
+  if (d.reg) return { r: 'reg' };
+  if (d.kind === 'check' || doc.k === 'check') return { r: 'check' };
+  if (!(num(d.amt) > 0)) return { r: 'amt' };
   const np = Number(doc.parts);
-  if (!Number.isInteger(np) || np < 1 || np > MAX_PARTS) return null;
+  if (!Number.isInteger(np) || np < 1 || np > MAX_PARTS) return { r: 'parts' };
   return { d, np };
 }
 
-// הקובץ השמור מ-chunks/{id}_{k} (נכתבים לפני מסמך ה-inbox). כל חלק – של אותו עובד. אין קובץ = אין צילום
-async function fileOf(db, id, np, owner) {
-  const S = await db.getAll(...Array.from({ length: np }, (_, k) => db.doc('chunks/' + id + '_' + k)));
+// הקובץ השמור מ-chunks/{id}_{k} (נכתבים לפני מסמך ה-inbox). כל חלק – של אותו עובד. pfx = שורש הנתונים לפי נתיב הטריגר.
+// נקרא מוקדם ככל האפשר (במקביל לשאר הקריאות), כי אפליקציית המנהל מוחקת את החלקים אחרי שהיא מושכת את ההוצאה (pullInbox2).
+// מחזיר { f } או { r: 'no-chunk' } (חלק חסר / של עובד אחר / בלי data)
+async function fileOf(pfx, id, np, owner) {
+  const fs = getFirestore();
+  const S = await fs.getAll(...Array.from({ length: np }, (_, k) => fs.doc(pfx + 'chunks/' + id + '_' + k)));
   let f = '';
   for (const s of S) {
-    if (!s.exists || s.get('owner') !== owner || typeof s.get('data') !== 'string') return '';
+    if (!s.exists || s.get('owner') !== owner || typeof s.get('data') !== 'string') return { r: 'no-chunk' };
     f += s.get('data');
   }
-  return f;
+  return { f };
 }
 
 // כמו pages() באפליקציה: עד 4 עמודים, PDF – כמו שהוא ועוצרים. תמונה – כמו שהיא (בשרת אין הקטנה; מגבלת הגודל של scanDocument חלה)
@@ -121,36 +134,40 @@ async function recognize(uid, bizId, files, o) {
 // הליבה. bizId = null לשורש (legacy). doc = מסמך ה-inbox. o – לבדיקות בלבד ({ key, base })
 async function onInbox(bizId, id, doc, opts) {
   const o = opts || {};
-  if (!ID_RE.test(String(id || '')) || (bizId && !T.BIZ_RE.test(String(bizId)))) return { ok: false, r: 'bad' };
-  const e0 = eligible(doc);
-  if (!e0) return { ok: true, r: 'skip' };
+  let bz = bizId || T.BIZ0;
+  const skip = (reason, extra) => { logger.info('piInbox skip', { reason, biz: bz }); return Object.assign({ ok: true, r: reason }, extra || {}); };
+  if (!ID_RE.test(String(id || '')) || (bizId && !T.BIZ_RE.test(String(bizId)))) { bz = ''; return Object.assign(skip('bad'), { ok: false }); }
+  const e0 = eligible(doc); // בדיקות בזיכרון בלבד
+  if (!e0.d) return skip(e0.r);
   const { d, np } = e0;
   const owner = doc.owner;
-  const biz = await T.loadBiz(bizId || T.BIZ0);
-  if (!biz || biz.status !== 'active') return { ok: true, r: 'biz' };
+  // כל הקריאות במקביל, והצילום ראשון: נתיב הנתונים נגזר מנתיב הטריגר; אחר כך מוודאים שהעסק באמת שם (wrong-root)
+  const pfx = bizId ? 'b/' + bizId + '/' : '';
+  const fs = getFirestore();
+  const [fr, biz, m, admin, staff, cfg] = await Promise.all([fileOf(pfx, id, np, owner), T.loadBiz(bz), T.resolveMember(owner),
+    fs.doc(pfx + 'admins/' + owner).get(), fs.doc(pfx + 'staff/' + owner).get(), fs.doc(pfx + 'cfg/main').get()]);
+  if (!biz || biz.status !== 'active') return skip('biz');
   const prefix = T.bizPrefix(biz);
-  if (prefix !== (bizId ? 'b/' + bizId + '/' : '')) return { ok: true, r: 'wrong-root' }; // הנתונים של העסק לא כאן
-  if (!(biz.features.shelf || biz.features.orders)) return { ok: true, r: 'feature-off' };
-  if (!biz.features.scan) return { ok: true, r: 'scan-off' };
-  const m = await T.resolveMember(owner);
-  if (m.bizId !== biz.bizId) return { ok: true, r: 'not-member' };
+  if (prefix !== pfx) return skip('wrong-root'); // הנתונים של העסק לא כאן
+  if (!(biz.features.shelf || biz.features.orders)) return skip('feature-off');
+  if (!biz.features.scan) return skip('scan-off');
+  if (m.bizId !== biz.bizId) return skip('not-member');
+  if (admin.exists || !staff.exists || staff.get('active') !== true) return skip('not-staff');
+  const w = { uid: owner, role: 'employee', staff, admin, biz, bizId: biz.bizId, superadmin: false };
+  if (biz.dataRoot === 'b' && !hasPerm(w, 'expW') && !hasPerm(w, 'prc')) return skip('no-perm');
+  let cats = [];
+  try { const j = JSON.parse(cfg.exists ? cfg.get('data') || '{}' : '{}'); cats = j && Array.isArray(j.cats) ? j.cats : []; } catch (e) { cats = []; }
+  const c = cats.find((z) => z && z.id === d.cat);
+  if (!c || c.beh !== 'sup') return skip('not-sup');
+  if (fr.r) return skip(fr.r);
+  const P0 = fr.f ? pagesOf(fr.f) : [];
+  if (!P0.length) return skip('no-photo');
   return T.runInBiz({ bizId: biz.bizId, prefix, biz, uid: owner }, async () => {
     const db = T.tdb();
-    const [admin, staff, cfg] = await Promise.all([db.doc('admins/' + owner).get(), db.doc('staff/' + owner).get(), db.doc('cfg/main').get()]);
-    if (admin.exists || !staff.exists || staff.get('active') !== true) return { ok: true, r: 'not-staff' };
-    const w = { uid: owner, role: 'employee', staff, admin, biz, bizId: biz.bizId, superadmin: false };
-    if (biz.dataRoot === 'b' && !hasPerm(w, 'expW') && !hasPerm(w, 'prc')) return { ok: true, r: 'no-perm' };
-    let cats = [];
-    try { const j = JSON.parse(cfg.exists ? cfg.get('data') || '{}' : '{}'); cats = j && Array.isArray(j.cats) ? j.cats : []; } catch (e) { cats = []; }
-    const c = cats.find((z) => z && z.id === d.cat);
-    if (!c || c.beh !== 'sup') return { ok: true, r: 'not-sup' };
     P.feats(w); // w.uname – כמו piCreate
     const reqId = rqOf('o' + id);
     const pid = 'i' + reqId;
-    if ((await db.doc('pinv/' + pid).get()).exists) return { ok: true, r: 'dup', id: pid }; // הטלפון כבר יצר – בלי זיהוי נוסף
-    const file = await fileOf(db, id, np, owner);
-    const P0 = file ? pagesOf(file) : [];
-    if (!P0.length) return { ok: true, r: 'no-photo' };
+    if ((await db.doc('pinv/' + pid).get()).exists) return skip('dup', { id: pid }); // הטלפון כבר יצר – בלי זיהוי נוסף
     let x;
     try {
       const { files } = scan.validateScanInput({ kind: 'invlines', files: P0 }, SCAN_MAX_FILE_MB.value() * 1024 * 1024);
@@ -170,7 +187,7 @@ async function onInbox(bizId, id, doc, opts) {
     };
     if (ID_OK(d.sub)) hdr.supId = d.sub;
     const cr = await P.createCore(w, hdr);
-    if (cr.dup) return { ok: true, r: 'dup', id: cr.id };
+    if (cr.dup) return skip('dup', { id: cr.id });
     let img = 0;
     try { img = await P.imgCore(cr.id, imgOf(P0)); } catch (e) { logger.warn('piInbox: image not stored', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
     logger.info('piInbox: pinv created', { bizId: biz.bizId, n: hdr.lines.length, np: img });

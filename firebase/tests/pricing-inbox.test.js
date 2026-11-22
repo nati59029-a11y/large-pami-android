@@ -141,11 +141,11 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
     const C = [
       [EXP({ cat: 'c_simple' }), jpeg(), null, 'not-sup'],
       [EXP({ cat: 'c_missing' }), jpeg(), null, 'not-sup'],
-      [EXP({ kind: 'check' }), jpeg(), { k: 'check' }, 'skip'],
-      [EXP({ repl: 'abc123' }), jpeg(), null, 'skip'],
-      [EXP({ reg: 'r1' }), jpeg(), null, 'skip'],
-      [EXP({ amt: 0 }), jpeg(), null, 'skip'],
-      [EXP({ amt: '' }), jpeg(), null, 'skip'],
+      [EXP({ kind: 'check' }), jpeg(), { k: 'check' }, 'check'],
+      [EXP({ repl: 'abc123' }), jpeg(), null, 'repl'],
+      [EXP({ reg: 'r1' }), jpeg(), null, 'reg'],
+      [EXP({ amt: 0 }), jpeg(), null, 'amt'],
+      [EXP({ amt: '' }), jpeg(), null, 'amt'],
       [EXP(), '', null, 'no-photo'], // nopic: חלק אחד ריק
     ];
     for (const [data, file, over, want] of C) {
@@ -177,10 +177,13 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
     assert.equal(invReqs().length, 0);
   });
 
-  it('חלק בצילום של עובד אחר – נחשב בלי צילום', async () => {
+  it('חלק בצילום של עובד אחר / חלק חסר – no-chunk, בלי זיהוי', async () => {
     const s = await stage(`b/${A}/`, E1, EXP(), jpeg());
     await prep((d) => d.doc(`b/${A}/chunks/${s.id}_0`).set({ owner: E2, data: jpeg() }));
-    assert.equal((await run(A, s)).r, 'no-photo');
+    assert.equal((await run(A, s)).r, 'no-chunk');
+    const s2 = await stage(`b/${A}/`, E1, EXP(), jpeg());
+    await prep((d) => d.doc(`b/${A}/chunks/${s2.id}_0`).delete()); // המנהל כבר מחק
+    assert.equal((await run(A, s2)).r, 'no-chunk');
     assert.equal(invReqs().length, 0);
   });
 
@@ -267,8 +270,9 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
 
   it('מזהה עסק לא תקין / מסמך פגום – בלי שגיאה', async () => {
     assert.equal((await X.onInbox('BAD!', 'x1', {})).r, 'bad');
-    assert.equal((await X.onInbox(A, 'x1', null)).r, 'skip');
-    assert.equal((await X.onInbox(A, 'x1', { owner: E1, status: 'new', data: 'not json', parts: '1' })).r, 'skip');
+    assert.equal((await X.onInbox(A, 'x1', null)).r, 'bad-doc');
+    assert.equal((await X.onInbox(A, 'x1', { owner: E1, status: 'new', data: 'not json', parts: '1' })).r, 'bad-data');
+    assert.equal((await X.onInbox(A, 'x1', { owner: E1, status: 'new', data: JSON.stringify(EXP()), parts: '13' })).r, 'parts');
     await X.run(A, { params: { id: 'x2' }, data: { data: () => { throw new Error('boom'); } } }); // run לא זורק
   });
 
