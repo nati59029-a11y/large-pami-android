@@ -530,7 +530,7 @@ async function secChat(request) {
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {
-        const r = await AI.chat({ tier, system, turns, tools: ST.declsOf(offered), timeoutMs: 45000 });
+        const r = await AI.chat({ tier, system, turns, tools: ST.declsOf(offered), timeoutMs: 45000, noCalls: round === MAX_ROUNDS - 1 }); // סבב אחרון: בלי כלים – עונים עם מה שנאסף
         sent += r.sent || 0; usage.in += r.usage.in; usage.out += r.usage.out;
         if (!r.calls.length) { final = r.text; break; }
         const calls = r.calls.slice(0, MAX_CALLS);

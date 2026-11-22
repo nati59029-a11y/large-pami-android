@@ -58,7 +58,7 @@ function geminiBody(o) {
     : { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } } }; // מהיר וזול: בלי "חשיבה" (לא מאומת: שם השדה בכל גרסת מודל)
   if (o.tools && o.tools.length) {
     body.tools = [{ functionDeclarations: o.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) }];
-    body.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+    body.toolConfig = { functionCallingConfig: { mode: o.noCalls ? 'NONE' : 'AUTO' } }; // 22.11.2026: noCalls – סבב אחרון, המודל חייב לענות במילים (ההצהרות נשארות בגלל קריאות קודמות בהיסטוריה)
   }
   return body;
 }
