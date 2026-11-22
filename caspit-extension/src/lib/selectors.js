@@ -499,6 +499,103 @@ function isLogin(doc, win, cfg) {
   if (!all(doc, L.css || 'input[type=password]').some(visible)) return false;
   return !(L.shell && find(doc, L.shell));
 }
-const api = { OPS, DENY_HE, denied, deniedLink, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes };
+// ---------- בחירת סניף במשרד האחורי (0.1.13) ----------
+// פקד הסניף בכספית: vue-multiselect ב-#store-switch-field (דוח היכרות 0.1.12, בכל 15 המסכים). cfg (selectors.json branch.switch + names):
+// field / cur (הטקסט הנבחר, למשל "לארג' פעמי-יהודה הנשיא") / box (.multiselect) / opt (.multiselect__option).
+// cur = שם הסניף מ-names שמופיע בטקסט הנבחר – רק אם בדיוק אחד מופיע (אחרת '' – לא מנחשים)
+function brNames(cfg) { return ((cfg && cfg.names) || []).map(norm).filter(Boolean); }
+function brOf(t, N) { const x = norm(t), m = N.filter((n) => x.includes(n)); return m.length === 1 ? m[0] : ''; }
+function branchCur(doc, cfg) {
+  const f = all(doc, cfg.field)[0];
+  if (!f) return { found: false };
+  const N = brNames(cfg), el = f.querySelector(cfg.cur);
+  return { found: true, cur: el ? brOf(el.textContent, N) : '', opts: all(f, cfg.opt).map((o) => brOf(o.textContent, N)).filter(Boolean) };
+}
+// פתיחת הרשימה (פוקוס על .multiselect, כמו vue-multiselect) ולחיצה על האפשרות של הסניף. לא מחכים כאן לתוצאה –
+// כספית עשויה לטעון את הדף מחדש; ה-service worker בודק אחר כך (branchCur) שהבחירה נקלטה
+async function branchPick(doc, cfg, name, ctx) {
+  const f = all(doc, cfg.field)[0];
+  if (!f) return { ok: false, why: 'no-field' };
+  const N = brNames(cfg), want = norm(name);
+  const opt = () => all(f, cfg.opt).find((o) => brOf(o.textContent, N) === want);
+  if (!opt()) return { ok: false, why: 'no-opt' };
+  const box = f.querySelector(cfg.box) || f;
+  try { box.focus(); } catch (e) { /* */ }
+  fire(box, 'focus', ctx.win);
+  for (let k = 0; k < 10 && !visible(opt()); k++) await ctx.sleep(200);
+  const o = opt();
+  if (!o) return { ok: false, why: 'no-opt' };
+  fire(o, 'mousedown', ctx.win);
+  o.click();
+  return { ok: true };
+}
+// רשימות בחירה קצרות בדף (0.1.13, היכרות אמצעי תשלום – קריאה בלבד, בלי לפתוח): <select> ו-vue-multiselect מחוץ לטבלאות, עד 30 אפשרויות.
+// רק התווית והאפשרויות כמו שהן – הסינון (תווית מוכרת, לא שמות אנשים / לקוחות) נעשה ב-service worker (sanitize.js listSafe) לפני שנשמר
+function lists(doc) {
+  const out = [];
+  const lblOf = (el) => {
+    let lb = null;
+    try { lb = el.id ? doc.querySelector('label[for="' + el.id.replace(/["\\]/g, '') + '"]') : null; } catch (e) { lb = null; }
+    if (!lb) { const g = el.closest && el.closest('.form-group,.title-on-top,.field,.col'); lb = g && g.querySelector('label'); }
+    if (!lb) { const p = el.previousElementSibling; if (p && String(p.tagName).toLowerCase() === 'label') lb = p; }
+    return norm((lb && lb.textContent) || el.getAttribute('aria-label') || '').slice(0, 40);
+  };
+  for (const el of all(doc, 'select,.multiselect')) {
+    if (out.length >= 12) break;
+    if (el.closest && el.closest(DATA)) continue;
+    if (el.closest && el.closest('#store-switch-field')) continue; // פקד הסניף – ב-rep.branch
+    const ms = String(el.tagName).toLowerCase() !== 'select';
+    const op = ms ? all(el, '.multiselect__option').map((o) => norm(o.textContent)) : Array.from(el.options || []).map((o) => norm(o.textContent));
+    const inp = ms ? el.querySelector('input') : null;
+    const lbl = lblOf(ms && inp && inp.id ? inp : el) || (ms && inp ? norm(inp.getAttribute('placeholder') || '').slice(0, 40) : '');
+    out.push(Object.assign({ kind: ms ? 'multiselect' : 'select', css: cssPath(el), lbl, n: op.length }, op.length <= 30 ? { opts: op.map((x) => x.slice(0, 40)) } : {}));
+  }
+  return out;
+}
+// ---------- מסמכי הקפה (0.1.13, היכרות בלבד) ----------
+// חלון שגיאה של כספית (למשל "חלה שגיאה בייבוא המידע. אנא צור קשר עם התמיכה" + "אישור"): הטקסט (קצר), ואם close – לחיצה על כפתור
+// הסגירה שבתוך החלון בלבד (אישור / סגור / OK – התאמה מלאה). זו הלחיצה היחידה על חלון; חלון שאינו הודעת שגיאה – לא נוגעים
+const DLG = '[role=dialog],[role=alertdialog],[aria-modal=true],.modal.show,.modal.in,.swal2-popup,.v--modal,.el-dialog,.el-message-box,.sweet-alert,.modal-dialog';
+const DLG_ERR = /שגיאה|תקלה|נכשל|error|failed/i;
+const DLG_OK = ['אישור', 'סגור', 'סגירה', 'ok', 'אוקיי', 'close'];
+function errDialogs(doc, close) {
+  const dl = all(doc, DLG).filter(visible);
+  const top = dl.filter((d) => !dl.some((x) => x !== d && x.contains(d)));
+  const out = [];
+  for (const d of top.slice(0, 3)) {
+    const t = own(d);
+    if (!DLG_ERR.test(t)) continue;
+    const r = { t: t.slice(0, 120), closed: false };
+    if (close) {
+      const b = all(d, 'button,[role=button],input[type=button],a.btn,.swal2-confirm').filter(visible).find((x) => DLG_OK.includes(norm(String(x.tagName).toLowerCase() === 'input' ? x.value : own(x)).toLowerCase()));
+      if (b) { b.click(); r.closed = true; r.b = norm(String(b.tagName).toLowerCase() === 'input' ? b.value : own(b)).slice(0, 10); }
+    }
+    out.push(r);
+  }
+  return out;
+}
+// אחרי "הצג": לכל טבלה – כותרות (כמו שהן; הסינון ב-service worker), מספר שורות, ומה יש בשורות: קישורים (רק ה-hash עם {n}) וכפתורים (רק מילות פעולה) –
+// בלי טקסט של תאים. הודעות גלויות (התראה / "אין נתונים") – קצרות, הסינון ב-service worker
+const ROW_ACT = new Set([...ACT, 'הצגה', 'פתח', 'פתיחה', 'צפייה', 'צפה', 'פרטים', 'עריכה', 'ערוך', 'מחק', 'מחיקה', 'ביטול', 'בטל', 'שלח', 'שליחה', 'מייל', 'העתק', 'שכפל', 'קבלה', 'חשבונית', 'תעודה', 'מסמך', 'הורד', 'הורדה', 'הדפסה']);
+function rowScan(doc) {
+  const tables = all(doc, 'table,[role=grid]').filter(visible).slice(0, 4).map((t) => {
+    const rows = all(t, 'tbody tr,[role=row]').filter((r) => r.querySelectorAll('td,[role=gridcell],[role=cell]').length);
+    const hs = new Set(), bw = new Set();
+    let links = 0, btns = 0;
+    for (const r of rows.slice(0, 50)) {
+      for (const a of all(r, 'a[href]')) { links++; const h = String(a.getAttribute('href') || ''); if (hs.size < 5) hs.add(/^#\//.test(h) ? h.replace(/\/[^/?]*\d[^/?]*/g, '/{id}').replace(/=[^&]*/g, '={v}').slice(0, 60) : h ? '(ext)' : ''); }
+      for (const b of all(r, 'button,[role=button],input[type=button]')) {
+        btns++;
+        const w = (String(b.tagName).toLowerCase() === 'input' ? norm(b.value) : own(b) || norm(b.getAttribute('title') || '')).toLowerCase().split(/[^a-zא-ת]+/).filter((x) => ROW_ACT.has(x));
+        if (w.length && bw.size < 8) bw.add(w.join(' ').slice(0, 30));
+      }
+    }
+    return { th: all(t, 'th,[role=columnheader]').filter((x) => !(x.closest && x.closest('tfoot'))).slice(0, 30).map((x) => own(x).slice(0, 40)), rows: rows.length, links, hrefs: [...hs].filter(Boolean), btns, bw: [...bw] };
+  });
+  const msgs = all(doc, '[role=alert],.alert,.toast,.toasted,.v-toast,.swal2-popup,.invalid-feedback,.text-danger,.error,.el-message,.notification,.noty_body,.no-data,.empty,.no-results')
+    .filter((x) => visible(x) && !(x.closest && x.closest(DATA))).map((x) => own(x).slice(0, 80)).filter(Boolean).slice(0, 4);
+  return { tables, msgs };
+}
+const api = { OPS, DENY_HE, denied, deniedLink, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes, branchCur, branchPick, lists, errDialogs, rowScan };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);

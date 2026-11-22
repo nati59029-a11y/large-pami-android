@@ -12,7 +12,7 @@
   <span id="hkm" role="button">לקוחות</span><div id="hksub"></div>
   <span id="prm" role="button">כרטיס הטבות</span><div id="prmsub"></div>
   <span id="repm" role="button">דוחות</span><div id="repsub"></div>
-  <select id="brSel" aria-label="בחירת סניף"><option>יהודה הנשיא</option><option>נחל לכיש</option></select><span class="store-line">לארג' פעמי חנות: לארג' פעמי-יהודה הנשיא</span><a href="#/receipts-outside">דוח תקבולים</a>
+  <div id="store-switch-field"><div class="multiselect" tabindex="0" aria-label="בחירת סניף"><div class="multiselect__select"></div><div class="multiselect__tags"><span class="multiselect__single"><div class="selected-store"></div></span></div><div class="multiselect__content-wrapper" style="display:none"><ul class="multiselect__content"><li class="multiselect__element"><span class="multiselect__option"><span>יהודה הנשיא</span></span></li><li class="multiselect__element"><span class="multiselect__option"><span>נחל לכיש</span></span></li></ul></div></div></div><span class="store-line"></span><a href="#/receipts-outside">דוח תקבולים</a>
   <span class="contact">owner@example.co.il · 052-1234567</span>
 </header>
 <main id="app"></main>
@@ -33,20 +33,42 @@ document.getElementById('empm').addEventListener('click', () => hit('emp-click')
 document.getElementById('hkm').addEventListener('mouseover', () => { document.getElementById('hksub').innerHTML = '<a href="#/hakafa-customers">לקוחות הקפה</a> <a href="#/hakafa-reports">דוח לקוחות - הקפה</a> <a href="#/hakafa_monthly_charge_customers">הפקת חשבוניות מרכזות</a>'; });
 document.getElementById('hkm').addEventListener('click', () => hit('hk-menu-click'));
 // פקד הסניף (0.1.12): אסור לשנות / ללחוץ / לפקס – כל אירוע נרשם (attHits)
-for (const ty of ['click', 'mousedown', 'focus', 'change', 'input']) document.getElementById('brSel').addEventListener(ty, () => hit('branch-' + ty));
+// פקד הסניף (0.1.13, כמו בכספית האמיתית: vue-multiselect ב-#store-switch-field): פוקוס פותח, לחיצה על אפשרות בוחרת (localStorage store) וכספית טוענת את הדף מחדש.
+// brPicks – כל בחירה (שם הסניף). brFail: switch – הבחירה בנחל לכיש לא נקלטת; restore – הבחירה ביהודה הנשיא לא נקלטת
+const STORE = () => localStorage.getItem('store') || 'יהודה הנשיא';
+{
+  const f = document.getElementById('store-switch-field'), ms = f.querySelector('.multiselect'), w = f.querySelector('.multiselect__content-wrapper');
+  f.querySelector('.selected-store').textContent = "לארג' פעמי-" + STORE();
+  document.querySelector('.store-line').textContent = "לארג' פעמי חנות: לארג' פעמי-" + STORE();
+  ms.addEventListener('focus', () => { w.style.display = 'block'; });
+  f.querySelectorAll('.multiselect__option').forEach((o) => o.addEventListener('click', (e) => {
+    e.stopPropagation(); w.style.display = 'none';
+    const nm = o.textContent.trim(), bf = localStorage.getItem('brFail') || '';
+    localStorage.setItem('brPicks', (localStorage.getItem('brPicks') || '') + nm + ';');
+    if ((bf === 'switch' && nm === 'נחל לכיש') || (bf === 'restore' && nm === 'יהודה הנשיא')) return;
+    localStorage.setItem('store', nm);
+    setTimeout(() => location.reload(), 300);
+  }));
+}
 // תפריט "דוחות" (0.1.12): קישורים במעבר עכבר – שניים של אמצעי תשלום / קופה, ואחד שלא קשור
 document.getElementById('repm').addEventListener('mouseover', () => { document.getElementById('repsub').innerHTML = '<a href="#/credit-settings">הגדרות אשראי</a> <a href="#/receipts-import">ייבוא תקבולים</a> <a href="#/payment-methods/new">הוסף אמצעי תשלום</a> <a href="#/payment-methods-report">דוח אמצעי תשלום</a> <a href="#/cash-register-summary">סיכום קופה יומי</a> <a href="#/stock-report">דוח מלאי</a>'; });
 document.getElementById('repm').addEventListener('click', () => hit('rep-menu-click'));
 // מסכי דוחות תשלום: סכומים בטבלה ובקובץ – אסור שיגיעו לדוח; "שמירה" / "סגירת קופה" – אסור ללחוץ
+// מסכי דוחות תשלום (0.1.13: לפי hash ישיר): סכומים בטבלה ובקובץ – אסור שיגיעו לדוח; "שמירה" / "סגירת קופה" – אסור ללחוץ.
+// רשימות בחירה: סוג דוח, קופה, אמצעי תשלום (multiselect), סניף – נכנסים; קופאי (שמות) – אסור שיגיע לדוח
 function payRep(app, k) {
-  const X = k === 'payment-methods-report';
+  const X = k === 'payment-reports' || k === 'payment-methods-report';
   app.innerHTML = '<div class="pay-rep"><h2>' + (X ? 'דוח אמצעי תשלום' : 'סיכום קופה יומי') + '</h2><label for="payDay">תאריך</label><input type="date" id="payDay"><label for="payStore">סניף</label><select id="payStore"><option>יהודה הנשיא</option><option>נחל לכיש</option></select>'
+    + '<label for="payKind">סוג דוח</label><select id="payKind"><option>מפורט</option><option>מרוכז</option></select><label for="payPos">קופה</label><select id="payPos"><option>כל הקופות</option><option>קופה 1</option><option>קופה 2</option></select>'
+    + '<label for="payCash">קופאי</label><select id="payCash"><option>כל הקופאים</option><option>זלמן קופאיסקי</option></select>'
+    + '<div class="form-group"><label>אמצעי תשלום</label><div class="multiselect"><input id="payMs" type="text"><div class="multiselect__content-wrapper" style="display:none"><span class="multiselect__option">מזומן</span><span class="multiselect__option">אשראי</span><span class="multiselect__option">הקפה</span></div></div></div>'
     + '<span class="store-name">נחל לכיש: ₪12,345.00</span><button class="btn" id="payShow">הצג</button>' + (X ? '<button class="btn" id="payX">יצוא לאקסל</button>' : '') + '<button class="btn btn-danger" data-hit="pay-save">שמירה</button><button class="btn btn-danger" data-hit="pay-close">סגירת קופה</button>'
     + '<table class="table"><thead><tr><th>תאריך</th><th>סניף</th><th>מזומן</th><th>אשראי</th><th>הקפה</th><th>סה"כ</th></tr></thead><tbody><tr><td>17/11/2026</td><td>יהודה הנשיא</td><td>4321.5</td><td>8765.25</td><td>345.75</td><td>13432.5</td></tr></tbody><tfoot><tr><th>סה"כ</th><th>99887.5</th></tr></tfoot></table></div>';
   document.getElementById('payShow').onclick = () => hit('pay-show');
+  for (const ty of ['change', 'focusin']) app.addEventListener(ty, () => hit('pay-' + ty), true);
   app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit); });
   const x = document.getElementById('payX');
-  if (x) x.onclick = () => { ev.push('pay-x'); localStorage.setItem('payX', String(+(localStorage.getItem('payX') || 0) + 1)); dl(new Blob(['\ufeffתאריך,סניף,מזומן,אשראי,הקפה,סה"כ\n17/11/2026,יהודה הנשיא,4321.5,8765.25,345.75,13432.5\n'], { type: 'text/csv' }), 'payments.csv'); };
+  if (x) x.onclick = () => { ev.push('pay-x'); localStorage.setItem('payX', String(+(localStorage.getItem('payX') || 0) + 1)); dl(new Blob(['﻿תאריך,סניף,מזומן,אשראי,הקפה,סה"כ\n17/11/2026,יהודה הנשיא,4321.5,8765.25,345.75,13432.5\n'], { type: 'text/csv' }), 'payments.csv'); };
 }
 // תפריט "כרטיס הטבות" (0.1.12, לפי בעל העסק): "הוסף מבצע", "מבצעים", "ייבוא מבצעים" – נוצרים רק במעבר עכבר; לחיצה על התפריט – אסורה
 document.getElementById('prm').addEventListener('mouseover', () => { document.getElementById('prmsub').innerHTML = '<a href="#/promotions-import">ייבוא מבצעים</a> <a href="#/promotions/add">הוספת מבצעים</a> <a href="#/promotions/new">הוסף מבצע</a> <a href="#/promotions">מבצעים</a>'; });
@@ -79,30 +101,51 @@ const HK = {
   'customer-sales-report': { t: 'דוח קניות לקוחות - פירוט שורות בחשבונית', h: ['תאריך', 'מספר מסמך', 'שם לקוח', 'פריט', 'כמות', 'מחיר', 'סכום', 'סניף', 'קופה'], b: [] },
   'total-sales-per-customer': { t: 'סה"כ מכירות ללקוח', h: ['שם לקוח', 'ח.פ/ע.מ', 'סה"כ', 'קבוצת סיווג פנימי'], b: [], x: 'none' },
   'hakafa_monthly_charge_customers': { t: 'הפקת חשבוניות מרכזות', h: ['שם לקוח', 'סכום', 'תעודות משלוח'], b: [['הפקת חשבוניות מרכזות', 'hk-charge'], ['שמירה', 'hk-save']] },
-  'merakez_invoices': { t: 'רצף חשבוניות מרכזות', h: ['מספר מסמך', 'תאריך', 'שם לקוח', 'סכום'], b: [['מחיקה', 'hk-del']] },
-  'customer-shipments': { t: 'תעודות משלוח', h: ['מספר מסמך', 'תאריך', 'שם לקוח', 'טלפון', 'סכום'], b: [['ביטול תעודה', 'hk-cancel']], x: 'trap' },
+  // 0.1.13 (צילום מסך 21.11): "חשבוניות מרכזות" – בלי "הצג", "יצוא לאקסל" מוסתר כל עוד חלון השגיאה פתוח; הטבלה מוצגת מיד
+  'merakez_invoices': { t: 'חשבוניות מרכזות', h: ['מספר פתקית', 'תאריך הפקה', 'חשבונית', 'פעולות'], b: [['מחיקה', 'hk-del']], show: 'nobtn', xHide: true },
+  'customer-shipments': { t: 'תעודות משלוח', h: ['מספר מסמך', 'תאריך', 'שם לקוח', 'טלפון', 'סכום'], b: [['ביטול תעודה', 'hk-cancel']], x: 'trap', show: 'none' },
+  'total-sales-all-customers': { t: 'סה"כ מכירות לכל הלקוחות', h: ['שם לקוח', 'סה"כ', 'מזומן', 'אשראי'], b: [], x: 'none', dlg: true },
 };
+HK.merakez_invoices.dlg = true;
+// 0.1.13 מסמכי הקפה (hkDocs): לוח שנה vdp-datepicker (ברירת מחדל 01/10/2026 – היום), הטבלה מתמלאת רק אחרי "הצג" (hkShow: מסך|מתאריך|עד|לקוח);
+// dlg – חלון "חלה שגיאה בייבוא המידע" עם "אישור" (dlgOk) ו"שלח דיווח" (אסור ללחוץ); show:'none' – בלי "הצג" (רק "הפק דוח" – אסור)
+const DOCS = ['customer-sales-report', 'total-sales-per-customer', 'merakez_invoices', 'customer-shipments', 'total-sales-all-customers'];
+// לקוחות לפי סניף (0.1.13): בנחל לכיש – רשימה אחרת (לקוח עסקי אחד); nlHkEmpty – בלי טבלה בכלל בנחל לכיש
+const HK_NL = [[2001, 'בית קפה גן העיר', '515151515', '08-6999999', 'רחוב הגפן 1', '77.10']];
+const hkRow = (c) => '<tr><td>' + c[0] + '</td><td>' + c[1] + '</td><td>' + c[2] + '</td><td>' + c[3] + '</td><td>' + c[4] + '</td><td>' + c[5] + '</td><td><button class="btn" data-hit="hk-row-edit">עריכה</button><a href="#/invoice/' + c[0] + '">מסמך ' + c[1] + '</a><input type="checkbox" id="pick-c' + c[0] + '" name="cust_' + c[0] + '"></td></tr>';
+const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 function hakafa(app, k) {
-  const P = HK[k];
-  app.innerHTML = '<div class="hakafa"><h2>' + P.t + ' – ' + HK_C[0][1] + '</h2><label>מתאריך</label><input type="date" id="hkFrom"><label>עד תאריך</label><input type="date" id="hkTo">'
+  const P = HK[k], doc = DOCS.includes(k), nl = STORE() === 'נחל לכיש' && (k === 'hakafa-customers' || k === 'hakafa-reports');
+  const RW = nl ? HK_NL : HK_C;
+  app.innerHTML = '<div class="hakafa"><h2>' + P.t + ' – ' + HK_C[0][1] + '</h2>'
+    + (doc ? '<div class="form-group title-on-top"><label>מתאריך</label><div id="dF"></div></div><div class="form-group title-on-top"><label>עד תאריך</label><div id="dT"></div></div>' : '<label>מתאריך</label><input type="date" id="hkFrom"><label>עד תאריך</label><input type="date" id="hkTo">')
     + '<label for="hkStore">סניף</label><select id="hkStore"><option>כל הסניפים</option><option>נחל לכיש</option><option>יהודה הנשיא</option></select>'
     + '<label for="hkPos">קופה</label><select id="hkPos"><option>כל הקופות</option><option>קופה 1</option></select>'
     + '<label for="hkCust">לקוח</label><select id="hkCust"><option>כל הלקוחות</option>' + HK_C.map((c) => '<option>' + c[1] + '</option>').join('') + '</select>'
-    + '<input id="hkQ" placeholder="חיפוש לפי שם או טלפון" value="' + HK_C[1][3] + '"><button class="btn" id="hkShow">הצג</button>'
+    + '<input id="hkQ" placeholder="חיפוש לפי שם או טלפון" value="' + HK_C[1][3] + '">' + (P.show === 'none' ? '<button class="btn" data-hit="hk-make-doc">הפק דוח</button>' : P.show === 'nobtn' ? '' : '<button class="btn" id="hkShow">הצג</button>')
     + (P.x === 'none' ? '' : P.x === 'trap' ? '<button class="btn" id="hkX">שמירה ויצוא לאקסל</button>' : P.x === 'named' ? '<button class="btn" id="hkX">יצוא לאקסל – כרטסת כהן משה</button>' : '<button class="btn" id="hkX">יצוא לאקסל</button>')
     + P.b.map((b) => '<button class="btn btn-danger" data-hit="' + b[1] + '">' + b[0] + '</button>').join('')
     + '<a href="#/hakafa-customers/' + HK_C[0][0] + '">' + HK_C[0][1] + '</a>'
-    + '<table class="table"><thead><tr>' + P.h.map((x) => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>'
-    + HK_C.map((c) => '<tr><td>' + c[0] + '</td><td>' + c[1] + '</td><td>' + c[2] + '</td><td>' + c[3] + '</td><td>' + c[4] + '</td><td>' + c[5] + '</td><td><button class="btn" data-hit="hk-row-edit">עריכה</button><input type="checkbox" id="pick-c' + c[0] + '" name="cust_' + c[0] + '"></td></tr>').join('') + '</tbody></table></div>';
+    + (nl && localStorage.getItem('nlHkEmpty') ? '<p>אין נתונים</p>' : '<table class="table"><thead><tr>' + P.h.map((x) => '<th>' + x + '</th>').join('') + '</tr></thead><tbody id="hkRows">'
+    + (doc && P.show !== 'nobtn' ? '' : RW.map(hkRow).join('')) + '</tbody></table>') + '</div>'
+    + (P.dlg ? '<div class="modal show" role="dialog" id="hkDlg" style="display:block"><div class="modal-dialog"><h5 class="modal-title">שגיאה</h5><p>חלה שגיאה בייבוא המידע. אנא צור קשר עם התמיכה</p><button class="btn" id="dlgOk">אישור</button><button class="btn" data-hit="dlg-report">שלח דיווח</button></div></div>' : '');
+  if (P.xHide && document.getElementById('hkX')) document.getElementById('hkX').style.display = 'none';
+  if (P.dlg) document.getElementById('dlgOk').onclick = () => { localStorage.setItem('dlgOk', (localStorage.getItem('dlgOk') || '') + k + ';'); document.getElementById('hkDlg').remove(); const x = document.getElementById('hkX'); if (x) x.style.display = ''; };
+  const dF = doc ? datePicker(document.getElementById('dF'), new Date(2026, 9, 1)) : null, dT = doc ? datePicker(document.getElementById('dT'), new Date()) : null;
   fetch('/bo/api/customers/c-4521/docs?from=2026-01-01', { headers: { Authorization: TOK } }).catch(() => {}); // מזהה לקוח בנתיב – אסור שיגיע לדוח
-  document.getElementById('hkShow').onclick = () => hit('hk-show:' + k);
+  const sh = document.getElementById('hkShow');
+  if (sh) sh.onclick = () => {
+    if (!doc) { hit('hk-show:' + k); return; }
+    localStorage.setItem('hkShow', (localStorage.getItem('hkShow') || '') + [k, ymd(dF()), ymd(dT()), document.getElementById('hkCust').value].join('|') + ';');
+    setTimeout(() => { const tb = document.getElementById('hkRows'); tb.innerHTML = HK_C.map(hkRow).join(''); tb.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit + ':' + k); }); }, 500);
+  };
   app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit + ':' + k); });
   const x = document.getElementById('hkX');
   if (x) x.onclick = () => {
     if (P.x === 'trap') { hit('hk-trap:' + k); return; }
     ev.push('hk-x:' + k); localStorage.setItem('hkX', (localStorage.getItem('hkX') || '') + k + ';');
     const csv = '\ufeff' + P.t + ' – ' + HK_C[0][1] + '\n' + ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', 'שלומציון ברקוביץ'].join(',') + '\n'
-      + HK_C.map((c) => [c[0], c[1], c[2], c[3], c[4], c[5], '17/11/2026'].join(',')).join('\n') + '\n';
+      + RW.map((c) => [c[0], c[1], c[2], c[3], c[4], c[5], '17/11/2026'].join(',')).join('\n') + '\n';
     dl(new Blob([csv], { type: 'text/csv' }), k + '.csv');
   };
 }
@@ -113,7 +156,7 @@ function job(url, body, filename) {
   fetch(url + '?token=Zx9kQ2mP7vL4nR8sT1wY6bC3', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: TOK, 'run-as-job': 'true', 'channel-name': 'c1' }, body: JSON.stringify(body || {}) })
     .then((r) => r.json()).then(() => setTimeout(() => {
       const x = new XMLHttpRequest();
-      x.open('GET', '/bo/files/get_job_result?filename=' + encodeURIComponent(filename));
+      x.open('GET', '/bo/files/get_job_result?filename=' + encodeURIComponent(filename) + '&store=' + encodeURIComponent(STORE())); // 0.1.13: הדוח לפי הסניף הנבחר
       x.setRequestHeader('Authorization', TOK);
       x.responseType = 'blob';
       x.onload = () => dl(x.response, filename);
@@ -159,6 +202,8 @@ function render() {
     app.querySelectorAll('#catalog-index button').forEach((b) => { b.onclick = () => { ev.push('cat:' + b.dataset.k); if (b.dataset.k === '0') job('/bo/merkaz/items/report.xlsx', {}, 'catalogs.xlsx'); if (b.dataset.k === '2') job('/bo/merkaz/items/full_report.xlsx', { include_store_price: false }, 'catalogs_with_barcodes.xlsx'); }; });
   } else if (h.startsWith('#/sales-items-reports')) {
     app.innerHTML = '<div class="panel panel-default"><div class="panel-body"><div class="form-group row"><form class="form-inline col-sm-5"><div class="form-group title-on-top"><label>מתאריך</label><div class="vue-field-value" id="dfrom"></div></div><div class="form-group title-on-top"><label>עד תאריך</label><div class="vue-field-value" id="dto"></div></div></form><div class="col-sm-7 align-center"><button type="button" class="btn btn-success" id="mk">צור קובץ</button></div></div></div></div>';
+    // 0.1.13: nlNoBtn – בנחל לכיש המסך בלי "צור קובץ" (כישלון באמצע הסניף הנוסף)
+    if (STORE() === 'נחל לכיש' && localStorage.getItem('nlNoBtn')) { document.getElementById('mk').remove(); return; }
     const now = new Date(), f = datePicker(document.getElementById('dfrom'), now), t = datePicker(document.getElementById('dto'), now);
     document.getElementById('mk').onclick = () => { const a = f(), b = t(); const k = (d) => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()); ev.push('mk:' + k(a) + '-' + k(b)); job('/bo/merkaz/reports/sales_items', { from: k(a), to: k(b) }, 'sales_items_' + k(a) + '_' + k(b) + '.csv'); };
   } else if (h.startsWith('#/csv-imports')) {
@@ -179,13 +224,21 @@ function render() {
     app.querySelectorAll('.multiselect__option').forEach((o) => { o.onclick = (e) => { e.stopPropagation(); t = o.dataset.v; jt.value = o.textContent; wrap.style.display = 'none'; ev.push('type:' + t);
       // כמו בכספית האמיתית (היכרות 3 + צילום מסך): "בחר קובץ" (#positive-file-uploader) ו"הורד קובץ דוגמה"; בחירת קובץ לא מעלה –
       // מוסיפה שורה לטבלה "ממתין לטעינה" (שם | סוג קובץ | פעולות: הסר). "העלה קבצים והרץ טעינה" מעלה את כל השורות.
-      document.getElementById('more').innerHTML = '<label for="positive-file-uploader">בחר קובץ</label> <input type="file" id="positive-file-uploader"> <button type="button" class="btn btn-default" id="sample">הורד קובץ דוגמה</button>';
+      // 0.1.13 (אבחון 22.11): hidvis – #positive-file-uploader מוסתר ולא עושה כלום, והשדה הגלוי ליד "בחר קובץ" מכניס לתור; hidlast – הגלוי לא עושה כלום, רק המוסתר
+      const um0 = localStorage.getItem('upmode') || '';
+      document.getElementById('more').innerHTML = um0 === 'hidvis' || um0 === 'hidlast'
+        ? '<span class="up-wrap"><input type="file" id="positive-file-uploader" style="display:none"></span><div class="pick"><label for="vis-up">בחר קובץ</label> <input type="file" id="vis-up"> <button type="button" class="btn btn-default" id="sample">הורד קובץ דוגמה</button></div>'
+        : '<label for="positive-file-uploader">בחר קובץ</label> <input type="file" id="positive-file-uploader"> <button type="button" class="btn btn-default" id="sample">הורד קובץ דוגמה</button>';
       document.getElementById('sample').onclick = () => ev.push('sample');
       // upmode (בדיקות 0.1.6 – התקלה של 19.11): '' רגיל; drop – בחירה רגילה לא עובדת, רק גרירה לאזור; xls – רק קובץ שסומן application/vnd.ms-excel;
       // none – שום דבר לא נכנס לתור, ומוצגת הודעת שגיאה (לבדיקת האבחון)
       const um = localStorage.getItem('upmode') || '';
       const addF = (f) => { if (!f) return; if (um === 'xls' && f.type !== 'application/vnd.ms-excel') { ev.push('reject:' + f.type); return; } Q.push({ f, t, tn: jt.value.trim() }); drawQ(); ev.push('add:' + f.type); };
-      document.getElementById('positive-file-uploader').onchange = (e) => { if (um !== 'drop' && um !== 'none') addF(e.target.files[0]); else ev.push('change-ignored'); if (um === 'none') { e.target.setAttribute('accept', '.csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); document.querySelector('.result').textContent = 'הקובץ לא נקלט 0521234567 – יש לבחור קובץ מסוג CSV או Excel בפורמט שמתאים לסוג הטעינה שנבחר ברשימה'; } e.target.value = ''; };
+      if (um0 === 'hidvis' || um0 === 'hidlast') {
+        const hid = document.getElementById('positive-file-uploader'), vu = document.getElementById('vis-up');
+        hid.onchange = (e) => { ev.push('hidden-change'); if (um0 === 'hidlast') addF(e.target.files[0]); };
+        vu.onchange = (e) => { ev.push('vis-change'); if (um0 === 'hidvis') addF(e.target.files[0]); };
+      } else document.getElementById('positive-file-uploader').onchange = (e) => { if (um !== 'drop' && um !== 'none') addF(e.target.files[0]); else ev.push('change-ignored'); if (um === 'none') { e.target.setAttribute('accept', '.csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); document.querySelector('.result').textContent = 'הקובץ לא נקלט 0521234567 – יש לבחור קובץ מסוג CSV או Excel בפורמט שמתאים לסוג הטעינה שנבחר ברשימה'; } e.target.value = ''; };
       document.getElementById('more').addEventListener('dragover', (e) => e.preventDefault());
       document.getElementById('more').addEventListener('drop', (e) => { e.preventDefault(); ev.push('drop'); if (um === 'drop') addF(e.dataTransfer.files[0]); });
     }; });
@@ -250,7 +303,7 @@ function render() {
     document.getElementById('ttX').onclick = () => { ev.push('tt-x:' + id); dl(new Blob(['﻿דוח שעות עובד - ' + nm + '\nתאריך,כניסה,יציאה,שעות רגילות,125%,150%\n03/' + mm + ',07:41,15:58,8:17,0,0\n04/' + mm + ',07:39,16:05,8:26,0,0\n'], { type: 'text/csv' }), 'time_tracks_' + id + '.csv'); };
   } else if (['#/credit-settings', '#/receipts-import', '#/payment-methods/new', '#/receipts-outside', '#/stock-report'].includes(h)) {
     hit('pay-bad-nav:' + h); app.innerHTML = '<h2>מסך שאסור להיכנס אליו בהיכרות</h2>'; // 0.1.12: קישור אסור / לא תחת "דוחות" – אסור לפתוח
-  } else if (h === '#/payment-methods-report' || h === '#/cash-register-summary') {
+  } else if (['#/payment-methods-report', '#/cash-register-summary', '#/payment-reports', '#/payment-report-hos', '#/rikuz-reports', '#/payments-by-categories-reports', '#/xreports'].includes(h)) {
     payRep(app, h.slice(2));
   } else if (h === '#/promotions') {
     promos(app);

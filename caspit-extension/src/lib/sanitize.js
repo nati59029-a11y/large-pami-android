@@ -76,7 +76,9 @@ const HDR_WORDS = new Set(('תאריך תאריכים יום ימים כניסה
   'מזומן אמצעי הפקה הנפקה מקורי קבוצה קבוצת הערה סיכום ריכוז פירוט דוח מצב פעיל נטו ברוטו רשימה ' +
   // 0.1.12 – מבצעים ואמצעי תשלום (כותרות צפויות: שם מבצע, מתאריך, סוג מבצע, מחיר מבצע; מזומן, אשראי, הקפה, צ'ק, תקבולים, קופאי…)
   'מבצע מבצעים הטבה הטבות מועדון חבר חברי נקודות תוקף אחוז קנה קבל מינימום מקסימום מוצר מוצרים ' +
-  'אשראי צ\'ק צק שיק המחאה המחאות תקבול תקבולים העברה העברות בנקאית ביט פייבוקס שובר שוברים תו תווים קופאים ויזה החזר החזרים ביטולים עסקאות עסקה').split(' '));
+  'אשראי צ\'ק צק שיק המחאה המחאות תקבול תקבולים העברה העברות בנקאית ביט פייבוקס שובר שוברים תו תווים קופאים ויזה החזר החזרים ביטולים עסקאות עסקה ' +
+  // 0.1.13 – מסמכי הקפה (מספר / סוג / תאריך מסמך, שולם, מספר חשבונית, תאריך פירעון…)
+  'שולמה שולמו תשלום ששולם נותר לתשלום יתרה פירעון פרעון פתקית פתקיות').split(' '));
 const HDR_PCT = /^\d{2,3}(?:\.\d)?%$/;
 // תא כותרת → אותו תא (מנורמל) אם כל המילים בו מוכרות (גם עם ו/ה/ב/ל/מ בתחילת מילה), אחרת '?'
 function hdrCell(v) {
@@ -125,6 +127,32 @@ function hdrRaw(rows, n) {
   }
   return { hi, hdr: hi >= 0 ? hdrStrict(R[hi]) : null, kinds: R.slice(0, n || 5).map((r) => (Array.isArray(r) ? r.slice(0, 40).map(cellKind) : [])) };
 }
-const api = { MAX_BYTES, hdrRaw, hdrStrict, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
+// רשימת בחירה קצרה בדף היכרות (0.1.13, דוחות אמצעי תשלום / מסמכי הקפה): רק כשהתווית מוכרת (כל המילים ברשימה הלבנה, למשל "סוג דוח", "קופה",
+// "סניף", "אמצעי תשלום") ואינה של אנשים / לקוחות (לקוח, עובד, קופאי, משתמש, ספק, שם…). כל אפשרות: שם סניף מ-names, או כל המילים מוכרות
+// (עד 3 ספרות, למשל "קופה 2"); אחרת '?'. → { lbl, opts } או null (הרשימה לא נכנסת לדוח בכלל)
+const LIST_EXTRA = new Set(['כל', 'הכל', 'בחר', 'ללא', 'אחר', 'אחרים', 'מפורט', 'מרוכז', 'יומי', 'שבועי', 'לפי', 'פילוח', 'תצוגה', 'הצג', 'בלבד', 'רק']);
+const LIST_PERSON = /לקוח|עובד|קופאי|משתמש|מוכר|סוכן|ספק|איש|חבר|שם|מנהל|נציג|לקוחות/;
+function listWords(t) {
+  const words = t.split(/[\s()\-–/.,:]+/).filter(Boolean);
+  const ok = (w) => HDR_WORDS.has(w) || LIST_EXTRA.has(w) || (/^[והבלמש]/.test(w) && w.length > 2 && (HDR_WORDS.has(w.slice(1)) || LIST_EXTRA.has(w.slice(1))));
+  return words.length > 0 && words.every(ok);
+}
+function listSafe(lbl, opts, names) {
+  const n = (v) => String(v == null ? '' : v).replace(/[\u200e\u200f\ufeff]/g, '').replace(/[”“״]/g, '"').replace(/[׳`’]/g, "'").replace(/\s+/g, ' ').trim();
+  const L = n(lbl);
+  if (!L || L.length > 30 || /\d/.test(L) || LIST_PERSON.test(L) || !listWords(L)) return null;
+  const N = (names || []).map(n);
+  const one = (o) => {
+    const t = n(o);
+    if (!t) return '';
+    const br = N.find((x) => x && t.includes(x));
+    if (br) return br;
+    if (t.length > 30 || LIST_PERSON.test(t) || (t.match(/\d/g) || []).length > 3) return '?';
+    const w = t.replace(/\d+/g, ' ').trim();
+    return !w || listWords(w) ? t : '?';
+  };
+  return { lbl: L, opts: (Array.isArray(opts) ? opts : []).slice(0, 30).map(one) };
+}
+const api = { MAX_BYTES, listSafe, hdrRaw, hdrStrict, SECRET_KEY, scrub, sanitize, limit, clean, size, hdrCell, hdrSafe, cellKind, fileShape };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSanitize = api;
 })(typeof self !== 'undefined' ? self : this);

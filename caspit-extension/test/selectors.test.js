@@ -166,14 +166,23 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; עו�
   assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
   // פרטיות: לא מחכים על הכותרת עם שם העובד
   assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
-  assert.equal(SEL.v, 7);
+  assert.equal(SEL.v, 8);
 });
 
 test('selectors.json v6: לקוחות הקפה – 8 מסכים priv בכתובת ישירה; hkExport לוחץ רק "יצוא לאקסל"; הפקת חשבוניות מרכזות – בלי זרימה', () => {
-  const H = ['#/hakafa-customers', '#/hakafa-reports', '#/hakafa-customer-reports', '#/customer-sales-report', '#/total-sales-per-customer', '#/hakafa_monthly_charge_customers', '#/merakez_invoices', '#/customer-shipments'];
+  const H = ['#/hakafa-customers', '#/hakafa-reports', '#/hakafa-customer-reports', '#/customer-sales-report', '#/total-sales-per-customer', '#/hakafa_monthly_charge_customers', '#/merakez_invoices', '#/customer-shipments', '#/total-sales-all-customers'];
   const P = SEL.disc.filter((p) => /^hk-/.test(p.name));
   assert.deepEqual(P.map((p) => p.hash), H);
-  assert.ok(P.every((p) => p.priv === true && !p.peek && (!p.flow || p.flow === 'hkExport')));
+  assert.ok(P.every((p) => p.priv === true && !p.peek && (!p.flow || p.flow === 'hkExport' || (p.flow === 'hkDocs' && p.docs === true))));
+  // 0.1.13: מסמכי ההקפה – hkDocs (טווח תאריכים ב-vdp-datepicker, "הצג" / "חפש" בלבד, יצוא אם יש); בלי בחירת לקוח
+  assert.deepEqual(P.filter((p) => p.flow === 'hkDocs').map((p) => p.hash), ['#/customer-sales-report', '#/total-sales-per-customer', '#/merakez_invoices', '#/customer-shipments', '#/total-sales-all-customers']);
+  const K = SEL.flows.hkDocs;
+  assert.deepEqual(K.map((x) => x.op), ['setDate', 'setDate', 'click', 'click']);
+  assert.ok(K.every((x) => x.safe && !x.submit));
+  assert.ok(K.filter((x) => x.op === 'setDate').every((x) => x.t.css === '.vdp-datepicker input' && !x.t.alt), 'תאריכים רק דרך vdp-datepicker');
+  assert.deepEqual(K[2].t.textAny, ['הצג', 'חפש', 'חיפוש']); assert.ok(K[2].optional && !K[2].capture);
+  assert.ok(K[3].capture && K[3].at === '{hash}');
+  assert.ok(!JSON.stringify(K).includes('לקוח'), 'לא בוחרים לקוח');
   assert.equal(P.find((p) => p.hash === '#/hakafa_monthly_charge_customers').flow, undefined);
   const F = SEL.flows.hkExport;
   assert.equal(F.length, 1); assert.equal(F[0].op, 'click'); assert.equal(F[0].at, '{hash}'); assert.ok(F[0].capture && F[0].safe && F[0].stop && !F[0].submit);
@@ -273,13 +282,62 @@ test('selectors.json v7 (0.1.12): מסך הייבוא בהיכרות – קרי�
   const pr = SEL.disc.find((x) => x.name === 'promos');
   assert.deepEqual(pr.menu, ['כרטיס הטבות']); assert.deepEqual(pr.find, ['מבצעים']);
   assert.equal(pr.flow, 'hkExport'); assert.equal(pr.promo, true); assert.equal(pr.priv, undefined); assert.equal(pr.hash, undefined);
-  // אמצעי תשלום: findAll לפי המילים, רק hkExport; בחירת סניף – רק שמות לזיהוי (אין צעד שבוחר סניף)
-  const py = SEL.disc.find((x) => x.name === 'pay');
-  assert.deepEqual(py.findAll, ['דוח אמצעי תשלום', 'דוח תקבולים', 'סיכום קופה', 'דוח z', 'דוח קופאים'], 'ביטויי דוח מפורשים – בלי "מזומן" / "אשראי" כלליים');
-  assert.deepEqual(py.menu, ['דוחות', 'קופות']);
-  assert.equal(py.flow, 'hkExport'); assert.equal(py.pay, true); assert.ok(py.max <= 8);
+  // 0.1.13: אמצעי תשלום לפי hash ישיר (בלי findAll), רק hkExport
+  assert.ok(!SEL.disc.some((x) => x.findAll), 'בלי findAll');
+  const py = SEL.disc.filter((x) => x.pay);
+  assert.deepEqual(py.map((x) => x.hash), ['#/payment-reports', '#/payment-report-hos', '#/rikuz-reports', '#/payments-by-categories-reports', '#/xreports']);
+  assert.ok(py.every((x) => x.flow === 'hkExport' && !x.priv && /^pay-/.test(x.name)));
   assert.deepEqual(SEL.branch.names, ['יהודה הנשיא', 'נחל לכיש']);
   assert.ok(!JSON.stringify(SEL.flows).includes('יהודה הנשיא') && !JSON.stringify(SEL.flows).includes('נחל לכיש'), 'אף זרימה לא נוגעת בבחירת הסניף');
+  // 0.1.13: החלפת סניף – רק דרך branch.switch (home / also), ובהיכרות רק discBranch (לקוחות)
+  assert.equal(SEL.branch.home, 'יהודה הנשיא'); assert.deepEqual(SEL.branch.also, ['נחל לכיש']);
+  assert.equal(SEL.branch.switch.field, '#store-switch-field');
+  assert.deepEqual(SEL.discBranch, { br: 'נחל לכיש', pages: ['hk-customers', 'hk-reports'] });
+});
+
+const BR = { names: ['יהודה הנשיא', 'נחל לכיש'], field: '#store-switch-field', cur: '.multiselect__single', box: '.multiselect', opt: '.multiselect__option' };
+const BR_HTML = '<div id="store-switch-field"><div class="multiselect" tabindex="0"><div class="multiselect__tags"><span class="multiselect__single"><div class="selected-store">לארג\' פעמי-יהודה הנשיא</div></span></div>'
+  + '<div class="multiselect__content-wrapper" style="display:none"><ul><li><span class="multiselect__option"><span>יהודה הנשיא</span></span></li><li><span class="multiselect__option"><span>נחל לכיש</span></span></li></ul></div></div></div>';
+test('branchCur / branchPick (0.1.13): הסניף הנבחר מהטקסט, פתיחה בפוקוס ולחיצה על האפשרות; אפשרות חסרה – no-opt', async () => {
+  await page.evaluate((h) => {
+    const d = document.createElement('div'); d.innerHTML = h; document.body.appendChild(d);
+    const ms = d.querySelector('.multiselect'), w = d.querySelector('.multiselect__content-wrapper');
+    ms.addEventListener('focus', () => { w.style.display = 'block'; window.ev.push('focus'); });
+    d.querySelectorAll('.multiselect__option').forEach((o) => o.addEventListener('click', () => { d.querySelector('.selected-store').textContent = "לארג' פעמי-" + o.textContent; w.style.display = 'none'; window.ev.push('pick:' + o.textContent); }));
+  }, BR_HTML);
+  const cur = () => page.evaluate((c) => window.CxSel.branchCur(document, c), BR);
+  assert.deepEqual(await cur(), { found: true, cur: 'יהודה הנשיא', opts: ['יהודה הנשיא', 'נחל לכיש'] });
+  const r = await page.evaluate((c) => window.CxSel.branchPick(document, c, 'נחל לכיש', { win: window, sleep: (ms) => new Promise((x) => setTimeout(x, ms)) }), BR);
+  assert.deepEqual(r, { ok: true });
+  assert.equal((await cur()).cur, 'נחל לכיש');
+  assert.deepEqual([...new Set(await ev())], ['focus', 'pick:נחל לכיש']);
+  assert.equal((await page.evaluate((c) => window.CxSel.branchPick(document, c, 'סניף אחר', { win: window, sleep: (ms) => new Promise((x) => setTimeout(x, ms)) }), BR)).why, 'no-opt');
+  await page.evaluate(() => { document.getElementById('store-switch-field').remove(); });
+  assert.deepEqual(await cur(), { found: false });
+});
+
+test('lists / errDialogs / rowScan (0.1.13, היכרות): רשימות קצרות בלי פקד הסניף; חלון שגיאה נסגר רק ב"אישור"; שורות בלי טקסט תאים', async () => {
+  await page.evaluate((h) => {
+    const d = document.createElement('div');
+    d.innerHTML = h + '<label for="rt">סוג דוח</label><select id="rt"><option>מפורט</option><option>מרוכז</option></select>'
+      + '<div class="form-group"><label>אמצעי תשלום</label><div class="multiselect"><input id="pm"><span class="multiselect__option">מזומן</span><span class="multiselect__option">אשראי</span></div></div>'
+      + '<div class="modal show" role="dialog" style="display:block"><h5>שגיאה</h5><p>חלה שגיאה בייבוא המידע. אנא צור קשר עם התמיכה</p><button id="ok">אישור</button><button id="del">מחק הכל</button></div>'
+      + '<div class="modal show" role="dialog" style="display:block" id="info"><p>שים לב</p><button id="ok2">אישור</button></div>'
+      + '<table><thead><tr><th>מספר מסמך</th><th>שם לקוח</th></tr></thead><tbody><tr><td>5</td><td>ישראל ישראלי</td><td><a href="#/invoice/123">ישראל</a><button>הצגה</button></td></tr></tbody></table>';
+    document.body.appendChild(d);
+    for (const id of ['ok', 'del', 'ok2']) document.getElementById(id).addEventListener('click', () => window.ev.push(id));
+  }, BR_HTML);
+  const L = await page.evaluate(() => window.CxSel.lists(document));
+  assert.deepEqual(L.filter((x) => x.lbl).map((x) => [x.kind, x.lbl, x.opts]), [['select', 'סוג דוח', ['מפורט', 'מרוכז']], ['multiselect', 'אמצעי תשלום', ['מזומן', 'אשראי']]]);
+  assert.ok(!JSON.stringify(L).includes('נחל לכיש'), 'פקד הסניף לא ברשימות');
+  const D0 = await page.evaluate(() => window.CxSel.errDialogs(document, false));
+  assert.equal(D0.length, 1); assert.equal(D0[0].closed, false); assert.deepEqual(await ev(), []);
+  const D1 = await page.evaluate(() => window.CxSel.errDialogs(document, true));
+  assert.equal(D1[0].closed, true); assert.deepEqual(await ev(), ['ok'], 'רק "אישור" של חלון השגיאה');
+  const R = await page.evaluate(() => window.CxSel.rowScan(document));
+  const t = R.tables.find((x) => x.th.includes('מספר מסמך'));
+  assert.equal(t.rows, 1); assert.equal(t.links, 1); assert.deepEqual(t.hrefs, ['#/invoice/{id}']); assert.deepEqual(t.bw, ['הצגה']);
+  assert.ok(!JSON.stringify(R).includes('ישראל'), 'בלי טקסט תאים');
 });
 
 test('screen (0.1.12): בלי כותרת "ממתין לטעינה" – כותרות אחרות, כותרות טבלה ומספר שורות, מה שמסביב לשדה הקובץ, דיאלוג; בלי תוכן תאים', async () => {

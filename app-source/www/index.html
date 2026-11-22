@@ -2205,7 +2205,9 @@ ACT.catHide=el=>{const c=cat(el.dataset.id);c.off=!c.off;if(c.off)c.hid=true;els
 ACT.catDel=el=>{S.cats=S.cats.filter(c=>c.id!==el.dataset.id);S.subs=S.subs.filter(s=>s.cat!==el.dataset.id);save();closeDlg();rerender()};
 /* ---- גיבוי ושחזור ---- */
 async function saveFile(name,data,type){const b=new Blob([data],{type}),C=window.Capacitor;
- if(C&&C.isNativePlatform&&C.isNativePlatform()){try{const u=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));const r=await C.Plugins.Filesystem.writeFile({path:name,data:btoa(s),directory:'CACHE'});await C.Plugins.Share.share({title:name,url:r.uri,dialogTitle:'שמירה או שיתוף של הקובץ'})}catch(e){if(!/cancel/i.test(String(e&&e.message)))toast('השמירה נכשלה: '+(e&&e.message||''))}return}
+ if(C&&C.isNativePlatform&&C.isNativePlatform()){try{const u=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));const d64=btoa(s);
+  if(C.Plugins.SaveFile){try{await C.Plugins.SaveFile.save({filename:name,mime:String(type||'').split(';')[0].trim()||'application/octet-stream',data:d64});toast('✓ הקובץ נשמר');return}catch(e){if(/cancel/i.test(String(e&&(e.message||e)))){toast('השמירה בוטלה');return}}} // חלון "שמירה בשם" קודם; שיתוף רק אם השמירה לא זמינה/נכשלה
+  const r=await C.Plugins.Filesystem.writeFile({path:name,data:d64,directory:'CACHE'});await C.Plugins.Share.share({title:name,url:r.uri,dialogTitle:'שמירה או שיתוף של הקובץ'})}catch(e){if(!/cancel/i.test(String(e&&e.message)))toast('השמירה נכשלה: '+(e&&e.message||''))}return}
  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.append(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},1500)}
 const bkName=()=>'LargePami_Backup_'+stamp()+'.json';
 async function bkSave(mode){let txt;toast('מכין גיבוי…');try{txt=await mkBackup((i,n)=>{if(n>20&&i%20===0)toast('אוסף קבצים '+i+' מתוך '+n)})}catch(e){toast('יצירת הגיבוי נכשלה: '+(e.message||e));return}const C=window.Capacitor,nat=C&&C.isNativePlatform&&C.isNativePlatform();

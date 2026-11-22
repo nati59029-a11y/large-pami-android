@@ -169,18 +169,25 @@ async function runToday(slot, now, tz) {
     const r0 = { flags: {} };
     await STEP.login(r0);
     const [y, m, d] = day.split('-');
-    const f = await capture(r0.tab, 'sales', { day, dmy: `${d}/${m}/${y}` }, 300e3);
+    // 0.1.13: גם כאן – יהודה הנשיא, נחל לכיש וחזרה; העלאה חלקית אחת לשני הסניפים (בשרת: העלאה אחת ל-20 דקות, והיא מחליפה את כל מסמכי היום)
+    const A = await salesAll(r0.tab, { day, dmy: `${d}/${m}/${y}` }, 300e3, { retry: false });
     hm = D.hmOf(now + (Date.now() - t0), tz); // "עד השעה" = מתי הדוח הורד מכספית
-    const rows = rowsOf(f), det = C.detect(rows);
-    if (det.kind !== 'sales') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "דוח מכירות לפריטים"');
-    const lines = C.parseSales(rows, det).lines.filter((l) => l.d === day);
+    const lines = A.list.flatMap((x) => x.p.lines.filter((l) => l.d === day));
     if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
+    // 0.1.13 (תיקון בודק): נחל לכיש נכשל – לא מעלים בכלל. השרת מחליף את כל מסמכי היום (cxDayP), והעלאה של יהודה הנשיא בלבד
+    // הייתה מוחקת את נחל לכיש מהשעה הקודמת. התמונה הקודמת נשארת; השעה הבאה תנסה שוב
+    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br });
     if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
-    out = { slot, st: 'ok', at: Date.now(), day, hm, n: lines.length };
+    out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {});
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
+    // 0.1.13: לא הצלחנו להחזיר ליהודה הנשיא – מדווחים לשרת מיד (כמו ריצה שנכשלה), אלא אם סנכרון לילי ממתין (הוא יחזיר בתחילתו וידווח אם ייכשל)
+    if (code === 'branch-restore') {
+      const run = await get('run').catch(() => null);
+      if (P.isTerminal(run)) await (await api()).call('report', { run: U.rid('ct'), kind: 'run', st: 'fail', err: { code, msg: String(e.message || '').slice(0, 300), step: 'today' }, steps: [], info: { today: day } }).catch(() => {});
+    }
     // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
-    out = { slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) };
+    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {});
     // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
     if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }
@@ -338,14 +345,29 @@ async function runFlow(tabId, name, vars, files, probe) {
 // (כמו ש-Windows מסמן CSV בבחירה ידנית). ניסיון נוסף רק כשהתור עדיין ריק; כל שורה אחרת בתור עוצרת (צעד queue שאחרי).
 // בכישלון: אבחון (כמה שדות קובץ, כמה קבצים נבחרו, accept, הודעות גלויות בדף – מסוננות) בהודעה לשרת ובחלון התוסף.
 const FILE_TRIES = [['change', 'text/csv'], ['drop', 'text/csv'], ['change', 'application/vnd.ms-excel']];
-const setFileMain = (t, f, mode, mime, guard) => {
+// 0.1.13 (אבחון 22.11 מכספית האמיתית): יש שני שדות קובץ – #positive-file-uploader מוסתר (הקובץ נכנס אליו ולא לתור), ושדה גלוי ליד "בחר קובץ"
+// (שבו בעל העסק בוחר ידנית ושם זה עובד). לכן pref 'vis': קודם שדה גלוי שליד "בחר קובץ", אחר כך גלוי לפי ה-css, אחר כך כל גלוי; בלי שום שדה גלוי – כמו קודם.
+// pref 'hid' – חלופה אחרונה (רק כשהתור עדיין ריק): השדה המוסתר. לפני כל ניסיון – ניקוי הערך של כל שדות הקובץ (רק שדות קובץ) מהניסיון הקודם
+const setFileMain = (t, f, mode, mime, guard, pref) => {
   try { const L = location, p = String(L.pathname || ''); if (L.origin !== guard.origin || !(p === guard.path || p.startsWith(guard.path + '/'))) return { wrong: true }; } catch (e) { return { wrong: true }; }
-  const pick = (x) => { if (!x || !x.css) return []; try { return Array.from(document.querySelectorAll(x.css)).filter((e) => String(e.type).toLowerCase() === 'file'); } catch (e) { return []; } };
-  let els = pick(t);
-  if (!els.length) els = pick(t && t.alt);
+  const isF = (e) => String(e.type).toLowerCase() === 'file';
+  const pick = (x) => { if (!x || !x.css) return []; try { return Array.from(document.querySelectorAll(x.css)).filter(isF); } catch (e) { return []; } };
   const vis = (e) => e.getClientRects().length > 0;
-  const el = els.find(vis) || els[0];
+  const allF = Array.from(document.querySelectorAll('input[type=file]'));
+  const prim = pick(t).concat(pick(t && t.alt).filter((e) => !pick(t).includes(e)));
+  const near = (e) => {
+    try { const lb = e.id && document.querySelector('label[for="' + e.id.replace(/["\\]/g, '') + '"]'); if (lb && /בחר\s*קובץ/.test(lb.textContent || '')) return true; } catch (x) { /* */ }
+    for (let p = e.parentElement, k = 0; p && p !== document.body && k < 3; p = p.parentElement, k++) if (/בחר\s*קובץ/.test(p.textContent || '') && !p.querySelector('table')) return true;
+    return false;
+  };
+  const visL = prim.filter(vis).concat(allF.filter((e) => vis(e) && !prim.includes(e)));
+  const hidL = prim.filter((e) => !vis(e));
+  let el;
+  if (pref === 'hid') el = hidL[0];
+  else el = visL.find(near) || visL[0] || prim[0];
   if (!el) return { found: false, n: 0 };
+  for (const x of allF) { try { if (isF(x) && x.value) x.value = ''; } catch (e) { /* */ } }
+  const idOf = (e) => (e.id ? '#' + e.id : 'input[type=file]:nth(' + allF.indexOf(e) + ')').slice(0, 60);
   const bin = atob(f.b64), u = new Uint8Array(bin.length);
   for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
   const dt = new DataTransfer();
@@ -358,7 +380,7 @@ const setFileMain = (t, f, mode, mime, guard) => {
     el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
   }
-  return { found: true, n: els.length, vis: vis(el), files: (el.files || []).length };
+  return { found: true, n: allF.length, vis: vis(el), files: (el.files || []).length, id: idOf(el), alt: vis(el) && hidL.length > 0 };
 };
 // התור "ממתין לטעינה": null = אין כותרת; אחרת [[שם, סוג]]
 const queueIn = (s, guard) => { const S = self.CxSel; if (!S.onPath(window, guard)) return { wrong: true }; const R = S.queueRows(document, s); return { rows: R ? R.map((r) => r.slice(0, 2)) : null }; };
@@ -370,7 +392,9 @@ const fileDiagIn = (t, guard) => {
   const el = S.find(document, t);
   const msgs = Array.from(document.querySelectorAll('[role=alert],.alert,.toast,.toasted,.v-toast,.swal2-popup,.invalid-feedback,.text-danger,.error,.el-message,.notification,.noty_body'))
     .filter((x) => x.getClientRects().length && !(x.closest && x.closest('table'))).map((x) => S.norm(x.textContent).slice(0, 80)).filter(Boolean).slice(0, 3);
-  return { ins: ins.length, vis: ins.filter((x) => x.getClientRects().length).length, files: el ? (el.files || []).length : -1, val: el ? !!el.value : false, accept: el ? String(el.getAttribute('accept') || '').slice(0, 60) : '', multi: !!(el && el.multiple), msgs };
+  // 0.1.13: מזהה (css) של כל שדה קובץ ואם הוא גלוי – בלי ערכים
+  const fids = ins.slice(0, 4).map((x) => S.cssPath(x).slice(0, 60) + (x.getClientRects().length ? '' : ' (מוסתר)'));
+  return { fids, ins: ins.length, vis: ins.filter((x) => x.getClientRects().length).length, files: el ? (el.files || []).length : -1, val: el ? !!el.value : false, accept: el ? String(el.getAttribute('accept') || '').slice(0, 60) : '', multi: !!(el && el.multiple), msgs };
 };
 // 0.1.12: תמונה מסוננת של מסך הייבוא כשהצעד setFile / queue נכשל (selectors.js screen) – כותרות, כותרות טבלה ומספר שורות,
 // מילות פעולה של כפתורים, מה שמסביב לשדה הקובץ, דיאלוג גלוי. נשלחת לשרת ב-info.scr של דיווח הריצה (לא בהודעה הקצרה), אחרי sanitize ועד ~4KB
@@ -392,7 +416,7 @@ async function scrOf(tabId, flow, res) {
 async function putFile(tabId, s, q, vars, f) {
   const rec = { found: false, done: false };
   if (!f) return { ok: false, rec: Object.assign(rec, { err: 'no-file' }) };
-  const tries = q ? FILE_TRIES : FILE_TRIES.slice(0, 1);
+  const tries = (q ? FILE_TRIES : FILE_TRIES.slice(0, 1)).map((x) => x.concat(['vis']));
   const log = [];
   for (let k = 0; k < tries.length; k++) {
     await guardBo(tabId);
@@ -401,20 +425,23 @@ async function putFile(tabId, s, q, vars, f) {
       if (Q && Q.wrong) throw wrongPage();
       if (Q && Q.rows && Q.rows.length) break; // משהו כבר בתור – לא מוסיפים; הצעד queue יחליט
     }
-    const [mode, mime] = tries[k];
-    const r = await inMain(tabId, setFileMain, [s.t, f, mode, mime, GUARD]);
+    const [mode, mime, pref] = tries[k];
+    const r = await inMain(tabId, setFileMain, [s.t, f, mode, mime, GUARD, pref]);
     if (r && r.wrong) throw wrongPage();
-    if (!r || !r.found) return { ok: false, rec: Object.assign(rec, { err: 'no-input' }), diag: 'לא נמצא שדה בחירת קובץ' };
-    rec.found = true; rec.done = true; rec.n = r.n; rec.try = k + 1;
-    log.push(mode + '/' + (mime === 'text/csv' ? 'csv' : 'xls') + ':' + r.files);
+    if (!r || !r.found) { if (pref === 'hid') break; return { ok: false, rec: Object.assign(rec, { err: 'no-input' }), diag: 'לא נמצא שדה בחירת קובץ' }; }
+    rec.found = true; rec.done = true; rec.n = r.n; rec.try = k + 1; rec.fid = r.id;
+    log.push(mode + '/' + (mime === 'text/csv' ? 'csv' : 'xls') + ':' + r.files + (r.vis ? '' : '@' + (pref === 'hid' ? 'hid' : 'h')));
+    // 0.1.13: אחרי כל הניסיונות בשדה הגלוי – חלופה אחרונה בשדה המוסתר (רק אם התור עדיין ריק – נבדק בתחילת הסבב הבא)
+    const lastTry = k === tries.length - 1;
+    if (q && lastTry && pref === 'vis' && r.alt) tries.push(['change', 'text/csv', 'hid']);
     if (!q) return { ok: true, rec };
-    const end = Date.now() + (k === tries.length - 1 ? 8000 : 6000);
+    const end = Date.now() + (lastTry ? 8000 : 6000);
     for (;;) {
       await sleep(400);
       const Q = await inIso(tabId, queueIn, [q, GUARD]);
       if (Q && Q.wrong) throw wrongPage();
       const rows = (Q && Q.rows) || [];
-      if (rows.length) { if (k) rec.via = mode + '/' + mime; return { ok: true, rec }; } // שלנו או לא – הצעד queue שאחרי בודק
+      if (rows.length) { if (k) rec.via = mode + '/' + mime + (pref === 'hid' ? '/hid' : ''); return { ok: true, rec }; } // שלנו או לא – הצעד queue שאחרי בודק
       if (Date.now() > end) break;
     }
   }
@@ -427,7 +454,7 @@ async function putFile(tabId, s, q, vars, f) {
   const diag = [
     (d.msgs || []).length ? 'הודעה בדף: ' + d.msgs.map((m) => S.scrub(m)).join(' | ') : '',
     `הקובץ לא נכנס ל"ממתין לטעינה" אחרי ${log.length} ניסיונות (${log.join(', ')})`,
-    `שדות קובץ: ${d.ins} (גלויים ${d.vis}) · נבחרו: ${d.files}${d.val ? ' (יש ערך)' : ''}${Q && Q.rows === null ? ' · אין כותרת ממתין' : ''}${d.multi ? ' · multiple' : ''}`,
+    `שדות קובץ: ${d.ins} (גלויים ${d.vis})${(d.fids || []).length ? ' [' + d.fids.map((x) => S.scrub(x)).join(', ') + ']' : ''} · נבחרו: ${d.files}${d.val ? ' (יש ערך)' : ''}${Q && Q.rows === null ? ' · אין כותרת ממתין' : ''}${d.multi ? ' · multiple' : ''}`,
     'accept: ' + (S.scrub(d.accept || '') || '—'),
   ].filter(Boolean).join(' · ');
   return { ok: false, rec: Object.assign(rec, { err: 'no-queue' }), diag };
@@ -493,6 +520,133 @@ function rowsOf(f) {
   try { return U.readRows(f.bytes, f.name, self.XLSX, C); } catch (e) { throw P.err('endpoint-changed', 'לא הצלחנו לקרוא את הקובץ מכספית'); }
 }
 
+// ---------- סניפים (0.1.13, החלטה 14) ----------
+// selectors.json branch: names (כל הסניפים), home ("יהודה הנשיא" – הסניף שכל השאר רץ בו), also (סניפים נוספים למכירות: "נחל לכיש"),
+// switch (פקד הסניף: vue-multiselect ב-#store-switch-field). בלי switch / also – סניף אחד, כמו קודם.
+// כלל: בסוף כל ריצה שהחליפה סניף (גם בכישלון) – חזרה ל-home ובדיקה; בתחילת כל ריצה (וכל שלב שנוגע בכספית) – אם הנבחר אינו home, מחזירים קודם.
+async function brCfg() {
+  const b = (await sel()).branch || {};
+  if (!b.switch || !b.home || !Array.isArray(b.names)) return null;
+  return Object.assign({ names: b.names, home: b.home, also: Array.isArray(b.also) ? b.also : [] }, b.switch);
+}
+const brCurIn = (cfg, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return X.branchCur(document, cfg); };
+const brPickIn = (cfg, name, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return X.branchPick(document, cfg, name, { win: window, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }); };
+// מצב הלשונית בזמן החלפה (כספית עשויה לטעון את הדף מחדש): bo / loading (טעינה בתוך /bo) / off (מחוץ למשרד האחורי → wrong-page)
+async function boState(tab) {
+  const t = await chrome.tabs.get(tab).catch(() => null);
+  if (!t) return 'gone';
+  const u = String(t.pendingUrl || t.url || '');
+  if (!BO_RE.test(u)) return 'off';
+  return t.status === 'complete' && !t.pendingUrl ? 'bo' : 'loading';
+}
+// קריאת הסניף הנבחר, עד ms (המסך עוד מצויר / נטען מחדש) → { found, cur } או null
+async function brRead(tab, cfg, ms) {
+  const end = Date.now() + (ms || 0);
+  for (;;) {
+    const st = await boState(tab);
+    if (st === 'off') throw wrongPage();
+    if (st === 'gone') throw P.err('selector-miss', 'הלשונית של כספית נסגרה');
+    const r = st === 'bo' ? await inIso(tab, brCurIn, [cfg, GUARD]).catch(() => null) : null;
+    if (r && r.wrong) throw wrongPage();
+    if (r && r.found) return r;
+    if (Date.now() > end) return r;
+    await sleep(700);
+  }
+}
+// בחירת סניף ובדיקה שנקלטה (הטקסט הנבחר מכיל את השם, והמסך התייצב). כישלון → code (branch-switch / branch-restore), בלי לנחש
+async function brSet(tab, name, code) {
+  const cfg = await brCfg();
+  if (!cfg) throw P.err(code, 'אין הגדרה לפקד הסניף');
+  let r = await brRead(tab, cfg, 15e3);
+  if (!r || !r.found) throw P.err(code, `לא נמצא פקד הסניף במסך (רצינו "${name}")`);
+  if (r.cur === name) return { same: true };
+  for (let k = 0; k < 2; k++) {
+    if ((await boState(tab)) === 'off') throw wrongPage();
+    const p = await inIso(tab, brPickIn, [cfg, name, GUARD]).catch(() => null);
+    if (p && p.wrong) throw wrongPage();
+    if (p && p.why === 'no-opt') throw P.err(code, `האפשרות "${name}" לא נמצאה בפקד הסניף`);
+    const end = Date.now() + (+cfg.ms || 30e3);
+    while (Date.now() < end) {
+      await sleep(700);
+      r = await brRead(tab, cfg, 0);
+      if (r && r.cur === name) {
+        await sleep(+cfg.settle || 2000); // כספית מרעננת את הנתונים / טוענת את הדף מחדש אחרי ההחלפה
+        r = await brRead(tab, cfg, 15e3);
+        if (r && r.cur === name && (await boState(tab)) === 'bo') return { ok: true };
+      }
+    }
+  }
+  throw P.err(code, `הבחירה בסניף "${name}" לא נקלטה בכספית (מוצג: ${(r && r.cur) || 'לא ידוע'})`);
+}
+// לוודא שכספית בסניף הבית (תחילת ריצה / שלב). בלי הגדרת סניפים – כלום
+async function brHome(tab) {
+  const cfg = await brCfg();
+  if (!cfg) return null;
+  try { return await brSet(tab, cfg.home, 'branch-restore'); } catch (e) {
+    if (e.code === 'wrong-page' || e.code === 'branch-restore') throw e;
+    throw P.err('branch-restore', String(e.message || e).slice(0, 200));
+  }
+}
+// הרצת fn בסניף name, וחזרה לבית תמיד (גם בכישלון). החזרה נכשלה → branch-restore (גובר, חוץ מ-wrong-page / needs-login שקרו קודם)
+async function inBranch(tab, name, fn) {
+  let res, err = null;
+  try { await brSet(tab, name, 'branch-switch'); res = await fn(); } catch (e) { err = e; }
+  try { await brHome(tab); } catch (e) {
+    if (err && (err.code === 'wrong-page' || err.code === 'needs-login')) throw err;
+    if (e.code === 'wrong-page') throw e;
+    throw P.err('branch-restore', String(e.message || '').slice(0, 200));
+  }
+  if (err) throw err;
+  return res;
+}
+// אימות הסניף הנוסף: בכל השורות "שם סניף" ו"מספר סניף" קיימים ושונים מאלה של הבית (ref). דוח ריק – תקין
+function brCheck(ref, lines, name) {
+  if (!lines.length) return null;
+  const vals = (L) => ({ bn: [...new Set(L.map((l) => l.bn || '').slice(0, 2000))].slice(0, 3), bk: [...new Set(L.map((l) => (l.bkn ? '' : l.bk || '')))].slice(0, 3) });
+  const v = vals(lines), vs = (x) => `שם: ${x.bn.map((t) => t || 'ריק').join('/') || '—'}, מספר: ${x.bk.map((t) => t || 'ריק').join('/') || '—'}`;
+  if (!ref.bn.length && !ref.bk.length) return P.err('branch-same', `${name}: אין נתוני סניף של יהודה הנשיא להשוואה (${vs(v)}) – לא נשלח`, { vals: { [name]: v } });
+  const bad = lines.some((l) => !l.bn || l.bkn || !/^\d+$/.test(String(l.bk || '')) || ref.bn.includes(l.bn) || ref.bk.includes(l.bk));
+  return bad ? P.err('branch-same', `${name}: "שם סניף" / "מספר סניף" לא שונים מיהודה הנשיא או ריקים (${name} – ${vs(v)}; יהודה הנשיא – ${vs(ref)}) – לא נשלח`, { vals: { [name]: v, home: ref } }) : null;
+}
+// הסניף של הבית לפי הדוח (שם + מספר), עם מה שנשמר מריצות קודמות (יום בלי מכירות ביהודה הנשיא)
+async function brRef(lines) {
+  const old = (await get('brRef')) || { bn: [], bk: [] };
+  const bn = [...new Set(lines.map((l) => l.bn).filter(Boolean))], bk = [...new Set(lines.filter((l) => !l.bkn).map((l) => l.bk).filter(Boolean))];
+  if (bn.length || bk.length) { await set({ brRef: { bn: bn.slice(0, 5), bk: bk.slice(0, 5) } }); return { bn, bk }; }
+  return { bn: (old.bn || []).slice(0, 5), bk: (old.bk || []).slice(0, 5) };
+}
+const salesOf = (f) => { const rows = rowsOf(f), det = C.detect(rows); if (det.kind !== 'sales') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "דוח מכירות לפריטים"'); return C.parseSales(rows, det); };
+// דוח המכירות לכל הסניפים: הבית כמו קודם, ואחר כך כל סניף נוסף – אותו דוח לאותו טווח, וחזרה לבית (inBranch).
+// כישלון בסניף נוסף (מעבר, דוח, branch-same) – הבית נשלח בכל זאת, והשגיאה ב-br (מדווחת בסוף הריצה). retry: שגיאה זמנית בסניף הנוסף
+// נזרקת (ניסיון חוזר של כל היום) כל עוד נשאר ניסיון. wrong-page / needs-login / branch-restore – תמיד נזרקות.
+// → { list: [{ br, f, p }], br: null | { code, msg, vals? } }
+async function salesAll(tab, vars, ms, o) {
+  const B = await brCfg();
+  if (B) await brHome(tab);
+  const f0 = await capture(tab, 'sales', vars, ms);
+  const p0 = salesOf(f0);
+  const out = { list: [{ br: B ? B.home : '', f: f0, p: p0 }], br: null };
+  if (!B || !B.also.length) return out;
+  const ref = await brRef(p0.lines);
+  for (const name of B.also) {
+    try {
+      const x = await inBranch(tab, name, async () => { const f = await capture(tab, 'sales', vars, ms); return { f, p: salesOf(f) }; });
+      const bad = brCheck(ref, x.p.lines, name);
+      if (bad) throw bad;
+      out.list.push({ br: name, f: x.f, p: x.p });
+    } catch (e) {
+      const code = e && typeof e.code === 'string' ? e.code : 'tab';
+      if (['wrong-page', 'needs-login', 'branch-restore'].includes(code)) throw e;
+      if (o && o.retry && P.RETRY.has(code)) throw e;
+      if (!out.br) {
+        const c = code === 'branch-same' || code === 'branch-switch' ? code : 'branch-sales';
+        out.br = Object.assign({ code: c, msg: (c === 'branch-sales' ? name + ': ' : '') + String((e && e.message) || P.msgOf(c)).slice(0, 260) }, e.vals ? { vals: e.vals } : {});
+      }
+    }
+  }
+  return out;
+}
+
 // ---------- שלבי הריצה ----------
 const STEP = {
   async hello(run) {
@@ -535,11 +689,13 @@ const STEP = {
     // דף התחברות או לשונית בלי הגשר → טוענים מחדש פעם אחת (אולי בעל העסק כבר התחבר בלשונית אחרת).
     // מחכים שהמסך יצויר (loginState) – בדיקה מיידית במחשב איטי ראתה דף ריק והמשיכה כאילו מחוברים
     if (!ok || (await loginState(tab)).login) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); if ((await loginState(tab)).login) throw P.err('needs-login'); await guardBo(tab); }
+    await brHome(tab); // 0.1.13: אם כספית נשארה בסניף אחר (למשל ריצה שנקטעה) – מחזירים ליהודה הנשיא לפני כל דבר אחר
     run.tab = tab;
     return {};
   },
   async catalog(run) {
     const tab = await ownTab(false);
+    await brHome(tab); // קטלוג – רק בסניף הבית
     const f = await capture(tab, 'catalog', {}, 600e3); // כספית מפיקה את הקובץ כ"משימה" (job) – בקטלוג גדול זה לוקח זמן
     const rows = rowsOf(f), det = C.detect(rows);
     if (det.kind !== 'cat') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "קטלוג פריטים"');
@@ -564,27 +720,38 @@ const STEP = {
     if (!day) return { skip: 'none' };
     const tab = await ownTab(false);
     const [y, m, d] = day.split('-');
-    const f = await capture(tab, 'sales', { day, dmy: `${d}/${m}/${y}` }, 300e3);
-    const rows = rowsOf(f), det = C.detect(rows);
-    if (det.kind !== 'sales') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "דוח מכירות לפריטים"');
-    const p = C.parseSales(rows, det), lines = p.lines.filter((l) => l.d === day);
-    const hash = await U.sha256(f.bytes);
+    // 0.1.13: יהודה הנשיא ואחר כך נחל לכיש (אותו יום), חזרה ליהודה הנשיא; העלאה אחת משולבת לשני הסניפים (השרת מפריד לפי מספר סניף)
+    const A = await salesAll(tab, { day, dmy: `${d}/${m}/${y}` }, 300e3, { retry: (run.attempt || 0) < P.BACKOFF.length });
+    if (A.br) { run.flags.br = run.flags.br || Object.assign({ day }, A.br); }
+    const lines = [], hs = [];
+    let bad = 0, other = 0;
+    for (const x of A.list) {
+      const L = x.p.lines.filter((l) => l.d === day);
+      lines.push(...L); bad += x.p.bad.length; other += x.p.lines.length - L.length;
+      hs.push(x.br + ':' + (await U.sha256(x.f.bytes)));
+    }
+    const hash = A.list.length === 1 ? hs[0].slice(hs[0].indexOf(':') + 1) : await U.sha256(new TextEncoder().encode(hs.join('|')));
+    const nb = A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {};
     const H = (await get('salesHash')) || {};
-    if (H[day] === hash) return { n: lines.length, skip: 'same' }; // אותו קובץ בדיוק כבר נקלט
+    if (H[day] === hash) return Object.assign({ n: lines.length, skip: 'same' }, nb, A.br ? { br: A.br.code } : {}); // אותם קבצים בדיוק כבר נקלטו
     if (lines.length) {
       const sRun = U.rid('cs'), parts = C.parts(lines, 1000), cl = await api();
       for (let k = 0; k < parts.length; k++) await cl.call('upload', { run: sRun, log: run.srv, kind: 'sales', day, part: k, parts: parts.length, lines: parts[k] });
       await cl.call('preview', { run: sRun, log: run.srv });
       await applyLoop(sRun, run.srv);
     }
-    H[day] = hash;
-    const keep = Object.keys(H).sort().slice(-30);
-    await set({ salesHash: Object.fromEntries(keep.map((k) => [k, H[k]])) });
-    return { n: lines.length, bad: p.bad.length, other: p.lines.length - lines.length };
+    if (!A.br) { // יום שהסניף הנוסף נכשל בו – לא נרשם כ"אותו קובץ" (ריצה חוזרת של היום תנסה שוב את שני הסניפים)
+      H[day] = hash;
+      const keep = Object.keys(H).sort().slice(-30);
+      await set({ salesHash: Object.fromEntries(keep.map((k) => [k, H[k]])) });
+    }
+    return Object.assign({ n: lines.length, bad, other }, nb, A.br ? { br: A.br.code } : {});
   },
   exportNew: (run) => exportImport(run, 'new'),
   exportPrice: (run) => exportImport(run, 'price'),
   async report(run) {
+    // 0.1.13: הסניף הנוסף נכשל (מעבר / דוח / branch-same) – הכול נשלח כרגיל, והריצה מסתיימת "נכשלה" עם הקוד (דיווח ב-finalize, בלי ניסיון חוזר)
+    if (run.flags && run.flags.br) throw P.err(run.flags.br.code, run.flags.br.msg);
     await (await api()).call('report', { run: run.srv, kind: 'run', st: 'ok', steps: run.log, info: summary(run) });
     return {};
   },
@@ -618,6 +785,7 @@ async function exportImport(run, kind) {
   const done = (await get('impHash')) || {};
   if (done[hash] === today) return { n, skip: 'same' };
   const tab = await ownTab(false);
+  await brHome(tab); // העלאה לכספית – רק בסניף הבית
   // שם ייחודי לריצה – כך מוצאים את השורה שלנו בטבלת "טעינות קודמות" (וניסיון חוזר של אותה ריצה לא מעלה פעמיים)
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
@@ -824,13 +992,89 @@ const privHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrSaf
 const safeHeads = (heads) => (Array.isArray(heads) ? heads.map((row) => S.hdrStrict(row) || []) : []);
 // מהדף הפרטי הראשון ועד סוף ההיכרות – כל בקשת רשת מסומנת pv (גם בקשות שמסתיימות אחרי המעבר למסך הבא)
 const privNet = (tab) => inMain(tab, () => window.__cxHook && window.__cxHook.privMark && window.__cxHook.privMark(true)).catch(() => {});
+// מסמכי הקפה (0.1.13): חלון שגיאה של כספית – הטקסט, וסגירה ב"אישור" (הלחיצה היחידה על חלון); אחרי "הצג" – טבלאות והודעות (מסוננות)
+const MSG_OK = /שגיאה|תקלה|נכשל|אין נתונים|אין תוצאות|לא נמצא|error|failed|no data/i;
+const dlgIn = (close, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return { d: X.errDialogs(document, close) }; };
+const rowsIn = (guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return X.rowScan(document); };
+async function dlgClose(tab, ms) {
+  const out = [], end = Date.now() + (ms || 0);
+  for (;;) {
+    await guardBo(tab);
+    const r = await inIso(tab, dlgIn, [true, GUARD]).catch(() => null);
+    if (r && r.wrong) throw wrongPage();
+    for (const x of (r && r.d) || []) if (out.length < 4) out.push({ t: S.scrub(x.t).slice(0, 120), closed: !!x.closed });
+    if ((r && r.d && r.d.length) || Date.now() > end) break;
+    await sleep(700);
+  }
+  if (out.length) await sleep(800);
+  return out;
+}
+// טבלאות אחרי "הצג": כותרות דרך הרשימה הלבנה (hdrStrict), מספר שורות, קישורים / כפתורים בשורות (רק hash ומילות פעולה); מחכים עד ms לשורות או להודעה
+async function docRows(tab, ms) {
+  const end = Date.now() + (ms || 0);
+  let r = null;
+  for (;;) {
+    await guardBo(tab);
+    r = await inIso(tab, rowsIn, [GUARD]).catch(() => null);
+    if (r && r.wrong) throw wrongPage();
+    if ((r && ((r.tables || []).some((t) => t.rows) || (r.msgs || []).length)) || Date.now() > end) break;
+    await sleep(1000);
+  }
+  r = r || {};
+  return {
+    tables: (r.tables || []).map((t) => ({ th: S.hdrStrict(t.th) || [], rows: t.rows, links: t.links, hrefs: t.hrefs, btns: t.btns, bw: t.bw })),
+    msgs: (r.msgs || []).filter((m) => MSG_OK.test(m)).map((m) => S.scrub(m).slice(0, 80)),
+  };
+}
+// היכרות לקוחות לפי סניף (0.1.13, discBranch): בנחל לכיש – יצוא hk-customers / hk-reports, רק כותרות (רשימה לבנה) ומספר שורות.
+// המעבר והחזרה – inBranch (חזרה ליהודה הנשיא תמיד); בסוף ההיכרות נבדק שוב שהנבחר הוא יהודה הנשיא
+async function discBranch(tab, S0, day) {
+  const B = S0.discBranch, cfg = await brCfg();
+  if (!B || !cfg || !B.br) return null;
+  const out = { br: B.br, pages: [] };
+  try {
+    await inBranch(tab, B.br, async () => {
+      for (const name of B.pages || []) {
+        const pg = (S0.disc || []).find((x) => x.name === name);
+        if (!pg || !pg.hash) continue;
+        await navTo(tab, pg.hash, true, 3000);
+        await guardBo(tab);
+        await privNet(tab);
+        const nonce = U.rid('n') + U.rid('');
+        const got = waitFile(nonce, tab, 120e3);
+        got.catch(() => {});
+        await arm(tab, nonce);
+        let f = null, probe = null;
+        try {
+          probe = await runFlow(tab, 'hkExport', { day, hash: pg.hash }, null, true);
+          const capDone = (probe.steps || []).some((x) => x.op === 'click' && x.done);
+          f = capDone ? await got.catch(() => null) : null;
+        } finally { waiting.delete(nonce); await disarm(tab); }
+        const t = await docRows(tab, 0);
+        const rec = { name, tables: t.tables.map((x) => ({ th: x.th, rows: x.rows })) };
+        if (!t.tables.length) throw P.err('selector-miss', `${B.br}: לא נמצאה טבלה במסך ${name}`);
+        if (f) {
+          try { const R = U.readRows(U.fromB64(f.b64), f.name, self.XLSX, C), sh = S.fileShape(R, 0); rec.file = { rows: R.length, hi: sh.hi, hdr: sh.hdr }; } catch (e) { rec.file = { kind: 'unreadable' }; }
+        } else rec.file = { none: true };
+        out.pages.push(rec);
+      }
+    });
+    out.ok = true;
+  } catch (e) {
+    if (e.code === 'wrong-page') throw e;
+    out.err = { code: e.code || 'fail', msg: S.scrub(String(e.message || '')).slice(0, 200) };
+  }
+  return out;
+}
 async function runDisc() {
   if (busy) return { ok: false, code: 'busy' };
   busy = true;
   keepAlive(true);
   const S0 = await sel(), day = D.addDays(D.dayStr(Date.now(), (await sched()).tz), -1);
+  // מסמכי הקפה (0.1.13): החודש הקודם המלא (לפי היום של אתמול באזור הזמן של העסק)
+  const pm = (() => { const [y, m] = day.split('-').map(Number), py = m === 1 ? y - 1 : y, pmn = m === 1 ? 12 : m - 1, mm = String(pmn).padStart(2, '0'); return { from: `${py}-${mm}-01`, to: D.addDays(`${y}-${String(m).padStart(2, '0')}-01`, -1) }; })();
   const rep = { v: 1, kind: 'disc', ver: VER, sel: S0.v, at: new Date().toISOString(), ua: (/Chrome\/(\d+)/.exec(navigator.userAgent) || [])[1] || '', pages: [], files: [], net: [] };
-  let tab;
+  let tab, brUsed = false;
   try {
     await set({ discSt: { st: 'run', at: Date.now() } });
     tab = await ownTab(true);
@@ -839,6 +1083,10 @@ async function runDisc() {
     await inMain(tab, () => window.__cxHook && window.__cxHook.discover(true));
     if (await isLoginTab(tab)) { rep.login = true; throw P.err('needs-login'); }
     await guardBo(tab);
+    // 0.1.13 (תיקון בודק): אם ריצה קודמת נקטעה בסניף אחר – מחזירים ליהודה הנשיא לפני שקוראים משהו; לא הצליח → branch-restore, עוצרים
+    brUsed = true;
+    await brHome(tab);
+    rep.brStart = 'ok';
     // קישורי התפריט – גם אם הניווט למסך מסוים ייכשל, לומדים מהם את הכתובות
     const heads = [...new Set((S0.disc || []).flatMap((p) => (Array.isArray(p.menu) ? p.menu : [])).map(String))];
     const mr = await inIso(tab, menuIn, [heads, 200, GUARD]);
@@ -879,6 +1127,8 @@ async function runDisc() {
         else rep.pages.push(Object.assign({ name: pg.name, ok: true, ro: true, hash: String(r.hash || '').replace(/\d+/g, '{n}').slice(0, 80), title: String(r.title || '').slice(0, 60), controls: r.controls || [], heads: r.heads || [] }, r.scr ? { scr: r.scr } : {}));
         continue;
       }
+      // מסמכי הקפה (0.1.13): חלון שגיאה שכספית הקפיצה – הטקסט, וסגירה ב"אישור", לפני הצעדים
+      const dlg = pg.docs ? await dlgClose(tab, 3000) : null;
       // היכרות v2: פותחים רשימות / לוח שנה רק כדי לראות אותם (בלי לבחור), לפני הצעדים
       const pk = [];
       for (const p of Array.isArray(pg.peek) ? pg.peek : []) { await guardBo(tab); const r = await inIso(tab, peekIn, [p, GUARD]); if (r && r.wrong) throw wrongPage(); pk.push(Object.assign({ name: String(p.name || '') }, r || {})); }
@@ -888,11 +1138,20 @@ async function runDisc() {
       await arm(tab, nonce);
       if (pg.priv) await privNet(tab);
       // hash: למסך עם hash קבוע – צעד עם at "{hash}" (hkExport) רץ רק אם באמת הגענו למסך
-      const probe = await runFlow(tab, pg.flow, { day, hash: pg.hash || (l && l.h) || '' }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
+      const probe = await runFlow(tab, pg.flow, { day, from: pm.from, to: pm.to, hash: pg.hash || (l && l.h) || '' }, null, true).catch((e) => ({ ok: false, err: String(e.message || e) }));
       // priv (0.1.11): מהרכיב שנמצא / נחסם – רק תגית ו-css, בלי הטקסט (למשל "יצוא לאקסל – כרטסת <שם לקוח>")
       const elOf = (e) => (e && pg.priv ? { tag: e.tag, css: String(e.css || '').replace(/\d/g, '?') } : e);
       const page = { name: pg.name, flow: pg.flow, probe: (probe.steps || []).map((x) => ({ i: x.i, op: x.op, found: x.found, done: x.done, el: elOf(x.el), err: x.err })), ok: !!probe.ok };
       if (pk.length) page.peek = pk;
+      if (pg.docs) {
+        // אחרי "הצג" (אם נלחץ): טבלאות / הודעות, ושוב חלון שגיאה אם קפץ
+        const t = await docRows(tab, 10e3);
+        const dlg2 = await dlgClose(tab, 0);
+        // 0.1.13 (תיקון בודק): בדף priv – מחלון השגיאה ומההודעות רק סיווג (err / nodata), בלי הטקסט (עלול לכלול שם לקוח)
+        const cls = (t) => (/אין נתונים|אין תוצאות|לא נמצא|no data/i.test(t) ? 'nodata' : 'err');
+        if (pg.priv) { dlg2.forEach((x, i) => { dlg2[i] = { k: cls(x.t), closed: x.closed }; }); (dlg || []).forEach((x, i) => { dlg[i] = { k: cls(x.t), closed: x.closed }; }); t.msgs = t.msgs.map(cls); }
+        page.docs = { month: pm.to.slice(5, 7) + '/' + pm.to.slice(0, 4), d1: +pm.from.slice(8), d2: +pm.to.slice(8), dlg: (dlg || []).concat(dlg2), show: (probe.steps || []).filter((x) => x.op === 'click' && !(S0.flows[pg.flow][x.i] || {}).capture).map((x) => ({ found: x.found, done: x.done, err: x.err }))[0] || null, tables: t.tables, msgs: t.msgs };
+      }
       const capI = (S0.flows[pg.flow] || []).findIndex((x) => x.capture), hasCap = capI >= 0;
       // 0.1.11: אם כפתור היצוא לא נלחץ (לא נמצא / נחסם) – לא מחכים לקובץ (אחרת כל מסך בלי יצוא מעכב 2 דקות)
       const capDone = (probe.steps || []).some((x) => x.i === capI && x.op === 'click' && x.done);
@@ -936,15 +1195,27 @@ async function runDisc() {
         page.heads = safeHeads(r.heads);
         if (r.scr && Array.isArray(r.scr.tables)) r.scr.tables = r.scr.tables.map((t) => Object.assign({}, t, { th: safeHeads([t.th])[0] || [] }));
         page.scr = r.scr;
+        if (pg.pay) {
+          // 0.1.13: רשימות בחירה קצרות (סוג דוח, קופה, סניף, אמצעי תשלום…) – רק תווית מוכרת ולא של אנשים / לקוחות; בלי לפתוח (sanitize.js listSafe)
+          const L = (await inIso(tab, (g) => (self.CxSel.onPath(window, g) ? self.CxSel.lists(document) : { wrong: true }), [GUARD])) || [];
+          if (L.wrong) throw wrongPage();
+          page.lists = (Array.isArray(L) ? L : []).map((x) => { const v = S.listSafe(x.lbl, x.opts, (S0.branch || {}).names); return v ? Object.assign({ kind: x.kind, n: x.n }, v, x.opts ? {} : { opts: [] }) : { kind: x.kind, n: x.n, lbl: '?' }; });
+        }
       }
       rep.pages.push(page);
     }
     // בקשות שנרשמו מאז הדף הפרטי הראשון (pv): כל מקטע נתיב עם ספרה → '?' (מזהי לקוח/עובד)
     rep.net = ((await inMain(tab, () => window.__cxHook && window.__cxHook.netLog())) || []).map((e) => (e && e.pv ? Object.assign({}, e, { p: String(e.p || '').split('/').map((x) => (/\d/.test(x) ? '?' : x)).join('/') }) : e));
+    // 0.1.13: לקוחות הקפה בנחל לכיש (החלפת סניף רק כאן – אחרי כל הדפים ואחרי יומן הרשת, כי כספית טוענת את הדף מחדש; לא בדפי pay), וחזרה ליהודה הנשיא
+    if (S0.discBranch) { brUsed = true; rep.brDisc = await discBranch(tab, S0, day); }
     rep.ok = true;
   } catch (e) {
     rep.err = { code: e.code || 'fail', msg: String(e.message || '').slice(0, 200) };
   } finally {
+    // 0.1.13: אחרי החלפת סניף בהיכרות – בדיקה אחרונה שכספית ביהודה הנשיא (ואם לא – החזרה); כישלון → branch-restore בדוח
+    if (tab && brUsed) {
+      try { await brHome(tab); rep.brEnd = 'ok'; } catch (e) { rep.brEnd = e.code || 'branch-restore'; rep.ok = false; if (!rep.err) rep.err = { code: 'branch-restore', msg: String(e.message || '').slice(0, 200) }; }
+    }
     if (tab) await inMain(tab, () => window.__cxHook && window.__cxHook.discover(false)).catch(() => {});
     keepAlive(false);
     busy = false;
@@ -999,4 +1270,6 @@ async function handle(m) {
   return { ok: false, code: 'bad-msg' };
 }
 // לבדיקות (Playwright): הפעלת טריגר ידנית
-self.__cxTest = { sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, updReq, reload: null, isBusy: () => busy };
+// discBr (0.1.13): היכרות הלקוחות בנחל לכיש לבד (בלי כל ההיכרות) + הסניף הנבחר אחרי
+const discBrTest = async () => { const tab = await ownTab(false); const out = await discBranch(tab, await sel(), D.addDays(D.dayStr(Date.now(), (await sched()).tz), -1)); const r = await brRead(tab, await brCfg(), 5e3); return { out, cur: r && r.cur }; };
+self.__cxTest = { discBr: discBrTest, sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, updReq, reload: null, isBusy: () => busy };
