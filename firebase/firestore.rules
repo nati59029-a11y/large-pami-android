@@ -1379,8 +1379,27 @@ service cloud.firestore {
       allow get: if rOrd() && docId in ['main', 'seq', 'price'];
       allow list, create, update, delete: if false;
     }
+    // הדפסת מדבקות (22.11.2026): מתג עובד lbl ("הדפסת מדבקות", כבוי כברירת מחדל, גם לעובד ישן בלי perms). מנהל / מנהל־על = כן.
+    function rLbl() {
+      return rMgr() || (isActiveEmployee()
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('lbl', false) == true);
+    }
+    // lblp/{id} – מוצר שהוקלד ידנית במסך הדפסת המדבקות (לא נמצא במלאי). נשמר לכל המכשירים בעסק. רק השדות האלה, בגודל מוגבל.
+    function lblpOk(d) {
+      return d.keys().hasOnly(['name', 'price', 'barcode', 'pack', 'at', 'by']) && d.keys().hasAll(['name', 'price', 'at', 'by'])
+        && d.name is string && d.name.size() >= 1 && d.name.size() <= 120
+        && d.price is number && d.price >= 0 && d.price <= 100000
+        && (!('barcode' in d) || (d.barcode is string && d.barcode.matches('^[ -~]{0,40}$')))
+        && (!('pack' in d) || (d.pack is string && d.pack.size() <= 30))
+        && d.at is int && d.at > 0 && d.by == request.auth.uid;
+    }
+    match /lblp/{id} {
+      allow read: if rLbl();
+      allow create, update: if rLbl() && lblpOk(request.resource.data);
+      allow delete: if rMgr();
+    }
     match /prod/{id} {
-      allow read: if rOrd();
+      allow read: if rOrd() || rLbl();
       allow create, update, delete: if false;
       // עלות (p/cost) – גם עובד עם הזמנות (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד
       match /p/{k} {
@@ -2863,9 +2882,16 @@ service cloud.firestore {
         allow get: if ordOk() && (docId in ['main', 'seq', 'price'] || (docId == 'cell' && feat('cellular')));
         allow list, create, update, delete: if false;
       }
+      // הדפסת מדבקות (22.11.2026): עובד עם המתג lbl קורא מוצרים כשתוספת ההזמנות פעילה (בלי p/cost ו-p/ws).
+      // lblp/{id} – מוצר שהוקלד ידנית במסך הדפסת המדבקות; מנהל או עובד עם lbl. מחיקה – מנהל בלבד. lblpOk – בשורש (אותה בדיקה).
+      match /lblp/{id} {
+        allow read: if perm('lbl');
+        allow create, update: if perm('lbl') && lblpOk(request.resource.data);
+        allow delete: if bMgr();
+      }
       match /prod/{id} {
         // קופה (שלב 0, 17.11.2026): גם קופאי / אחראי משמרת (posAny) קורא מוצרים – בלי p/cost ו-p/ws (שם נשאר רק ordOk / מנהל)
-        allow read: if ordOk() || posAny();
+        allow read: if ordOk() || posAny() || (feat('orders') && perm('lbl'));
         allow create, update, delete: if false;
         // עלות (p/cost) – מנהל ועובד עם ord (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד (עובד דרך getWsPrices)
         match /p/{k} {
