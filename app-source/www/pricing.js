@@ -3,7 +3,8 @@
    ו-pricing-lines.js). לא משנה שום קוד קיים: רק עוטף (wrap) את נקודות השמירה, ותמיד אחרי שהשמירה הרגילה הסתיימה.
    נקודות השמירה: FRM.scanok (סריקה ישנה + סריקה אחידה trInv לתמונה), FRM.addsave (קובץ סרוק שנשמר בטופס הרגיל – trInv ל-PDF,
    המסך האחיד), bqSaveOne (תור הסריקה המרובה + מסמכים ששותפו לאפליקציה – siToBq), awJoin (חשבונית סרוקה שחוברה לתשלום שממתין לה),
-   pushItem (עובד שולח הוצאה למנהל – נכנס לתמחור כבר בשליחה), inbDrop (המנהל דחה את ההוצאה של העובד → piVoid).
+   inbDrop (המנהל דחה את ההוצאה של העובד → piVoid).
+   הוצאה שעובד שולח למנהל (pushItem) נכנסת לתמחור בשרת (piInbox, מ-22.11.2026) – לא כאן; בקשות ישנות של עובד שכבר בתור (lp-piq) מסתיימות כרגיל.
    התנאים: מחובר לחשבון (מנהל / עובד), תוספת "מדף" או "הזמנות" פעילה, קטגוריה מסוג ספק (beh==='sup'), חשבונית (לא זיכוי) עם צילום.
    הכול ברקע ובתוך try: ההוצאה עצמה (S.tx) לא משתנה, וכשל כאן לא מפריע לשמירה.
    תור (localStorage, lp-piq לפי העסק): בלי רשת הבקשה ממתינה ונשלחת אחר כך (בחזרת הרשת / כל דקה / בפתיחה). בכל בקשה אחת:
@@ -65,11 +66,10 @@ if(typeof awJoin==='function'){const o=awJoin;awJoin=function(e,t,fid,fx){const 
  const r=await o.apply(this,arguments);
  try{for(const t of S.tx.slice(n0))if(t&&t.file)fromTx(t,t.file);if(typeof AWP!=='undefined'&&AWP&&AWP.fid)PI.cand.add(AWP.fid)}catch(e){}return r}}
 {const o=FRM.awatt;if(typeof o==='function')FRM.awatt=async function(){PI.aw=(PI.aw||0)+1;try{return await o.apply(this,arguments)}finally{PI.aw--}}}
-/* עובד: ההוצאה נשלחה למנהל (inbox) → לתמחור כבר עכשיו */
-if(typeof pushItem==='function'){const o=pushItem;pushItem=async function(it){const r=await o.apply(this,arguments);
- try{const d=it&&it.data;if(isW()&&d&&!d.repl&&!d.reg&&d.kind!=='check'&&it.fileId&&num(d.amt)>0){const c=((cfgLocal()||{}).cats||[]).find(z=>z.id===d.cat);
-  if(c&&c.beh==='sup')add({t:'c',rq:rqOf(it.fileId),fid:it.fileId,sup:String(d.subName||''),supId:ID_OK(d.sub)?d.sub:'',inv:s_(d.inv||''),date:DATE_OK(d.date)?d.date:''})}}catch(e){}
- return r}}
+/* עובד: ההוצאה נשלחה למנהל (inbox) → לתמחור. מ-22.11.2026 (שלב 2) הטלפון של העובד כבר לא מזהה בעצמו: השרת עושה את זה מיד כשה-inbox נוצר
+   (טריגר piInbox / piInboxB, firebase/functions/pricing-inbox.js – אותם תנאים ואותו מזהה rqOf('o'+id)). כך אין זיהוי כפול (מכסה ועלות).
+   בקשות שכבר ממתינות בתור של עובד מגרסה קודמת (lp-piq) – לא נמחקות וממשיכות כרגיל: אם השרת כבר יצר את החשבונית, piCreate מחזיר dup
+   ולא נוצרת כפילות; אם השרת דילג (למשל הצילום לא נמצא) – הבקשה מהטלפון משלימה. אין יותר הוק על pushItem. */
 /* מנהל דחה הוצאה של עובד → החשבונית יוצאת מהתמחור (piVoid). אותו מזהה כמו אצל העובד: הקובץ שלו הוא 'o'+מזהה ההוצאה */
 if(typeof inbDrop==='function'){const o=inbDrop;inbDrop=function(id){let it=null;try{it=(S.inbox||[]).find(x=>x.id===id)||null}catch(e){}
  const r=o.apply(this,arguments);

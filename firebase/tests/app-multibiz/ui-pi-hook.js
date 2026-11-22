@@ -2,7 +2,8 @@
 // תמחור מחשבונית ספק, שלב 3 (12.11.2026): www/pricing.js – חשבונית ספק שנשמרת עם צילום נכנסת ל"חשבוניות לתמחור" (piCreate) ברקע.
 // רשת מדומה (בלי אמולטור): scanDocument (invoice / invlines), piCreate ו-piVoid נענים כאן. מסך 360px.
 // בודק: שמירה (גם לחיצה כפולה) = בקשה אחת; S.tx זהה למצב בלי pricing.js; עסק בלי מדף ובלי הזמנות – כלום; בלי רשת – ההוצאה נשמרת
-// והבקשה נשלחת כשהרשת חוזרת (בלי זיהוי נוסף); תור הסריקה המרובה; עובד ששולח הוצאה → piCreate, מנהל שדוחה → piVoid.
+// והבקשה נשלחת כשהרשת חוזרת (בלי זיהוי נוסף); תור הסריקה המרובה; מנהל שדוחה → piVoid.
+// 22.11.2026 (שלב 2): עובד ששולח הוצאה – הטלפון כבר לא מזהה ולא שולח piCreate (השרת, piInbox, עושה את זה); בקשה ישנה שכבר בתור של העובד – מסתיימת.
 // שימוש: node ui-pi-hook.js <www-dir> [out.json]
 const fs = require('fs'); const H = require('./harness');
 const BZ0 = ['larg', 'peami'].join('');
@@ -116,7 +117,7 @@ const waitQ = async (page, ms) => { const t0 = Date.now(); while (Date.now() - t
   const rq4 = await page.evaluate((f) => PI.rqOf(f), fq);
   check('4 תור הסריקה המרובה: "אישור הכול" (פעמיים) → piCreate אחד לקובץ', M.create.filter((x) => x.reqId === rq4).length === 1 && await page.evaluate((f) => S.tx.some((t) => t.file === f), fq), { rq4, create: M.create.map((x) => x.reqId) });
 
-  // ---- 5. עובד שולח הוצאה → piCreate; מנהל דוחה → piVoid ----
+  // ---- 5. עובד שולח הוצאה → בלי זיהוי ובלי piCreate מהטלפון (השרת עושה, שלב 2); בקשה ישנה בתור – מסתיימת; מנהל דוחה → piVoid ----
   const W = await open(browser, www, cfgL, 'w@x.co');
   const wid = 'w1abcdefgh';
   await W.page.evaluate(async (id) => {
@@ -126,8 +127,14 @@ const waitQ = async (page, ms) => { const t0 = Date.now(); while (Date.now() - t
     await pushItem({ id, created: new Date().toISOString(), data: { cat: 'e_sup', catName: 'ספקים', sub: 's1', subName: 'ספק בדיקה', amt: 100, date: '2026-11-01', note: '', inv: '777', dn: false }, fileId: 'o' + id });
     await pushItem({ id: id + 'x', created: new Date().toISOString(), data: { cat: 'e_x', catName: 'שונות', sub: '', subName: '', amt: 50, date: '2026-11-01', note: 'x', inv: '', dn: false }, fileId: 'o' + id + 'x' });
   }, wid);
-  await sleep(500); await waitQ(W.page);
-  check('5 עובד שלח חשבונית ספק → piCreate אחד (מזהה = הקובץ של העובד); הוצאה שאינה ספק – לא', W.M.create.length === 1 && W.M.create[0].reqId === 'piow1abcdefgh' && W.M.create[0].inv === '777' && W.M.create[0].sup === 'ספק בדיקה', W.M.create.map((x) => ({ rq: x.reqId, inv: x.inv })));
+  await sleep(1500);
+  const w5 = await W.page.evaluate(() => ({ q: PI.q().length }));
+  check('5 (שלב 2) עובד שלח חשבונית ספק → אין זיהוי, אין piCreate ואין בקשה בתור (השרת יוצר את החשבונית)', W.M.create.length === 0 && W.M.lt === 0 && W.M.img.length === 0 && w5.q === 0, { create: W.M.create.length, lt: W.M.lt, q: w5.q });
+  // בקשה שנכנסה לתור בגרסה הקודמת (lp-piq) – לא נזרקת, ומסתיימת כרגיל (piCreate עם אותו מזהה; אם השרת כבר יצר – dup)
+  await W.page.evaluate((id) => { localStorage.setItem(LK('lp-piq'), JSON.stringify([{ t: 'c', rq: PI.rqOf('o' + id), fid: 'o' + id, sup: 'ספק בדיקה', supId: 's1', inv: '777', date: '2026-11-01', n: 0, nx: 0, at: Date.now() }])); PI.pump(); }, wid);
+  await waitQ(W.page);
+  check('5ב בקשה ישנה מהתור של העובד מסתיימת: piCreate אחד (מזהה = הקובץ של העובד), התור ריק', W.M.create.length === 1 && W.M.create[0].reqId === 'piow1abcdefgh' && W.M.create[0].inv === '777' && W.M.create[0].sup === 'ספק בדיקה' && (await W.page.evaluate(() => PI.q().length)) === 0, W.M.create.map((x) => ({ rq: x.reqId, inv: x.inv })));
+  check('5ג אין שגיאות JS (עובד)', W.page.__errors.length === 0, W.page.__errors);
   await W.ctx.close();
   await page.evaluate((id) => { const c = S.cats.find((x) => x.beh === 'sup' && !x.hid && !x.off); S.inbox.push({ id: id + 'c', d: { cat: c.id, sub: 's1', amt: -40, date: '2026-11-01', inv: '778' }, file: 'i' + id + 'c' }, { id: id + 'n', d: { cat: c.id, sub: 's1', amt: 40, date: '2026-11-01', inv: '779' }, file: '' }, { id, d: { cat: c.id, sub: 's1', amt: 100, date: '2026-11-01', inv: '777' }, file: 'i' + id }); save(); inbDrop(id + 'c'); inbDrop(id + 'n'); inbDrop(id); }, wid);
   await sleep(500); await waitQ(page);

@@ -1,6 +1,7 @@
 'use strict';
 // הגעה מיידית (11.11.2026, החלטה 1): אצל מנהל, כשהאפליקציה גלויה – משיכה של inbox ו-mq כל 20 שניות, מיד בחזרה לאפליקציה,
 // טיימר אחד בלבד, מנעול משותף עם pullInbox, בלי כפילויות, בלי הודעות שגיאה חוזרות בלי רשת, ובלי משיכות כבדות (מכירות אתר/סגירות/הפקדות).
+// 22.11.2026 (שלב 2): צילום (chunks) של הוצאה שנשלחה לפני פחות מ-5 דקות (inbox.t) לא נמחק במשיכה – נמחק במשיכה שאחרי 5 דקות; בלי t – מיד.
 // רשת מדומה (בלי אמולטור). בבדיקה הקצב מוקטן: 300ms במקום 20 שניות (אותו קוד, INB.ms), כך ש-900ms = "60 שניות".
 // שימוש: node ui-inb-live.js <www-dir> [out.json]
 const fs = require('fs'); const H = require('./harness');
@@ -23,7 +24,7 @@ async function mockQ(ctx) {
     if (isInb) M.inb++; else M.mq++;
     if (M.delay) await sleep(M.delay);
     if (M.fail === 'abort') return route.abort('internetdisconnected');
-    const L = isInb ? M.inbox.map((x) => ({ document: { name: DOCS + 'inbox/' + x.id, fields: { status: S('new'), by: S('עובד בדיקה'), owner: S('w'), created: S('2026-11-03T09:00:00Z'), data: S(JSON.stringify(x.data)) } } }))
+    const L = isInb ? M.inbox.map((x) => ({ document: { name: DOCS + 'inbox/' + x.id, fields: { status: S('new'), by: S('עובד בדיקה'), owner: S('w'), created: S('2026-11-03T09:00:00Z'), data: S(JSON.stringify(x.data)), ...(x.parts ? { parts: S(String(x.parts)) } : {}), ...(x.t ? { t: { integerValue: String(x.t) } } : {}) } } }))
       : M.mqL.map((x) => ({ document: { name: DOCS + 'mq/' + x.id, fields: { uid: S('w'), by: S('עובד בדיקה'), t: { integerValue: '1793700000000' }, st: S('new'), k: S('invoice'), np: { integerValue: '0' } } } }));
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(L.length ? L : [{ readTime: '2026-11-03T09:00:00Z' }]) });
   });
@@ -96,6 +97,31 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   const r7b = await page.evaluate(() => ({ cnt: S.inbox.filter((x) => x.id === 'inbLive1').length, kept: !!document.getElementById('sentinel') }));
   check('7 מסמך חדש מעובד: נכנס ל-S.inbox פעם אחת, ו"לטיפול" מצטייר מחדש מעצמו', n7 === 1 && r7.cnt === 1 && r7.redrawn && r7.v === 'todo', { n7, r7 });
   check('7א אותו מסמך שוב (3 משיכות, 2 מהן בו־זמנית) – לא נכנס פעמיים, ואין ציור מחדש בלי שינוי', n7b === 0 && r7b.cnt === 1 && r7b.kept, { n7b, r7b });
+
+  // 7ב. (שלב 2) chunks: הוצאה "צעירה" (t לפני דקה) – הצילום נשמר, החלקים לא נמחקים עכשיו; ישנה בלי t – נמחקים מיד, כמו קודם
+  const DEL = []; let gets = 0;
+  await ctx.route(/:8080\/.*\/chunks\//, (route) => { const r = route.request(); const id = decodeURIComponent(new URL(r.url()).pathname.split('/').pop());
+    if (r.method() === 'DELETE') { DEL.push(id); return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }); }
+    gets++; return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: DOCS + 'chunks/' + id, fields: { owner: S('w'), data: S('data:image/jpeg;base64,AAAA' + id) } }) }); });
+  const now7 = await page.evaluate(() => Date.now());
+  M.inbox = [{ id: 'chYoung1', parts: 2, t: now7 - 60000, data: { type: 'exp', amt: 10, date: '2026-11-03', cat: '' } }, { id: 'chOld1', parts: 1, data: { type: 'exp', amt: 11, date: '2026-11-03', cat: '' } }];
+  await page.evaluate(() => inbTick(0));
+  const r7c = await page.evaluate(() => ({ y: (S.inbox.find((x) => x.id === 'chYoung1') || {}).file || '', o: (S.inbox.find((x) => x.id === 'chOld1') || {}).file || '', q: JSON.parse(localStorage.getItem(LK('lp-chq')) || '[]') }));
+  check('7ב צעירה (דקה): נכנסה עם צילום, החלקים לא נמחקו ונרשמו לתור; ישנה בלי t – נמחקה מיד', r7c.y === 'ichYoung1' && r7c.o === 'ichOld1' && !DEL.some((x) => x.startsWith('chYoung1')) && DEL.includes('chOld1_0') && r7c.q.length === 1 && r7c.q[0].id === 'chYoung1' && r7c.q[0].np === 2, { r7c, DEL });
+  M.inbox = []; DEL.length = 0;
+  await page.clock.setFixedTime(now7 + 3 * 60000); await page.evaluate(() => inbTick(0));
+  check('7ג אחרי 3 דקות (4 מאז השליחה) – עדיין לא נמחקים', DEL.length === 0, { DEL });
+  await page.clock.setFixedTime(now7 + 4 * 60000 + 1000); await page.evaluate(() => inbTick(0));
+  const q7d = await page.evaluate(() => JSON.parse(localStorage.getItem(LK('lp-chq')) || '[]'));
+  check('7ד אחרי 5 דקות מהשליחה – שני החלקים נמחקים במשיכה הבאה והתור מתרוקן', DEL.length === 2 && DEL.includes('chYoung1_0') && DEL.includes('chYoung1_1') && q7d.length === 0, { DEL, q7d });
+  // שעון של עובד שקדים מאוד (t בעתיד): הדחייה לכל היותר 5 דקות מהמשיכה
+  DEL.length = 0; const now7e = await page.evaluate(() => Date.now());
+  M.inbox = [{ id: 'chFut1', parts: 1, t: now7e + 3600e3, data: { type: 'exp', amt: 12, date: '2026-11-03', cat: '' } }];
+  await page.evaluate(() => inbTick(0)); M.inbox = [];
+  const q7e = await page.evaluate(() => JSON.parse(localStorage.getItem(LK('lp-chq')) || '[]'));
+  await page.clock.setFixedTime(now7e + 5 * 60000 + 1000); await page.evaluate(() => inbTick(0));
+  check('7ה t בעתיד (שעון עובד שגוי): נדחה לכל היותר 5 דקות, ואז נמחק', q7e.length === 1 && q7e[0].due === now7e + 5 * 60000 && DEL.length === 1 && DEL[0] === 'chFut1_0', { q7e, DEL });
+  await ctx.unroute(/:8080\/.*\/chunks\//);
 
   // 8. mq: פריט חדש נטען, ונכנס פעם אחת
   M.mqL = [{ id: 'mqLive1' }];
