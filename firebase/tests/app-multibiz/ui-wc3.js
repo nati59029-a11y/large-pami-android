@@ -142,7 +142,7 @@ const cardOf = (page, re) => page.evaluate((s) => { const c = [...document.query
   // "הזכר לעובד" ← tkNudge; כשל נבלע
   await mp.evaluate(() => { TKT = 'open'; tkLoad(); }); await sleep(600); await mp.evaluate(() => rerender()); await sleep(300);
   FN_FAIL = true;
-  await mp.click('#tkc-t1 [data-a=tkwNd]'); await mp.click('#dlg [data-a=yes]'); await waitFor(async () => FN.length === 1);
+  await mp.click('#tkc-t1 [data-a=tkwMenu]'); await mp.click('#dlg [data-a=tkwMi][data-go=tkwNd]'); await mp.click('#dlg [data-a=yes]'); await waitFor(async () => FN.length === 1);
   await sleep(500);
   check('15 "הזכר לעובד": nd נכתב ואחריו קריאה ל-tkNudge({taskId}); כשל בשרת נבלע (אין שגיאת JS)', LOG.some((l) => l.m === 'PATCH' && l.col === 'tasks' && l.mask.includes('nd')) && FN[0].data.taskId === 't1' && !('bizId' in FN[0].data) && mp.__errors.length === 0, FN);
   FN_FAIL = false;

@@ -14,6 +14,7 @@
    עובדים בלי לפתוח את האפליקציה (בטלפון נעול – אחרי ביטול נעילה). הלחיצות נשמרות בטלפון ומיושמות כאן בפתיחה הבאה (wcDrain):
    דחייה ← lp-snz, "טופל" לתזכורת ← remDone, "טופל" למשימה פרטית ← עדכון לשרת. APK ישן – כמו קודם (@capacitor/local-notifications). */
 (function(){'use strict';
+const gS=()=>{try{return S}catch(e){return{}}};
 if(typeof V==='undefined'||typeof V.tk!=='function'||typeof tkIL==='undefined'||typeof tkDl!=='function')return;
 const W={},H=36e5,MIN=6e4,ND_GAP=30*MIN,MID=7000001;
 const on=()=>{try{return !!(fbRole()&&bzF('tasks'))}catch(e){return false}};
@@ -107,7 +108,7 @@ function myView(card){if(W.wk())return wkView(card);const now=Date.now(),F=fl(),
 W.wk=()=>on()&&!fbAdmin();
 const MI={};
 function miImg(id){if(MI[id])return MI[id].img;MI[id]={img:null};try{Promise.resolve(fsx('/tasks/'+id+'/p/m1')).then(d=>{const v=d&&gv(d,'img');if(v&&imgOk(v)){MI[id].img=v;tkRe()}}).catch(()=>{})}catch(e){}return null}
-W.wkTags=(t,lt)=>{let s='';if(lt)s+='<span class="tag t4">באיחור</span> ';if(t.pri==='h')s+=`<span class="tag t4">${icd('warn')} דחוף</span> `;
+W.wkTags=(t,lt)=>{let s='';const k=STK(t);if(k==='late'||k==='wait')s+=W.stTag(t);else if(lt)s+='<span class="tag tk-late">באיחור</span> ';if(t.pri==='h')s+=`<span class="tag tk-urg">${icd('warn')} דחוף</span> `;
 return s};
 W.wkDet=(t,tg)=>{const np=t.np||0,sa=rvNew()&&tkNew(t)&&t.st==='open'&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${esc(t.id)}" style="margin-top:8px">▶ התחלתי</button>`:'';
  tg=String(tg||'').trim();
@@ -128,7 +129,7 @@ function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew
  const mi=t.mi>0?miImg(t.id):null,tg=W.wkTags(t,lt);
  return `<div class="card" id="tkc-${did}" style="border-color:${lt?'var(--bad)':'var(--acc)'};border-width:2px${W.bar(t)}">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<div style="white-space:pre-wrap;font-weight:700;font-size:1.2rem">${esc(t.txt)}</div>
   ${mi?`<img src="${esc(mi)}" alt="תמונת הוראות מהמנהל" data-a="tkPics" data-id="${did}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin:8px 0 0;display:block">`:''}${W.ckH(t)}
-  <p class="note" style="margin:8px 0">יעד: ${dl<Infinity?esc(tkDT(dl)):'בלי יעד'}</p>${t.note?`<p class="note" style="color:var(--bad);margin:0 0 8px;white-space:pre-wrap">${t.rt==='1'?(t.dg==='1'?'המשימה הוחזרה':'המנהל החזיר את המשימה'):'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
+  <p style="margin:8px 0;font-weight:600${lt?';color:var(--st-late)':''}">${icd('clock')} ${esc(W.dlTx(t))}</p>${t.note?`<p class="note" style="color:var(--bad);margin:0 0 8px;white-space:pre-wrap">${t.rt==='1'?(t.dg==='1'?'המשימה הוחזרה':'המנהל החזיר את המשימה'):'התמונה לא אושרה'}: ${esc(t.note)}</p>`:t.cT&&t.cBy&&t.cBy!==me?`<p class="note" style="margin:0 0 8px;white-space:pre-wrap">${esc(t.cN||'המנהל')}: ${esc(t.cT)}</p>`:''}
   ${pb}${nt?`<p class="note" style="margin:6px 0 0;text-align:center">${nt}</p>`:''}
   <div style="margin-top:8px;text-align:center">${[ex,(cn||tkUnr(t))?lnk('tkRead','✓ סמן כנקרא'):'',lnk('tkCm',`${icd('chat')} תגובה${cc!=null?' ('+cc+')':''}`,cn?';color:var(--acc)':''),t.mi>0||wp>0?lnk('tkPics',`${icd('img')} תמונות`):'',ndNew(t)?lnk('tkwNdSeen','ראיתי את התזכורת'):''].filter(Boolean).join('<span style="color:var(--mut)"> · </span>')}</div>
   ${W.wkDet(t,W.tag(t))}</div>`}
@@ -142,7 +143,7 @@ function wkView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=a
  const one=x=>{inMy=x;try{return x.k==='t'?card(x.o):x.k==='p'?ptCard(x.o):remCard(x.o)}finally{inMy=null}};
  const rk=x=>(x.nd||x.at<now)?0:x.o&&x.o.pri==='h'&&x.at<day0(1)?1:x.at<day0(1)?2:3;
  const kk=x=>x.k+':'+x.id;
- const A=L.filter(x=>!x.sz).sort((a,b)=>(rk(a)-rk(b))||((a.at-b.at)||0)),nx=A[0],R=A.slice(1);W.nowId=nx&&nx.k==='t'?nx.id:'';
+ const A=L.filter(x=>!x.sz).sort((a,b)=>(rk(a)-rk(b))||((a.at-b.at)||0));const R0=A.findIndex(x=>kk(x)===W.pick);if(R0<0)W.pick='';else if(R0>0)A.unshift(A.splice(R0,1)[0]);const nx=A[0],R=A.slice(1);W.nowId=nx&&nx.k==='t'?nx.id:'';
  /* המשימה הנוכחית נעלמה והופיעה ב"בוצע היום" = סיימו אותה: מסך "בוצע" עם "הבאה ›" (נדחתה / הוסרה – לא) */
  if(W.cur&&!A.some(x=>kk(x)===W.cur)){const d=dn.find(x=>x.k+':'+x.id===W.cur);if(d)W.fin=String(d.txt||'').slice(0,120)||'המשימה'}
  W.cur=nx?kk(nx):'';
@@ -156,10 +157,11 @@ function wkView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=a
   return t};
  const more=`<details class="card" style="padding:10px 14px"><summary style="cursor:pointer;font-weight:700">＋ עוד</summary><div style="display:grid;gap:8px;margin-top:8px"><button class="btn g" data-a="tkwFold">+ משימה חדשה</button><button class="btn g" data-a="tkwRNew">${icd('bell')} תזכורת חדשה</button><button class="btn g" data-a="tkwMorn">${icd('clock')} הודעת בוקר</button>${typeof rqBtn==='function'?rqBtn():''}${typeof window.shBtn==='function'?window.shBtn():''}
   <div class="chips" style="margin:0"><button class="chip" data-a="tkTab" data-v="open">פתוחות</button><button class="chip" data-a="tkTab" data-v="late">באיחור</button><button class="chip" data-a="tkTab" data-v="sum">${icd('chart')} סיכום</button></div>${LN()?'':'<p class="note" style="margin:0">בגרסה הזו של האפליקציה אין התראות בטלפון: התזכורות מופיעות רק כאן, בתוך האפליקציה.</p>'}</div></details>`;
- const allBtn=`<button class="btn g w" data-a="tkwAll" style="margin:4px 0 10px">כל המשימות (${A.length})</button>`;
+ const allBtn=`<button type="button" data-a="tkwAll" style="display:block;width:100%;min-height:44px;margin:2px 0 10px;background:none;border:0;color:var(--mut);font:inherit;text-decoration:underline;cursor:pointer">כל המשימות (${A.length})</button>`;
+ const nextQ=R.length?`<div class="mh"><span>הבאות בתור</span><span>${R.length}</span></div>`+R.slice(0,3).map(x=>`<button type="button" class="opt" data-a="tkwPick" data-v="${esc(kk(x))}" style="margin-bottom:8px;gap:6px;padding:0 12px;min-height:52px;font-size:.98rem;overflow:hidden"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;text-align:start">${esc(x.o.txt||'')}</span>${x.k==='t'?W.wkTags(x.o,tkIsLate(x.o)).replace(/<span class="tag /g,'<span class="tag ').trim():''}<b style="color:var(--mut);white-space:nowrap;font-weight:600;font-size:.8rem">${x.k==='t'?esc(W.dlTx(x.o)):x.at<Infinity?esc(whenTx(x.at)):'בלי יעד'}</b>${ico('chev')}</button>`).join(''):'';
  if(!all1){
   if(W.fin&&nx)h+=`<div class="card" id="tkw-fin" style="border-color:var(--inc);border-width:2px;text-align:center;padding:22px 14px"><div style="font-size:2rem;color:var(--inc)">✓</div><div style="font-weight:700;font-size:1.15rem;margin:6px 0">בוצע</div><div class="note" style="white-space:pre-wrap;margin:0 0 14px">${esc(W.fin)}</div><button class="btn w" data-a="tkwNext" style="min-height:52px;font-size:1.05rem;font-weight:700;background:var(--acc);color:var(--onacc);border-color:var(--acc)">הבאה ›</button></div>`+allBtn;
-  else if(nx){W.fin='';h+=`<div class="mh"><span>המשימה הנוכחית</span></div>`+(nx.k==='t'?nowCard(nx.o):one(nx))+(A.length>1||S.length?allBtn:'')}
+  else if(nx){W.fin='';h+=`<div class="mh"><span>המשימה הנוכחית</span></div>`+(nx.k==='t'?nowCard(nx.o):one(nx))+nextQ+(A.length>1||S.length?allBtn:'')}
   else{W.fin='';h+=`<div class="card" id="tkw-empty" style="text-align:center;padding:26px 14px"><div style="font-size:2rem;color:var(--inc)">✓</div><div style="font-weight:700;font-size:1.15rem;margin-top:6px">${F.q||F.c||F.t?'אין תוצאות לסינון הזה.':'אין משימות כרגע ✓'}</div></div>`+tail()}
   return h+more}
  W.fin='';
@@ -168,6 +170,7 @@ function wkView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=a
   return `<button class="opt" data-a="tkwOpen" data-v="${esc(k)}" style="margin-bottom:8px"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${esc(x.o.txt||'')}</span><b style="color:var(--mut);white-space:nowrap;font-weight:600">${x.at<Infinity?esc(whenTx(x.at)):'בלי יעד'}</b>${ico('chev')}</button>`}).join('');
  return h+tail()+more}
 ACT.tkwAll=()=>{W.wAll=1;W.fin='';rerender();try{window.scrollTo(0,0)}catch(e){}};
+ACT.tkwPick=el=>{W.pick=el.dataset.v||'';W.fin='';rerender();try{window.scrollTo(0,0)}catch(e){}};
 ACT.tkwOne=()=>{W.wAll=0;rerender();try{window.scrollTo(0,0)}catch(e){}};
 ACT.tkwNext=()=>{W.fin='';rerender();try{window.scrollTo(0,0)}catch(e){}};
 /* ---- סבב 4 (18.11.2026): "עבור ואשר (N)" – מעבר ברצף על משימות שממתינות לאישור. לכל משימה התמונות בגדול, "החזר לעובד" (עם הערה, הפעולה הקיימת FRM.tkRej)
@@ -200,18 +203,22 @@ FRM.tkApRej=f=>{const A=W.ap;if(!A)return;const id=f.dataset.id,note=String(fd(f
 ACT.tkwApAll=()=>{const A=W.ap;if(!A)return;const L=A.ids.map(tkGet).filter(t=>t&&t.st==='wait'&&!A.rtn.includes(t.id));W.ap=null;closeDlg();if(!L.length)return;
  tkDo(async()=>{let ok=0,er=null;for(const t of L){try{await tkOkP(t)();ok++}catch(e){er=e}}if(er)throw new Error('אושרו '+ok+' מתוך '+L.length+'. '+tkErr(er));toast('✓ אושרו '+ok+' משימות')},'')};
 /* ---- לוח צוות (מנהל) ---- */
-function teamView(){const S=TKST.L,L=TK.L||[],now=Date.now(),t0=day0(0),m30=now-30*864e5,p=typeof tkPend==='function'?tkPend():{w:0,c:0},q=typeof rqN==='function'?rqN():0,fr=L.filter(t=>t.st==='open'&&tkNew(t)&&!t.ow).length;
+function teamView(){const S=TKST.L,L=TK.L||[],now=Date.now(),t0=day0(0),PD=W.pf||30,m30=now-PD*864e5,p=typeof tkPend==='function'?tkPend():{w:0,c:0},q=typeof rqN==='function'?rqN():0,fr=L.filter(t=>t.st==='open'&&tkNew(t)&&!t.ow).length;
  const op=(a,v,t,n)=>`<button class="opt" data-a="${a}" ${v?`data-v="${v}"`:''}><span>${t}</span><b style="color:${n?'var(--acc)':'var(--mut)'}">${n}</b></button>`;
  let h=`<div class="card"><h3 style="margin:0 0 8px">${icd('bell')} דורש ממני</h3>${op('tkwTab','wait','משימות שממתינות לאישור',p.w)}${op('tkwTab','wait','תגובות חדשות במשימות',p.c)}${op('go','rq','בקשות חדשות מעובדים',q)}${op('tkwTab','open','משימות שאף עובד לא תפס',fr)}${W.apBtn()?'<div style="margin-top:8px">'+W.apBtn()+'</div>':''}</div>`;
  if(!S)return h+`<p class="note">${TKST.busy||!TKST.t?'טוען רשימת עובדים…':'לא ניתן לטעון את רשימת העובדים.'}</p>`;
- const st={};S.forEach(s=>st[s.uid]={s,o:0,l:0,d:0,n30:0,ok30:0,w:0});
+ const st={};S.forEach(s=>st[s.uid]={s,o:0,l:0,d:0,n30:0,ok30:0,w:0,as:0,rt:0});
  const byEm={};S.forEach(s=>{if(s.em)byEm[s.em]=s.uid});
- L.forEach(t=>{if(t.st==='done'||t.st==='wait'){const u=t.ow&&st[t.ow]?t.ow:byEm[String(t.doneBy||'').toLowerCase()];const r=u&&st[u];if(!r)return;if(t.sub>=t0)r.d++;if(t.st==='done'&&t.sub>=m30){r.n30++;if(!tkIsLate(t))r.ok30++}return}
-  const us=t.ow?[t.ow]:tkNew(t)?t.to:[];us.forEach(u=>{const r=st[u];if(!r)return;r.o++;if(tkLateNow(t))r.l++;if(t.sa>0&&t.st==='open'&&t.ow===u)r.w++})});
+ L.forEach(t=>{if(t.st==='done'||t.st==='wait'){const u=t.ow&&st[t.ow]?t.ow:byEm[String(t.doneBy||'').toLowerCase()];const r=u&&st[u];if(!r)return;if(t.cr>=m30)r.as++;if(t.sub>=t0)r.d++;if(t.st==='done'&&t.sub>=m30){r.n30++;if(!tkIsLate(t))r.ok30++}return}
+  const us=t.ow?[t.ow]:tkNew(t)?t.to:[];us.forEach(u=>{const r=st[u];if(!r)return;if(t.cr>=m30)r.as++;if(t.rt==='1')r.rt++;r.o++;if(tkLateNow(t))r.l++;if(t.sa>0&&t.st==='open'&&t.ow===u)r.w++})});
  const rows=Object.values(st).sort((a,b)=>(b.l-a.l)||(b.o-a.o)||a.s.name.localeCompare(b.s.name,'he'));
  const k=(lb,v,c)=>`<div style="flex:1;min-width:60px;text-align:center"><b style="display:block;font-size:1.1rem;${c?'color:'+c:''}">${v}</b><small class="note">${lb}</small></div>`;
- h+=`<div class="mh"><span>העובדים</span><span>${rows.length}</span></div>`+(rows.length?rows.map(r=>`<div class="card" style="padding:10px 12px"><div style="font-weight:700;margin-bottom:6px">${esc(r.s.name)}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('פתוחות',r.o)}${k('באיחור',r.l,r.l?'var(--bad)':'')}${k('בוצעו היום',r.d,r.d?'var(--inc)':'')}${k('בזמן (30 יום)',r.n30?Math.round(r.ok30*100/r.n30)+'%':'–')}${k('בעבודה',r.w,r.w?'var(--acc)':'')}</div></div>`).join(''):'<p class="note">אין עובדים פעילים.</p>');
- return h+'<p class="note">מחושב מהמשימות שנטענו במכשיר. "בזמן" – מתוך המשימות שבוצעו ב-30 הימים האחרונים.</p>'}
+ const S0=gS(),sd=new Date(m30).toISOString().slice(0,10),ln=r=>{const sb=(S0.subs||[]).find(x=>x&&x.pay&&x.pay.uid===r.s.uid)||(S0.subs||[]).find(x=>x&&x.name&&x.name===r.s.name&&(cat(x.cat)||{}).beh==='emp');if(!sb)return '';const nn=(S0.enotes||[]).filter(x=>x&&x.sub===sb.id&&String(x.d||'')>=sd).length,bn=!!(sb.pay&&Array.isArray(sb.pay.comp)&&sb.pay.comp.some(c=>c&&c.k==='tk'));
+  return `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button type="button" class="btn s g" style="min-height:44px" data-a="go" data-v="card" data-arg="${esc(sb.id)}">הערות מנהל: ${nn}</button>${bn?`<button type="button" class="btn s g" style="min-height:44px" data-a="go" data-v="card" data-arg="${esc(sb.id)}">בונוס משימות – בכרטיס העובד</button>`:''}</div>`};
+ h+=`<div class="chips" style="margin:8px 0" role="group" aria-label="תקופת ביצועים">${[7,30,90].map(n=>`<button type="button" class="chip ${n===PD?'on':''}" style="min-height:44px" data-a="tkwPf" data-v="${n}">${n} ימים</button>`).join('')}</div>`;
+ h+=`<div class="mh"><span>העובדים</span><span>${rows.length}</span></div>`+(rows.length?rows.map(r=>`<div class="card" style="padding:10px 12px"><div style="font-weight:700;margin-bottom:6px">${esc(r.s.name)}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('פתוחות',r.o)}${k('באיחור',r.l,r.l?'var(--bad)':'')}${k('בוצעו היום',r.d,r.d?'var(--inc)':'')}${k('בזמן ('+PD+' ימים)',r.n30?Math.round(r.ok30*100/r.n30)+'%':'–')}${k('בעבודה',r.w,r.w?'var(--acc)':'')}</div><div class="note" style="margin:8px 0 2px">ב-${PD} הימים האחרונים</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('הוטלו',r.as)}${k('בוצעו',r.n30)}${k('באיחור',r.n30-r.ok30,r.n30-r.ok30?'var(--st-late)':'')}${k('הוחזרו לתיקון',r.rt)}${k('פתוחות באיחור',r.l,r.l?'var(--st-late)':'')}</div>${ln(r)}</div>`).join(''):'<p class="note">אין עובדים פעילים.</p>');
+ return h+'<p class="note">מחושב מהמשימות שנטענו במכשיר. "בזמן" – מתוך המשימות שבוצעו בתקופה שנבחרה. "הוטלו" – משימות שנכתבו בתקופה. "הוחזרו לתיקון" – משימות שהוחזרו ועדיין לא בוצעו שוב.</p>'}
+ACT.tkwPf=el=>{const v=+el.dataset.v;W.pf=[7,30,90].includes(v)?v:30;rerender()};
 ACT.tkwTab=el=>{TKT=el.dataset.v||'open';rerender()};
 W.view=(tab,card)=>{if(!on())return '';return tab==='team'?(fbAdmin()?teamView():''):myView(card)};
 /* ---- תגיות ופעולות בכרטיס משימה ---- */
@@ -407,7 +414,7 @@ const ckN=x=>{const n=(x.ck||[]).length,s=new Set((x.ckd||[]).filter(i=>i>=0&&i<
 function xTags(x){let s='';if(x.pri==='h')s+=`<span class="tag t4">${icd('warn')} דחוף</span> `;else if(x.pri==='l')s+='<span class="tag" style="color:var(--mut)">נמוכה</span> ';
  if(x.cat)s+=`<span class="tag t2">${esc(x.cat)}</span> `;if(x.est>0)s+=`<span class="tag t1">${icd('clock')} ${esc(estTx(x.est))}</span> `;
  const c=ckN(x);if(c[1])s+=`<span class="tag ${c[0]===c[1]?'t3':'t1'}">☑ ${c[0]}/${c[1]}</span> `;return s}
-W.bar=x=>!on()?'':x.pri==='h'?';border-inline-start:5px solid var(--bad)':x.pri==='l'?';border-inline-start:5px solid var(--mut)':'';
+W.bar=x=>!on()?'':x.pri==='h'?';border-inline-start:5px solid var(--st-urg,var(--bad))':x.pri==='l'?';border-inline-start:5px solid var(--mut)':'';
 const ckCan=x=>rvNew()&&(x.pv?(x.st!=='done'&&(x.owner===SY.uid||fbAdmin())):(x.st==='open'&&(fbAdmin()||x.ow===SY.uid||(!tkNew(x)&&!x.ow))));
 const ckO=new Set(),ckC=new Set();
 W.ckH=x=>{if(!on())return '';const c=ckN(x);if(!c[1])return '';const k=(x.pv?'p':'t'),can=ckCan(x),did=esc(x.id);
@@ -427,7 +434,7 @@ const FX0=()=>({dk:'d3',d:'',tm:'',est:0,pri:'',cat:'',ck:[],more:0});let FX=FX0
 const NOTE72='<p class="note" style="margin:2px 0 8px">3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p>';
 function cats(){const m=new Set();(TK.L||[]).concat(PT.L||[]).forEach(x=>{if(x&&x.cat)m.add(x.cat)});tplL().concat(TPC.L||[]).forEach(t=>{if(t.cat)m.add(String(t.cat).slice(0,30))});return [...m].slice(0,30).sort((a,b)=>a.localeCompare(b,'he'))}
 const fxClean=()=>({cat:String(FX.cat||'').trim().slice(0,30),ck:(FX.ck||[]).map(x=>String(x||'').trim().slice(0,120)).filter(Boolean).slice(0,20)});
-W.fold=tab=>on()&&tab==='my'&&!W.fo;
+W.fold=tab=>on()&&(tab==='my'||(tab==='open'&&fbAdmin()))&&!W.fo;
 ACT.tkwFold=()=>{W.fo=1;rerender();setTimeout(()=>{const t=document.querySelector('form[data-f=tkAdd] textarea');if(t){t.scrollIntoView({block:'center'});t.focus()}},60)};
 W.formX=()=>{if(!on())return '';
  if(!rvNew())return '<p class="note" style="margin:4px 0 2px">יעד לביצוע: '+NOTE72.replace(/^<p[^>]*>|<\/p>$/g,'')+'</p><p class="note" style="margin:0 0 8px">יעד גמיש, עדיפות, נושא ורשימת סימון – יופעל אחרי עדכון השרת.</p>';
@@ -462,7 +469,7 @@ W.fx=()=>{if(!on())return null;const X={msg:'',f:()=>({}),done:id=>{FX=FX0();W.f
  if(!rvNew())return X;
  const now=Date.now();let dl=null;
  const lim=wpLim();
- if(lim){}else if(FX.dk==='td')dl=atDay(0,23,59);else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
+ if(lim){}else if(FX.dk==='td'){dl=atDay(0,23,59);/* 23:59–24:00: "היום" כבר עבר – לא יוצרים משימה שבאיחור מהרגע הראשון */if(dl<=now){X.err='היום כבר נגמר. בחר "מחר" או תאריך ושעה';return X}}else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
  else if(FX.dk==='at'){const dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(FX.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(FX.tm||'');if(!dm||!tm){X.err='בחר תאריך ושעה ליעד';return X}
   dl=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(dl<=now){X.err='היעד שנבחר כבר עבר. בחר זמן עתידי';return X}if(dl>now+399*864e5){X.err='אפשר לקבוע יעד עד שנה קדימה';return X}}
  const c=fxClean();
@@ -500,10 +507,39 @@ ACT.tkwRqTk=el=>{const id=el.dataset.id,x=rqGet(id);if(!x||!rqOk())return;const 
 function rqcBan(){const c=W.rqc;if(!c)return '';
  return `<div class="card" style="margin:6px 0;padding:8px 10px;border-color:var(--acc)"><b>${icd('chat')} משימה מבקשה של ${esc(c.n)}</b><p class="note" style="margin:4px 0 6px">הנמען: ${esc(c.n)}. אחרי יצירת המשימה הבקשה תסומן "בטיפול".</p><button type="button" class="btn g s" data-a="tkwRqX">ביטול</button></div>`}
 ACT.tkwRqX=()=>{const c=W.rqc;W.rqc=null;TKN.sel=null;const f=tkForm();if(f&&c&&f.elements.txt.value===c.txt)f.elements.txt.value='';tkRe()};
+/* ---- חיבורים (22.11.2026): "📋 צור משימה" ממסכים אחרים (חשבונית לתשלום, חוסרים לפי ספק) – טופס "משימה חדשה" הקיים, ממולא מראש
+   (טקסט + יעד מוצע: td היום / tm מחר / at תאריך ושעה). המנהל בוחר עובד ושומר דרך FRM.tkAdd – אין כאן כתיבה. מנהל בלבד, כשתוספת המשימות פעילה ---- */
+W.pfOk=()=>{try{return on()&&fbAdmin()}catch(e){return false}};
+W.prefill=(txt,o)=>{o=o||{};txt=String(txt||'').replace(/\s+/g,' ').trim().slice(0,500);if(!txt||!W.pfOk())return;
+ W.rqc=null;TKN.sel=null;TKN.np=0;TKN.imgs=[];const z=FX0();
+ if(o.dk==='td'||o.dk==='tm')z.dk=o.dk;else if(o.dk==='at'&&/^\d{4}-\d{2}-\d{2}$/.test(o.d||'')){z.dk='at';z.d=o.d;z.tm=/^\d{2}:\d{2}$/.test(o.tm||'')?o.tm:'12:00'}
+ FX=z;closeDlg();TKT='open';W.fo=1;W.d0=1;MGF='';if(cur().v!=='tk')go('tk');else rerender();
+ setTimeout(()=>{const f=tkForm();if(!f)return;if(f.elements.prv&&f.elements.prv.checked){f.elements.prv.checked=false;tkPrvSync()}const ta=f.elements.txt;if(!ta)return;ta.value=txt;f.scrollIntoView({block:'start'});ta.focus()},120)};
+window.tkPrefill=W.prefill;
+/* חשבונית פתוחה לתשלום (חלון "סגירת תשלום" – payDlg): כפתור "📋 צור משימה" מתחת לטופס. יעד מוצע: יום התשלום (dueOf) ב-12:00, ואם הגיע / עבר – היום */
+{const o=typeof payDlg==='function'?payDlg:null;if(o)payDlg=function(id){const r=o.apply(this,arguments);try{const f=document.querySelector('#dlg form[data-f=paysave]');
+ if(f&&W.pfOk()&&!document.getElementById('tkwPfInv'))f.insertAdjacentHTML('afterend',`<button type="button" id="tkwPfInv" class="btn g w" style="margin-top:8px;min-height:44px" data-a="tkwPfInv" data-id="${esc(String(id||''))}">צור משימה לטיפול בחשבונית</button>`)}catch(e){}return r}}
+ACT.tkwPfInv=el=>{let L=[];try{L=S.tx||[]}catch(e){}const t=L.find(x=>x.id===el.dataset.id);if(!t)return;const d=dueOf(t),td=today();
+ W.prefill('לטפל בחשבונית '+subName(t)+' '+ils(bal(t))+(t.inv?' (מס׳ '+t.inv+')':'')+' – יעד '+dfmt(d),d>td?{dk:'at',d,tm:'12:00'}:{dk:'td'})};
+/* מבצע שנשלח לקו (yemot-promo.js): "צור משימות פרסום" – שתי משימות פרטיות למנהל עצמו (ptk, אותה כתיבה כמו משימה פרטית בטופס), יעד היום 23:59.
+   מזהה קבוע לפי היום (שעון ישראל), המבצע (promoKey) ומספר המשימה – לחיצה חוזרת / שליחה חוזרת באותו יום לא יוצרת כפילות (409 = כבר קיימת) */
+const PMT=['לפרסם את המבצע בקבוצות הווצאפ','לוודא שהמבצע עלה בקו'];let pmB=0;
+W.promoOk=W.pfOk;
+W.promoAsk=(key,nm)=>{if(!W.promoOk()||!/^[A-Za-z0-9_-]{1,60}$/.test(String(key||'')))return;nm=String(nm||'').replace(/\s+/g,' ').trim().slice(0,60);
+ dlg(`<h3>✓ המבצע נשלח לקו</h3><p class="note">ליצור לך משימות פרסום להיום${nm?' – "'+esc(nm)+'"':''}?</p><ul class="note" style="margin:0 0 10px;padding-inline-start:18px">${PMT.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul><div class="row"><button type="button" class="btn grow" style="min-height:44px" data-a="tkwPromo" data-k="${esc(key)}" data-n="${esc(nm)}">צור משימות פרסום</button><button type="button" class="btn g grow" style="min-height:44px" data-a="closeDlg">לא עכשיו</button></div>`)};
+ACT.tkwPromo=async el=>{const key=String(el.dataset.k||''),nm=String(el.dataset.n||'');if(pmB||!W.promoOk()||!/^[A-Za-z0-9_-]{1,60}$/.test(key))return;pmB=1;el.disabled=true;
+ const day=ymd(Date.now()).replace(/-/g,''),now=Date.now(),dl=atDay(0,23,59);let mk=0,ex=0,er='';
+ try{for(let i=0;i<PMT.length;i++){const f={owner:sv(SY.uid),by:sv(fbBy()),txt:sv((PMT[i]+(nm?' – '+nm:'')).slice(0,500)),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),sub:iv(0),late:sv('')};
+   if(rvNew()&&dl>now)f.dl=iv(dl);const post=()=>fsx('/ptk?documentId='+encodeURIComponent('ymp'+day+'_'+key+'_'+(i+1)),{method:'POST',body:JSON.stringify({fields:f})});
+   try{try{await post()}catch(e){if(!(e&&e.code===403&&'dl' in f))throw e;rvSet(0);delete f.dl;await post()}mk++}catch(e){if(e&&e.code===409)ex++;else{er=tkErr(e);break}}}}
+ finally{pmB=0}
+ closeDlg();toast(er?(mk?'נוצרו '+mk+' משימות. ':'')+er:mk?'✓ נוצרו '+mk+' משימות פרסום (פרטיות, יעד היום)'+(ex?' · '+ex+' כבר היו קיימות':''):'משימות הפרסום של המבצע הזה כבר נוצרו היום');
+ if(mk){try{await tkLoad()}catch(e){}if(cur().v==='tk')rerender()}};
 function rqcDone(id){const c=W.rqc;if(!id||!c)return;W.rqc=null;const x=rqGet(c.id);
  docPatch('rq',c.id,{ph:'w',tk:String(id)}).then(()=>{if(x){x.ph='w';x.tk=String(id)}}).catch(()=>toast('המשימה נוצרה, אבל סימון הבקשה "בטיפול" נכשל'))}
 /* ---- יציאה מהחשבון: ביטול ההתראות המקומיות ומחיקת המפתחות של המשתמש מהמכשיר (טלפון משותף). לא זורק שגיאות ---- */
 W.out=u=>{const k=x=>LK(x+'-'+(u||''));clearTimeout(sT);
+ try{if(typeof window.__secNfOut==='function')window.__secNfOut(u)}catch(e){}/* התראות מהטלפון (sec-notif.js): כיבוי הקליטה ומחיקת lp-ntf-* של המשתמש */
  try{const P=LN();if(P){const ids=rd(k('lp-ln-ids'),[]);if(Array.isArray(ids)&&ids.length)Promise.resolve(P.cancel({notifications:ids.map(id=>({id}))})).catch(()=>{});
   Promise.resolve(P.getPending()).then(r=>{const a=((r&&r.notifications)||[]).filter(n=>n&&n.extra&&n.extra.lp==='wc').map(n=>({id:n.id}));if(a.length)return P.cancel({notifications:a})}).catch(()=>{})}}catch(e){}
  natRem().then(G=>{if(G)return G.remSync({p:'wc|',n:[],keep:[],q:true})}).catch(()=>{});
@@ -555,5 +591,80 @@ CHG.tkSndOn=async el=>{const uid=el.dataset.uid,u=(SNDS.L||[]).find(x=>x.uid===u
 {const o=V.tk;if(typeof o==='function')V.tk=function(){const r=o.apply(this,arguments);
  try{if(on()&&fbAdmin()&&r&&typeof r.h==='string'){const m='<button class="btn g w" data-a="tkRefresh"';
   if(r.h.includes(m))r.h=r.h.replace(m,()=>`<button class="opt" data-a="go" data-v="tkSnd" style="margin-top:8px"><span>${icd('user')} מי שולח משימות לעובדים<small>מתג לכל עובד: מי יכול לשלוח משימות לעובדים אחרים</small></span></button>`+m)}}catch(e){}return r}}
+/* ---- לוח מנהל (לשונית "פתוחות"): מונים לחיצים, סטטוס אחיד בכרטיס, פעולות מהירות ---- */
+/* הגדרות אחידות: באיחור = פתוחה והיעד עבר; ממתין לאישור = st wait; היום = יעד היום (ולא באיחור); דחוף = pri h פתוחה; בהמשך = שאר הפתוחות.
+   "לא טופלו" = באיחור + ממתין לאישור יותר מ-24 שעות. מיון: באיחור ← ממתין ← דחוף ← היום ← בהמשך */
+let MGF='';
+const STK=x=>x.st==='done'?'done':x.st==='wait'?'wait':Date.now()>tkDl(x)?'late':'open';
+const mgCat=(x,now,t1)=>{const o={late:0,wait:0,today:0,urg:0,later:0,stale:0};
+ if(x.st==='wait'){o.wait=1;if(now-(x.sub||x.cr||now)>864e5)o.stale=1;return o}
+ if(x.st!=='open')return o;
+ const dl=tkDl(x);if(now>dl){o.late=1;o.stale=1}else if(dl<t1)o.today=1;
+ if(x.pri==='h')o.urg=1;if(!o.late&&!o.today&&!o.urg)o.later=1;return o};
+const mgRank=c=>c.late?0:c.wait?1:c.urg?2:c.today?3:4;
+W.mgBar=L=>{if(!on()||!fbAdmin())return '';const now=Date.now(),t1=day0(1),n={today:0,urg:0,late:0,wait:0,later:0,stale:0};
+ L.forEach(x=>{const c=mgCat(x,now,t1);for(const k in n)n[k]+=c[k]});
+ const K=[['today','היום','var(--acc)'],['urg','דחוף','var(--st-urg)'],['late','באיחור','var(--st-late)'],['wait','ממתין לאישור','var(--st-wait)'],['later','בהמשך',''],['stale','לא טופלו','var(--st-late)']];
+ return `<div class="tkmg" role="group" aria-label="סינון מהיר">${K.map(k=>`<button type="button" class="tkm ${MGF===k[0]?'on':''} ${n[k[0]]?'':'z'}" data-a="tkwMg" data-v="${k[0]}" aria-pressed="${MGF===k[0]}" style="${k[2]&&n[k[0]]?'--mc:'+k[2]:''}"><b>${n[k[0]]}</b><span>${k[1]}</span></button>`).join('')}</div>`+(MGF?`<p class="note" style="margin:-4px 0 8px">מסונן: ${esc(K.find(k=>k[0]===MGF)[1])} · <a href="#" data-a="tkwMg" data-v="${esc(MGF)}">הצג הכל</a></p>`:'')};
+W.mg=L=>{if(!on()||!fbAdmin())return L;const now=Date.now(),t1=day0(1),A=L.map(x=>({x,c:mgCat(x,now,t1)})).filter(a=>!MGF||a.c[MGF]);
+ A.sort((a,b)=>(mgRank(a.c)-mgRank(b.c))||((tkDl(a.x)-tkDl(b.x))||0));return A.map(a=>a.x)};
+ACT.tkwMg=el=>{const v=el.dataset.v;MGF=MGF===v?'':v;rerender()};
+/* יעד קריא: "היום 18:00" / "מחר 09:00" / "באיחור 2 ימים" */
+const lateTx=t=>{const d=Math.floor((Date.now()-tkDl(t))/864e5);return d>=2?'באיחור '+d+' ימים':d===1?'באיחור יום':'באיחור'};
+W.dlTx=t=>{const dl=tkDl(t);if(!(dl<Infinity))return 'בלי יעד';return t.st==='open'&&Date.now()>dl?lateTx(t)+' ('+whenTx(dl)+')':whenTx(dl)};
+W.stTag=(t,wl)=>{if(!on())return '';const k=STK(t);
+ return k==='late'?`<span class="tag tk-late">${lateTx(t)}</span> `:k==='wait'?`<span class="tag tk-wait">${esc(wl||'ממתין לאישור')}</span> `:k==='done'?`<span class="tag tk-done">בוצע</span>${tkIsLate(t)?' <span class="tag tk-late">באיחור</span>':''} `:'<span class="tag tk-open">פתוחה</span> '};
+/* כפתור ראשי אחד לפי מצב + תפריט "⋯" (משתמש בפעולות הקיימות: tkOk, tkDone, tkRej, tkMv, tkUnclaim, tkCm, tkwNd, tkReq, tkPics, tkImg, tkDel) */
+W.mgAct=(t,cn)=>{if(!on()||!fbAdmin())return null;const did=esc(t.id),nw=Array.isArray(t.to)&&t.to.length>0;let a='';
+ if(t.st==='wait'){if(t.pr==='1')a+=`<button class="btn g" data-a="tkImg" data-id="${did}">הצג תמונה</button>`;a+=`<button class="btn" data-a="tkOk" data-id="${did}">✓ אשר</button>`}
+ else if(t.st==='open')a+=`<button class="btn" data-a="tkDone" data-id="${did}">✓ בוצע</button>`;
+ return a+`<button class="btn g" data-a="tkwMenu" data-id="${did}" aria-label="עוד פעולות">⋯${cn?' <span class="tag tk-wait" style="margin:0 4px">הערה חדשה</span>':''}</button>`};
+ACT.tkwMenu=el=>{const t=tkGet(el.dataset.id);if(!t)return;const did=esc(t.id),nw=Array.isArray(t.to)&&t.to.length>0,B=(go,tx)=>`<button class="btn g" data-a="tkwMi" data-go="${go}" data-id="${did}">${tx}</button>`;let m='';
+ if(t.st==='wait')m+=B('tkRej',t.pr==='1'?'דחה':'החזר לעובד');
+ if(t.st!=='done'){if(nw)m+=B('tkMv','העבר לעובד…');if(nw&&t.ow)m+=B('tkUnclaim','בטל תפיסה');if(rvNew())m+=B('tkwDl','שנה תאריך יעד')}
+ m+=B('tkCm',icd('chat')+' הערה / תגובות');
+ if(t.st==='open'&&nw)m+=B('tkwNd',icd('bell')+' תזכורת לעובד');
+ if(t.st==='open'&&t.pr!=='1'&&!(t.np>0))m+=B('tkReq',icd('cam')+' בקש תמונה');
+ if(t.st==='done'&&t.pr==='1')m+=B('tkImg','הצג תמונה');
+ if(nw&&(t.mi>0||t.wp>0))m+=B('tkPics',icd('img')+' תמונות');
+ m+=B('tkDel',icd('trash')+' מחק');
+ dlg(`<h3>פעולות במשימה</h3><p class="note" style="white-space:pre-wrap">${esc(String(t.txt||'').slice(0,100))}</p><div class="tkmenu">${m}<button class="btn g" data-a="closeDlg">סגור</button></div>`)};
+ACT.tkwMi=el=>{const f=ACT[el.dataset.go];closeDlg();if(typeof f==='function')f(el)};
+/* שינוי יעד: dl בלבד (המנהל רשאי לעדכן משימה בחוקים; due לא משתנה). רק כשהכללים החדשים פורסמו (rvNew) – בכללים הישנים "late" מחושב לפי due, ו-dl שונה היה חוסם את "בוצע" של העובד */
+const dlOk=()=>{if(rvNew())return true;toast('שינוי תאריך יעד יופעל אחרי עדכון השרת');return false};
+ACT.tkwDl=el=>{const t=tkGet(el.dataset.id);if(!t||!fbAdmin()||!dlOk())return;const did=esc(t.id),B=(v,tx)=>`<button class="btn g" data-a="tkwDlGo" data-id="${did}" data-v="${v}">${tx}<small style="display:block;opacity:.7">${v>0?esc(whenTx(v)):''}</small></button>`,at=Date.now()+H;
+ dlg(`<h3>${icd('clock')} שינוי תאריך יעד</h3><p class="note">היעד הנוכחי: ${esc(W.dlTx(t))}</p><div class="tkmenu">${B(atDay(0,23,59),'היום 23:59')}${B(atDay(1,18,0),'מחר 18:00')}${B(atDay(3,18,0),'בעוד 3 ימים')}${B(0,'בלי יעד')}</div>
+ <form data-f="tkwDl" data-id="${did}" style="margin-top:10px"><div class="row" style="gap:8px"><label class="f grow"><span>תאריך</span><input type="date" name="d" value="${ymd(at)}" required></label><label class="f grow"><span>שעה</span><input type="time" name="tm" value="${hhmm(at)}" required></label></div><div class="row"><button class="btn grow">עדכן יעד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.tkwDlGo=el=>{const id=el.dataset.id,v=Math.max(0,+el.dataset.v||0);closeDlg();if(!fbAdmin()||!dlOk())return;tkDo(()=>tkPatch(id,{dl:v}),'✓ היעד עודכן: '+(v?whenTx(v):'בלי יעד'))};
+FRM.tkwDl=f=>{if(!fbAdmin()||!dlOk()){closeDlg();return}const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(x.tm||'');if(!dm||!tm)return toast('בחר תאריך ושעה');
+ const at=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(at<Date.now()-MIN)return toast('הזמן שנבחר כבר עבר');if(at>Date.now()+365*864e5)return toast('אפשר עד שנה קדימה');
+ const id=f.dataset.id;closeDlg();tkDo(()=>tkPatch(id,{dl:at}),'✓ היעד עודכן: '+whenTx(at))};
+/* ---- בית המנהל: כרטיס "מה דורש טיפול היום" (בראש הבית). רק מה שכבר בזיכרון: TK (משימות, מתרענן לכל היותר פעם ב-3 דקות), RQ (בקשות), חשבוניות מ-S. שורה עם 0 מוסתרת; הכול 0 ← "✓ אין דברים פתוחים". בלי שינוי נתונים ובלי קריאות רשת חדשות מעבר לרענון הקיים (tkLoad / rqLoad) ---- */
+{const h0=V.home;let hat=0;
+ ACT.hmTk=el=>{const v=el.dataset.v;TKT=['late','wait','open'].includes(v)?v:'open';MGF='';W.d0=1;if(cur().v!=='tk')go('tk');else rerender()};
+ ACT.hmTkNew=()=>{TKT='open';W.fo=1;W.d0=1;MGF='';if(cur().v!=='tk')go('tk');else rerender();setTimeout(()=>{const t=document.querySelector('form[data-f=tkAdd] textarea');if(t){t.scrollIntoView({block:'center'});t.focus()}},120)};
+ const homeCard=r0=>{const rows=[],opt=(a,v,t,n,c)=>n>0?`<button type="button" class="k" style="min-height:64px;text-align:start;border-inline-start:3px solid ${c||'var(--acc)'}" data-a="${a}"${v?` data-v="${v}"`:''}><b style="color:${c||'var(--acc)'};font-size:1.25rem">${n}</b><small style="display:block;white-space:normal">${t}</small></button>`:'';
+  let pend=false;const tk=on()&&fbAdmin();
+  if(tk){const L=TK.L||[],now=Date.now(),t0=day0(0),t1=day0(1);let late=0,wait=0,open=0,rc=0;
+   L.forEach(x=>{const c=mgCat(x,now,t1);if(c.late)late++;else if(c.wait)wait++;else if(x.st==='open')open++;if(x.rc&&x.st==='open'){const d=tkDl(x);if(d>=t0&&d<t1)rc++}});
+   if(!TK.at)pend=true;
+   rows.push(opt('hmTk','late','משימות באיחור',late,'var(--st-late)'),opt('hmTk','wait','משימות שממתינות לאישור',wait,'var(--st-wait)'),opt('hmTk','open','משימות פתוחות',open,'var(--st-open)'));
+   const rq=typeof rqN==='function'?rqN():0;rows.push(opt('go','rq','בקשות עובדים שממתינות',rq));
+   rows.push(opt('hmTk','open','שגרה יומית שטרם בוצעה (יעד היום)',rc,'var(--st-wait)'))}
+  try{const m=HM,D=dueStats(m),td=today(),E=brFil(),late=inv().filter(t=>inBr(t,E)&&isLate(t,td));
+   rows.push(opt('hcLate','','חשבוניות באיחור לתשלום',late.length,'var(--st-late)'),opt('hcDue','','חשבוניות לתשלום ב'+mfmt(m),D.open.length,'var(--st-open)'))}catch(e){}
+  const any=rows.some(Boolean),sc=[];
+  if(tk)sc.push('<button type="button" class="chip" style="min-height:44px" data-a="hmTkNew">＋ משימה חדשה</button>');
+  if(/id="secHome"/.test(r0)&&typeof ACT.secOpen==='function')sc.push('<button type="button" class="chip" style="min-height:44px" data-a="secOpen">המזכירה</button>');
+  if(bzF('scan'))sc.push('<button type="button" class="chip" style="min-height:44px" data-a="go" data-v="scan">סריקת חשבונית</button>');
+  return `<div class="card" id="hmTodo" style="margin:0 0 10px"><h3 style="margin:0 0 8px">${icd('bell')} דורש טיפול</h3>${any?`<div class="kg" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${rows.join('')}</div>`:pend?'<p class="note" style="margin:0">טוען…</p>':'<p class="note" style="margin:0;color:var(--st-done)">✓ אין דברים פתוחים</p>'}${sc.length?`<div class="chips" style="margin:8px 0 0">${sc.join('')}</div>`:''}</div>`};
+ /* סוף ה-div שמתחיל ב-st (ספירת פתיחות/סגירות של div); -1 אם לא נמצא */
+ const afterDiv=(h,st)=>{if(st<0)return -1;const re=/<div\b|<\/div>/g;re.lastIndex=st;let d=0,m;while((m=re.exec(h))){d+=m[0]==='</div>'?-1:1;if(!d)return re.lastIndex}return -1};
+ if(typeof h0==='function')V.home=function(){const r=h0.apply(this,arguments);
+  try{if(!r||typeof r.h!=='string'||!(typeof isA==='function'&&isA())||isW())return r;
+   const now=Date.now();if(on()&&fbAdmin()&&now-hat>18e4&&(!TK.at||now-TK.at>18e4)){hat=now;Promise.resolve(tkLoad()).then(()=>{if(cur().v==='home')rerender()}).catch(()=>{})}
+   if(on()&&typeof rqLoad==='function'&&!RQ.b&&now-RQ.at>18e4)rqLoad();
+   /* 22.11.2026 (בקשת בעל הפרויקט): הכרטיס מתחת לנתוני העסק (הכנסות/הוצאות/רווח ואריחי התשלום), לא מעליהם */
+   const c=homeCard(r.h),i=r.h.indexOf('id="hcards"'),at0=i<0?-1:afterDiv(r.h,r.h.lastIndexOf('<div',i)),bm=at0<0?null:/^\s*<button class="ban" id="recBan"[\s\S]*?<\/button>/.exec(r.h.slice(at0)),at=bm?at0+bm[0].length:at0;/* שורת ההתאמות (recBan) נשארת ישר מתחת לאריחים */r.h=at<0?r.h+c:r.h.slice(0,at)+c+r.h.slice(at)}catch(e){}return r}}
 window.TKW=W;
 })();
