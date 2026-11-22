@@ -11,7 +11,7 @@ if(typeof ACT==='undefined'||typeof S==='undefined')return;
 let K='lp-acard';try{K=LK('lp-acard')}catch(e){}
 const done=()=>{try{const a=JSON.parse(localStorage.getItem(K)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}};
 const mark=L=>{try{localStorage.setItem(K,JSON.stringify(L.slice(-500)))}catch(e){}};
-const ok=()=>{try{return!!window.PayUI&&PayUI.on()&&!SY.sa&&bzB()&&typeof admStaffOk==='function'&&admStaffOk()}catch(e){return false}};
+const ok=()=>{try{return!!window.PayUI&&PayUI.on()&&!SY.sa&&bzB()&&!(typeof bzSus==="function"&&bzSus())&&typeof admStaffOk==='function'&&admStaffOk()}catch(e){return false}};
 const nm=u=>String(u.name||String(u.email||'').split('@')[0]||'').trim().slice(0,60);
 function run(){if(!ok()||typeof ADM==='undefined'||!Array.isArray(ADM.staff))return;
  const C=(S.cats||[]).filter(c=>c&&c.beh==='emp'&&!c.off);if(!C.length)return;
