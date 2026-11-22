@@ -3172,7 +3172,8 @@ const shNat=()=>{const C=window.Capacitor;return C&&C.isNativePlatform&&C.isNati
 const shB64=u=>{let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(s)};
 const shFile=k=>'LargePami_'+(k==='imp'?'import':k)+'_'+stamp()+'.pdf';
 ACT.shPrint=async el=>{const k=el.dataset.k;toast('מכין להדפסה…');try{const pdf=await shDoc(k),C=shNat();if(C&&C.Plugins.PdfPrint){await C.Plugins.PdfPrint.print({name:shName(k),data:shB64(pdf)})}else{window.open(URL.createObjectURL(new Blob([pdf],{type:'application/pdf'})),'_blank')}}catch(e){toast('ההדפסה נכשלה: '+(e&&e.message||e))}};
-ACT.shPdf=async el=>{const k=el.dataset.k;toast('מכין PDF…');try{await saveFile(shFile(k),await shDoc(k),'application/pdf')}catch(e){toast('יצירת ה-PDF נכשלה: '+(e&&e.message||e))}};
+ACT.shPdf=async el=>{const k=el.dataset.k;toast('מכין PDF…');try{const pdf=await shDoc(k),C=shNat(),f=shFile(k);
+ if(C&&C.Plugins.Filesystem&&C.Plugins.Share){const r=await C.Plugins.Filesystem.writeFile({path:f,data:shB64(pdf),directory:'CACHE'});try{await C.Plugins.Share.share({title:f,url:r.uri,dialogTitle:'שליחת ה-PDF'})}catch(e){if(!/cancel/i.test(String(e&&(e.message||e))))throw e}}else await saveFile(f,pdf,'application/pdf')}catch(e){toast('יצירת ה-PDF נכשלה: '+(e&&e.message||e))}}; // 22.11.2026: "PDF" = שליחה/שיתוף; "הורד" = שמירה במכשיר
 ACT.shDev=async el=>{const k=el.dataset.k;toast('מכין קובץ…');try{const pdf=await shDoc(k),C=shNat();if(C&&C.Plugins.SaveFile){await C.Plugins.SaveFile.save({filename:shFile(k),mime:'application/pdf',data:shB64(pdf)});toast('✓ נשמר במכשיר')}else await saveFile(shFile(k),pdf,'application/pdf')}catch(e){const m=String(e&&(e.message||e));toast(/cancel/i.test(m)?'השמירה בוטלה':'השמירה נכשלה: '+m)}};
 /* ---- התראה לפני מחיקת הדף ---- */
 let SHW=null;
