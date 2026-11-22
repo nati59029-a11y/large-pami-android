@@ -147,6 +147,8 @@ $('f').addEventListener('submit',function(ev){ev.preventDefault();
     if(a.trim()===b.trim())hint=' – באחת מהן יש רווח בהתחלה או בסוף';
     else if(a.toLowerCase()===b.toLowerCase())hint=' – יש הבדל באותיות גדולות/קטנות (Shift)';
     else if(/[\u0590-\u05FF]/.test(a+b))hint=' – באחת מהן הוקלדו אותיות בעברית';
+    else if(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/.test(a+b))hint=' – המקלדת הוסיפה סימן נסתר באחד השדות. מחקו את השדה והקלידו שוב';
+    else if(a.length!==b.length)hint=' – בשדה הראשון '+a.length+' תווים ובשני '+b.length;
     return msg('שתי הסיסמאות לא זהות'+hint+'. אפשר ללחוץ על העין כדי לראות מה הוקלד.','err');
   }
   $('go').disabled=true;msg('שומר…');
