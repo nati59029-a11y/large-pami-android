@@ -806,3 +806,76 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     await assertFails(env.authenticatedContext(MGR).firestore().doc(`b/${A}/cxHrs/${id}`).get());
   });
 });
+
+describe('רובוט כספית – סבב 2: התראת איחור משעות כספית, ותקלות שעות בהתראות', () => {
+  const at = (day, hm) => { const [y, m, d] = day.split('-').map(Number); const [H, M] = hm.split(':').map(Number); return TK.zoned(y, m - 1, d, H, M); };
+  const M = '2026-12';
+  let br = 0;
+  // כל העלאה – סניף אחר (בלי מגבלת הקצב של סניף+חודש)
+  const up = (emps, now, tok) => bot(tok || TOK, { op: 'upload', ver: '0.1.14', run: rid('cl'), kind: 'hours', br: 'סניף ' + (br++), m: M, emps }, { o: { now } });
+  const sent = async (biz, day) => { const s = await adm().doc(`b/${biz}/shfsent/${day}`).get(); return (s.exists && s.get('late')) || {}; };
+  const late = () => PUSH.filter((x) => /^lt/.test(x.id));
+  before(async () => {
+    await adm().doc(`b/${A}/private/cxbot`).set({ hr: null }, { merge: true });
+    await adm().doc(`b/${A}/shfcfg/map`).set({ m: { 'דנה  כהן': E1 } }); // רווח כפול – ההתאמה מנרמלת
+    for (const [id, d] of [['LT1', '2026-12-08'], ['LT2', '2026-12-09'], ['LT3', '2026-12-12']]) await adm().doc(`b/${A}/shf/${id}`).set({ d, s: '08:00', e: '14:00', u: E1, nm: E1, fx: false });
+    await adm().doc(`b/${B}/shfcfg/map`).set({ m: { 'יוסי לוי': MB } });
+    await adm().doc(`b/${B}/shf/LB1`).set({ d: '2026-12-10', s: '08:00', e: '14:00', u: MB, nm: MB, fx: false });
+  });
+
+  it('איחור של 6 דקות → התראה אחת למנהל; העלאה נוספת באותו יום (גם מסניף אחר) → אין התראה נוספת; בלי שם ביומן / ב-private', async () => {
+    PUSH.length = 0;
+    const D = '2026-12-08';
+    let r = await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: D, i: '08:06', o: '', b: 0 }] }], at(D, '09:00'));
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.equal(late().length, 1, JSON.stringify(PUSH));
+    assert.equal(late()[0].k, 'sh'); assert.match(late()[0].body, /08:06/); assert.match(late()[0].body, /08:00/); assert.match(late()[0].body, /6 דקות/);
+    assert.ok((await sent(A, D))[E1], 'נרשם ב-shfsent.late');
+    r = await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: D, i: '08:06', o: '', b: 0 }] }], at(D, '09:30'));
+    assert.equal(r.code, 200);
+    r = await up([{ id: '777', nm: 'דנה כהן', rows: [{ d: D, i: '08:20', o: '', b: 0 }] }], at(D, '10:00'));
+    assert.equal(r.code, 200);
+    assert.equal(late().length, 1, 'פעם אחת לעובד ליום');
+    assert.ok(!JSON.stringify(await dev()).includes('דנה'));
+  });
+
+  it('איחור של 4 דקות → אין; עובד לא ממופה → אין; החודש הקודם / יום בלי משמרת → אין', async () => {
+    PUSH.length = 0;
+    const D = '2026-12-09';
+    assert.equal((await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: D, i: '08:04', o: '', b: 0 }] }], at(D, '09:00'))).code, 200);
+    assert.equal((await up([{ id: '502', nm: 'מישהו אחר', rows: [{ d: D, i: '09:30', o: '', b: 0 }] }], at(D, '10:00'))).code, 200);
+    assert.equal(late().length, 0);
+    assert.deepEqual(await sent(A, D), {});
+    // יום בלי משמרת לעובד
+    assert.equal((await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: '2026-12-11', i: '10:00', o: '', b: 0 }] }], at('2026-12-11', '10:30'))).code, 200);
+    assert.equal(late().length, 0);
+  });
+
+  it('עסק אחר מבודד: מיפוי ומשמרת בעסק B לא מתריעים על העלאה של עסק A', async () => {
+    PUSH.length = 0;
+    const D = '2026-12-10';
+    assert.equal((await up([{ id: '601', nm: 'יוסי לוי', rows: [{ d: D, i: '08:30', o: '', b: 0 }] }], at(D, '09:00'))).code, 200);
+    assert.equal(late().length, 0);
+    assert.deepEqual(await sent(A, D), {}); assert.deepEqual(await sent(B, D), {});
+  });
+
+  it('שבת → אין התראה', async () => {
+    PUSH.length = 0;
+    const D = '2026-12-12';
+    assert.equal((await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: D, i: '08:30', o: '', b: 0 }] }], at(D, '09:00'))).code, 200);
+    assert.equal(late().length, 0);
+    assert.deepEqual(await sent(A, D), {});
+  });
+
+  it('תקלות שעות (hours-*) בדיווח הריצה → התראה למנהל בעברית, פעם ביום', async () => {
+    const T1 = at('2026-12-14', '11:00');
+    await adm().doc(`b/${A}/private/cxbot.watch`).delete();
+    await adm().doc(`b/${A}/private/cxbot`).set({ sd: '2026-12-13', lr: { id: 'rh', at: T1 - 3600e3, st: 'fail', code: 'hours-branch', msg: '', step: 'hours' } }, { merge: true });
+    PUSH.length = 0;
+    assert.ok((await BOT.runWatch({ now: T1, send }))[A].includes('hours-branch')); // pd – שארית מבדיקה קודמת, לא רלוונטי
+    assert.match(PUSH.find((x) => x.id === 'hours-branch').body, /נחל לכיש/);
+    assert.ok(!(await BOT.runWatch({ now: T1 + 3600e3, send }))[A].includes('hours-branch'), 'פעם ביום');
+    for (const c of ['hours-format', 'hours-list', 'hours-month', 'hours-branch', 'hours-fail']) assert.ok(typeof BOT.MSG[c] === 'string' && /[א-ת]/.test(BOT.MSG[c]), c);
+    await adm().doc(`b/${A}/private/cxbot`).set({ lr: null }, { merge: true });
+  });
+});

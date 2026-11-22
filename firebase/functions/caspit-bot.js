@@ -29,9 +29,9 @@
 //   שעות העובדים (22.11, תוסף 0.1.14): upload עם kind:'hours' – { run?, br (שם הסניף בכספית), m 'YYYY-MM' (החודש הנוכחי או הקודם, שעון ישראל),
 //          emps:[{ id (מזהה העובד בכספית – ספרות), nm (שם העובד בכספית, עד 60), rows:[{ d YYYY-MM-DD, i HH:MM, o HH:MM|'', b דקות הפסקה, t? סה"כ בדקות, n? 1 = חוצה חצות }] }] }.
 //          אימות קפדני (שדות, טיפוסים, גבולות: עד 300 עובדים, 200 שורות לעובד, 10,000 בהעלאה). נשמר לכל עסק: cxHrs/{m}_{bk}_{id} (bk = 8 תווי sha של שם הסניף)
-//          { m, br, bk, e, nm, rows, n, at, run } – כל העלאה מחליפה את המסמך של אותו סניף+חודש+עובד (עובדים אחרים לא נמחקים). בלי התראות.
+//          { m, br, bk, e, nm, rows, n, at, run } – כל העלאה מחליפה את המסמך של אותו סניף+חודש+עובד (עובדים אחרים לא נמחקים). סבב 2: אחרי השמירה – התראת איחור למנהל (shifts.js cxLate).
 //          קצב: עד 120 העלאות שעות ביום לעסק, ולכל סניף+חודש לכל היותר פעם בדקה (hr ב-private/cxbot). poll מחזיר caps:[…, 'hours'].
-//          קריאה: cxBotTok({ op:'hours', m }) – מנהל בלבד (mgrW) → { m, list:[{ br, e, nm, rows, n, at }] } (לתצוגה בסבב הבא; התאמה לפי שם – shfcfg/map).
+//          קריאה: cxBotTok({ op:'hours', m }) – מנהל בלבד (mgrW) → { m, list:[{ br, e, nm, rows, n, at }] } (מסך "שעות עובדים" באפליקציה, cx-hours.js; התאמה לפי שם – shfcfg/map).
 // פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים (גם בלי שמות עובדים ושעות).
 
 const crypto = require('node:crypto');
@@ -76,7 +76,8 @@ const TODAY_GAP = 20 * 60e3; // לכל היותר העלאה חלקית אחת �
 const HRS = { emps: 300, rows: 200, all: 10000, day: 120, gap: 60e3, read: 1000 };
 const MON_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const reqLive = (q, now) => !!(q && typeof q.id === 'string' && !q.took && now - (q.at || 0) < REQ_MS);
-const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty'];
+const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty',
+  'hours-format', 'hours-list', 'hours-month', 'hours-branch', 'hours-fail']; // סבב 2 (22.11): תקלות בשעות העובדים (תוסף 0.1.14) – התראה למנהל
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
 const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason });
@@ -307,9 +308,9 @@ const OPF = {
     O.onlyKeys(b, []);
     return { schedule: SCHED, lastSales: x.dev.sd || null, limits: limitsOf(await cfgNow()) };
   },
-  async upload(w, b, x) {
+  async upload(w, b, x, o) {
     const kind = b.kind == null ? 'cat' : b.kind;
-    if (kind === 'hours') return uploadHours(w, b, x);
+    if (kind === 'hours') return uploadHours(w, b, x, o);
     if (kind === 'sales' && b.partial !== undefined) return uploadToday(w, b, x);
     if (kind === 'sales') {
       O.onlyKeys(b, ['run', 'kind', 'day', 'part', 'parts', 'lines']);
@@ -419,7 +420,7 @@ function hrsRow(r, m) {
   if (r.n !== undefined && (r.n !== 1 || r.o === '')) throw bad('bad-row', 'סימון חצות לא תקין');
   return Object.assign({ d: r.d, i: r.i, o: r.o, b: r.b }, r.t !== undefined ? { t: r.t } : {}, r.n === 1 ? { n: 1 } : {});
 }
-async function uploadHours(w, b, x) {
+async function uploadHours(w, b, x, o) {
   O.onlyKeys(b, ['run', 'kind', 'br', 'm', 'emps']);
   if (b.run !== undefined && (typeof b.run !== 'string' || !SRUN_RE.test(b.run))) throw bad('bad-run', 'מזהה לא תקין');
   if (typeof b.br !== 'string' || !b.br.trim() || b.br.length > 40 || ctl.test(b.br) || b.br.includes('/')) throw bad('bad-br', 'סניף לא תקין');
@@ -457,6 +458,8 @@ async function uploadHours(w, b, x) {
   for (const e of emps) bt.set(db.doc(`cxHrs/${b.m}_${bk}_${e.id}`), { m: b.m, br, bk, e: e.id, nm: e.nm, rows: e.rows, n: e.rows.length, at: x.now, run: b.run || '' });
   await bt.commit();
   await ref.set({ hrl: { at: x.now, m: b.m, bk, n: emps.length, rows: total } }, { merge: true }); // ההעלאה האחרונה (מספרים בלבד)
+  // סבב 2: התראת איחור למנהל (shifts.js cxLate – עובד ממופה עם משמרת היום, פעם ביום). כישלון כאן לא מפיל את ההעלאה
+  try { await require('./shifts')._core.cxLate(emps, b.m, Object.assign({}, o, { now: x.now })); } catch (e) { logger.warn('cxBot: late check failed', { biz: w.bizId, name: e && e.name, code: e && e.code }); }
   return { n: emps.length, rows: total };
 }
 async function reportRun(w, b, x, o) {
@@ -593,6 +596,11 @@ const MSG = {
   updfail: 'העדכון האוטומטי של התוסף במחשב החנות נכשל כמה פעמים ברצף. הסנכרון ממשיך בגרסה הנוכחית – פרטים באפליקציה, בכרטיס "רובוט".',
   updstale: 'העדכון האוטומטי של התוסף במחשב החנות לא רץ כבר יומיים (המשימה המתוזמנת ב-Windows הופסקה או נמחקה?). פרטים באפליקציה, בכרטיס "רובוט".',
   updlag: 'גרסה חדשה של התוסף הורדה למחשב החנות אבל לא נטענה. כדאי לסגור ולפתוח את Chrome במחשב (או ללחוץ ⟳ ב-chrome://extensions).',
+  'hours-format': 'קובץ השעות שירד מכספית לא נראה כמו שציפינו, ולכן שעות העובדים לא עודכנו. הסנכרון של השאר ממשיך – פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-list': 'הרובוט לא הצליח לקרוא את רשימת העובדים בכספית, ולכן שעות העובדים לא עודכנו. פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-month': 'הרובוט לא הצליח לבחור בכספית את החודש הקודם, ולכן השעות של החודש הקודם לא עודכנו. פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-branch': 'שעות העובדים של סניף נחל לכיש לא עודכנו (יהודה הנשיא עודכן). פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-fail': 'עדכון שעות העובדים מכספית נכשל. הסנכרון של השאר ממשיך – פרטים באפליקציה, בכרטיס "רובוט".',
   pd: (n) => `${n} שינויים שנשלחו לכספית עדיין לא נקלטו שם, גם אחרי 2 סנכרוני קטלוג. כדאי לבדוק בכספית את ייבוא הקבצים.`,
 };
 // שולח לכל מנהלי העסק התראה אחת לכל סוג ביום (b/{bizId}/private/cxbot.watch). → הסוגים שנשלחו
