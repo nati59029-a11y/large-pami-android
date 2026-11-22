@@ -286,6 +286,8 @@ Object.assign(exports, require('./orders'));
 Object.assign(exports, require('./ord-pick'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
+// חשבונית ספק של עובד → pinv בשרת (22.11.2026): piInbox / piInboxB – טריגר על יצירת inbox/{id} ו-b/{bizId}/inbox/{id}, זיהוי + piCreate + צילום (pricing-inbox.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pricing-inbox'));
 
 // מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): arFile – קישור עם אסימון לקובץ PDF (onRequest, us-central1 בלבד). ar-file.js
 Object.assign(exports, require('./ar-file'));

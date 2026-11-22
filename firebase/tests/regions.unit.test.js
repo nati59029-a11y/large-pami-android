@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'posBackupDaily', 'posOpsWatch', 'posSaleSend', 'ptkPush', 'ptkPushB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'shTick', 'syncLegacyAdmin', 'syncLegacyStaff', 'tkPush', 'tkPushB']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'piInbox', 'piInboxB', 'posBackupDaily', 'posOpsWatch', 'posSaleSend', 'ptkPush', 'ptkPushB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'shTick', 'syncLegacyAdmin', 'syncLegacyStaff', 'tkPush', 'tkPushB']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -107,6 +107,17 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
       assert.equal(e.eventTrigger.eventFilterPathPatterns.document, doc);
       assert.equal(e.eventTrigger.retry, false);
       assert.ok(e.maxInstances >= 1 && e.maxInstances <= 5, 'maxInstances נמוך');
+    }
+  });
+  it('חשבונית ספק של עובד → pinv (22.11.2026): piInbox / piInboxB – טריגר יצירה על inbox, europe-west1 בלבד, בלי ניסיון חוזר, עם GEMINI_API_KEY', () => {
+    for (const [n, doc] of [['piInbox', 'inbox/{id}'], ['piInboxB', 'b/{bizId}/inbox/{id}']]) {
+      const e = ep(ex[n]);
+      assert.deepEqual(regions(ex[n]), ['europe-west1'], n);
+      assert.ok(e.eventTrigger && /document\.v1\.created$/.test(e.eventTrigger.eventType), n + ' – ' + (e.eventTrigger && e.eventTrigger.eventType));
+      assert.equal(e.eventTrigger.eventFilterPathPatterns.document, doc);
+      assert.equal(e.eventTrigger.retry, false);
+      assert.ok(e.maxInstances >= 1 && e.maxInstances <= 5, 'maxInstances נמוך');
+      assert.ok((e.secretEnvironmentVariables || []).some((x) => x.key === 'GEMINI_API_KEY'), n + ' – סוד GEMINI_API_KEY');
     }
   });
   it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {

@@ -256,7 +256,10 @@ async function vatOf(db, w) {
 // piCreate({ reqId, sup?, supId?, inv?, date?, lines? }) → { id, dup } – מזהה קבוע 'i' + reqId: ניסיון חוזר לא יוצר שנייה
 async function piCreate(request) {
   const w = feats(await requireStaff(request));
-  const input = inputObject(request);
+  return createCore(w, inputObject(request));
+}
+// הליבה של piCreate (גם לטריגר piInbox, pricing-inbox.js): w = { uid, role, uname } אחרי בדיקת ההרשאות. רץ בתוך העסק (T.tdb())
+async function createCore(w, input) {
   O.onlyKeys(input, ['reqId', 'sup', 'supId', 'inv', 'date', 'lines']);
   const reqId = O.reqIdOf(input);
   const h = Object.assign({ sup: '', inv: '', date: '' }, cleanHdr(input));
@@ -478,6 +481,21 @@ async function piImg(request) {
   return { ok: true, k, np };
 }
 
+// הליבה של piImg לצילום שלם (טריגר piInbox): du = 'data:...' או 'PAGES:[...]', כמו upImg באפליקציה. אותן בדיקות ואותו מבנה
+// (pinv/{id}/p/{k}, np ו-img במסמך). צילום גדול מ-IMG_MAX חלקים / לא תמונה – לא נשמר (כמו באפליקציה) ומחזיר 0
+async function imgCore(id, du) {
+  if (typeof du !== 'string' || !du.length || !IMG_HEAD.test(du) || !IMG_CHARS.test(du)) return 0;
+  const np = Math.ceil(du.length / IMG_CH);
+  if (np < 1 || np > IMG_MAX) return 0;
+  const ref = T.tdb().doc('pinv/' + id);
+  const d = open(await ref.get());
+  for (let k = 0; k < np; k++) await ref.collection('p').doc(String(k)).set({ data: du.slice(k * IMG_CH, (k + 1) * IMG_CH) });
+  const old = Number.isInteger(d.np) ? d.np : 0;
+  for (let x = np; x < Math.min(old, IMG_MAX); x++) await ref.collection('p').doc(String(x)).delete();
+  await ref.update({ np, img: Date.now() });
+  return np;
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -487,4 +505,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall({}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanLine, cleanLines, soft, normSup, matches, alMerge, LOCK_MS, MAX_LINES, IMG_CH, IMG_MAX } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanLine, cleanLines, soft, normSup, matches, alMerge, LOCK_MS, MAX_LINES, IMG_CH, IMG_MAX, feats, createCore, imgCore } });
