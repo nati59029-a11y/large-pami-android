@@ -773,7 +773,7 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     assert.equal((await HD(A).where('e', '==', '21').get()).size, 0, 'שום דבר לא נשמר');
   });
 
-  it('קצב: אותו סניף+חודש פעם בדקה (סניף אחר – מותר); עד 120 ביום', async () => {
+  it('קצב: אותו סניף+חודש פעם בדקה (סניף אחר – מותר); עד 160 ביום (0.1.15)', async () => {
     const T0 = next() + 120e3;
     const em = [{ id: '31', nm: 'x', rows: R1.slice(0, 1) }];
     assert.equal((await up({ emps: em }, T0)).code, 200);
@@ -781,8 +781,9 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     assert.equal(r.code, 429); assert.equal(r.body.reason, 'rate');
     assert.equal((await up({ br: 'נחל לכיש', emps: em }, T0 + 30e3)).code, 200, 'סניף אחר');
     assert.equal((await up({ emps: em }, T0 + 61e3)).code, 200, 'אחרי דקה');
-    await adm().doc(`b/${A}/private/cxbot`).set({ hr: { d: BOT.ilDay(T0), n: 120, k: {} } }, { merge: true });
-    assert.equal((await up({ br: 'סניף אחר', emps: em }, T0 + 200e3)).body.reason, 'rate', 'מעל 120 ביום');
+    await adm().doc(`b/${A}/private/cxbot`).set({ hr: { d: BOT.ilDay(T0), n: 159, k: {} } }, { merge: true });
+    assert.equal((await up({ br: 'סניף ב', emps: em }, T0 + 200e3)).code, 200, '159 → עוד אחת מותרת');
+    assert.equal((await up({ br: 'סניף אחר', emps: em }, T0 + 200e3)).body.reason, 'rate', 'מעל 160 ביום');
     await adm().doc(`b/${A}/private/cxbot`).set({ hr: null }, { merge: true });
     t = T0 + 300e3;
   });
@@ -804,6 +805,53 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     const id = (await HD(A).limit(1).get()).docs[0].id;
     const { assertFails } = require('@firebase/rules-unit-testing');
     await assertFails(env.authenticatedContext(MGR).firestore().doc(`b/${A}/cxHrs/${id}`).get());
+  });
+  it('0.1.15 empty: מוחק רק את סניף+חודש+עובד שברשימה – לא סניף / חודש / עסק אחר, לא עובד שלא הופיע; emps ריק מותר רק עם empty; קלט לא תקין נדחה; החודש הקודם → bad-empty-month; caps כולל hours2', async () => {
+    assert.ok((await okb(TOK, { op: 'poll' })).caps.includes('hours2'));
+    const em = (id) => ({ id, nm: 'x', rows: R1.slice(0, 1) });
+    const pm = (id) => ({ id, nm: 'x', rows: [{ d: '2026-11-28', i: '08:00', o: '16:00', b: 30 }] });
+    // הכנה: 41 ו-42 ביהודה הנשיא, 41 גם בנחל לכיש ובחודש הקודם, 41 בעסק B
+    assert.equal((await up({ emps: [em('41'), em('42')] }, next())).code, 200);
+    assert.equal((await up({ br: 'נחל לכיש', emps: [em('41')] }, next())).code, 200);
+    assert.equal((await up({ m: PM, emps: [pm('41')] }, next())).code, 200);
+    const TB = (await ok('cxBotTok', MB, { op: 'new' })).token;
+    assert.equal((await up({ emps: [em('41')] }, next(), TB)).code, 200);
+    const has = async (biz, m, br, id) => (await HD(biz).where('m', '==', m).where('e', '==', id).get()).docs.some((d) => d.get('br') === br);
+    // empty עם emps ריק → רק 41 / יהודה הנשיא / החודש הנוכחי / עסק A
+    const r = await up({ emps: [], empty: ['41'] }, next());
+    assert.equal(r.code, 200, JSON.stringify(r.body)); assert.equal(r.body.n, 0); assert.equal(r.body.del, 1);
+    assert.equal(await has(A, M, 'יהודה הנשיא', '41'), false, 'נמחק');
+    assert.equal(await has(A, M, 'יהודה הנשיא', '42'), true, 'עובד שלא ברשימה – נשאר');
+    assert.equal(await has(A, M, 'נחל לכיש', '41'), true, 'סניף אחר – נשאר');
+    assert.equal(await has(A, PM, 'יהודה הנשיא', '41'), true, 'חודש אחר – נשאר');
+    assert.equal(await has(B, M, 'יהודה הנשיא', '41'), true, 'עסק אחר – נשאר');
+    // יחד עם emps: 42 נמחק, 43 נשמר; מזהה שאין לו מסמך – בלי שגיאה
+    const r2 = await up({ emps: [em('43')], empty: ['42', '99'] }, next());
+    assert.equal(r2.code, 200, JSON.stringify(r2.body)); assert.equal(r2.body.del, 2);
+    assert.equal(await has(A, M, 'יהודה הנשיא', '42'), false); assert.equal(await has(A, M, 'יהודה הנשיא', '43'), true);
+    assert.equal((await up({ emps: [em('42')] }, next())).code, 200); // 42 חוזר – לבדיקות הקלט הלא תקין
+    // החודש הקודם (מותר ל-emps) – empty נדחה (bad-empty-month), כלום לא נשמר ולא נמחק
+    const r3 = await up({ m: PM, emps: [pm('44')], empty: ['41'] }, next());
+    assert.equal(r3.code, 400, JSON.stringify(r3.body)); assert.equal(r3.body.reason, 'bad-empty-month');
+    assert.equal(await has(A, PM, 'יהודה הנשיא', '41'), true, 'החודש הקודם – לא נמחק'); assert.equal(await has(A, PM, 'יהודה הנשיא', '44'), false);
+    assert.equal((await up({ m: PM, emps: [], empty: ['41'] }, next())).body.reason, 'bad-empty-month');
+    // קלט לא תקין – שום דבר לא נמחק
+    const bad = async (b, reason) => { const x = await up(b, next()); assert.equal(x.code, 400, JSON.stringify(b).slice(0, 100) + ' ' + JSON.stringify(x.body)); assert.equal(x.body.reason, reason); };
+    await bad({ emps: [], empty: [] }, 'bad-empty');
+    await bad({ emps: [], empty: '42' }, 'bad-empty');
+    await bad({ emps: [], empty: [42] }, 'bad-empty');
+    await bad({ emps: [], empty: ['4a'] }, 'bad-empty');
+    await bad({ emps: [], empty: ['../x'] }, 'bad-empty');
+    await bad({ emps: [], empty: ['1234567890123'] }, 'bad-empty');
+    await bad({ emps: [], empty: ['42', '42'] }, 'bad-empty');
+    await bad({ emps: [em('42')], empty: ['42'] }, 'bad-empty');
+    await bad({ emps: [], empty: Array.from({ length: 301 }, (_, k) => String(k + 1)) }, 'bad-empty');
+    await bad({ emps: [em('1')], empty: Array.from({ length: 300 }, (_, k) => String(k + 2)) }, 'bad-emps');
+    await bad({ m: '2026-10', emps: [], empty: ['42'] }, 'bad-month');
+    await bad({ m: PM, emps: [], empty: ['42'] }, 'bad-empty-month');
+    await bad({ m: '2027-01', emps: [], empty: ['42'] }, 'bad-month');
+    await bad({ emps: [] }, 'bad-emps');
+    assert.equal(await has(A, M, 'יהודה הנשיא', '42'), true, 'קלט שנדחה לא מחק');
   });
 });
 
@@ -865,6 +913,40 @@ describe('רובוט כספית – סבב 2: התראת איחור משעות �
     assert.equal((await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: D, i: '08:30', o: '', b: 0 }] }], at(D, '09:00'))).code, 200);
     assert.equal(late().length, 0);
     assert.deepEqual(await sent(A, D), {});
+  });
+
+  // שעון הקופה (shifts.js posLate, נקרא מ-pos-clock.js אחרי החתמת כניסה) – אותו רישום כפילויות כמו כספית
+  const posIn = async (D, hm, prev) => {
+    const SH = require('../functions/shifts.js')._core, T = require('../functions/lib/tenant.js');
+    const tt = at(D, hm), id = E1 + '_' + tt;
+    for (const p of prev || []) await adm().doc(`b/${A}/posclock/${E1}_${at(D, p)}`).set({ who: E1, in: at(D, p), out: at(D, p) + 60e3, day: D.replace(/-/g, '') });
+    await adm().doc(`b/${A}/posclock/${id}`).set({ who: E1, in: tt, out: null, day: D.replace(/-/g, '') });
+    return T.runInBiz({ bizId: A, prefix: 'b/' + A + '/', biz: { bizId: A, dataRoot: 'b' } }, () => SH.posLate(E1, tt, { send }));
+  };
+  it('שעון הקופה: איחור 6 דק\' → התראה אחת; 4 → אין; אחרי התראה מכספית באותו יום → אין (ולהפך); שבת / בלי משמרת / כניסה שנייה ביום → אין', async () => {
+    for (const [id, d] of [['LP1', '2026-12-15'], ['LP2', '2026-12-16'], ['LP3', '2026-12-17'], ['LP4', '2026-12-19'], ['LP5', '2026-12-21']]) await adm().doc(`b/${A}/shf/${id}`).set({ d, s: '08:00', e: '14:00', u: E1, nm: E1, fx: false });
+    PUSH.length = 0;
+    assert.equal(await posIn('2026-12-15', '08:06'), 1);
+    assert.equal(late().length, 1); assert.match(late()[0].body, /08:06/); assert.match(late()[0].body, /6 דקות/); assert.match(late()[0].body, /שעון הקופה/);
+    assert.ok((await sent(A, '2026-12-15'))[E1]);
+    assert.equal(await posIn('2026-12-15', '08:20'), 0, 'פעם ביום');
+    // אחרי הקופה – כספית לא שולחת שוב
+    assert.equal((await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: '2026-12-15', i: '08:07', o: '', b: 0 }] }], at('2026-12-15', '09:00'))).code, 200);
+    assert.equal(late().length, 1, 'כספית אחרי הקופה – אין נוספת');
+    // 4 דקות → אין
+    assert.equal(await posIn('2026-12-16', '08:04'), 0); assert.deepEqual(await sent(A, '2026-12-16'), {});
+    // כספית קודם, הקופה אחריה → אין
+    PUSH.length = 0;
+    assert.equal((await up([{ id: '501', nm: 'דנה כהן', rows: [{ d: '2026-12-17', i: '08:10', o: '', b: 0 }] }], at('2026-12-17', '09:00'))).code, 200);
+    assert.equal(late().length, 1);
+    assert.equal(await posIn('2026-12-17', '08:11'), 0); assert.equal(late().length, 1, 'הקופה אחרי כספית – אין נוספת');
+    // שבת; יום בלי משמרת; כניסה שנייה ביום (הראשונה בזמן)
+    PUSH.length = 0;
+    assert.equal(await posIn('2026-12-19', '08:30'), 0, 'שבת');
+    assert.equal(await posIn('2026-12-18', '10:00'), 0, 'בלי משמרת');
+    assert.equal(await posIn('2026-12-21', '13:00', ['07:58']), 0, 'כניסה שנייה ביום');
+    assert.equal(late().length, 0);
+    assert.ok(!JSON.stringify(await dev()).includes('דנה'));
   });
 
   it('תקלות שעות (hours-*) בדיווח הריצה → התראה למנהל בעברית, פעם ביום', async () => {

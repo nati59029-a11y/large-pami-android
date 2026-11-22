@@ -433,7 +433,7 @@ async function attLast(db, biz, uid, start, end) {
 // נקרא מ-caspit-bot.js אחרי upload kind:'hours' (בתוך T.runInBiz של העסק, אחרי שהשורות נשמרו ב-cxHrs). emps – העובדים בהעלאה [{ nm, rows }].
 // עובד ממופה (shfcfg/map, השם מנורמל ברווחים כמו ב-setCfg) עם משמרת שמתחילה היום: הכניסה הראשונה שלו היום – מכל הסניפים (cxHrs של החודש) –
 // מאוחרת מתחילת המשמרת הראשונה שלו היום ביותר מסף האיחור (shfcfg/main.late) → התראה למנהלים, פעם אחת לעובד ליום (shfsent/{day}.late[uid]).
-// המפתח late[uid] משותף לכל מקור איחור (גם לשעון הקופה, אם תיווסף לו התראה) – כך שאין כפילות לאותו עובד ויום.
+// המפתח late[uid] משותף לכל מקור איחור (גם לשעון הקופה – posLate) – כך שאין כפילות לאותו עובד ויום.
 // לא בשבת / חג (SC.quiet), לא על החודש הקודם. ביומן – מספרים בלבד (בלי שמות). → מספר ההתראות שנשלחו
 const nmKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 async function cxLate(emps, m, o) {
@@ -463,21 +463,40 @@ async function cxLate(emps, m, o) {
       if (!p || t < p.t) ent.set(u, { t, i: r.i, br: str(x.br, 40) });
     }
   }
-  const DR = require('./daily-rep')._core;
   let n = 0;
   for (const [u, oc] of first) {
     const e = ent.get(u);
-    if (!e) continue;
-    const late = Math.round((e.t - oc.start) / 60000);
-    if (late <= cfg.late) continue;
-    const nm = await userName(db, u);
-    if (nm === null) continue;
-    if (!(await claim(db, today, 'late', u, now))) continue;
-    n++;
-    await DR.pushMgrs(db, { uid: 'cxlate', bizId: sc && sc.bizId }, 'lt' + oc.id, '', Object.assign({}, o, { msg: { k: 'sh', id: 'lt' + oc.id, title: 'איחור למשמרת', body: nm + ' נכנס/ה ב-' + e.i + (e.br ? ' (' + e.br + ')' : '') + ', והמשמרת התחילה ב-' + oc.s + ' – איחור של ' + late + ' דקות (לפי כספית)' } }));
+    if (e && (await lateSend(db, { u, oc, t: e.t, cfg, today, now, o, who: 'cxlate', what: ' נכנס/ה ב-' + e.i + (e.br ? ' (' + e.br + ')' : ''), src: 'לפי כספית' }))) n++;
   }
   if (n) logger.info('cxLate', { biz: sc && sc.bizId, n });
   return n;
+}
+// משותף לכספית (cxLate) ולשעון הקופה (posLate): כניסה בזמן t למופע oc מאוחרת ביותר מ-cfg.late → push למנהלים (k:'sh'),
+// פעם אחת לעובד ליום – המפתח shfsent/{today}.late[u] משותף לשני המקורות. → true אם נשלחה
+async function lateSend(db, x) {
+  const late = Math.round((x.t - x.oc.start) / 60000);
+  if (late <= x.cfg.late) return false;
+  const nm = await userName(db, x.u);
+  if (nm === null) return false;
+  if (!(await claim(db, x.today, 'late', x.u, x.now))) return false;
+  const sc = T.scope(), oc = x.oc;
+  await require('./daily-rep')._core.pushMgrs(db, { uid: x.who, bizId: sc && sc.bizId }, 'lt' + oc.id, '', Object.assign({}, x.o, { msg: { k: 'sh', id: 'lt' + oc.id, title: 'איחור למשמרת', body: nm + x.what + ', והמשמרת התחילה ב-' + oc.s + ' – איחור של ' + late + ' דקות (' + x.src + ')' } }));
+  return true;
+}
+// ---------- התראת איחור משעון הקופה (pos-clock.js, החתמת כניסה; 22.11.2026) ----------
+// נקרא אחרי החתמת כניסה מוצלחת (בתוך העסק). לעובד יש משמרת שמתחילה היום (המופע הראשון שלו), וזו הכניסה הראשונה שלו היום
+// (כמו בכספית – לא מודדים כניסה למשמרת שנייה מתחילת הראשונה) → lateSend. לא בשבת / חג. ביומן – מספר בלבד. → מספר ההתראות (0 / 1)
+async function posLate(uid, t, o) {
+  if (typeof uid !== 'string' || !UID_RE.test(uid) || !Number.isFinite(t) || SC.quiet(t)) return 0;
+  const db = T.tdb(), today = SC.todayOf(t);
+  const oc = SC.expand(await loadDefs(db), today, 1).find((x) => x.u === uid);
+  if (!oc) return 0;
+  const s = await db.collection('posclock').where('who', '==', uid).where('day', '==', today.replace(/-/g, '')).limit(50).get();
+  if (s.docs.some((d) => Number.isFinite(d.get('in')) && d.get('in') < t)) return 0;
+  const cfgS = await db.doc('shfcfg/main').get();
+  const ok = await lateSend(db, { u: uid, oc, t, cfg: SC.cfgOf(cfgS.exists ? cfgS.data() : null), today, now: (o && o.now) || t, o, who: 'poslate', what: ' החתים/ה כניסה בקופה ב-' + SC.hmOf(t), src: 'לפי שעון הקופה' });
+  if (ok) { const sc = T.scope(); logger.info('posLate', { biz: sc && sc.bizId, n: 1 }); }
+  return ok ? 1 : 0;
 }
 
 const DN = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -570,4 +589,4 @@ exports.shTick = onSchedule({ region: LEGACY_REGION, schedule: 'every 10 minutes
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, attLast, loadDefs, ATT_SRC, cxLate, nmKey, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, attLast, loadDefs, ATT_SRC, cxLate, posLate, lateSend, nmKey, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });

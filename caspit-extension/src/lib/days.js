@@ -114,7 +114,7 @@ function hourSlot(now, tz, from, to) {
   if (p.h < from || p.h > to || quiet(now, tz)) return null;
   return `${p.y}-${p2(p.m)}-${p2(p.d)} ${p2(p.h)}`;
 }
-// שעות העובדים בבוקר (0.1.14): חצי השעה הנוכחית כמזהה 'YYYY-MM-DD HH:MM' (MM = 00 / 30) – רק מ-from עד to (דקות מחצות, כולל, שעון tz)
+// שעות העובדים במשך היום (0.1.14; 0.1.15 – 07:00–23:00): חצי השעה הנוכחית כמזהה 'YYYY-MM-DD HH:MM' (MM = 00 / 30) – רק מ-from עד to (דקות מחצות, כולל, שעון tz)
 // ולא בחלון השקט (שבת וחג); אחרת null
 function halfSlot(now, tz, from, to) {
   const p = parts(now, tz), m = p.h * 60 + p.mi, s = p.h * 60 + (p.mi < 30 ? 0 : 30);

@@ -15,7 +15,7 @@ const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות ל
 const TICK_MIN = 15;
 const POLL_MIN = 1, POLL_SLOW_MIN = 15; // "סנכרן עכשיו" מהטלפון: בדיקה כל דקה (שרת ישן בלי poll – כל 15 דקות)
 const TODAY_FROM = 7, TODAY_TO = 23; // מכירות היום (0.1.10): כל שעה עגולה 07:00–23:00 לפי שעון העסק, לא בשבת וחג
-const HRS_FROM = 7 * 60, HRS_TO = 11 * 60; // שעות העובדים בבוקר (0.1.14): כל 30 דקות 07:00–11:00 לפי שעון העסק, לא בשבת וחג – רק החודש הנוכחי
+const HRS_FROM = 7 * 60, HRS_TO = 23 * 60; // שעות העובדים במשך היום (0.1.15; ב-0.1.14 עד 11:00): כל 30 דקות 07:00–23:00 לפי שעון העסק, לא בשבת וחג – רק החודש הנוכחי
 
 // האסימון ב-storage.local: מגבילים את האחסון להקשרים של התוסף בלבד (לא לסקריפטי התוכן בלשונית כספית), אם הדפדפן תומך
 // (setAccessLevel נתמך בוודאות ב-storage.session; ב-local – לא מאומת, ולכן בניסיון בלבד). סקריפטי התוכן (bridge.js, selectors.js) לא קוראים אחסון בכלל.
@@ -42,7 +42,7 @@ async function setupAlarms() {
   if (!(await chrome.alarms.get('tick'))) await chrome.alarms.create('tick', { periodInMinutes: TICK_MIN, delayInMinutes: 1 });
   if (!(await chrome.alarms.get('poll'))) await chrome.alarms.create('poll', { periodInMinutes: POLL_MIN, delayInMinutes: POLL_MIN });
   await chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); // מכירות היום – בשעה העגולה הבאה (נוצר מחדש בכל הפעלה)
-  await chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); // 0.1.14: שעות העובדים בבוקר – בחצי השעה הבאה
+  await chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); // 0.1.14: שעות העובדים (0.1.15: 07:00–23:00) – בחצי השעה הבאה
 }
 chrome.runtime.onInstalled.addListener(() => { setupAlarms(); trigger('install'); });
 chrome.runtime.onStartup.addListener(() => { setupAlarms(); trigger('startup'); });
@@ -50,8 +50,10 @@ if (chrome.idle && chrome.idle.onStateChanged) chrome.idle.onStateChanged.addLis
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === 'tick' || a.name === 'poll') updTick().catch(() => {});
   if (a.name === 'daily') { setupAlarms(); trigger('daily'); }
-  else if (a.name === 'hour') { chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); todayTick().catch(() => {}); }
-  else if (a.name === 'hrs') { chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); hoursTick().catch(() => {}); }
+  // 0.1.15: בשעה עגולה שני ה-alarms (מכירות היום ושעות העובדים) באים יחד – כל אחד מריץ את שלו ואחריו את השני. הנעילה busy מונעת ריצה כפולה,
+  // והמשבצת שנלקחה (todaySt / hrsSt) מונעת חזרה – כך השנייה רצה מיד אחרי הראשונה ולא מחכה ל-tick
+  else if (a.name === 'hour') { chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); todayTick().then(() => hoursTick()).catch(() => {}); }
+  else if (a.name === 'hrs') { chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); hoursTick().then(() => todayTick()).catch(() => {}); }
   else if (a.name === 'tick') tick().then(() => todayTick()).then(() => hoursTick()).catch(() => {}); // השלמה: שעה / חצי שעה שה-alarm שלה הוחמץ (מחשב ישן או ריצה אחרת) – פעם אחת
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
@@ -127,8 +129,9 @@ async function pollOnce() {
   if (body.upd) await set({ updSent: body.upd.at + '|' + body.upd.ok + '|' + body.upd.ver });
   // יכולות השרת (0.1.10): today = מכירות היום כל שעה, uq = "עדכון המחשב" מהטלפון; 0.1.14: hours = שעות העובדים (upload kind:'hours'). שרת ישן (בלי caps) → כבויות
   const cl = Array.isArray(r.caps) ? r.caps : [];
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours') };
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours) await set({ caps });
+  // 0.1.15: hours2 = השרת מקבל empty (עובדים שכל השעות שלהם בחודש נמחקו בכספית). שרת בלי hours2 – לא שולחים empty (שדה לא מוכר נדחה)
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2') };
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
@@ -197,8 +200,8 @@ async function runToday(slot, now, tz) {
   await set({ todaySt: out });
   return out;
 }
-// ---------- שעות העובדים בבוקר (0.1.14) ----------
-// כל 30 דקות 07:00–11:00 (שעון העסק), לא בשבת וחג: רק החודש הנוכחי, שני הסניפים (hoursAll) והעלאה (upload kind:'hours').
+// ---------- שעות העובדים במשך היום (0.1.14; 0.1.15 – עד 23:00) ----------
+// כל 30 דקות 07:00–23:00 (שעון העסק), לא בשבת וחג: רק החודש הנוכחי, שני הסניפים (hoursAll) והעלאה (upload kind:'hours').
 // כמו מכירות היום: לא hello ולא report, לא נספר כריצה, לא נוגע ב-lastSales / sd. לא מתחילים כשריצה אחרת פעילה, בלי חיבור / רשת,
 // כשחצי השעה הזו כבר נלקחה, ומול שרת שלא מודיע caps.hours. כישלון – רק בחלון התוסף (hrsSt), חוץ מ-branch-restore (דיווח מיד, כמו בשעתי).
 async function hoursTick(o) {
@@ -866,7 +869,7 @@ async function hoursBr(tab, months) {
     ids.add(id);
     const pg = await runFlow(tab, 'hrsPage', {}, null, true);
     if (!pg.ok) throw P.err('hours-fail', `דף השעות של עובד לא נטען (צעד ${(pg.miss || 0) + 1})`);
-    const e = { id: String(id), nm: String(row.nm || '').slice(0, 60), m: {} };
+    const e = { id: String(id), nm: String(row.nm || '').slice(0, 60), m: {}, z: {} };
     let moved = false;
     for (const ym of [cur].concat(months.filter((x) => x !== cur))) {
       if (ym !== cur) {
@@ -885,8 +888,17 @@ async function hoursBr(tab, months) {
       out.out += p.out;
       if (ym !== cur) { if (p.rows.length) out.pm.ok++; else if (p.out) out.pm.bad++; } // החודש לא התחלף (הקובץ מחודש אחר)
       if (p.rows.length) e.m[ym] = p.rows;
+      // 0.1.15: היצוא הצליח ופוענח, ואין בו אף שורה – לא מחודש אחר (out) ולא שורה שלא פוענחה (bad) – כל השעות של העובד בחודש נמחקו בכספית → מועמד ל-empty.
+      // רק החודש הנוכחי (ברירת המחדל של הדף); בחודש הקודם אי אפשר לוודא שהבחירה נקלטה כשהקובץ ריק. יצוא שנכשל / מבנה לא מוכר – נזרק למעלה, ולא מגיע לכאן
+      else if (ym === cur && !p.out && !p.bad) e.z[ym] = 1;
     }
-    if (moved) { const r = await inIso(tab, monthIn, [cur, GUARD]).catch(() => null); if (r && r.wrong) throw wrongPage(); } // חזרה לחודש הנוכחי (אם כספית זוכרת את הבחירה)
+    // חזרה לחודש הנוכחי (אם כספית זוכרת את הבחירה). לא אושרה (הערך בפקד "בחר חודש" לא התחלף) – היצוא הבא עלול להיות מהחודש הקודם,
+    // ולכן אין empty לאף עובד בסניף הזה בריצה הזו (zOff)
+    if (moved) {
+      const r = await inIso(tab, monthIn, [cur, GUARD]).catch(() => null);
+      if (r && r.wrong) throw wrongPage();
+      if (!(r && r.ok)) out.zOff = 'month';
+    }
     out.emps.push(e);
   }
   return out;
@@ -908,24 +920,39 @@ async function hoursAll(tab, months) {
   return out;
 }
 // העלאה: לכל סניף ולכל חודש – העלאה אחת עם העובדים שיש להם לפחות שורת נוכחות אחת בחודש (השרת מחליף לכל סניף+חודש+עובד)
+// 0.1.15: עם caps.hours2 – גם empty: עובדים שהיצוא שלהם הצליח בלי אף שורה בחודש, ושנשלחו בעבר עם שורות לאותו סניף+חודש (hrsSeen – רק להם יש מה למחוק).
+// השרת מוחק רק את המסמכים שלהם באותו סניף+חודש. מעצור (HR.emptyPick): כל העובדים בסניף ריקים / יותר מ-2 → בלי empty, x.zw = 'hours-empty-many'.
+// החזרה לחודש הנוכחי לא אושרה (zOff) → בלי empty לסניף, x.zw = 'hours-empty-month'
 async function hoursSend(list, months, run, log) {
   let n = 0;
-  const cl = await api();
+  const cl = await api(), h2 = !!((await get('caps')) || {}).hours2, seen = (await get('hrsSeen')) || {};
   for (const x of list) {
     for (const ym of months) {
       const emps = x.r.emps.filter((e) => e.m[ym] && e.m[ym].length).map((e) => ({ id: e.id, nm: e.nm, rows: e.m[ym] }));
-      if (!emps.length) continue;
-      await cl.call('upload', Object.assign({ run, kind: 'hours', br: x.br, m: ym, emps }, log ? { log } : {}));
+      const key = x.br + '|' + ym;
+      let empty = [];
+      if (h2) {
+        const pk = HR.emptyPick(x.r.emps, ym, seen[key], 2);
+        if (pk.ids.length && x.r.zOff) x.zw = 'hours-empty-month';
+        else if (pk.warn) x.zw = pk.warn;
+        else empty = pk.ids;
+      }
+      if (!emps.length && !empty.length) continue;
+      await cl.call('upload', Object.assign({ run, kind: 'hours', br: x.br, m: ym, emps }, empty.length ? { empty } : {}, log ? { log } : {}));
+      const del = new Set(empty);
+      seen[key] = [...new Set((seen[key] || []).filter((id) => !del.has(id)).concat(emps.map((e) => e.id)))].slice(-500);
       n++;
     }
   }
+  const keep = Object.keys(seen).sort((a, b) => (a.slice(a.lastIndexOf('|') + 1) < b.slice(b.lastIndexOf('|') + 1) ? 1 : -1)).slice(0, 12); // סניפים × החודשים האחרונים
+  await set({ hrsSeen: Object.fromEntries(keep.map((k) => [k, seen[k]])) });
   return n;
 }
 // מספרים בלבד (בלי שמות ושעות) – לחלון התוסף ולדיווח הריצה
 function hoursInfo(A, months) {
   const pm = A.list.reduce((a, x) => ({ ok: a.ok + x.r.pm.ok, bad: a.bad + x.r.pm.bad, none: a.none + x.r.pm.none, why: a.why || x.r.pm.why }), { ok: 0, bad: 0, none: 0, why: '' });
   return Object.assign({ m: months, brs: A.list.map((x) => [x.br, x.r.seen, x.r.emps.filter((e) => Object.keys(e.m).length).length, x.r.emps.reduce((s0, e) => s0 + Object.values(e.m).reduce((a, r) => a + r.length, 0), 0)]) },
-    months.length > 1 ? { pm } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
+    months.length > 1 ? { pm } : {}, A.list.some((x) => x.zw) ? { warn: A.list.find((x) => x.zw).zw } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
 }
 
 // ---------- שלבי הריצה ----------

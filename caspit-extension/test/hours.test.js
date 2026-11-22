@@ -73,3 +73,27 @@ test('חודשים לסנכרון: בימים 1–5 גם הקודם (גם בינ
   assert.deepEqual(H.monthsFor('2027-01-01'), ['2026-12', '2027-01']);
   assert.deepEqual(H.monthsFor('2026-11-02', true), ['2026-11']);
 });
+
+test('0.1.15: שורות נתונים שלא פוענחו נספרות ב-bad (לא שורת סה"כ, לא שורה ריקה, לא יום בלי כניסה); קובץ ריק בלי כותרות – ok:false (hours-format, אף פעם לא empty)', () => {
+  const HD = ['תאריך', 'כניסה', 'יציאה', 'סה"כ שעות'];
+  // כספית שינתה את פורמט התאריך / השעה – אף שורה לא נכנסת, אבל bad > 0 → לא "ריק"
+  let r = H.parse([HD, ['Nov 3 2026', '07:41', '15:58', '8:17'], ['Nov 4 2026', '07:39', '', '']], '2026-11');
+  assert.equal(r.ok, true); assert.deepEqual(r.rows, []); assert.equal(r.bad, 2, 'תאריך לא מוכר');
+  r = H.parse([HD, ['Nov 3 2026', '7h41', '', ''], ['03/11/2026', '7h41', '', '']], '2026-11');
+  assert.deepEqual(r.rows, []); assert.equal(r.bad, 2);
+  // רק שורת סה"כ, שורות ריקות ויום בלי החתמה → bad = 0 (באמת אין שורות)
+  r = H.parse([['דוח שעות עובד - פלוני'], HD, ['03/11/2026', '', '', ''], [], ['', '', '', ''], ['סה"כ', '', '', '0:00']], '2026-11');
+  assert.equal(r.ok, true); assert.deepEqual(r.rows, []); assert.equal(r.out, 0); assert.equal(r.bad, 0);
+  // קובץ ריק / רק שורת כותרת של הדוח / בלי שורת כותרות → ok:false
+  for (const rows of [[], [[]], [['דוח שעות עובד - פלוני']], [['דוח שעות עובד - פלוני'], ['', '']], [['שם', 'ערך']]]) assert.equal(H.parse(rows, '2026-11').ok, false, JSON.stringify(rows));
+});
+
+test('0.1.15 emptyPick: רק מי שנשלח בעבר עם שורות; כל העובדים ריקים / יותר מ-2 → אף אחד + hours-empty-many', () => {
+  const E = (id, z) => ({ id, z: z ? { '2026-11': 1 } : {} });
+  assert.deepEqual(H.emptyPick([E('1', 1), E('2'), E('3', 1)], '2026-11', ['1', '2']), { ids: ['1'], warn: '' });
+  assert.deepEqual(H.emptyPick([E('1', 1), E('2'), E('3', 1)], '2026-11', []), { ids: [], warn: '' }, 'לא נשלחו בעבר – אין מה למחוק');
+  assert.deepEqual(H.emptyPick([E('1', 1), E('2', 1)], '2026-11', ['1']), { ids: [], warn: 'hours-empty-many' }, 'כל העובדים בסניף ריקים');
+  assert.deepEqual(H.emptyPick([E('1', 1), E('2', 1), E('3', 1), E('4', 1), E('5')], '2026-11', ['1', '2', '3']), { ids: [], warn: 'hours-empty-many' }, 'יותר מ-2');
+  assert.deepEqual(H.emptyPick([E('1', 1), E('2', 1), E('3')], '2026-11', ['1', '2']), { ids: ['1', '2'], warn: '' }, '2 – מותר');
+  assert.deepEqual(H.emptyPick([E('1', 1), E('2')], '2026-10', ['1']), { ids: [], warn: '' }, 'חודש אחר');
+});
