@@ -166,7 +166,26 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; עו�
   assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
   // פרטיות: לא מחכים על הכותרת עם שם העובד
   assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
-  assert.equal(SEL.v, 8);
+  assert.equal(SEL.v, 9);
+});
+
+test('selectors.json v9 (0.1.14): זרימות השעות – רק קריאה; לא לוחצים "עריכה" / "עובד חדש" / "הוספת כניסה ויציאה" / "הצג רק מנהלים" / יצוא של הרשימה', () => {
+  const L = SEL.flows.hrsList, G = SEL.flows.hrsPage, X = SEL.flows.hrsExport;
+  assert.deepEqual(L.map((x) => x.op), ['nav', 'waitFor', 'click']); assert.equal(L[0].hash, '#/employees');
+  assert.equal(L[2].check, true); assert.match(JSON.stringify(L[2].t), /הצג רק עובדים פעילים/);
+  const all = [...L, ...G, ...X];
+  const words = JSON.stringify(all.filter((x) => x.op === 'click').map((x) => x.t));
+  for (const w of ['עריכה', 'עובד חדש', 'הוספת כניסה ויציאה', 'הצג רק מנהלים']) assert.ok(!words.includes(w), w);
+  assert.ok(all.every((x) => x.op !== 'click' || (x.safe && !x.submit)), 'כל לחיצה safe (רצות במצב probe – denied)');
+  assert.ok(G.every((x) => x.op === 'waitFor' && x.stop && x.at === '#/employee-time-tracks/'));
+  assert.deepEqual(X.map((x) => [x.op, x.at, !!x.capture, !!x.stop]), [['click', '#/employee-time-tracks/', true, true]], '"יצוא לאקסל" רק בדף השעות');
+  assert.ok(!JSON.stringify(all).includes('דוח שעות עובד'));
+  assert.ok(SEL.hours.max > 0 && SEL.hours.max <= 500);
+  // denied לא חוסם את מה שצריך ללחוץ
+  const S = require('../src/lib/selectors.js');
+  const fake = (t) => ({ innerText: t, textContent: t, getAttribute: () => null });
+  for (const t of ['שעות לעובד', 'יצוא לאקסל', 'הצג רק עובדים פעילים']) assert.equal(S.denied(fake(t)), false, t);
+  for (const t of ['עריכה', 'עובד חדש', 'הוספת כניסה ויציאה']) assert.equal(S.denied(fake(t)), true, t);
 });
 
 test('selectors.json v6: לקוחות הקפה – 8 מסכים priv בכתובת ישירה; hkExport לוחץ רק "יצוא לאקסל"; הפקת חשבוניות מרכזות – בלי זרימה', () => {

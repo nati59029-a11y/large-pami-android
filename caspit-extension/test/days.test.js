@@ -123,3 +123,17 @@ test('שבת וחג: שישי וערב חג מ-14:00 עד מוצאי 21:00 – �
     for (const h of ['13:30', '14:30', '20:30', '21:30']) assert.equal(D.quiet(J(day + ' ' + h), TZ), SC.quiet(J(day + ' ' + h)), day + ' ' + h);
   }
 });
+
+test('0.1.14 שעות העובדים בבוקר: חצי שעה 07:00–11:00, לא בשבת וחג', () => {
+  const F = 7 * 60, T = 11 * 60;
+  assert.equal(D.halfSlot(J('2026-11-18 06:59'), TZ, F, T), null);
+  assert.equal(D.halfSlot(J('2026-11-18 07:00'), TZ, F, T), '2026-11-18 07:00');
+  assert.equal(D.halfSlot(J('2026-11-18 07:29'), TZ, F, T), '2026-11-18 07:00');
+  assert.equal(D.halfSlot(J('2026-11-18 07:30'), TZ, F, T), '2026-11-18 07:30');
+  assert.equal(D.halfSlot(J('2026-11-18 11:10'), TZ, F, T), '2026-11-18 11:00');
+  assert.equal(D.halfSlot(J('2026-11-18 11:30'), TZ, F, T), null);
+  assert.equal(D.halfSlot(J('2026-11-21 09:00'), TZ, F, T), null, 'שבת');
+  assert.equal(D.halfSlot(J('2026-09-21 09:00'), TZ, F, T), null, 'יום כיפור');
+  const t = J('2026-11-18 07:10');
+  assert.equal(D.nextHalf(t) - t, 20 * 60e3);
+});

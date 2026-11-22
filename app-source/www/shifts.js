@@ -45,7 +45,7 @@ const reload=()=>{S.w=null;S.err='';load()};
 
 /* ---------- הטבלה השבועית ---------- */
 function chip(o,w){const n=((w.tasks||{})[o.id]||[]).length,nm=o.u?(o.nm||nmOf(o.u)||'עובד'):'בלי עובד';
- return `<button class="shc${o.u?'':' op'}" data-a="shOpen" data-k="${esc(o.id)}"><b>${esc(o.s)}–${esc(o.e)}${o.x?' ☾':''}</b><small>${esc(nm)}</small>${o.fx||n?`<small>${o.fx?'🔁 קבועה':''}${o.fx&&n?' · ':''}${n?'📋 '+n+' משימות':''}</small>`:''}</button>`}
+ return `<button class="shc${o.u?'':' op'}" data-a="sftOpen" data-k="${esc(o.id)}"><b>${esc(o.s)}–${esc(o.e)}${o.x?' ☾':''}</b><small>${esc(nm)}</small>${o.fx||n?`<small>${o.fx?'🔁 קבועה':''}${o.fx&&n?' · ':''}${n?'📋 '+n+' משימות':''}</small>`:''}</button>`}
 V.shf=()=>{const T='משמרות';if(!on())return{t:T,h:'<div class="empty">המסך זמין כשתוספת המשימות פעילה</div>'};
  if(!S.w&&!S.err)load();const w=S.w;
  if(S.err)return{t:T,h:`<div class="card"><p class="note">${esc(S.err)}</p><button class="btn g w" ${big} data-a="shRe">נסו שוב</button></div>`};
@@ -53,7 +53,7 @@ V.shf=()=>{const T='משמרות';if(!on())return{t:T,h:'<div class="empty">המ
  const full=!!w.full;
  let h=`<div class="row" style="margin-bottom:8px"><button class="btn g grow" ${big} data-a="shWk" data-v="-7" aria-label="שבוע קודם">› הקודם</button><button class="btn g grow" ${big} data-a="shWk" data-v="0">השבוע</button><button class="btn g grow" ${big} data-a="shWk" data-v="7" aria-label="שבוע הבא">הבא ‹</button></div>`;
  h+=`<p class="note" style="margin:0 0 8px;text-align:center"><b>${dm(w.days[0])} – ${dm(w.days[6])}</b>${full?'':' · המשמרות שלך'}</p>`;
- if(full)h+=`<div class="row" style="margin-bottom:8px"><button class="btn grow" ${big} data-a="shNew">+ משמרת</button>${w.mgr?`<button class="btn g grow" ${big} data-a="go" data-v="shfCfg">הגדרות</button>`:''}</div>`;
+ if(full)h+=`<div class="row" style="margin-bottom:8px"><button class="btn grow" ${big} data-a="shNew">+ משמרת</button>${w.mgr?`<button class="btn g grow" ${big} data-a="go" data-v="shfCfg">הגדרות</button>`:''}${w.mgr&&typeof window.cxhBtn==='function'?window.cxhBtn():''}</div>`;
  if(full&&w.mgr&&!w.hrs)h+='<p class="note">כדי לקבל כל בוקר התראה על זמנים בלי עובדים – הגדירו שעות פעילות ב"הגדרות".</p>';
  h+='<div class="shw" role="region" aria-label="טבלת משמרות שבועית" tabindex="0"><div class="shg">';
  for(const d of w.days){const L=w.occ.filter(o=>o.day===d),H=(w.holes||{})[d]||[],X=(w.orph||[]).filter(t=>t.day===d);
@@ -66,7 +66,7 @@ ACT.shRe=()=>reload();
 ACT.shWk=el=>{const n=+el.dataset.v;const base=S.w?S.w.from:'';S.from=n&&base?addD(base,n):'';reload();rerender()};
 
 /* ---------- לחיצה על משמרת: פרטים, משימות, עריכה, מחיקה ---------- */
-ACT.shOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
+ACT.sftOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
  const nm=o.u?(o.nm||nmOf(o.u)||'עובד'):'בלי עובד',L=(w.tasks||{})[o.id]||[],ended=o.end<=Date.now();
  let h=`<h3>${esc(nm)} · יום ${DN[dow(o.day)]} ${dm(o.day)}</h3><p class="note" style="margin-top:0"><span dir="ltr">${esc(o.s)}–${esc(o.e)}</span>${o.x?' (נגמרת למחרת)':''} · ${o.fx?'משמרת קבועה (כל שבוע)':'משמרת חד־פעמית'}${o.nt?'<br>'+esc(o.nt):''}</p>`;
  if(!w.full)return dlg(h+`<button class="btn g w" ${big} data-a="closeDlg">סגור</button>`);
@@ -74,7 +74,7 @@ ACT.shOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
  if(!o.u)h+='<p class="note">אין עובד במשמרת – קודם בחרו עובד (עריכה) ואז שלחו משימות.</p>';
  else if(ended)h+='<p class="note">המשמרת הסתיימה.</p>';
  else h+=`<form data-f="shTaskF" data-k="${esc(o.id)}" style="margin-top:8px"><label class="f"><span>משימה חדשה ל${esc(nm)}</span><textarea name="txt" rows="2" maxlength="500" required placeholder="למשל: לסדר את מדף החלב"></textarea></label><button class="btn w" ${big}>שליחה ${o.start<=Date.now()?'עכשיו':'– תוצג בתחילת המשמרת'}</button></form>`;
- h+=o.day<w.today?`<p class="note">משמרת שעברה – אי אפשר לשנות.</p><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`:`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="shEdit" data-k="${esc(o.id)}">עריכה</button><button class="btn g grow" ${big} data-a="shDel" data-k="${esc(o.id)}">מחיקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`;
+ h+=o.day<w.today?`<p class="note">משמרת שעברה – אי אפשר לשנות.</p><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`:`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="sftEdit" data-k="${esc(o.id)}">עריכה</button><button class="btn g grow" ${big} data-a="sftDel" data-k="${esc(o.id)}">מחיקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`;
  dlg(h)};
 FRM.shTaskF=async f=>{const occ=f.dataset.k,txt=String(fd(f).txt||'').trim();if(!txt)return toast('כתבו משימה');if(txt.length>500)return toast('עד 500 תווים');
  const b=f.querySelector('button');b.disabled=true;
@@ -94,7 +94,7 @@ function formH(o){const w=S.w,st=(w&&w.staff)||[],d=o?o.day:(w&&w.days&&w.days.i
  <label class="f"><span>הערה (לא חובה)</span><input name="nt" maxlength="200" value="${esc(o?o.nt:'')}" style="min-height:48px"></label>
  <div class="row" style="margin-top:8px"><button class="btn grow" ${big}>שמירה</button><button type="button" class="btn g grow" ${big} data-a="closeDlg">ביטול</button></div></form>`}
 ACT.shNew=()=>{if(!S.w||!S.w.full)return;dlg(formH(null))};
-ACT.shEdit=el=>{const o=occOf(el.dataset.k);if(o)dlg(formH(o))};
+ACT.sftEdit=el=>{const o=occOf(el.dataset.k);if(o)dlg(formH(o))};
 const sidOf=o=>o.sid||o.id.slice(0,o.id.length-11);
 async function saveRun(data,b){try{await fnCall('shApi',data);toast('נשמר');closeDlg();reload()}catch(e){if(b)b.disabled=false;err(e)}}
 /* שאלה: רק הפעם / מכאן והלאה (משמרת קבועה) */
@@ -110,7 +110,7 @@ FRM.shSaveF=f=>{const x=fd(f),o=f.dataset.k?occOf(f.dataset.k):null;
  data.id=sidOf(o);
  if(!o.fx){b.disabled=true;return saveRun(data,b)}
  data.day=o.day;askMode('שמירת השינוי',m=>{if(m==='fwd'&&data.d<o.day)return toast('ב"מכאן והלאה" התאריך לא יכול להיות לפני '+dm(o.day));saveRun(Object.assign(data,{mode:m}))})};
-ACT.shDel=el=>{const o=occOf(el.dataset.k);if(!o)return;const id=sidOf(o);
+ACT.sftDel=el=>{const o=occOf(el.dataset.k);if(!o)return;const id=sidOf(o);
  if(!o.fx)return ask('למחוק את המשמרת? משימות שממתינות לה יבוטלו.',()=>saveRun({op:'del',id}),'כן, מחק');
  askMode('מחיקת משמרת',m=>saveRun({op:'del',id,day:o.day,mode:m}))};
 
@@ -129,7 +129,7 @@ V.shfCfg=()=>{const T='הגדרות משמרות';if(!on()||!mgr())return{t:T,h:
  let h=`<form data-f="shCfgF"><div class="card"><h3 style="margin-top:0">התראות</h3>
  <label class="f"><span>שעת ההתראה היומית על זמנים בלי עובדים</span><input type="time" name="at" required value="${esc(F.at)}" style="min-height:48px"></label>
  <label class="f"><span>סף איחור (דקות, 0–60)</span><input type="number" name="late" inputmode="numeric" min="0" max="60" step="1" required value="${esc(String(F.late))}" style="min-height:48px"></label>
- <p class="note" style="margin-top:0">סף האיחור ישמש להתראות איחור כשהנוכחות מכספית תחובר. תזכורת לעובד נשלחת שעה לפני המשמרת. בשבת ובחג לא נשלחות התראות.</p></div>
+ <p class="note" style="margin-top:0">סף האיחור משמש להתראת איחור למנהל לפי שעות הכניסה מכספית (פעם אחת לעובד ליום). תזכורת לעובד נשלחת שעה לפני המשמרת. בשבת ובחג לא נשלחות התראות.</p></div>
  <div class="card"><h3 style="margin-top:0">שעות פעילות</h3>${F.sug?'<p class="note" style="margin-top:0">הצעה – עוד לא נשמרה. בלי שעות פעילות לא נשלחת התראה על זמנים בלי עובדים.</p>':''}
  ${F.hrs.map((x,i)=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="row" style="align-items:center;justify-content:space-between"><b>${DN[i]}</b><label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" name="c${i}" data-c="shCfgC" value="1"${x.c?' checked':''}> סגור</label></div>
  ${x.c?'':`<div class="row"><label class="f grow"><span>משעה</span><input type="time" name="s${i}" value="${esc(x.s)}" style="min-height:48px"></label><label class="f grow"><span>עד</span><input type="time" name="e${i}" value="${esc(x.e)}" style="min-height:48px"></label></div>`}</div>`).join('')}

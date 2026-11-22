@@ -215,5 +215,5 @@ function normHrs(v) {
 module.exports = {
   HM_RE, DAY_RE, ID_RE, MAX_SKIP, DEF_LATE, DEF_AT, REM_MIN, HOLES_WIN,
   isHM, hmMin, isDay, addDays, weekdayOf, todayOf, weekStart, hmOf, times, appliesOn, occOn, expand, parseOcc, occById,
-  openRange, holes, holesTxt, remDue, remWin, quiet, quietWin, ATT_AFTER, ATT_MAX, ATT_PRE, attWin, attDue, attHit, addSkip, sameWeek, SKIP_KEEP, cfgOf, holesDue, normDef, normHrs,
+  openRange, holes, holesTxt, remDue, remWin, quiet, atHM, quietWin, ATT_AFTER, ATT_MAX, ATT_PRE, attWin, attDue, attHit, addSkip, sameWeek, SKIP_KEEP, cfgOf, holesDue, normDef, normHrs,
 };

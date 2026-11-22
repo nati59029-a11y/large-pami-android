@@ -26,7 +26,13 @@
 //   "עדכון המחשב" (19.11): cxBotTok op:'upd' → ureq:{ id, at, by } ב-private/cxbot (רק לתוסף UPD_VER ומעלה; בקשה אחת בכל 10 דקות).
 //          poll מחזיר uq (מזהה הבקשה); התוסף בודק את הדיסק (lib/upd.js) ומחזיר poll עם ack + res:{ st, cur, disk } (ureq.took, ureq.res).
 //          poll מקבל גם upd (מצב העדכון האוטומטי, כשהשתנה – עד כל 10 דקות) – "נבדק לאחרונה" באפליקציה.
-// פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים.
+//   שעות העובדים (22.11, תוסף 0.1.14): upload עם kind:'hours' – { run?, br (שם הסניף בכספית), m 'YYYY-MM' (החודש הנוכחי או הקודם, שעון ישראל),
+//          emps:[{ id (מזהה העובד בכספית – ספרות), nm (שם העובד בכספית, עד 60), rows:[{ d YYYY-MM-DD, i HH:MM, o HH:MM|'', b דקות הפסקה, t? סה"כ בדקות, n? 1 = חוצה חצות }] }] }.
+//          אימות קפדני (שדות, טיפוסים, גבולות: עד 300 עובדים, 200 שורות לעובד, 10,000 בהעלאה). נשמר לכל עסק: cxHrs/{m}_{bk}_{id} (bk = 8 תווי sha של שם הסניף)
+//          { m, br, bk, e, nm, rows, n, at, run } – כל העלאה מחליפה את המסמך של אותו סניף+חודש+עובד (עובדים אחרים לא נמחקים). סבב 2: אחרי השמירה – התראת איחור למנהל (shifts.js cxLate).
+//          קצב: עד 120 העלאות שעות ביום לעסק, ולכל סניף+חודש לכל היותר פעם בדקה (hr ב-private/cxbot). poll מחזיר caps:[…, 'hours'].
+//          קריאה: cxBotTok({ op:'hours', m }) – מנהל בלבד (mgrW) → { m, list:[{ br, e, nm, rows, n, at }] } (מסך "שעות עובדים" באפליקציה, cx-hours.js; התאמה לפי שם – shfcfg/map).
+// פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים (גם בלי שמות עובדים ושעות).
 
 const crypto = require('node:crypto');
 const { onRequest, HttpsError } = require('firebase-functions/v2/https');
@@ -59,15 +65,19 @@ const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
 const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
 const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
-const CAPS = ['today', 'uq'];
+const CAPS = ['today', 'uq', 'hours'];
 const UST = ['reload', 'same', 'copying', 'busy', 'none'];
 const VER3 = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const TODAY_FROM = 7; // מכירות היום: מ-07:00 (שעון ישראל)
 const TODAY_SKEW = 2 * 60e3; // סובלנות שעון: שעון המחשב שמקדים עד 2 דקות – מתקבל מ-06:58 / 20:58 במוצאי שבת וחג
 const TODAY_GAP = 20 * 60e3; // לכל היותר העלאה חלקית אחת ל-20 דקות לעסק
+// שעות העובדים (0.1.14): גבולות, וקצב – עד HRS.day העלאות ביום לעסק, ולכל סניף+חודש פעם ב-HRS.gap
+const HRS = { emps: 300, rows: 200, all: 10000, day: 120, gap: 60e3, read: 1000 };
+const MON_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const reqLive = (q, now) => !!(q && typeof q.id === 'string' && !q.took && now - (q.at || 0) < REQ_MS);
-const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty'];
+const ALERT_CODES = ['needs-login', 'selector-miss', 'endpoint-changed', 'limit', 'wrong-page', 'import-errors', 'import-timeout', 'import-queue-not-empty',
+  'hours-format', 'hours-list', 'hours-month', 'hours-branch', 'hours-fail']; // סבב 2 (22.11): תקלות בשעות העובדים (תוסף 0.1.14) – התראה למנהל
 const deny = (reason, msg) => new HttpsError('permission-denied', msg, { reason });
 const pre = (reason, msg) => new HttpsError('failed-precondition', msg, { reason });
 const bad = (reason, msg) => new HttpsError('invalid-argument', msg, { reason });
@@ -124,7 +134,7 @@ async function verify(tok) {
 
 // cxBotTok({ op }) – מנהל. new → { token, id } (פעם אחת). revoke → { ok }. info → מצב הרובוט
 async function cxBotTok(w, input) {
-  O.onlyKeys(input, ['op']);
+  O.onlyKeys(input, input.op === 'hours' ? ['op', 'm'] : ['op']);
   if (!w.bizId) throw pre('no-biz', 'בחרו עסק');
   const ref = priv(w.bizId, 'cxbot');
   if (input.op === 'new') {
@@ -155,6 +165,7 @@ async function cxBotTok(w, input) {
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
+      hrl: d.h ? d.hrl || null : null, // 0.1.14: העלאת השעות האחרונה (מספרים בלבד)
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null, scr: r.st !== 'ok' && r.info ? scrOut(r.info.scr) : null }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
@@ -179,6 +190,14 @@ async function cxBotTok(w, input) {
     if (r.no === 'running') throw pre('running', 'הסנכרון כבר רץ במחשב החנות.');
     logger.info('cxBotTok: now', { biz: w.bizId });
     return { ok: true, req: r.req };
+  }
+  // שעות העובדים מכספית (0.1.14) לחודש אחד – מנהל בלבד (cxBotTok עובר דרך mgrW), רק העסק שלו (T.tdb). לתצוגה בסבב הבא
+  if (input.op === 'hours') {
+    if (typeof input.m !== 'string' || !MON_RE.test(input.m)) throw bad('bad-month', 'חודש לא תקין (YYYY-MM)');
+    const q = await T.tdb().collection('cxHrs').where('m', '==', input.m).limit(HRS.read).get();
+    const list = q.docs.map((d) => { const x = d.data(); return { br: x.br || '', e: x.e || '', nm: x.nm || '', rows: Array.isArray(x.rows) ? x.rows : [], n: x.n || 0, at: x.at || 0 }; });
+    list.sort((a, b) => (a.br < b.br ? -1 : a.br > b.br ? 1 : a.nm < b.nm ? -1 : a.nm > b.nm ? 1 : a.e < b.e ? -1 : 1));
+    return { m: input.m, list };
   }
   // "עדכון המחשב": בקשה לתוסף לבדוק אם המשימה ב-Windows כבר הורידה גרסה חדשה, ולהיטען מחדש אם בטוח. לא מוריד כלום בעצמו.
   if (input.op === 'upd') {
@@ -289,8 +308,9 @@ const OPF = {
     O.onlyKeys(b, []);
     return { schedule: SCHED, lastSales: x.dev.sd || null, limits: limitsOf(await cfgNow()) };
   },
-  async upload(w, b, x) {
+  async upload(w, b, x, o) {
     const kind = b.kind == null ? 'cat' : b.kind;
+    if (kind === 'hours') return uploadHours(w, b, x, o);
     if (kind === 'sales' && b.partial !== undefined) return uploadToday(w, b, x);
     if (kind === 'sales') {
       O.onlyKeys(b, ['run', 'kind', 'day', 'part', 'parts', 'lines']);
@@ -386,6 +406,61 @@ async function uploadToday(w, b, x) {
   const r = await CX.cxPartial(w, { day: today, hm, lines: b.lines, now: x.now });
   await priv(w.bizId, 'cxbot').set({ tp: { d: today, hm, at: x.now, n: r.n } }, { merge: true });
   return { n: r.n, bad: r.bad, partial: true };
+}
+// שעות העובדים (0.1.14): אימות קפדני, קצב, ושמירה – מסמך לכל סניף+חודש+עובד (מחליף את הקודם). → { n: עובדים, rows }
+const ctl = /[\u0000-\u001f\u007f]/;
+function hrsRow(r, m) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-row', 'שורת שעות לא תקינה');
+  O.onlyKeys(r, ['d', 'i', 'o', 'b', 't', 'n'], 'שורת שעות');
+  if (typeof r.d !== 'string' || !CX.DATE_RE.test(r.d) || r.d.slice(0, 7) !== m || addDays(r.d, 0) !== r.d) throw bad('bad-row', 'תאריך לא תקין בשורת שעות');
+  if (typeof r.i !== 'string' || !HM_RE.test(r.i)) throw bad('bad-row', 'שעת כניסה לא תקינה');
+  if (typeof r.o !== 'string' || (r.o !== '' && !HM_RE.test(r.o))) throw bad('bad-row', 'שעת יציאה לא תקינה');
+  if (!Number.isInteger(r.b) || r.b < 0 || r.b > 1440) throw bad('bad-row', 'הפסקה לא תקינה');
+  if (r.t !== undefined && (!Number.isInteger(r.t) || r.t < 0 || r.t > 2880)) throw bad('bad-row', 'סה"כ לא תקין');
+  if (r.n !== undefined && (r.n !== 1 || r.o === '')) throw bad('bad-row', 'סימון חצות לא תקין');
+  return Object.assign({ d: r.d, i: r.i, o: r.o, b: r.b }, r.t !== undefined ? { t: r.t } : {}, r.n === 1 ? { n: 1 } : {});
+}
+async function uploadHours(w, b, x, o) {
+  O.onlyKeys(b, ['run', 'kind', 'br', 'm', 'emps']);
+  if (b.run !== undefined && (typeof b.run !== 'string' || !SRUN_RE.test(b.run))) throw bad('bad-run', 'מזהה לא תקין');
+  if (typeof b.br !== 'string' || !b.br.trim() || b.br.length > 40 || ctl.test(b.br) || b.br.includes('/')) throw bad('bad-br', 'סניף לא תקין');
+  const cur = ilDay(x.now).slice(0, 7), prev = addDays(cur + '-01', -1).slice(0, 7);
+  if (typeof b.m !== 'string' || !MON_RE.test(b.m)) throw bad('bad-month', 'חודש לא תקין');
+  if (b.m !== cur && b.m !== prev) throw bad('bad-month', 'שעות – רק החודש הנוכחי או הקודם');
+  if (!Array.isArray(b.emps) || !b.emps.length || b.emps.length > HRS.emps) throw bad('bad-emps', `עובדים: 1 עד ${HRS.emps}`);
+  const ids = new Set();
+  let total = 0;
+  const emps = b.emps.map((e) => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) throw bad('bad-emp', 'עובד לא תקין');
+    O.onlyKeys(e, ['id', 'nm', 'rows'], 'עובד');
+    if (typeof e.id !== 'string' || !/^\d{1,12}$/.test(e.id) || ids.has(e.id)) throw bad('bad-emp', 'מזהה עובד לא תקין או כפול');
+    ids.add(e.id);
+    if (e.nm !== undefined && (typeof e.nm !== 'string' || e.nm.length > 60 || ctl.test(e.nm))) throw bad('bad-emp', 'שם עובד לא תקין');
+    if (!Array.isArray(e.rows) || !e.rows.length || e.rows.length > HRS.rows) throw bad('bad-rows', `שורות לעובד: 1 עד ${HRS.rows}`);
+    total += e.rows.length;
+    if (total > HRS.all) throw bad('bad-rows', `יותר מ-${HRS.all} שורות שעות בהעלאה אחת`);
+    const rows = e.rows.map((r) => hrsRow(r, b.m)).sort((p, q) => (p.d + p.i < q.d + q.i ? -1 : p.d + p.i > q.d + q.i ? 1 : 0));
+    return { id: e.id, nm: (e.nm || '').trim(), rows };
+  });
+  const br = b.br.trim(), bk = sha('cxbr:' + br).slice(0, 8), key = bk + '_' + b.m, day = ilDay(x.now);
+  // קצב (לפני כל כתיבה): בטרנזקציה – שתי העלאות במקביל לא עוברות יחד
+  const ref = priv(w.bizId, 'cxbot');
+  const okRate = await ref.firestore.runTransaction(async (tx) => {
+    const s = await tx.get(ref), hr = (s.exists && s.get('hr')) || {};
+    const same = hr.d === day, n = same ? +hr.n || 0 : 0, k = same && hr.k && typeof hr.k === 'object' ? hr.k : {};
+    const last = +k[key] || 0;
+    if (n >= HRS.day || (last && x.now >= last && x.now - last < HRS.gap)) return false;
+    tx.set(ref, { hr: { d: day, n: n + 1, k: Object.assign({}, k, { [key]: x.now }) } }, { merge: true });
+    return true;
+  });
+  if (!okRate) throw new HttpsError('resource-exhausted', 'שעות העובדים כבר עודכנו לפני פחות מדקה (או יותר מדי העלאות היום)', { reason: 'rate' });
+  const db = T.tdb(), bt = db.batch();
+  for (const e of emps) bt.set(db.doc(`cxHrs/${b.m}_${bk}_${e.id}`), { m: b.m, br, bk, e: e.id, nm: e.nm, rows: e.rows, n: e.rows.length, at: x.now, run: b.run || '' });
+  await bt.commit();
+  await ref.set({ hrl: { at: x.now, m: b.m, bk, n: emps.length, rows: total } }, { merge: true }); // ההעלאה האחרונה (מספרים בלבד)
+  // סבב 2: התראת איחור למנהל (shifts.js cxLate – עובד ממופה עם משמרת היום, פעם ביום). כישלון כאן לא מפיל את ההעלאה
+  try { await require('./shifts')._core.cxLate(emps, b.m, Object.assign({}, o, { now: x.now })); } catch (e) { logger.warn('cxBot: late check failed', { biz: w.bizId, name: e && e.name, code: e && e.code }); }
+  return { n: emps.length, rows: total };
 }
 async function reportRun(w, b, x, o) {
   {
@@ -521,6 +596,11 @@ const MSG = {
   updfail: 'העדכון האוטומטי של התוסף במחשב החנות נכשל כמה פעמים ברצף. הסנכרון ממשיך בגרסה הנוכחית – פרטים באפליקציה, בכרטיס "רובוט".',
   updstale: 'העדכון האוטומטי של התוסף במחשב החנות לא רץ כבר יומיים (המשימה המתוזמנת ב-Windows הופסקה או נמחקה?). פרטים באפליקציה, בכרטיס "רובוט".',
   updlag: 'גרסה חדשה של התוסף הורדה למחשב החנות אבל לא נטענה. כדאי לסגור ולפתוח את Chrome במחשב (או ללחוץ ⟳ ב-chrome://extensions).',
+  'hours-format': 'קובץ השעות שירד מכספית לא נראה כמו שציפינו, ולכן שעות העובדים לא עודכנו. הסנכרון של השאר ממשיך – פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-list': 'הרובוט לא הצליח לקרוא את רשימת העובדים בכספית, ולכן שעות העובדים לא עודכנו. פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-month': 'הרובוט לא הצליח לבחור בכספית את החודש הקודם, ולכן השעות של החודש הקודם לא עודכנו. פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-branch': 'שעות העובדים של סניף נחל לכיש לא עודכנו (יהודה הנשיא עודכן). פרטים באפליקציה, בכרטיס "רובוט".',
+  'hours-fail': 'עדכון שעות העובדים מכספית נכשל. הסנכרון של השאר ממשיך – פרטים באפליקציה, בכרטיס "רובוט".',
   pd: (n) => `${n} שינויים שנשלחו לכספית עדיין לא נקלטו שם, גם אחרי 2 סנכרוני קטלוג. כדאי לבדוק בכספית את ייבוא הקבצים.`,
 };
 // שולח לכל מנהלי העסק התראה אחת לכל סוג ביום (b/{bizId}/private/cxbot.watch). → הסוגים שנשלחו

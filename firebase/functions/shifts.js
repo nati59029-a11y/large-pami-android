@@ -4,8 +4,8 @@
 //   shf/{id}      – הגדרת משמרת (lib/shifts-core.js). shft/{id} – משימה למשמרת: { occ, sid, day, u, txt, st, tk, by, bn, at, relAt, why }.
 //                   st: wait (ממתינה) / rel (נשלחה – tasks/sh-<id>) / cx (בוטלה כשהמשמרת נמחקה) / orph (לא נשלחה: המופע לא קיים / אין עובד –
 //                   מוצגת למנהל בטבלה, לא נעלמת בשקט).
-//   shfcfg/main   – { late, at, hrs, ub, ua }. shfcfg/map – { m: { '<שם עובד בכספית>': uid } } (ישמש בשלב הנוכחות).
-//   shfsent/{day} – { rem: { occ: ts }, holes: ts, att: { '<occ>_<uid>': ts } } – מונע שליחה כפולה (day = יום תחילת המשמרת).
+//   shfcfg/main   – { late, at, hrs, ub, ua }. shfcfg/map – { m: { '<שם עובד בכספית>': uid } } (מסך "שעות עובדים" והתראת האיחור – cxLate).
+//   shfsent/{day} – { rem: { occ: ts }, holes: ts, att: { '<occ>_<uid>': ts }, late: { uid: ts } } – מונע שליחה כפולה (day = יום תחילת המשמרת).
 // shApi({ op, ... }) – תוספת tasks. מנהל, או עובד עם perms.shf: הכול חוץ מ-cfg/setCfg (מנהל בלבד). עובד בלי shf: רק week, ורק המשמרות שלו.
 //   week{from}  – 7 ימים מ-from: מופעים, חורים (לפי שעות הפעילות), משימות (משימות שממתינות במשמרות של המשתמש עצמו – מוסתרות ממנו).
 //   save{id?, day?, mode?, u, d, s, e, fx, nt} – חדשה / עריכה. עריכה רק מהיום והלאה (מופע שעבר – bad-day). משמרת קבועה: mode 'one'
@@ -368,14 +368,14 @@ async function api(request) {
 }
 
 // ---------- shTick: עסק אחד (בתוך T.runInBiz). opts: { now, send } ----------
-// תפיסה בטרנזקציה – שתי ריצות במקביל לא שולחות פעמיים. key: 'rem' + occ / 'att' + '<occ>_<uid>' / 'holes'
+// תפיסה בטרנזקציה – שתי ריצות במקביל לא שולחות פעמיים. key: 'rem' + occ / 'att' + '<occ>_<uid>' / 'late' + uid / 'holes'
 async function claim(db, day, key, occ, now) {
   const ref = db.doc('shfsent/' + day);
   return db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     const d = s.exists ? s.data() || {} : {};
     if (key === 'holes') { if (d.holes) return false; tx.set(ref, { holes: now, day }, { merge: true }); return true; }
-    const k = key === 'att' ? 'att' : 'rem';
+    const k = key === 'att' || key === 'late' ? key : 'rem';
     if (d[k] && d[k][occ]) return false;
     tx.set(ref, { [k]: { [occ]: now }, day }, { merge: true });
     return true;
@@ -427,6 +427,57 @@ async function attLast(db, biz, uid, start, end) {
     logger.warn('attLast failed', { name: e && e.name, code: e && e.code });
     return null;
   }
+}
+
+// ---------- התראת איחור לפי שעות כספית (סבב 2, 22.11.2026; החלטה 11) ----------
+// נקרא מ-caspit-bot.js אחרי upload kind:'hours' (בתוך T.runInBiz של העסק, אחרי שהשורות נשמרו ב-cxHrs). emps – העובדים בהעלאה [{ nm, rows }].
+// עובד ממופה (shfcfg/map, השם מנורמל ברווחים כמו ב-setCfg) עם משמרת שמתחילה היום: הכניסה הראשונה שלו היום – מכל הסניפים (cxHrs של החודש) –
+// מאוחרת מתחילת המשמרת הראשונה שלו היום ביותר מסף האיחור (shfcfg/main.late) → התראה למנהלים, פעם אחת לעובד ליום (shfsent/{day}.late[uid]).
+// המפתח late[uid] משותף לכל מקור איחור (גם לשעון הקופה, אם תיווסף לו התראה) – כך שאין כפילות לאותו עובד ויום.
+// לא בשבת / חג (SC.quiet), לא על החודש הקודם. ביומן – מספרים בלבד (בלי שמות). → מספר ההתראות שנשלחו
+const nmKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+async function cxLate(emps, m, o) {
+  const now = (o && o.now) || Date.now(), today = SC.todayOf(now);
+  if (m !== today.slice(0, 7) || SC.quiet(now)) return 0;
+  if (!(emps || []).some((e) => (e.rows || []).some((r) => r.d === today))) return 0;
+  const db = T.tdb(), sc = T.scope();
+  const ms = await db.doc('shfcfg/map').get();
+  const raw = ms.exists && ms.get('m') && typeof ms.get('m') === 'object' ? ms.get('m') : {};
+  const keys = new Map(Object.entries(raw).filter(([, u]) => typeof u === 'string' && UID_RE.test(u)).map(([k, u]) => [nmKey(k), u]));
+  const cand = new Set();
+  for (const e of emps) { const u = keys.get(nmKey(e.nm)); if (u && e.rows.some((r) => r.d === today)) cand.add(u); }
+  if (!cand.size) return 0;
+  const [cfgS, defs] = await Promise.all([db.doc('shfcfg/main').get(), loadDefs(db)]);
+  const cfg = SC.cfgOf(cfgS.exists ? cfgS.data() : null);
+  const first = new Map(); // uid → המשמרת הראשונה שלו היום
+  for (const oc of SC.expand(defs, today, 1)) if (cand.has(oc.u) && !first.has(oc.u)) first.set(oc.u, oc);
+  if (!first.size) return 0;
+  const ent = new Map(); // uid → { t, i, br } – הכניסה הראשונה היום
+  const hs = await db.collection('cxHrs').where('m', '==', m).limit(1000).get();
+  for (const d of hs.docs) {
+    const x = d.data() || {}, u = keys.get(nmKey(x.nm));
+    if (!u || !first.has(u)) continue;
+    for (const r of Array.isArray(x.rows) ? x.rows : []) {
+      if (!r || r.d !== today || !SC.isHM(r.i)) continue;
+      const t = SC.atHM(today, r.i), p = ent.get(u);
+      if (!p || t < p.t) ent.set(u, { t, i: r.i, br: str(x.br, 40) });
+    }
+  }
+  const DR = require('./daily-rep')._core;
+  let n = 0;
+  for (const [u, oc] of first) {
+    const e = ent.get(u);
+    if (!e) continue;
+    const late = Math.round((e.t - oc.start) / 60000);
+    if (late <= cfg.late) continue;
+    const nm = await userName(db, u);
+    if (nm === null) continue;
+    if (!(await claim(db, today, 'late', u, now))) continue;
+    n++;
+    await DR.pushMgrs(db, { uid: 'cxlate', bizId: sc && sc.bizId }, 'lt' + oc.id, '', Object.assign({}, o, { msg: { k: 'sh', id: 'lt' + oc.id, title: 'איחור למשמרת', body: nm + ' נכנס/ה ב-' + e.i + (e.br ? ' (' + e.br + ')' : '') + ', והמשמרת התחילה ב-' + oc.s + ' – איחור של ' + late + ' דקות (לפי כספית)' } }));
+  }
+  if (n) logger.info('cxLate', { biz: sc && sc.bizId, n });
+  return n;
 }
 
 const DN = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -519,4 +570,4 @@ exports.shTick = onSchedule({ region: LEGACY_REGION, schedule: 'every 10 minutes
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, attLast, loadDefs, ATT_SRC, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { api: wrap(api), tickBiz, runTick, release, taskDoc, attOpen, attLast, loadDefs, ATT_SRC, cxLate, nmKey, ops: { opWeek, opSave, opDel, opTask, opTaskDel, opCfg, opSetCfg } } });
