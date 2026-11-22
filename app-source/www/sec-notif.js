@@ -2,13 +2,16 @@
    התוסף LpNotif (android-plugin/LpNotifListen.java + LpNotifPlugin.java) קולט התראות רק מהאפליקציות שהמנהל בחר, ומדלג על שולחים ברשימת ההחרגה.
    כאן: לשונית "התראות מהטלפון" במסך המזכירה (רק למנהל, רק באפליקציה), "מה לעשות?" לכל התראה, למידה מהבחירות והצעת כלל אחרי פעמיים,
    וביצוע לבד של כלל שאושר במפורש (פתיחת משימה לעובד שנלמד – אותו קוד כמו אישור כרטיס משימה במזכירה, מזהה קבוע מהמפתח של ההתראה; או "התעלם").
-   פרטיות: תוכן ההתראה לא יוצא מהמכשיר, חוץ מלחיצה על "שאלי את המזכירה" (שולח לצ'אט הקיים). לא נכתב ליומן (console).
+   פרטיות: תוכן ההתראה (שולח וטקסט) נשמר רק בתור של התוסף (SharedPreferences "lp_notif_in", מוחרג מגיבוי אנדרואיד) ובזיכרון של הדף – לא ב-localStorage (שנכלל בגיבוי).
+   הוא יוצא מהמכשיר רק כשפותחים ממנו משימה (ידנית או בכלל אוטומטי – "<שולח>: <טקסט>" נכנס למשימה) או בלחיצה על "שאלי את המזכירה". לא נכתב ליומן (console).
+   ביציאה מהחשבון (tasks-wc.js W.out ← __secNfOut): הקליטה כבה, התור נמחק, ומפתחות lp-ntf-* של המשתמש נמחקים.
    החלק הראשון (Core) – לוגיקה טהורה בלי DOM, נבדקת ב-node (firebase/tests/sec-notif.unit.test.js). השאר – המסך.
-   נשמר במכשיר: lp-ntf-in-<uid> ההתראות שנקלטו (עד 300), lp-ntf-<עסק>|<uid> בחירות, כללים, יומן "מה עשיתי לבד" (50) ועצירת הביצוע האוטומטי. */
+   נשמר ב-localStorage (בלי טקסט הודעה): lp-ntf-m-<uid> מצב לכל התראה לפי המפתח שלה בלבד (טופל/התעלם/משימה…),
+   lp-ntf-<עסק>|<uid> בחירות, כללים, יומן "מה עשיתי לבד" (50), מוני התקרה היומית ועצירת הביצוע האוטומטי. lp-ntf-in-<uid> (גרסה קודמת, עם טקסט) נמחק בכניסה. */
 (function(root){
 'use strict';
 /* ===================== Core (טהור) ===================== */
-const MAXI=300,LOGN=50;
+const MAXI=300,LOGN=50,AUTO_RUN=10,AUTO_DAY=30,MAXM=600;
 /* שולח להשוואה: אותיות קטנות, בלי "(3 הודעות)" בסוף, רווחים אחידים – אותו כלל כמו senderKey ב-LpNotifListen.java */
 const senderKey=s=>String(s==null?'':s).replace(/\s*\(\d+[^)]*\)\s*$/,'').replace(/\s+/g,' ').trim().toLowerCase();
 const isSkipped=(skip,s)=>{const k=senderKey(s);return !!k&&(Array.isArray(skip)?skip:[]).some(x=>senderKey(x)===k)};
@@ -25,7 +28,7 @@ const AUTO=new Set(['task','ign']);
 const ruleKey=it=>String(it.p||'')+'|'+senderKey(it.s);
 /* בחירה: (אפליקציה, שולח, פעולה, עובד) ← מספר הפעמים. to = {uid, un} למשימה (uid '*' = כל העובדים) */
 function record(Lr,it,act,to,now){const rk=ruleKey(it),uid=to&&to.uid||'',k=rk+'|'+act+'|'+uid;Lr=Lr||{};
- const e=Lr[k]||(Lr[k]={rk,p:it.p,a:it.a,s:it.s,act,uid,un:'',n:0,t:0,kw:''});e.n++;e.t=now||Date.now();e.s=it.s;e.a=it.a;if(to&&to.un)e.un=to.un;const kw=kwOf(it.x);if(kw)e.kw=kw;return e}
+ const e=Lr[k]||(Lr[k]={rk,p:it.p,a:it.a,s:it.s,act,uid,un:'',n:0,t:0});e.n++;e.t=now||Date.now();e.s=it.s;e.a=it.a;if(to&&to.un)e.un=to.un;delete e.kw;return e}
 /* הצעות "ללמוד?": לכל שולח – הבחירה האחרונה שלו, אם נבחרה פעמיים לפחות, היא פעולה שמותר לבצע לבד (משימה לעובד / התעלם), ואין עדיין החלטה (כלל או "תמיד לשאול") */
 function suggest(Lr,R){const best={};Object.keys(Lr||{}).forEach(k=>{const e=Lr[k];if(!e)return;const b=best[e.rk];if(!b||e.t>b.t)best[e.rk]=e});
  return Object.values(best).filter(e=>e.n>=2&&AUTO.has(e.act)&&(e.act!=='task'||!!e.uid)&&!(R&&R[e.rk])).sort((a,b)=>b.t-a.t)}
@@ -37,7 +40,18 @@ function delRule(R,Lr,rk){delete R[rk];Object.keys(Lr||{}).forEach(k=>{if(Lr[k]&
 function tidOf(k){let a=0x811c9dc5,b=0x01000193^0x5bd1e995;const s=String(k||'');for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);a=Math.imul(a^c,16777619)>>>0;b=Math.imul(b^c,2246822519)>>>0;b=(b^(b>>>13))>>>0}
  return 'n'+a.toString(16).padStart(8,'0')+b.toString(16).padStart(8,'0')}
 const logAdd=(G,e)=>{G=Array.isArray(G)?G:[];G.unshift(e);return G.slice(0,LOGN)};
-const Core={MAXI,LOGN,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd};
+/* מצב לכל התראה – לפי המפתח בלבד (המפתח מהתוסף: אפליקציה|hash|זמן, בלי טקסט). שדות מותרים בלבד, בלי שולח ובלי טקסט */
+const STF=['st','by','tk','at','cap'];
+function stPut(M,k,o,now){if(!M||typeof k!=='string'||!k)return null;const e=Object.assign({},M[k]||{});STF.forEach(f=>{if(o&&o[f]!==undefined)e[f]=String(o[f]).slice(0,80)});e.at=+(o&&o.at)||now||Date.now();M[k]=e;return e}
+const applySt=(list,M)=>(Array.isArray(list)?list:[]).map(x=>{const e=M&&M[x.k]||{};return Object.assign({},x,{st:'new'},e,{at:+e.at||0})});
+/* מחיקת מצב של התראות שכבר לא בתור (keys = המפתחות שבתור), ועד MAXM – קודם הישנים. מחזיר true אם משהו נמחק */
+function stTrim(M,keys,max){let ch=false;max=max||MAXM;if(keys)Object.keys(M).forEach(k=>{if(!keys.has(k)){delete M[k];ch=true}});
+ const ks=Object.keys(M);if(ks.length>max){ks.sort((a,b)=>(+M[a].at||0)-(+M[b].at||0)).slice(0,ks.length-max).forEach(k=>delete M[k]);ch=true}return ch}
+/* תקרה לביצוע אוטומטי של משימות: עד AUTO_RUN בכל עיבוד (used = כמה כבר בוצעו בעיבוד הזה), ועד AUTO_DAY ביום לכל כלל.
+   C = {d:<יום>, n:{<מפתח כלל>: מספר}} – מתאפס ביום חדש. why: 'run' (תקרת עיבוד) / 'day' (תקרה יומית של הכלל) */
+function capTake(C,rk,day,used){if(!C||typeof C!=='object'||C.d!==day)C={d:day,n:{}};if(!C.n||typeof C.n!=='object')C.n={};
+ if((used|0)>=AUTO_RUN)return{ok:false,C,why:'run'};if((+C.n[rk]||0)>=AUTO_DAY)return{ok:false,C,why:'day'};C.n[rk]=(+C.n[rk]||0)+1;return{ok:true,C}}
+const Core={MAXI,LOGN,AUTO_RUN,AUTO_DAY,MAXM,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd,stPut,applySt,stTrim,capTake};
 if(typeof module==='object'&&module&&module.exports){module.exports=Core;return}
 root.SecNotifCore=Core;
 
@@ -50,7 +64,7 @@ if(!TABS.some(x=>x[0]===TK))TABS.push([TK,TL]);
 const DEF=['com.whatsapp','com.whatsapp.w4b','com.google.android.apps.messaging','com.samsung.android.messaging','com.android.mms','com.android.messaging'];
 const SUG=DEF.concat(['com.google.android.gm','org.telegram.messenger','com.microsoft.office.outlook','com.facebook.orca','com.instagram.android']);
 const DEFN={'com.whatsapp':'WhatsApp','com.whatsapp.w4b':'WhatsApp Business','com.google.android.apps.messaging':'הודעות (Google)','com.samsung.android.messaging':'הודעות (Samsung)','com.android.mms':'הודעות','com.android.messaging':'הודעות'};
-const N={cfg:null,en:null,apps:null,v:'list',cards:{},busy:0,tk:0,lis:0,remK:'',ld:0,wr:0,lastN:-1};
+const N={cfg:null,en:null,apps:null,v:'list',cards:{},busy:0,tk:0,lis:0,remK:'',ld:0,wr:0,lastN:-1,q:null,qU:'',lg:''};
 const cap=()=>window.Capacitor||null;
 const native=()=>{try{const C=cap();return !!(C&&C.isNativePlatform&&C.isNativePlatform())}catch(e){return false}};
 const plug=()=>{const C=cap();return native()&&C.Plugins&&C.Plugins.LpNotif||null};
@@ -58,10 +72,19 @@ const adm=()=>{try{return typeof isA==='function'&&isA()}catch(e){return false}}
 const uid=()=>SY&&SY.uid||'';
 const rd=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const wr=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}};
-const kIn=()=>'lp-ntf-in-'+uid(),kSt=()=>'lp-ntf-'+(SY&&SY.bizId||'')+'|'+uid();
-const inbox=()=>{const a=rd(kIn(),[]);return Array.isArray(a)?a.filter(x=>x&&typeof x.k==='string'):[]};
-const inboxW=a=>wr(kIn(),a);
-const st=()=>{const o=rd(kSt(),{});return{L:o&&typeof o.L==='object'&&o.L?o.L:{},R:o&&typeof o.R==='object'&&o.R?o.R:{},G:Array.isArray(o&&o.G)?o.G:[],off:!!(o&&o.off)}};
+const kM=()=>'lp-ntf-m-'+uid(),kSt=()=>'lp-ntf-'+(SY&&SY.bizId||'')+'|'+uid();
+/* ההתראות עצמן: רק בזיכרון (N.q), נטענות מהתור של התוסף בכל כניסה. המצב (טופל/התעלם…) – לפי מפתח בלבד */
+const stM=()=>{const o=rd(kM(),{});return o&&typeof o==='object'&&!Array.isArray(o)?o:{}};
+const stMW=o=>wr(kM(),o);
+const inbox=()=>N.q&&N.qU&&N.qU===uid()?applySt(N.q,stM()):[];
+/* גרסה קודמת שמרה את ההתראות (שולח וטקסט) ב-lp-ntf-in-<uid>: מעבירים רק את ההחלטות (לפי מפתח) ומוחקים את המפתח */
+function legacy(){const u=uid();if(!u||N.lg===u)return;N.lg=u;const k='lp-ntf-in-'+u,a=rd(k,null);
+ try{if(Array.isArray(a)){const M=stM();a.forEach(x=>{if(x&&typeof x.k==='string'&&x.st&&x.st!=='new'&&!M[x.k])stPut(M,x.k,{st:x.st,by:x.by,tk:x.tk,at:x.at},Date.now())});stMW(M)}}catch(e){}
+ try{localStorage.removeItem(k)}catch(e){}}
+/* מחיקת כל המידע המקומי של משתמש (יציאה מהחשבון / העברת הקליטה לחשבון אחר): ההחלטות, הכללים והיומן בכל העסקים, והעותק הישן עם הטקסט */
+function wipe(u){if(!u)return;try{const del=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&(k==='lp-ntf-in-'+u||k==='lp-ntf-m-'+u||(k.startsWith('lp-ntf-')&&k.endsWith('|'+u))))del.push(k)}del.forEach(k=>localStorage.removeItem(k))}catch(e){}
+ if(N.qU===u){N.q=null;N.qU=''}if(N.lg===u)N.lg=''}
+const st=()=>{const o=rd(kSt(),{});return{L:o&&typeof o.L==='object'&&o.L?o.L:{},R:o&&typeof o.R==='object'&&o.R?o.R:{},G:Array.isArray(o&&o.G)?o.G:[],off:!!(o&&o.off),C:o&&o.C&&typeof o.C==='object'?o.C:null}};
 const stW=o=>wr(kSt(),o);
 const newN=()=>{try{return uid()?inbox().filter(x=>x.st==='new').length:0}catch(e){return 0}};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
@@ -86,26 +109,36 @@ async function saveCfg(o){const P=plug();if(!P)throw new Error('no plugin');cons
 /* ---------- קליטה: משיכה מהתוסף, מיזוג, וביצוע כללים שאושרו ---------- */
 async function tick(){const P=plug();if(!P||!adm()||!uid()||N.tk)return;N.tk=1;
  try{if(!N.lis&&typeof P.addListener==='function'){N.lis=1;try{await P.addListener('notif',()=>{setTimeout(tick,300)})}catch(e){}}
-  if(!N.cfg||N.ld!==2)await loadCfg();if(!mine())return;
-  const r=await P.pull({});const items=Array.isArray(r&&r.items)?r.items:[];if(r&&typeof r.on==='boolean')N.en=r.on;
-  if(!items.length)return;
-  const m=merge(inbox(),items,N.cfg.skip);inboxW(m.list);
-  if(m.added.length)await autoRun(m.added)}
+  if(!N.cfg||N.ld!==2)await loadCfg();if(!mine())return;legacy();
+  /* קודם החדשות (שעוד לא נלקחו) – רק עליהן רצים הכללים; בכניסה הראשונה גם כל התור (pull all), כי ההתראות לא נשמרות בדף */
+  const r=await P.pull({});const fresh=Array.isArray(r&&r.items)?r.items:[];if(r&&typeof r.on==='boolean')N.en=r.on;let added;
+  if(!N.q||N.qU!==uid()){const a=await P.pull({all:true});const all=Array.isArray(a&&a.items)?a.items:[],fk=new Set(fresh.map(o=>o&&o.k));
+   const m=merge([],all.concat(fresh),N.cfg.skip);N.q=m.list;N.qU=uid();added=m.added.filter(x=>fk.has(x.k));
+   if(all.length){const M=stM();if(stTrim(M,new Set(all.map(o=>o&&o.k))))stMW(M)}}
+  else{if(!fresh.length)return;const m=merge(N.q,fresh,N.cfg.skip);N.q=m.list;added=m.added}
+  const M=stM();added=added.filter(x=>!M[x.k]);
+  if(added.length)await autoRun(added)}
  catch(e){/* בשקט – ננסה שוב בפעם הבאה */}
  finally{N.tk=0;const n=newN();if(onTab())re();else if(n!==N.lastN)re();N.lastN=n}}
-async function autoRun(added){const S=st();if(S.off)return;let ch=0;
+/* תקרה: עד AUTO_RUN משימות בכל עיבוד ועד AUTO_DAY ביום לכל כלל. מעבר לתקרה – ההתראה נשארת "ממתינה להחלטה" (cap), ושורה אחת ביומן לכל כלל */
+const CAPM={day:'הגעתי לתקרה היומית של הכלל – ממתין לאישורך',run:'הגעתי לתקרה של '+AUTO_RUN+' משימות אוטומטיות בבת אחת – ממתין לאישורך'};
+const dayK=t=>{try{return new Date(t).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'})}catch(e){return new Date(t).toISOString().slice(0,10)}};
+async function autoRun(added){const S=st();if(S.off)return;let ch=0,used=0;const day=dayK(Date.now()),capd={};
  for(const it of added){const r=ruleFor(S.R,it);if(!r)continue;
   if(r.act==='ign'){setSt(it.k,{st:'ign',by:'auto'});S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'ign',ok:1});ch=1;continue}
-  if(r.act==='task'){let res;try{res=await autoTask(it,r)}catch(e){res={ok:0,why:e&&e.cx||'פתיחת המשימה נכשלה'}}
+  if(r.act==='task'){const cp=capTake(S.C,ruleKey(it),day,used);S.C=cp.C;ch=1;
+   if(!cp.ok){setSt(it.k,{cap:cp.why});const ck=ruleKey(it)+'|'+cp.why,g=capd[ck]||(capd[ck]={t:Date.now(),k:it.k,s:it.s,a:it.a,act:'cap',why:cp.why,n:0});g.n++;continue}
+   used++;let res;try{res=await autoTask(it,r)}catch(e){res={ok:0,why:e&&e.cx||'פתיחת המשימה נכשלה'}}
    if(res.ok)setSt(it.k,{st:'task',by:'auto',tk:res.tk});
    S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'task',un:r.un||'',ok:res.ok?1:0,tk:res.tk||'',dup:res.dup?1:0,why:res.why||''});ch=1}}
+ Object.values(capd).forEach(g=>{S.G=logAdd(S.G,g)});
  if(ch)stW(S)}
 async function autoTask(it,r){const c=cx();if(!cxOk())return{ok:0,why:'המשימות לא זמינות כאן'};
  const S=await c.staff();let to=[];if(r.uid!=='*'){for(const u of String(r.uid).split(',')){const z=S.find(x=>x.uid===u);if(!z)return{ok:0,why:'העובד לא נמצא ברשימת העובדים הפעילים'};to.push({uid:z.uid,name:z.name})}}
  const card={id:tidOf(it.k),txt:taskTxt(it),all:r.uid==='*',to,due:null,pri:'',rv:false};
  const x=await c.create(card);return{ok:1,tk:'sec'+card.id,dup:!!x.dup}}
 const taskTxt=it=>((it.s?it.s+': ':'')+it.x).trim().slice(0,500);
-function setSt(k,o){const L=inbox(),it=L.find(x=>x.k===k);if(!it)return null;Object.assign(it,o,{at:Date.now()});inboxW(L);return it}
+function setSt(k,o){const it=itemOf(k);if(!it)return null;const M=stM(),e=stPut(M,k,o,Date.now());stMW(M);return Object.assign(it,e)}
 const itemOf=k=>inbox().find(x=>x.k===k)||null;
 
 /* ---------- למידה ---------- */
@@ -133,7 +166,7 @@ function setH(){const c=N.cfg,P=new Set(c.pkgs&&c.pkgs.length?c.pkgs:[]),A=N.app
  const rest=A?A.map(a=>a.p).filter(p=>!top.includes(p)):[];
  return `<div class="card"><b>${TL}</b>
  <p class="note" style="margin:6px 0">המזכירה תראה את ההתראות שמגיעות לטלפון <b>רק מהאפליקציות שתבחרו כאן</b>, ותשאל מה לעשות עם כל אחת.</p>
- <ul class="note" style="margin:0 0 8px;padding-inline-start:18px"><li>נקלט רק מה שמופיע בהתראה עצמה (שם השולח והטקסט) – לא כל השיחה.</li><li>זה נשאר בטלפון הזה בלבד ולא נשלח לשרת.</li><li>הטקסט נשלח למזכירה (AI) רק כשלוחצים "שאלי את המזכירה".</li><li>אפשר לכבות בכל רגע.</li></ul>
+ <ul class="note" style="margin:0 0 8px;padding-inline-start:18px"><li>נקלט רק מה שמופיע בהתראה עצמה (שם השולח והטקסט) – לא כל השיחה.</li><li>ההתראות נשמרות רק בטלפון. כשפותחים מהן משימה (ידנית או בכלל אוטומטי), השולח וטקסט ההודעה נכנסים למשימה ונראים לעובד שמקבל אותה. 'שאלי את המזכירה' שולח את הטקסט לבינה המלאכותית.</li><li>אפשר לכבות בכל רגע.</li></ul>
  <p style="margin:6px 0"><b>גישה להתראות:</b> ${N.en?'✓ ניתנה':'עוד לא ניתנה'}</p>
  <div class="secrow">${N.en?'':B('secNfOpen','תן גישה להתראות')}${B('secNfRe','בדוק שוב')}</div>
  ${N.en?'':'<p class="note" style="margin:4px 0">בחלון שייפתח: מוצאים את האפליקציה ברשימה "גישה להתראות" ומפעילים. אחר כך חוזרים לכאן.</p><p class="note" style="margin:4px 0">אם אנדרואיד כותב "הגדרה מוגבלת": בהגדרות הטלפון ← אפליקציות ← האפליקציה הזו ← ⋮ (שלוש נקודות למעלה) ← "התרת הגדרות מוגבלות", ואז שוב "תן גישה להתראות".</p>'}</div>
@@ -142,14 +175,14 @@ function setH(){const c=N.cfg,P=new Set(c.pkgs&&c.pkgs.length?c.pkgs:[]),A=N.app
  ${rest.length?`<details><summary style="cursor:pointer;min-height:44px;display:flex;align-items:center">כל האפליקציות בטלפון (${rest.length})</summary><div style="display:grid;gap:6px;margin:8px 0">${rest.map(box).join('')}</div></details>`:''}
  <label class="f"><span>שולחים שלא נקלטים (שורה לכל שולח, בדיוק כמו שהשם מופיע בהתראה)</span><textarea name="skip" rows="3" maxlength="5000">${esc((c.skip||[]).join('\n'))}</textarea></label>
  <div class="secrow"><button class="btn grow" style="min-height:44px">${c.on?'שמור':'שמור והפעל'}</button>${c.on?B('secNfOff','כבה את הקליטה'):''}${c.on?B('secNfV','חזרה לרשימה',' data-v="list"'):''}</div></form>`}
-function sugH(){const S=st();return suggest(S.L,S.R).slice(0,3).map(e=>`<div class="card" style="border-color:var(--acc);border-width:2px"><b>ללמוד?</b><p style="margin:4px 0">מעכשיו כשמגיעה הודעה מ<b>${esc(e.s||'השולח')}</b> (${esc(e.a||'')}) – ${esc(actL(e,true))}.</p><p class="note" style="margin:0 0 4px">בחרת בזה ${e.n} פעמים.</p><div class="secrow">${B('secNfRuleOk','כן, לבצע לבד',` data-k="${esc(e.rk)}"`)}${B('secNfRuleNo','תמיד לשאול',` data-k="${esc(e.rk)}"`)}</div></div>`).join('')}
+function sugH(){const S=st();return suggest(S.L,S.R).slice(0,3).map(e=>`<div class="card" style="border-color:var(--acc);border-width:2px"><b>ללמוד?</b><p style="margin:4px 0">מעכשיו כשמגיעה הודעה מ<b>${esc(e.s||'השולח')}</b> (${esc(e.a||'')}) – ${esc(actL(e,true))}.</p><p class="note" style="margin:0 0 4px">בחרת בזה ${e.n} פעמים.</p>${e.act==='task'?'<p class="note" style="margin:0 0 4px">כל הודעה מהשולח הזה תיפתח כמשימה לעובד, כולל הטקסט שלה.</p>':''}<div class="secrow">${B('secNfRuleOk','כן, לבצע לבד',` data-k="${esc(e.rk)}"`)}${B('secNfRuleNo','תמיד לשאול',` data-k="${esc(e.rk)}"`)}</div></div>`).join('')}
 function cardH(it){const c=N.cards[it.k];const k=` data-k="${esc(it.k)}"`;
  const head=`<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${esc(it.s||'(בלי שם)')}</b><small class="note">${esc(it.a)} · ${esc(when(it.t))}</small></div><p style="margin:6px 0;white-space:pre-wrap;word-break:break-word">${esc(it.x)}</p>`;
  if(c){const C=cx(),S=c.staff||[];const who=c.all?'כל העובדים':(c.to||[]).map(z=>z.name).join(' ו');
   return `<div class="card">${head}<div class="card" style="margin:6px 0 0;padding:8px"><b>לפתוח משימה?</b><p style="margin:4px 0"><b>מה:</b> ${esc(c.txt)}</p><p style="margin:4px 0"><b>למי:</b> ${who?esc(who):'<span class="note">בחרו עובד</span>'}</p>
   ${S.length?`<div class="secrow" role="group" aria-label="למי">${S.slice(0,30).map(z=>B('secNfWho',esc(z.name),k+` data-u="${esc(z.uid)}"`,!c.all&&c.to.length===1&&c.to[0].uid===z.uid?' on':'')).join('')}${B('secNfWho','כל העובדים',k+' data-u="*"',c.all?' on':'')}</div>`:'<p class="note" style="margin:4px 0">רשימת העובדים לא נטענה – המשימה תיפתח לכל הצוות.</p>'}
   <p style="margin:4px 0"><b>יעד:</b> ${esc(C&&C.dueL?C.dueL(c):'3 ימי עסקים')}</p><div class="secrow">${B('secNfTkOk','אשר ופתח',k)}${B('secNfTkNo','בטל',k)}</div></div></div>`}
- return `<div class="card">${head}<p class="note" style="margin:4px 0">מה לעשות?</p><div class="secrow">${B('secNfTask','📋 פתח משימה',k)}${B('secNfRem','⏰ תזכורת',k)}${B('secNfAsk','💬 שאלי את המזכירה',k)}</div><div class="secrow">${B('secNfDone','✓ טופל',k)}${B('secNfIgn','🙈 התעלם',k)}${B('secNfBlock','🚫 לא לקלוט מהשולח הזה',k)}</div></div>`}
+ return `<div class="card">${head}${it.cap&&CAPM[it.cap]?`<p class="note" style="margin:4px 0;color:var(--bad)">${esc(CAPM[it.cap])}</p>`:''}<p class="note" style="margin:4px 0">מה לעשות?</p><div class="secrow">${B('secNfTask','📋 פתח משימה',k)}${B('secNfRem','⏰ תזכורת',k)}${B('secNfAsk','💬 שאלי את המזכירה',k)}</div><div class="secrow">${B('secNfDone','✓ טופל',k)}${B('secNfIgn','🙈 התעלם',k)}${B('secNfBlock','🚫 לא לקלוט מהשולח הזה',k)}</div></div>`}
 function listH(){const L=inbox(),nw=L.filter(x=>x.st==='new').sort((a,b)=>b.t-a.t),old=L.filter(x=>x.st!=='new').sort((a,b)=>(b.at||b.t)-(a.at||a.t));
  let h=sugH();
  h+=nw.length?nw.slice(0,50).map(cardH).join('')+(nw.length>50?`<p class="note">מוצגות 50 החדשות מתוך ${nw.length}.</p>`:''):`<div class="card"><p class="note" style="margin:0">אין התראות חדשות. כשתגיע הודעה מאחת האפליקציות שבחרתם, היא תופיע כאן.</p></div>`;
@@ -158,7 +191,7 @@ function listH(){const L=inbox(),nw=L.filter(x=>x.st==='new').sort((a,b)=>b.t-a.
 function rulesH(){const S=st(),R=Object.entries(S.R).sort((a,b)=>(b[1].t||0)-(a[1].t||0));
  let h=`<div class="card"><b>הכללים שנלמדו</b>${R.length?R.map(([rk,r])=>`<div class="secli"><p style="margin:2px 0">הודעה מ<b>${esc(r.s||'')}</b> (${esc(r.a||'')}) – ${r.on?esc(actL(r)):'תמיד לשאול'}</p><div class="secrow">${B('secNfRuleDel','מחק',` data-k="${esc(rk)}"`)}</div></div>`).join(''):'<p class="note" style="margin:6px 0 0">עוד אין כללים. אחרי שתבחרו אותה פעולה פעמיים לאותו שולח, המזכירה תציע ללמוד.</p>'}</div>`;
  h+=`<label class="card" style="display:flex;gap:10px;align-items:center;min-height:44px"><input type="checkbox" data-c="secNfStop"${S.off?' checked':''}> <span><b>עצור את הביצוע האוטומטי</b><br><small class="note">הכללים נשמרים, אבל המזכירה רק שואלת ולא מבצעת לבד.</small></span></label>`;
- h+=`<div class="card"><b>מה עשיתי לבד</b>${S.G.length?S.G.map(g=>`<div class="secli"><p style="margin:2px 0">${esc(when(g.t))} · ${esc(g.a||'')} · <b>${esc(g.s||'')}</b></p><small class="note">${g.act==='ign'?'סומן "התעלם"':g.ok?(g.dup?'המשימה כבר הייתה פתוחה':'נפתחה משימה ל'+esc(g.un||'העובד')):'לא נפתחה משימה: '+esc(g.why||'')+' – ההתראה נשארה ברשימה'}</small>${g.tk?` ${B('secCxGo','למשימה',` data-tid="${esc(g.tk)}"`)}`:''}</div>`).join(''):'<p class="note" style="margin:6px 0 0">עוד לא בוצעה פעולה לבד.</p>'}</div>`;
+ h+=`<div class="card"><b>מה עשיתי לבד</b>${S.G.length?S.G.map(g=>`<div class="secli"><p style="margin:2px 0">${esc(when(g.t))} · ${esc(g.a||'')} · <b>${esc(g.s||'')}</b></p><small class="note">${g.act==='cap'?esc((CAPM[g.why]||CAPM.day)+(g.n>1?' ('+g.n+' הודעות)':'')):g.act==='ign'?'סומן "התעלם"':g.ok?(g.dup?'המשימה כבר הייתה פתוחה':'נפתחה משימה ל'+esc(g.un||'העובד')):'לא נפתחה משימה: '+esc(g.why||'')+' – ההתראה נשארה ברשימה'}</small>${g.tk?` ${B('secCxGo','למשימה',` data-tid="${esc(g.tk)}"`)}`:''}</div>`).join(''):'<p class="note" style="margin:6px 0 0">עוד לא בוצעה פעולה לבד.</p>'}</div>`;
  return h}
 window.__secNotifH=()=>{try{return notifH()}catch(e){return '<p class="note">לא ניתן להציג את המסך כרגע.</p>'}};
 
@@ -168,7 +201,7 @@ function done(it,stv,act,to,extra){setSt(it.k,Object.assign({st:stv},extra||{}))
 ACT.secNfV=el=>{N.v=el.dataset.v||'list';if(N.v==='set')loadApps();re(1)};
 ACT.secNfOpen=async()=>{const P=plug();if(!P)return;try{await P.openSettings()}catch(e){toast('לא הצלחתי לפתוח את ההגדרות. פתחו בהגדרות הטלפון: התראות ← גישה להתראות')}};
 ACT.secNfRe=async()=>{await loadCfg();re(1);if(N.en)tick()};
-ACT.secNfTake=()=>ask('להפעיל את קליטת ההתראות לחשבון שלך? ההתראות שנקלטו עד עכשיו בטלפון הזה יימחקו.',async()=>{const P=plug();try{await P.clear();await saveCfg({on:true});toast('✓ הופעל לחשבון שלך')}catch(e){toast('הפעולה נכשלה')}re(1)},'הפעל');
+ACT.secNfTake=()=>ask('להפעיל את קליטת ההתראות לחשבון שלך? ההתראות שנקלטו עד עכשיו בטלפון הזה יימחקו.',async()=>{const P=plug(),u0=N.cfg&&N.cfg.u||'';try{await P.clear();if(u0&&u0!==uid())wipe(u0);N.q=null;N.qU='';await saveCfg({on:true});toast('✓ הופעל לחשבון שלך')}catch(e){toast('הפעולה נכשלה')}re(1);setTimeout(tick,300)},'הפעל');
 FRM.secNfSave=async f=>{const pk=[...f.querySelectorAll('input[name=p]:checked')].map(i=>i.value);if(!pk.length)return toast('בחרו לפחות אפליקציה אחת');
  const skip=String(fd(f).skip||'').split('\n').map(s=>s.trim()).filter(Boolean).slice(0,200);const was=!!(N.cfg&&N.cfg.on);
  try{await saveCfg({on:true,pkgs:pk,skip})}catch(e){return toast('השמירה נכשלה')}
@@ -203,11 +236,16 @@ ACT.secNfIgn=el=>{const it=pick(el);if(it)done(it,'ign','ign')};
 ACT.secNfBlock=el=>{const it=pick(el);if(!it)return;if(!it.s)return toast('אין שם שולח בהתראה הזו');
  ask(`לא לקלוט יותר הודעות מ"${it.s}"? אפשר להחזיר בהגדרות.`,async()=>{const sk=(N.cfg&&N.cfg.skip||[]).slice();if(!isSkipped(sk,it.s))sk.push(String(it.s).replace(/\s*\(\d+[^)]*\)\s*$/,'').trim());
   try{await saveCfg({skip:sk})}catch(e){return toast('הפעולה נכשלה')}
-  const L=inbox();L.forEach(x=>{if(x.st==='new'&&senderKey(x.s)===senderKey(it.s)){x.st='blk';x.at=Date.now()}});inboxW(L);toast('✓ לא ייקלטו יותר הודעות מהשולח הזה');re(1)},'לא לקלוט')};
+  const M=stM(),now=Date.now();inbox().forEach(x=>{if(x.st==='new'&&senderKey(x.s)===senderKey(it.s))stPut(M,x.k,{st:'blk'},now)});stMW(M);toast('✓ לא ייקלטו יותר הודעות מהשולח הזה');re(1)},'לא לקלוט')};
 ACT.secNfRuleOk=el=>{const S=st(),e=suggest(S.L,S.R).find(x=>x.rk===el.dataset.k);if(!e)return re(1);setRule(S.R,e,true);stW(S);toast('✓ מעכשיו זה יבוצע לבד');re(1)};
 ACT.secNfRuleNo=el=>{const S=st(),e=suggest(S.L,S.R).find(x=>x.rk===el.dataset.k);if(!e)return re(1);setRule(S.R,e,false);stW(S);toast('בסדר, אמשיך לשאול');re(1)};
 ACT.secNfRuleDel=el=>{const rk=el.dataset.k;ask('למחוק את הכלל? המזכירה תחזור לשאול על הודעות מהשולח הזה.',()=>{const S=st();delRule(S.R,S.L,rk);stW(S);toast('הכלל נמחק');re(1)},'מחק')};
 CHG.secNfStop=el=>{const S=st();S.off=!!el.checked;stW(S);toast(S.off?'הביצוע האוטומטי נעצר':'הביצוע האוטומטי חזר')};
+
+/* ---------- יציאה מהחשבון (נקרא מ-tasks-wc.js W.out, לפני ש-SY מתאפס): אם הקליטה שייכת למשתמש שיוצא (או לאף אחד) – מכבים, מוחקים את התור והתצורה בתוסף. ובכל מקרה מוחקים את המפתחות המקומיים שלו. לא זורק ---------- */
+window.__secNfOut=u=>{u=u||uid();
+ try{const P=plug();if(P)Promise.resolve(P.getConfig()).then(c=>{const cu=String(c&&c.u||'');if(cu&&cu!==u)return;return Promise.resolve(P.setConfig({on:false,pkgs:[],skip:[],u:''})).then(()=>P.clear())}).catch(()=>{})}catch(e){}
+ wipe(u);N.q=null;N.qU='';N.lg='';N.cfg=null;N.ld=0;N.cards={};N.lastN=-1};
 
 /* ---------- חיבור: מונה בלשונית, הסתרה ממי שאינו מנהל, קליטה בפתיחה / חזרה לאפליקציה / אירוע מהתוסף ---------- */
 {const r0=V.sec;V.sec=function(){const r=r0.apply(this,arguments);

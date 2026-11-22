@@ -110,6 +110,14 @@ const cardOf = (page, re) => page.evaluate((s) => { const c = [...document.query
   await mp.click('#dlg [data-a=tkwDlGo]:nth-child(2)'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.col === 'tasks'));
   const pd = LOG.find((l) => l.m === 'PATCH' && l.col === 'tasks');
   check('3ב שינוי יעד: PATCH עם dl בלבד', pd && pd.id === 'e-later' && pd.mask.join() === 'dl' && +pd.f.dl.integerValue > T0, pd && pd.mask);
+  // כללים ישנים (rv=0): אין "שנה תאריך יעד" בתפריט, ו-tkwDlGo / FRM.tkwDl לא כותבים dl
+  await sleep(300); await mp.evaluate(() => { const k = Object.keys(localStorage).find((x) => /lp-tk-rv$/.test(x)); localStorage.setItem(k, JSON.stringify({ v: 0, t: Date.now() })); closeDlg(); });
+  await mp.click('#tkc-e-later [data-a=tkwMenu]'); await sleep(200);
+  const menuOld = await txt(mp, '#dlg'); LOG.length = 0;
+  await mp.evaluate(() => { closeDlg(); const b = document.createElement('button'); b.dataset.id = 'e-later'; b.dataset.v = String(Date.now() + 864e5); ACT.tkwDlGo(b); });
+  await sleep(500);
+  check('3ג כללים ישנים: אין "שנה תאריך יעד" בתפריט, ושינוי יעד לא נשלח (dl)', !/שנה תאריך יעד/.test(menuOld) && /הערה/.test(menuOld) && !LOG.some((l) => l.m === 'PATCH' && l.col === 'tasks'), menuOld);
+  await mp.evaluate(() => { const k = Object.keys(localStorage).find((x) => /lp-tk-rv$/.test(x)); localStorage.setItem(k, JSON.stringify({ v: 1, t: Date.now() })); });
   await mp.evaluate(() => { TKT = 'rc'; rerender(); }); await sleep(600);
   await mp.click('[data-a=rcPackOpen]'); await sleep(500);
   await shot(mp, shots, 'm-pack');

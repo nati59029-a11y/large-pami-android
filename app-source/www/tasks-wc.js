@@ -537,6 +537,7 @@ function rqcDone(id){const c=W.rqc;if(!id||!c)return;W.rqc=null;const x=rqGet(c.
  docPatch('rq',c.id,{ph:'w',tk:String(id)}).then(()=>{if(x){x.ph='w';x.tk=String(id)}}).catch(()=>toast('המשימה נוצרה, אבל סימון הבקשה "בטיפול" נכשל'))}
 /* ---- יציאה מהחשבון: ביטול ההתראות המקומיות ומחיקת המפתחות של המשתמש מהמכשיר (טלפון משותף). לא זורק שגיאות ---- */
 W.out=u=>{const k=x=>LK(x+'-'+(u||''));clearTimeout(sT);
+ try{if(typeof window.__secNfOut==='function')window.__secNfOut(u)}catch(e){}/* התראות מהטלפון (sec-notif.js): כיבוי הקליטה ומחיקת lp-ntf-* של המשתמש */
  try{const P=LN();if(P){const ids=rd(k('lp-ln-ids'),[]);if(Array.isArray(ids)&&ids.length)Promise.resolve(P.cancel({notifications:ids.map(id=>({id}))})).catch(()=>{});
   Promise.resolve(P.getPending()).then(r=>{const a=((r&&r.notifications)||[]).filter(n=>n&&n.extra&&n.extra.lp==='wc').map(n=>({id:n.id}));if(a.length)return P.cancel({notifications:a})}).catch(()=>{})}}catch(e){}
  natRem().then(G=>{if(G)return G.remSync({p:'wc|',n:[],keep:[],q:true})}).catch(()=>{});
@@ -618,7 +619,7 @@ W.mgAct=(t,cn)=>{if(!on()||!fbAdmin())return null;const did=esc(t.id),nw=Array.i
  return a+`<button class="btn g" data-a="tkwMenu" data-id="${did}" aria-label="עוד פעולות">⋯${cn?' <span class="tag tk-wait" style="margin:0 4px">הערה חדשה</span>':''}</button>`};
 ACT.tkwMenu=el=>{const t=tkGet(el.dataset.id);if(!t)return;const did=esc(t.id),nw=Array.isArray(t.to)&&t.to.length>0,B=(go,tx)=>`<button class="btn g" data-a="tkwMi" data-go="${go}" data-id="${did}">${tx}</button>`;let m='';
  if(t.st==='wait')m+=B('tkRej',t.pr==='1'?'דחה':'החזר לעובד');
- if(t.st!=='done'){if(nw)m+=B('tkMv','העבר לעובד…');if(nw&&t.ow)m+=B('tkUnclaim','בטל תפיסה');m+=B('tkwDl','שנה תאריך יעד')}
+ if(t.st!=='done'){if(nw)m+=B('tkMv','העבר לעובד…');if(nw&&t.ow)m+=B('tkUnclaim','בטל תפיסה');if(rvNew())m+=B('tkwDl','שנה תאריך יעד')}
  m+=B('tkCm',icd('chat')+' הערה / תגובות');
  if(t.st==='open'&&nw)m+=B('tkwNd',icd('bell')+' תזכורת לעובד');
  if(t.st==='open'&&t.pr!=='1'&&!(t.np>0))m+=B('tkReq',icd('cam')+' בקש תמונה');
@@ -627,12 +628,13 @@ ACT.tkwMenu=el=>{const t=tkGet(el.dataset.id);if(!t)return;const did=esc(t.id),n
  m+=B('tkDel',icd('trash')+' מחק');
  dlg(`<h3>פעולות במשימה</h3><p class="note" style="white-space:pre-wrap">${esc(String(t.txt||'').slice(0,100))}</p><div class="tkmenu">${m}<button class="btn g" data-a="closeDlg">סגור</button></div>`)};
 ACT.tkwMi=el=>{const f=ACT[el.dataset.go];closeDlg();if(typeof f==='function')f(el)};
-/* שינוי יעד: dl בלבד (המנהל רשאי לעדכן משימה בחוקים; due לא משתנה) */
-ACT.tkwDl=el=>{const t=tkGet(el.dataset.id);if(!t||!fbAdmin())return;const did=esc(t.id),B=(v,tx)=>`<button class="btn g" data-a="tkwDlGo" data-id="${did}" data-v="${v}">${tx}<small style="display:block;opacity:.7">${v>0?esc(whenTx(v)):''}</small></button>`,at=Date.now()+H;
+/* שינוי יעד: dl בלבד (המנהל רשאי לעדכן משימה בחוקים; due לא משתנה). רק כשהכללים החדשים פורסמו (rvNew) – בכללים הישנים "late" מחושב לפי due, ו-dl שונה היה חוסם את "בוצע" של העובד */
+const dlOk=()=>{if(rvNew())return true;toast('שינוי תאריך יעד יופעל אחרי עדכון השרת');return false};
+ACT.tkwDl=el=>{const t=tkGet(el.dataset.id);if(!t||!fbAdmin()||!dlOk())return;const did=esc(t.id),B=(v,tx)=>`<button class="btn g" data-a="tkwDlGo" data-id="${did}" data-v="${v}">${tx}<small style="display:block;opacity:.7">${v>0?esc(whenTx(v)):''}</small></button>`,at=Date.now()+H;
  dlg(`<h3>${icd('clock')} שינוי תאריך יעד</h3><p class="note">היעד הנוכחי: ${esc(W.dlTx(t))}</p><div class="tkmenu">${B(atDay(0,23,59),'היום 23:59')}${B(atDay(1,18,0),'מחר 18:00')}${B(atDay(3,18,0),'בעוד 3 ימים')}${B(0,'בלי יעד')}</div>
  <form data-f="tkwDl" data-id="${did}" style="margin-top:10px"><div class="row" style="gap:8px"><label class="f grow"><span>תאריך</span><input type="date" name="d" value="${ymd(at)}" required></label><label class="f grow"><span>שעה</span><input type="time" name="tm" value="${hhmm(at)}" required></label></div><div class="row"><button class="btn grow">עדכן יעד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-ACT.tkwDlGo=el=>{const id=el.dataset.id,v=Math.max(0,+el.dataset.v||0);closeDlg();tkDo(()=>tkPatch(id,{dl:v}),'✓ היעד עודכן: '+(v?whenTx(v):'בלי יעד'))};
-FRM.tkwDl=f=>{const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(x.tm||'');if(!dm||!tm)return toast('בחר תאריך ושעה');
+ACT.tkwDlGo=el=>{const id=el.dataset.id,v=Math.max(0,+el.dataset.v||0);closeDlg();if(!fbAdmin()||!dlOk())return;tkDo(()=>tkPatch(id,{dl:v}),'✓ היעד עודכן: '+(v?whenTx(v):'בלי יעד'))};
+FRM.tkwDl=f=>{if(!fbAdmin()||!dlOk()){closeDlg();return}const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(x.tm||'');if(!dm||!tm)return toast('בחר תאריך ושעה');
  const at=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(at<Date.now()-MIN)return toast('הזמן שנבחר כבר עבר');if(at>Date.now()+365*864e5)return toast('אפשר עד שנה קדימה');
  const id=f.dataset.id;closeDlg();tkDo(()=>tkPatch(id,{dl:at}),'✓ היעד עודכן: '+whenTx(at))};
 /* ---- בית המנהל: כרטיס "מה דורש טיפול היום" (בראש הבית). רק מה שכבר בזיכרון: TK (משימות, מתרענן לכל היותר פעם ב-3 דקות), RQ (בקשות), חשבוניות מ-S. שורה עם 0 מוסתרת; הכול 0 ← "✓ אין דברים פתוחים". בלי שינוי נתונים ובלי קריאות רשת חדשות מעבר לרענון הקיים (tkLoad / rqLoad) ---- */

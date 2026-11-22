@@ -78,9 +78,10 @@ describe('sec-notif: למידה', () => {
     C.record(L, N('a'), 'task', W, T); C.record(L, N('b'), 'task', W, T + 1); C.record(L, N('c'), 'done', null, T + 2);
     assert.equal(C.suggest(L, {}).length, 0);
   });
-  it('מילת מפתח עיקרית נשמרת (בלי מילות קישור)', () => {
+  it('פרטיות: הלמידה לא שומרת מילה מטקסט ההודעה; kwOf עדיין עובד', () => {
     const L = {}; const e = C.record(L, N('a', { x: 'שלום, החשבונית של החודש מצורפת' }), 'ign', null, T);
-    assert.equal(e.kw, 'החשבונית');
+    assert.equal('kw' in e, false); assert.equal(JSON.stringify(L).includes('החשבונית'), false); assert.equal(JSON.stringify(L).includes('מצורפת'), false);
+    assert.equal(C.kwOf('שלום, החשבונית של החודש מצורפת'), 'החשבונית');
     assert.equal(C.kwOf('היי מה נשמע'), 'נשמע');
     assert.equal(C.kwOf(''), '');
   });
@@ -109,5 +110,38 @@ describe('sec-notif: מזהה משימה ויומן', () => {
   it('logAdd: החדש ראשון, עד 50', () => {
     let G = []; for (let i = 0; i < 60; i++) G = C.logAdd(G, { t: i });
     assert.equal(G.length, 50); assert.equal(G[0].t, 59);
+  });
+});
+
+describe('sec-notif: מצב לפי מפתח (בלי טקסט)', () => {
+  it('stPut שומר רק st/by/tk/at/cap – לא שולח ולא טקסט; applySt מחזיר "new" כברירת מחדל', () => {
+    const M = {};
+    C.stPut(M, 'k1', { st: 'ign', by: 'auto', s: 'דני', x: 'סוד', p: 'com.whatsapp' }, T);
+    assert.deepEqual(Object.keys(M.k1).sort(), ['at', 'by', 'st']); assert.equal(M.k1.at, T);
+    assert.equal(JSON.stringify(M).includes('סוד'), false); assert.equal(JSON.stringify(M).includes('דני'), false);
+    const L = C.applySt([N('k1'), N('k2')], M);
+    assert.equal(L[0].st, 'ign'); assert.equal(L[0].by, 'auto'); assert.equal(L[1].st, 'new'); assert.equal(L[1].x, 'הסחורה תגיע מחר');
+    assert.equal(C.stPut(M, '', { st: 'x' }, T), null);
+  });
+  it('stTrim: מוחק מפתחות שלא בתור, ועד MAXM – קודם הישנים', () => {
+    const M = { a: { st: 'done', at: 1 }, b: { st: 'done', at: 2 }, c: { st: 'done', at: 3 } };
+    assert.equal(C.stTrim(M, new Set(['b', 'c'])), true); assert.deepEqual(Object.keys(M).sort(), ['b', 'c']);
+    assert.equal(C.stTrim(M, new Set(['b', 'c'])), false);
+    assert.equal(C.stTrim(M, null, 1), true); assert.deepEqual(Object.keys(M), ['c']);
+  });
+});
+
+describe('sec-notif: תקרה לביצוע אוטומטי', () => {
+  it('עד 10 בעיבוד אחד', () => {
+    let Cc = null, ok = 0, used = 0;
+    for (let i = 0; i < 15; i++) { const r = C.capTake(Cc, 'p|s', '2026-11-22', used); Cc = r.C; if (r.ok) { ok++; used++; } else assert.equal(r.why, 'run'); }
+    assert.equal(ok, C.AUTO_RUN); assert.equal(C.AUTO_RUN, 10); assert.equal(Cc.n['p|s'], 10);
+  });
+  it('עד 30 ביום לכל כלל; כלל אחר נפרד; יום חדש מתאפס', () => {
+    let Cc = null, ok = 0;
+    for (let run = 0; run < 5; run++) for (let i = 0; i < 10; i++) { const r = C.capTake(Cc, 'p|s', '2026-11-22', i); Cc = r.C; if (r.ok) ok++; else assert.equal(r.why, 'day'); }
+    assert.equal(ok, C.AUTO_DAY); assert.equal(C.AUTO_DAY, 30);
+    assert.equal(C.capTake(Cc, 'p|other', '2026-11-22', 0).ok, true);
+    const r = C.capTake(Cc, 'p|s', '2026-11-23', 0); assert.equal(r.ok, true); assert.equal(r.C.d, '2026-11-23'); assert.equal(r.C.n['p|s'], 1);
   });
 });

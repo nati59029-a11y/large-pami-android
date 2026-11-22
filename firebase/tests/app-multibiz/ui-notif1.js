@@ -3,6 +3,7 @@
 // בדפדפן: הסבר "זמין רק באפליקציה". באפליקציה: הפעלה (בחירת אפליקציות, ברירת מחדל, החרגה, "תן גישה"), קליטה מהתור (pull + אירוע notif),
 // מונה בלשונית, "פתח משימה" (פענוח sec-cmd → כרטיס אישור → כתיבה כמו במזכירה, מזהה קבוע), "התעלם", "לא לקלוט מהשולח",
 // "שאלי את המזכירה" (רק בלחיצה – secChat), למידה: הצעה אחרי פעמיים, "כן, לבצע לבד" → ביצוע אוטומטי + יומן, עצירה, מחיקת כלל.
+// פרטיות: אין טקסט הודעה ב-localStorage (רק מזהים/החלטות), יציאה מהחשבון מכבה ומוחקת, העברה לחשבון אחר מוחקת את המידע הקודם. תקרה לביצוע אוטומטי.
 // רשת מדומה (בלי שרת). 360px: בלי גלילה לרוחב, בלי שגיאות JS. שימוש: node ui-notif1.js <www-dir> [shots-dir]
 const fs = require('fs');
 const path = require('path');
@@ -61,13 +62,16 @@ const plugin = (page) => page.evaluate(() => {
     isEnabled: async () => ({ on: N.en }), openSettings: async () => { N.calls.push(['openSettings']); },
     getConfig: async () => JSON.parse(JSON.stringify(N.cfg)), setConfig: async (c) => { N.calls.push(['setConfig', c]); N.cfg = JSON.parse(JSON.stringify(c)); },
     getApps: async () => ({ apps: [{ p: 'com.android.calculator2', l: 'מחשבון' }, { p: 'com.google.android.gm', l: 'Gmail' }, { p: 'com.google.android.apps.messaging', l: 'Messages' }, { p: 'com.whatsapp', l: 'WhatsApp' }, { p: 'com.whatsapp.w4b', l: 'WhatsApp Business' }] }),
-    pull: async () => { N.calls.push(['pull']); const it = N.q.filter((x) => !x.d); it.forEach((x) => { x.d = 1; }); return { items: JSON.parse(JSON.stringify(it)), on: N.en }; },
-    clear: async () => { N.q = []; },
+    pull: async (o) => { N.calls.push(['pull', !!(o && o.all)]); const it = N.q.filter((x) => (o && o.all) || !x.d); N.q.forEach((x) => { x.d = 1; }); return { items: JSON.parse(JSON.stringify(it)), on: N.en }; },
+    clear: async () => { N.calls.push(['clear']); N.q = []; },
     addListener: async (n, f) => { (L[n] = L[n] || []).push(f); return { remove: () => {} }; },
   };
   window.Capacitor = Object.assign(window.Capacitor || {}, { isNativePlatform: () => true, Plugins: Object.assign((window.Capacitor && window.Capacitor.Plugins) || {}, { LpNotif: P }) });
 });
 let seq = 0;
+// כל הערכים ב-localStorage – לבדיקה שאין בהם טקסט של הודעה
+const lsHas = (page, words) => page.evaluate((w) => { const all = Object.keys(localStorage).map((k) => k + '=' + localStorage.getItem(k)).join('\n'); return w.filter((x) => all.includes(x)); }, words);
+const stM = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('lp-ntf-m-m') || '{}'));
 const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window.__nf.fire('notif'); }, Object.assign({ k: 'com.whatsapp|k' + (++seq), p: 'com.whatsapp', a: 'WhatsApp', s: 'דני ספק', x: 'הודעה', t: Date.now() - seq * 1000, d: 0 }, o));
 
 (async () => {
@@ -83,9 +87,11 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
 
   // --- באפליקציה (תוסף מדומה) ---
   await plugin(page);
+  // עותק ישן מגרסה קודמת (עם טקסט) – צריך להימחק בקליטה הראשונה
+  await page.evaluate(() => localStorage.setItem('lp-ntf-in-m', JSON.stringify([{ k: 'old|1', s: 'ישן', x: 'סוד ישן', st: 'done', t: 1 }])));
   await page.evaluate(() => rerender()); await H.settle(page, 600);
   const t1 = await txt(page);
-  check('הפעלה: הסבר מה נקלט ומה לא', /רק מהאפליקציות שתבחרו/.test(t1) && /לא כל השיחה/.test(t1) && /לא נשלח לשרת/.test(t1) && /רק כשלוחצים "שאלי את המזכירה"/.test(t1), t1.slice(0, 300));
+  check('הפעלה: הסבר מה נקלט ומה לא', /רק מהאפליקציות שתבחרו/.test(t1) && /לא כל השיחה/.test(t1) && /ההתראות נשמרות רק בטלפון/.test(t1) && /נכנסים למשימה ונראים לעובד שמקבל אותה/.test(t1) && /'שאלי את המזכירה' שולח את הטקסט לבינה המלאכותית/.test(t1) && !/לא נשלח לשרת/.test(t1), t1.slice(0, 300));
   const boxes = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('form[data-f=secNfSave] input[name=p]')].map((i) => [i.value, i.checked])));
   check('ברירת מחדל: WhatsApp, WhatsApp Business ו-SMS מסומנים; Gmail מוצע ולא מסומן; מחשבון רק ב"כל האפליקציות"',
     boxes['com.whatsapp'] && boxes['com.whatsapp.w4b'] && boxes['com.google.android.apps.messaging'] && boxes['com.google.android.gm'] === false && boxes['com.android.calculator2'] === false && !('com.samsung.android.messaging' in boxes), boxes);
@@ -113,6 +119,9 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
     check('"מה לעשות?" עם כל ששת הכפתורים בכל כרטיס', /מה לעשות\?/.test(t2) && nb.every((n) => n === 2), nb); }
   check('מונה לא-טופלו על הלשונית (2)', /התראות מהטלפון\s*2/.test(await txt(page, '#secTabs')), await txt(page, '#secTabs'));
   check('שום תוכן התראה לא נשלח לשרת בלי לחיצה', !o.bodies.some((b) => JSON.stringify(b).includes('קוד אימות')));
+  { const h = await lsHas(page, ['קוד אימות', 'תני למרים', 'דני ספק', 'סוד ישן']);
+    check('פרטיות: אחרי קליטה אין ב-localStorage טקסט הודעה או שולח (גם העותק הישן נמחק)', h.length === 0 && !(await page.evaluate(() => localStorage.getItem('lp-ntf-in-m'))), h); }
+  check('קליטה ראשונה: נטען כל התור מהתוסף (pull all)', await page.evaluate(() => window.__nf.calls.some((c) => c[0] === 'pull' && c[1] === true)));
   if (shots) await page.screenshot({ path: path.join(shots, 'notif-list-360.png'), fullPage: true });
   check('360px: בלי גלילה לרוחב (רשימה)', (await sx(page)) <= 1, await sx(page));
 
@@ -136,8 +145,8 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   if (shots) await page.screenshot({ path: path.join(shots, 'notif-learn-360.png'), fullPage: true });
   await page.click('[data-a=secNfRuleOk]'); await H.settle(page, 300);
   await push(page, { s: 'בנק (2 הודעות)', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b3', x: 'קוד אימות 9999' }); await H.settle(page, 900);
-  const inb = await page.evaluate(() => JSON.parse(localStorage.getItem('lp-ntf-in-m')).find((x) => x.k === 'sms|b3'));
-  check('כלל שאושר: ההתראה הבאה מהבנק סומנה "התעלם" לבד', inb && inb.st === 'ign' && inb.by === 'auto', inb);
+  const inb = (await stM(page))['sms|b3'];
+  check('כלל שאושר: ההתראה הבאה מהבנק סומנה "התעלם" לבד (המצב נשמר לפי מפתח בלבד)', inb && inb.st === 'ign' && inb.by === 'auto' && !('x' in inb) && !('s' in inb), inb);
 
   // משימה לאותו עובד פעמיים → כלל → פתיחה אוטומטית (מזהה קבוע, בלי כפילות)
   for (const k of ['s1', 's2']) {
@@ -149,6 +158,7 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   }
   const t5 = await txt(page);
   check('אין זיהוי עובד: כרטיס עם "<שולח>: <טקסט>" ובחירת עובד; אחרי פעמיים ליוסי – הצעה', /ספק ירקות: הסחורה הגיעה s1/.test(JSON.stringify(o.tasks)) && /מעכשיו כשמגיעה הודעה מספק ירקות/.test(t5) && /לפתוח משימה ליוסי לוי/.test(t5), t5.slice(0, 400));
+  check('"ללמוד?" למשימה: אזהרה שכל הודעה מהשולח תיפתח כמשימה כולל הטקסט', /כל הודעה מהשולח הזה תיפתח כמשימה לעובד, כולל הטקסט שלה/.test(t5));
   await page.click('[data-a=secNfRuleOk]'); await H.settle(page, 300);
   const n0 = Object.keys(o.tasks).length;
   await push(page, { s: 'ספק ירקות', k: 'wa|s3', x: 'חסרים עגבניות' }); await H.settle(page, 1200);
@@ -156,7 +166,20 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   check('כלל משימה: נפתחה משימה לבד ליוסי, באותם שדות', ids2.length === n0 + 1 && nt && nt.ow.stringValue === 'u2' && nt.txt.stringValue === 'ספק ירקות: חסרים עגבניות', { n: ids2.length, nt });
   // אותה התראה שוב (מפתח זהה) – לא נכנסת שוב ולא נפתחת משימה שנייה
   await page.evaluate(() => { const x = window.__nf.q.find((y) => y.k === 'wa|s3'); x.d = 0; window.__nf.fire('notif'); }); await H.settle(page, 900);
-  check('מפתח שכבר נקלט: אין התראה כפולה ואין משימה נוספת', Object.keys(o.tasks).length === n0 + 1 && (await page.evaluate(() => JSON.parse(localStorage.getItem('lp-ntf-in-m')).filter((x) => x.k === 'wa|s3').length)) === 1);
+  check('מפתח שכבר נקלט: אין התראה כפולה ואין משימה נוספת', Object.keys(o.tasks).length === n0 + 1 && (await page.evaluate(() => [...document.querySelectorAll('#main .secli')].filter((x) => /חסרים עגבניות/.test(x.textContent)).length)) === 1);
+
+  // תקרה: 12 הודעות בבת אחת מאותו שולח – נפתחות 10, השתיים הנותרות ממתינות להחלטה
+  await page.evaluate(() => { for (let i = 1; i <= 12; i++) window.__nf.q.push({ k: 'wa|c' + i, p: 'com.whatsapp', a: 'WhatsApp', s: 'ספק ירקות', x: 'הזמנה מספר ' + i, t: Date.now() - 100000 + i, d: 0 }); window.__nf.fire('notif'); });
+  await H.settle(page, 2000);
+  const nc = Object.keys(o.tasks).length - (n0 + 1), tc = await txt(page);
+  check('תקרה בעיבוד אחד: נפתחו 10 משימות לבד, 2 ממתינות עם הודעה', nc === 10 && (tc.match(/הגעתי לתקרה של 10 משימות אוטומטיות בבת אחת – ממתין לאישורך/g) || []).length === 2, { nc });
+  // תקרה יומית: מונה הכלל כבר 30 היום
+  await page.evaluate(() => { const k = Object.keys(localStorage).find((x) => /^lp-ntf-biz-o\|m$/.test(x)); const v = JSON.parse(localStorage.getItem(k)); v.C.n['com.whatsapp|ספק ירקות'] = 30; localStorage.setItem(k, JSON.stringify(v)); });
+  const n1 = Object.keys(o.tasks).length;
+  await push(page, { s: 'ספק ירקות', k: 'wa|d1', x: 'הזמנה אחרי התקרה' }); await H.settle(page, 1000);
+  const td = await txt(page);
+  check('תקרה יומית לכלל (30): אין משימה, ההתראה ממתינה עם "הגעתי לתקרה היומית של הכלל – ממתין לאישורך"', Object.keys(o.tasks).length === n1 && /הזמנה אחרי התקרה/.test(td) && /הגעתי לתקרה היומית של הכלל – ממתין לאישורך/.test(td));
+  { const h = await lsHas(page, ['הזמנה מספר', 'חסרים עגבניות', 'הזמנה אחרי התקרה']); check('פרטיות: גם אחרי ביצוע אוטומטי אין טקסט הודעה ב-localStorage', h.length === 0, h); }
 
   // הכללים שנלמדו + יומן + עצירה
   await page.click('[data-a=secNfV][data-v=rules]'); await H.settle(page, 300);
@@ -166,8 +189,9 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   check('360px: בלי גלילה לרוחב (כללים)', (await sx(page)) <= 1, await sx(page));
   await page.click('[data-c=secNfStop]'); await H.settle(page, 200);
   await page.click('[data-a=secNfV][data-v=list]'); await H.settle(page, 200);
+  const n2 = Object.keys(o.tasks).length;
   await push(page, { s: 'ספק ירקות', k: 'wa|s4', x: 'עוד הזמנה' }); await H.settle(page, 900);
-  check('עצירת הביצוע האוטומטי: אין משימה חדשה, ההתראה ממתינה', Object.keys(o.tasks).length === n0 + 1 && /עוד הזמנה/.test(await txt(page)));
+  check('עצירת הביצוע האוטומטי: אין משימה חדשה, ההתראה ממתינה', Object.keys(o.tasks).length === n2 && /עוד הזמנה/.test(await txt(page)));
   await page.click('[data-a=secNfV][data-v=rules]'); await H.settle(page, 200);
   await page.evaluate(() => { const b = [...document.querySelectorAll('[data-a=secNfRuleDel]')].find((x) => /בנק/.test(x.closest('.secli').innerText)); b.click(); }); await H.settle(page, 200);
   await dlgOk(page);
@@ -192,7 +216,7 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   const rv = await page.evaluate(() => { const i = document.querySelector('#dlg form[data-f=tkwRem] input[name=txt]'); return i ? i.value : null; });
   check('תזכורת: חלון "תזכורת חדשה" הקיים, ממולא בטקסט', rv === 'רו"ח: לשלוח דוחות', rv);
   await page.evaluate(() => { const f = document.querySelector('#dlg form[data-f=tkwRem]'); f.querySelector('[data-a=tkwRQ][data-v=t]').click(); f.requestSubmit(); }); await H.settle(page, 500);
-  const rm = await page.evaluate(() => ({ r: JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => /lp-rem/.test(k))) || '[]'), it: JSON.parse(localStorage.getItem('lp-ntf-in-m')).find((x) => x.k === 'wa|r1') }));
+  const rm = await page.evaluate(() => ({ r: JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => /lp-rem/.test(k))) || '[]'), it: JSON.parse(localStorage.getItem('lp-ntf-m-m') || '{}')['wa|r1'] }));
   check('אחרי שמירת התזכורת: נשמרה, וההתראה סומנה "נקבעה תזכורת"', rm.r.some((r) => r.txt === 'רו"ח: לשלוח דוחות') && rm.it && rm.it.st === 'rem', rm);
 
   // כיבוי
@@ -200,6 +224,21 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   await page.click('[data-a=secNfV][data-v=set]'); await H.settle(page, 300);
   await page.click('[data-a=secNfOff]'); await H.settle(page, 200); await dlgOk(page);
   check('כיבוי: setConfig on:false', await page.evaluate(() => window.__nf.cfg.on === false));
+
+  // העברת הקליטה לחשבון אחר: המידע המקומי של החשבון הקודם נמחק
+  await page.evaluate(() => { window.__nf.cfg = { on: true, pkgs: ['com.whatsapp'], skip: [], u: 'other' }; window.__nf.q = [{ k: 'wa|o1', p: 'com.whatsapp', a: 'WhatsApp', s: 'א', x: 'של אחר', t: Date.now(), d: 0 }];
+    localStorage.setItem('lp-ntf-m-other', '{"wa|o1":{"st":"done","at":1}}'); localStorage.setItem('lp-ntf-biz-o|other', '{"R":{}}'); localStorage.setItem('lp-ntf-in-other', '[]'); });
+  await page.click('#secTabs [data-v=notif]'); await H.settle(page, 500);
+  check('קליטה בחשבון אחר: כפתור "הפעל לחשבון שלי"', !!(await page.$('#main [data-a=secNfTake]')));
+  await page.click('#main [data-a=secNfTake]'); await H.settle(page, 200); await dlgOk(page); await H.settle(page, 600);
+  const tk = await page.evaluate(() => ({ ks: Object.keys(localStorage).filter((k) => /^lp-ntf-/.test(k) && /other$/.test(k)), cfg: window.__nf.cfg, q: window.__nf.q.length }));
+  check('"הפעל לחשבון שלי": התור נמחק, המפתחות המקומיים של החשבון הקודם נמחקו, הקליטה לחשבון שלי', tk.ks.length === 0 && tk.q === 0 && tk.cfg.u === 'm' && tk.cfg.on === true, tk);
+
+  // יציאה מהחשבון: כיבוי הקליטה, מחיקת התור והמפתחות המקומיים
+  await page.evaluate(() => { window.__nf.q.push({ k: 'wa|z1', p: 'com.whatsapp', a: 'WhatsApp', s: 'ז', x: 'לפני יציאה', t: Date.now(), d: 0 }); window.__nf.calls = []; TKW.out(SY.uid); });
+  await H.settle(page, 500);
+  const lo = await page.evaluate(() => ({ ks: Object.keys(localStorage).filter((k) => /^lp-ntf-/.test(k)), cfg: window.__nf.cfg, q: window.__nf.q.length, cl: window.__nf.calls.some((c) => c[0] === 'clear') }));
+  check('יציאה מהחשבון: setConfig on:false, clear בתוסף, אין מפתחות lp-ntf-*', lo.cfg.on === false && lo.cfg.u === '' && lo.cfg.pkgs.length === 0 && lo.cl && lo.q === 0 && lo.ks.length === 0, lo);
   check('בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   await browser.close();
   console.log(fail ? `\n${fail} בדיקות נכשלו` : '\nכל הבדיקות עברו');
