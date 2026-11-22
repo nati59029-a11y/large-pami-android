@@ -943,7 +943,9 @@ test('0.1.13 (תיקון בודק) שעתי: נחל לכיש נכשל → בלי
 });
 test('0.1.13 (תיקון בודק) היכרות שמתחילה כשכספית בנחל לכיש: קודם חזרה ליהודה הנשיא; לא מצליח → branch-restore, בלי לקרוא אף מסך', async () => {
   await ls({ store: 'נחל לכיש', brFail: 'restore', brPicks: null });
-  await caspitPage().reload(); await caspitPage().waitForLoadState('load');
+  // הלשונית של התוסף (/bo) – לא caspitPage(), שבסוויטה המלאה עלול להיות דף הקופה מבדיקה קודמת
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/bo/.test(x.url()))) { await p.reload(); await p.waitForLoadState('load'); }
+  assert.ok(ctx.pages().some((x) => /caspit\.valu\.co\.il\/bo/.test(x.url())), 'יש לשונית /bo');
   try {
     await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
     const pop = await ctx.newPage();
@@ -954,7 +956,10 @@ test('0.1.13 (תיקון בודק) היכרות שמתחילה כשכספית ב
     assert.equal(s.discSt.st, 'fail'); assert.equal(s.disc.rep.err.code, 'branch-restore', JSON.stringify(s.disc.rep.err));
     assert.deepEqual(s.disc.rep.pages, [], 'לא נקרא אף מסך');
     assert.ok((await picks()).startsWith('יהודה הנשיא;'), await picks());
-  } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+  } finally {
+    await ls({ brFail: null, store: 'יהודה הנשיא' });
+    await waitFor(async () => !(await sw.evaluate(() => self.__cxTest.isBusy())), 300e3, 'disc end'); // שהבדיקה הבאה לא תתחיל באמצע היכרות
+  }
 });
 
 test('"עדכון המחשב" (0.1.10): בקשה מהטלפון (poll uq) → בדיקת הדיסק, תשובה לשרת (ack) פעם אחת, וטעינה מחדש רק כשיש גרסה חדשה שהועתקה; upd נשלח ב-poll רק כשהשתנה', async () => {
