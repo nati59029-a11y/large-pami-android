@@ -183,6 +183,65 @@ function datePicker(host, init) {
   show();
   return () => v;
 }
+// ---------- 0.1.14: שעות העובדים (localStorage hrsMode = grid) ----------
+// רשימת עובדים כמו ag-grid: שורות וירטואליות (רק השורות שבתצוגה מצוירות, row-index), גלילה ב-.ag-body-viewport; "שעות לעובד" – כפתור (hrsLink=1: קישור).
+// דף השעות: "בחר חודש" (MM/YYYY, change מחליף חודש; hrsMonthStuck=1 – השינוי לא נקלט), "יצוא לאקסל" לפי העובד, החודש והסניף. hrsFmt=bad – קובץ במבנה לא מוכר.
+// כל לחיצה אסורה ("עריכה", "עובד חדש", "הוספת כניסה ויציאה", "הצג רק מנהלים", "יצוא לאקסל" של הרשימה) נרשמת ב-attHits; hrsX – כל יצוא שעות (מזהה|חודש|סניף)
+const HE = [[11, 'גלעד שפרינצק', false], [12, 'מיכל רוזנצוויג', true], [13, 'עומר טננבאום', true], [14, 'נגה פרלמוטר', true], [15, 'יואב שטרנברג', true]];
+const ymOf = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1);
+function hrsData(id, ym) {
+  const now = new Date(), cur = ymOf(now), prev = ymOf(new Date(now.getFullYear(), now.getMonth() - 1, 1)), nl = STORE() === 'נחל לכיש';
+  const [y, m] = ym.split('-'), dd = (d) => d + '/' + m + '/' + y;
+  if (ym === cur) {
+    if (!nl && id === 12) return [[dd('01'), "א'", '07:41', '15:58', '0:30', '7:47'], [dd('02'), "ב'", '22:10', '06:05', '0:15', '7:40'], [dd('03'), "ג'", '07:39', '', '', '']];
+    if (!nl && id === 15) return [[dd('02'), "ב'", '09:00', '13:00', '', '4:00']];
+    if (nl && id === 13) return [[dd('01'), "א'", '10:00', '18:00', '0:30', '7:30']];
+  }
+  if (ym === prev && !nl && id === 12) return [[dd('28'), "ה'", '08:00', '16:00', '0:30', '7:30']];
+  return [];
+}
+function empGrid(app) {
+  const link = localStorage.getItem('hrsLink') === '1', H = 40, VIS = 2;
+  app.innerHTML = '<div class="employees"><h2>עובדים</h2><div class="custom-control custom-checkbox"><input type="checkbox" id="onlyAct" class="custom-control-input"><label class="custom-control-label" for="onlyAct">הצג רק עובדים פעילים</label></div>'
+    + '<div class="custom-control custom-checkbox"><input type="checkbox" id="onlyMgr" class="custom-control-input"><label class="custom-control-label" for="onlyMgr">הצג רק מנהלים</label></div>'
+    + '<button class="btn btn-primary" id="empNew">עובד חדש</button><button class="btn" id="empX">יצוא לאקסל</button>'
+    + '<div class="ag-root-wrapper"><div class="ag-root" role="grid"><div class="ag-header"><div class="ag-header-cell" col-id="name">שם</div><div class="ag-header-cell" col-id="card">כרטיס מגנטי</div><div class="ag-header-cell" col-id="phone">טלפון נייד</div><div class="ag-header-cell" col-id="st">סטטוס</div><div class="ag-header-cell" col-id="act">פעולות</div></div>'
+    + '<div class="ag-body-viewport" style="height:' + (H * VIS) + 'px;overflow-y:auto;position:relative"><div class="ag-center-cols-container" style="position:relative"></div></div></div></div></div>';
+  const vp = app.querySelector('.ag-body-viewport'), cc = app.querySelector('.ag-center-cols-container'), grid = app.querySelector('[role=grid]');
+  const draw = () => {
+    const L = HE.filter((e) => !document.getElementById('onlyAct').checked || e[2]);
+    grid.setAttribute('aria-rowcount', String(L.length + 1));
+    cc.style.height = (L.length * H) + 'px';
+    const a = Math.floor(vp.scrollTop / H), b = Math.min(L.length, a + VIS + 1);
+    cc.innerHTML = L.slice(a, b).map((e, j) => '<div class="ag-row" role="row" row-index="' + (a + j) + '" style="position:absolute;top:' + ((a + j) * H) + 'px;height:' + H + 'px;width:100%">'
+      + '<div class="ag-cell" col-id="name">' + e[1] + '</div><div class="ag-cell" col-id="card">77' + e[0] + '</div><div class="ag-cell" col-id="phone">05' + e[0] + '-7654321</div><div class="ag-cell" col-id="st">' + (e[2] ? 'פעיל' : 'לא פעיל') + '</div>'
+      + '<div class="ag-cell" col-id="act"><button class="btn" data-a="edit" data-id="' + e[0] + '">עריכה</button>' + (link ? '<a href="#/employee-time-tracks/' + e[0] + '">שעות לעובד</a>' : '<button class="btn" data-a="hours" data-id="' + e[0] + '">שעות לעובד</button>') + '</div></div>').join('');
+    cc.querySelectorAll('button').forEach((x) => { x.onclick = () => { if (x.dataset.a === 'hours') location.hash = '#/employee-time-tracks/' + x.dataset.id; else hit('emp-' + x.dataset.a); }; });
+  };
+  vp.addEventListener('scroll', () => setTimeout(draw, 50));
+  document.getElementById('onlyAct').addEventListener('change', () => { vp.scrollTop = 0; draw(); });
+  document.getElementById('onlyMgr').addEventListener('change', () => hit('emp-mgr'));
+  document.getElementById('empNew').onclick = () => hit('emp-new');
+  document.getElementById('empX').onclick = () => hit('emp-x');
+  draw();
+}
+function hrsPage(app, id) {
+  const e = HE.find((x) => String(x[0]) === id) || [0, 'עובד אחר'], now = new Date();
+  let ym = ymOf(now);
+  app.innerHTML = '<div class="time-tracks"><h2>דוח שעות עובד - ' + e[1] + '</h2><label for="month">בחר חודש</label><input id="month" value="' + pad(now.getMonth() + 1) + '/' + now.getFullYear() + '"><button class="btn" id="ttX">יצוא לאקסל</button><button class="btn btn-primary" id="ttAdd">הוספת כניסה ויציאה</button>'
+    + '<table class="table"><thead><tr><th>תאריך</th><th>כניסה</th><th>יציאה</th><th>זמן הפסקה</th><th>סה"כ שעות</th><th>פעולות</th></tr></thead><tbody id="ttRows"></tbody></table></div>';
+  const draw = () => { document.getElementById('ttRows').innerHTML = hrsData(+id, ym).map((r) => '<tr><td>' + r[0] + '</td><td>' + r[2] + '</td><td>' + r[3] + '</td><td>' + r[4] + '</td><td>' + r[5] + '</td><td><button class="btn">עריכה</button></td></tr>').join(''); };
+  document.getElementById('month').addEventListener('change', (ev2) => { const m = /^(\d{1,2})\/(\d{4})$/.exec(ev2.target.value); if (m && localStorage.getItem('hrsMonthStuck') !== '1') { ym = m[2] + '-' + pad(+m[1]); draw(); } });
+  document.getElementById('ttAdd').onclick = () => hit('tt-add');
+  document.getElementById('ttX').onclick = () => {
+    localStorage.setItem('hrsX', (localStorage.getItem('hrsX') || '') + id + '|' + ym + '|' + STORE() + ';');
+    const bad = localStorage.getItem('hrsFmt') === 'bad';
+    const head = bad ? 'מספר,שם,ערך\n' : 'תאריך,יום,כניסה,יציאה,זמן הפסקה,סה"כ שעות,שעות רגילות,125%,150%\n';
+    const body = bad ? '1,' + e[1] + ',07:41\n' : hrsData(+id, ym).map((r) => r.join(',') + ',' + r[5] + ',0,0\n').join('') + 'סה"כ,,,,,,,,\n';
+    dl(new Blob(['﻿דוח שעות עובד - ' + e[1] + '\n' + head + body], { type: 'text/csv' }), 'time_tracks_' + id + '.csv');
+  };
+  draw();
+}
 function render() {
   const h = location.hash || '#/';
   // מדמה את כספית האמיתית: מסך מסוים (redir) / כל טעינה (redirLoad) מעבירים אל מחוץ למשרד האחורי (/bo) – לקופה
@@ -276,6 +335,10 @@ function render() {
       drawQ(); drawH();
     };
     document.addEventListener('click', (e) => { if (e.target !== jt) wrap.style.display = 'none'; });
+  } else if (h === '#/employees' && localStorage.getItem('hrsMode') === 'grid') {
+    empGrid(app);
+  } else if (h.startsWith('#/employee-time-tracks/') && localStorage.getItem('hrsMode') === 'grid') {
+    hrsPage(app, h.split('/').pop());
   } else if (h === '#/employees') {
     // רשימת עובדים (כמו בכספית, הסבר בעל העסק 19.11): העובד הראשון לא פעיל – רק אחרי "הצג רק עובדים פעילים" השורה הראשונה היא של עובד פעיל.
     // שמות וטלפונים אסור שיגיעו לדוח; "עריכה", "עובד חדש", "הצג רק מנהלים" ו"יצוא לאקסל" של הרשימה – אסור ללחוץ (נרשם ב-attHits)

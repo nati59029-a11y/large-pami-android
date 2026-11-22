@@ -1,8 +1,8 @@
 // תוסף כספית – service worker: תזמון, ריצת סנכרון (מכונת מצבים שממשיכה אחרי הפסקה), מצב היכרות, והודעות מהחלון הקופץ.
 // כל הבקשות לכספית רצות בתוך לשונית ייעודית של התוסף (מוצמדת, לא פעילה) – לא בלשונית של בעל העסק, ולא מהשרת.
 // התוסף לעולם לא ממלא שם משתמש או סיסמה: אם כספית מבקשת התחברות – מדווחים "צריך התחברות" ומנסים שוב בבדיקה הבאה.
-importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js', 'lib/upd.js');
-const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi, UP = self.CxUpd;
+importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js', 'lib/upd.js', 'lib/hours.js');
+const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi, UP = self.CxUpd, HR = self.CxHours;
 const VER = chrome.runtime.getManifest().version;
 const CASPIT = 'https://caspit.valu.co.il/';
 const CASPIT_APP = CASPIT + 'bo';
@@ -15,6 +15,7 @@ const START_DELAY_MIN = 2; // המתנה אחרי הפעלה/התעוררות ל
 const TICK_MIN = 15;
 const POLL_MIN = 1, POLL_SLOW_MIN = 15; // "סנכרן עכשיו" מהטלפון: בדיקה כל דקה (שרת ישן בלי poll – כל 15 דקות)
 const TODAY_FROM = 7, TODAY_TO = 23; // מכירות היום (0.1.10): כל שעה עגולה 07:00–23:00 לפי שעון העסק, לא בשבת וחג
+const HRS_FROM = 7 * 60, HRS_TO = 11 * 60; // שעות העובדים בבוקר (0.1.14): כל 30 דקות 07:00–11:00 לפי שעון העסק, לא בשבת וחג – רק החודש הנוכחי
 
 // האסימון ב-storage.local: מגבילים את האחסון להקשרים של התוסף בלבד (לא לסקריפטי התוכן בלשונית כספית), אם הדפדפן תומך
 // (setAccessLevel נתמך בוודאות ב-storage.session; ב-local – לא מאומת, ולכן בניסיון בלבד). סקריפטי התוכן (bridge.js, selectors.js) לא קוראים אחסון בכלל.
@@ -41,6 +42,7 @@ async function setupAlarms() {
   if (!(await chrome.alarms.get('tick'))) await chrome.alarms.create('tick', { periodInMinutes: TICK_MIN, delayInMinutes: 1 });
   if (!(await chrome.alarms.get('poll'))) await chrome.alarms.create('poll', { periodInMinutes: POLL_MIN, delayInMinutes: POLL_MIN });
   await chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); // מכירות היום – בשעה העגולה הבאה (נוצר מחדש בכל הפעלה)
+  await chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); // 0.1.14: שעות העובדים בבוקר – בחצי השעה הבאה
 }
 chrome.runtime.onInstalled.addListener(() => { setupAlarms(); trigger('install'); });
 chrome.runtime.onStartup.addListener(() => { setupAlarms(); trigger('startup'); });
@@ -49,7 +51,8 @@ chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === 'tick' || a.name === 'poll') updTick().catch(() => {});
   if (a.name === 'daily') { setupAlarms(); trigger('daily'); }
   else if (a.name === 'hour') { chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); todayTick().catch(() => {}); }
-  else if (a.name === 'tick') tick().then(() => todayTick()).catch(() => {}); // השלמה: שעה שה-alarm שלה הוחמץ (מחשב ישן) – פעם אחת באותה שעה
+  else if (a.name === 'hrs') { chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); hoursTick().catch(() => {}); }
+  else if (a.name === 'tick') tick().then(() => todayTick()).then(() => hoursTick()).catch(() => {}); // השלמה: שעה / חצי שעה שה-alarm שלה הוחמץ (מחשב ישן או ריצה אחרת) – פעם אחת
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
   else if (a.name === 'poll') pollOnce().catch(() => {});
@@ -122,10 +125,10 @@ async function pollOnce() {
   }
   await pollEvery(POLL_MIN);
   if (body.upd) await set({ updSent: body.upd.at + '|' + body.upd.ok + '|' + body.upd.ver });
-  // יכולות השרת (0.1.10): today = מכירות היום כל שעה, uq = "עדכון המחשב" מהטלפון. שרת ישן (בלי caps) → שתיהן כבויות
+  // יכולות השרת (0.1.10): today = מכירות היום כל שעה, uq = "עדכון המחשב" מהטלפון; 0.1.14: hours = שעות העובדים (upload kind:'hours'). שרת ישן (בלי caps) → כבויות
   const cl = Array.isArray(r.caps) ? r.caps : [];
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq') };
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq) await set({ caps });
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours') };
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
@@ -192,6 +195,45 @@ async function runToday(slot, now, tz) {
     if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }
   await set({ todaySt: out });
+  return out;
+}
+// ---------- שעות העובדים בבוקר (0.1.14) ----------
+// כל 30 דקות 07:00–11:00 (שעון העסק), לא בשבת וחג: רק החודש הנוכחי, שני הסניפים (hoursAll) והעלאה (upload kind:'hours').
+// כמו מכירות היום: לא hello ולא report, לא נספר כריצה, לא נוגע ב-lastSales / sd. לא מתחילים כשריצה אחרת פעילה, בלי חיבור / רשת,
+// כשחצי השעה הזו כבר נלקחה, ומול שרת שלא מודיע caps.hours. כישלון – רק בחלון התוסף (hrsSt), חוץ מ-branch-restore (דיווח מיד, כמו בשעתי).
+async function hoursTick(o) {
+  const now = (o && o.now) || Date.now(); // now – לבדיקות בלבד
+  if (busy || !navigator.onLine || !(await get('token'))) return null;
+  if (!((await get('caps')) || {}).hours) return null;
+  const s = await sched();
+  const slot = D.halfSlot(now, s.tz, HRS_FROM, HRS_TO);
+  if (!slot || ((await get('hrsSt')) || {}).slot === slot) return null;
+  const run = await get('run');
+  if (run && run.st === 'run' && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null;
+  return runHours(slot, HR.monthsFor(D.dayStr(now, s.tz), true));
+}
+async function runHours(slot, months) {
+  if (busy) return null;
+  busy = true;
+  keepAlive(true);
+  let out;
+  try {
+    await set({ hrsSt: { slot, st: 'run', at: Date.now() } }); // חצי השעה נלקחה – גם אם ה-service worker נסגר באמצע
+    const r0 = { flags: {} };
+    await STEP.login(r0);
+    const A = await hoursAll(r0.tab, months);
+    await hoursSend(A.list, months, U.rid('ch'));
+    out = Object.assign({ slot, st: A.br ? 'fail' : 'ok', at: Date.now() }, hoursInfo(A, months), A.br ? { code: A.br.code, msg: A.br.msg } : {});
+  } catch (e) {
+    const code = e && typeof e.code === 'string' ? e.code : 'tab';
+    if (code === 'branch-restore') {
+      const run = await get('run').catch(() => null);
+      if (P.isTerminal(run)) await (await api()).call('report', { run: U.rid('ch'), kind: 'run', st: 'fail', err: { code, msg: String(e.message || '').slice(0, 300), step: 'hours' }, steps: [], info: { hrs: months } }).catch(() => {});
+    }
+    out = { slot, st: 'fail', at: Date.now(), m: months, code, msg: String((e && e.message) || '').slice(0, 200) };
+    if (code === 'bad-field' || code === 'bad-kind') await set({ caps: Object.assign((await get('caps')) || {}, { hours: false }) }); // שרת שלא מכיר – עד ה-poll הבא
+  } finally { keepAlive(false); busy = false; }
+  await set({ hrsSt: out });
   return out;
 }
 // בדיקה: צריך להריץ? אם כן – מתחילים בעוד 2 דקות (alarm 'start')
@@ -647,6 +689,245 @@ async function salesAll(tab, vars, ms, o) {
   return out;
 }
 
+// ---------- שעות העובדים (0.1.14) ----------
+// "עובדים" (#/employees) → "הצג רק עובדים פעילים" (רק אם לא מסומן) → לכל עובד "שעות לעובד" (#/employee-time-tracks/<מזהה>) → "יצוא לאקסל" של דף השעות.
+// קריאה בלבד: הזרימות רצות במצב probe (רק צעדי safe, ובלי שום רכיב עם מילה אסורה – selectors.js denied); "עריכה", "עובד חדש",
+// "הוספת כניסה ויציאה", "הצג רק מנהלים" ו"יצוא לאקסל" של הרשימה – לא נלחצים. רק /bo (navTo / guardBo / guard בתוך הדף).
+// הרשימה עשויה להיות ag-grid עם שורות וירטואליות: גוללים עד הסוף (עד 300 גלילות / max שורות), כל שורה לפי row-index פעם אחת, וכל עובד (מזהה) פעם אחת.
+// פרטיות: שמות ושעות רק בהעלאה לשרת – לא בהודעות, לא ב-hrsSt ולא בדיווח הריצה (שם רק מספרים).
+const HRS_RE = /#\/employee-time-tracks\/(\d{1,12})(?:[/?]|$)/;
+// בתוך הדף: סריקת הרשימה (clickK = null) או לחיצה על "שעות לעובד" בשורה clickK. → { rows:[{ k, id, nm }], grid, cnt, noCtl } | { clicked } | { miss }
+const empIn = async (guard, max, clickK) => {
+  const X = self.CxSel;
+  if (!X.onPath(window, guard)) return { wrong: true };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const RE = /#\/employee-time-tracks\/(\d{1,12})(?:[/?]|$)/;
+  const vis = (e) => e.getClientRects().length > 0, txt = (e) => X.norm(e.innerText || e.textContent);
+  const ctlOf = (els) => {
+    for (const r of els) {
+      const c = Array.from(r.querySelectorAll('a,button,[role=button],input[type=button],span')).filter((e) => vis(e) && txt(e).length <= 30 && /שעות לעובד/.test(txt(e) || e.value || ''));
+      const m = c.filter((e) => !c.some((o) => o !== e && e.contains(o)))[0];
+      if (m) return (m.closest && m.closest('a[href],button,[role=button]')) || m;
+    }
+    return null;
+  };
+  const idOf = (els, ctl) => {
+    const as = [ctl && ctl.closest && ctl.closest('a[href]')].concat(...els.map((r) => Array.from(r.querySelectorAll('a[href]')))).filter(Boolean);
+    for (const a of as) { const m = RE.exec(a.getAttribute('href') || ''); if (m) return m[1]; }
+    return '';
+  };
+  const grid = Array.from(document.querySelectorAll('.ag-root-wrapper,.ag-root')).find(vis) || null;
+  const NM = /^(שם|שם עובד|שם העובד|שם מלא)$/;
+  let nameOf = () => '', rowsNow;
+  if (grid) {
+    const hd = Array.from(grid.querySelectorAll('.ag-header-cell[col-id]')).map((h) => ({ id: h.getAttribute('col-id'), t: txt(h) }));
+    let nc = hd.filter((h) => NM.test(h.t)).slice(0, 1).map((h) => h.id);
+    if (!nc.length) nc = ['שם פרטי', 'שם משפחה'].map((t) => (hd.find((h) => h.t === t) || {}).id).filter(Boolean);
+    nameOf = (els) => nc.map((c) => { for (const r of els) { const x = Array.from(r.querySelectorAll('[col-id]')).find((e) => e.getAttribute('col-id') === c); if (x) return txt(x); } return ''; }).filter(Boolean).join(' ').slice(0, 60);
+    rowsNow = () => {
+      const by = new Map();
+      for (const r of grid.querySelectorAll('[row-index]')) { const k = r.getAttribute('row-index'); if (!/^\d+$/.test(k) || (r.closest && r.closest('.ag-floating-top,.ag-floating-bottom,.ag-header'))) continue; if (!by.has(+k)) by.set(+k, []); by.get(+k).push(r); }
+      return by;
+    };
+  } else {
+    const tb = Array.from(document.querySelectorAll('table')).find((t) => vis(t) && ctlOf([t]));
+    const th = tb ? Array.from(tb.querySelectorAll('thead th, tr:first-child th')).map(txt) : [];
+    const ni = th.findIndex((t) => NM.test(t));
+    nameOf = (els) => (ni >= 0 ? txt((els[0].querySelectorAll('td')[ni]) || document.createElement('i')).slice(0, 60) : '');
+    rowsNow = () => new Map((tb ? Array.from(tb.querySelectorAll('tbody tr')).filter((r) => r.querySelector('td')) : []).map((r, k) => [k, [r]]));
+  }
+  const vp = grid ? ['.ag-body-viewport', '.ag-body-vertical-scroll-viewport', '.ag-center-cols-viewport'].map((c) => grid.querySelector(c)).find((e) => e && e.scrollHeight > e.clientHeight + 2) : null;
+  const scrollTo = async (y) => { vp.scrollTop = y; vp.dispatchEvent(new Event('scroll')); await sleep(450); };
+  const got = new Map();
+  let noCtl = 0;
+  const take = () => {
+    for (const [k, els] of rowsNow()) {
+      if (got.has(k)) continue;
+      const ctl = ctlOf(els);
+      if (clickK != null) {
+        if (k !== clickK) continue;
+        if (!ctl || X.denied(ctl)) return { miss: true };
+        ctl.click();
+        return { clicked: true };
+      }
+      if (!ctl) { noCtl++; continue; }
+      if (got.size < max) got.set(k, { k, id: idOf(els, ctl), nm: nameOf(els) });
+    }
+    return null;
+  };
+  if (vp) await scrollTo(0);
+  let r = take();
+  for (let it = 0; !r && vp && it < 300 && got.size < max; it++) {
+    const y0 = vp.scrollTop;
+    if (y0 + vp.clientHeight >= vp.scrollHeight - 2) break;
+    await scrollTo(y0 + Math.max(30, Math.floor(vp.clientHeight * 0.7)));
+    r = take();
+    if (vp.scrollTop === y0) break;
+  }
+  if (!r && vp) r = take();
+  if (r) return r;
+  if (clickK != null) return { miss: true };
+  const g = grid && (grid.matches('[role=grid],[role=treegrid]') ? grid : grid.querySelector('[role=grid],[role=treegrid]'));
+  const pg = grid && Array.from(grid.querySelectorAll('.ag-paging-panel')).some(vis);
+  return { rows: [...got.values()].sort((a, b) => a.k - b.k), grid: !!grid, cnt: g ? +g.getAttribute('aria-rowcount') || 0 : 0, noCtl, paged: !!pg };
+};
+// בתוך הדף: בחירת חודש בדף השעות ("בחר חודש": שדה טקסט MM/YYYY, type=month או select). לוח שנה / פורמט לא מוכר → לא נוגעים ({ ok:false, why })
+const monthIn = async (ym, guard) => {
+  const X = self.CxSel;
+  if (!X.onPath(window, guard)) return { wrong: true };
+  const vis = (e) => e.getClientRects().length > 0;
+  const [y, m] = ym.split('-');
+  let el = null;
+  for (const l of Array.from(document.querySelectorAll('label,span,div,strong,b')).filter((e) => vis(e) && /^(בחר |בחירת )?חודש:?$/.test(X.norm(e.textContent)))) {
+    el = l.control || (l.htmlFor && document.getElementById(l.htmlFor)) || (l.nextElementSibling && l.nextElementSibling.matches('input,select') ? l.nextElementSibling : null) || (l.parentElement && l.parentElement.querySelector('input:not([type=checkbox]):not([type=password]),select'));
+    if (el) break;
+  }
+  if (!el) { const L = Array.from(document.querySelectorAll('input')).filter((e) => vis(e) && /^(\d{1,2}\/\d{4}|\d{4}-\d{2})$/.test(String(e.value).trim())); if (L.length === 1) el = L[0]; }
+  if (!el) return { ok: false, why: 'no-ctl' };
+  if (String(el.type).toLowerCase() === 'password') return { ok: false, why: 'bad' };
+  if (el.readOnly || (el.closest && el.closest('.vdp-datepicker,.mx-datepicker,.v-calendar'))) return { ok: false, why: 'cal' };
+  let v;
+  if (String(el.tagName).toLowerCase() === 'select') {
+    const o = Array.from(el.options || []).find((x) => { const t = X.norm(x.textContent) + ' ' + x.value, my = X.monthYear(t); return new RegExp('(^|\\D)0?' + +m + '\\/' + y + '(\\D|$)').test(t) || (my && my.y === +y && my.m === +m - 1) || x.value === ym; });
+    if (!o) return { ok: false, why: 'no-opt' };
+    v = o.value;
+  } else if (String(el.type).toLowerCase() === 'month' || /^\d{4}-\d{2}$/.test(String(el.value).trim())) v = ym;
+  else if (/^\d{2}\/\d{4}$/.test(String(el.value).trim())) v = m + '/' + y;
+  else if (/^\d\/\d{4}$/.test(String(el.value).trim())) v = +m + '/' + y;
+  else return { ok: false, why: 'fmt' };
+  X.setValue(el, v, window);
+  try { el.dispatchEvent(new Event('blur', { bubbles: true })); } catch (e) { /* */ }
+  await new Promise((r) => setTimeout(r, 2000));
+  return String(el.value) === v ? { ok: true } : { ok: false, why: 'stuck' };
+};
+// כתובת דף השעות אחרי לחיצה על "שעות לעובד" (רק בתוך /bo) → המזהה, או '' אחרי ms
+async function hrsWaitId(tab, ms) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const t = await chrome.tabs.get(tab).catch(() => null);
+    if (!t) throw P.err('selector-miss', 'הלשונית של כספית נסגרה');
+    const u = String(t.pendingUrl || t.url || '');
+    if (!BO_RE.test(u)) throw wrongPage();
+    const m = HRS_RE.exec(u);
+    if (m && t.status === 'complete') { await sleep(1500); await guardBo(tab); return m[1]; }
+    if (Date.now() > end) return '';
+    await sleep(400);
+  }
+}
+// "יצוא לאקסל" של דף השעות (זרימה במצב probe: רק אם הכתובת היא דף שעות עובד, ובלי רכיב עם מילה אסורה) → הקובץ
+async function hrsGrab(tab) {
+  const nonce = U.rid('n') + U.rid('');
+  const got = waitFile(nonce, tab, 120e3);
+  got.catch(() => {});
+  await arm(tab, nonce);
+  try {
+    const r = await runFlow(tab, 'hrsExport', {}, null, true);
+    if (!(r.steps || []).some((x) => x.op === 'click' && x.done)) throw P.err('hours-fail', `לא נמצא "יצוא לאקסל" בדף השעות של עובד (${((r.steps || []).find((x) => x.err) || {}).err || 'לא נמצא'})`);
+    const f = await got;
+    return { name: f.name, bytes: U.fromB64(f.b64) };
+  } finally { waiting.delete(nonce); await disarm(tab); }
+}
+// מבנה קובץ לא מוכר → hours-format: רק כותרות דרך הרשימה הלבנה, מספר שורות / עמודות וסוג תא (בלי שמות ובלי ערכים)
+function hrsFmt(R) {
+  const sh = S.fileShape(R, 5);
+  return { rows: R.length, cols: Math.max(0, ...R.slice(0, 20).map((r) => (Array.isArray(r) ? r.length : 0))), hi: sh.hi, hdr: sh.hdr, kinds: sh.kinds };
+}
+// סניף אחד: כל העובדים מהרשימה, לכל עובד החודשים (הנוכחי תמיד; הקודם – בחירה ב"בחר חודש", ובסוף חזרה לנוכחי).
+// → { emps:[{ id, nm, m:{ 'YYYY-MM': rows } }], seen, skip, out, pm:{ ok, bad, none, why } }
+async function hoursBr(tab, months) {
+  const H0 = (await sel()).hours || {}, max = Math.min(+H0.max || 300, 500), cur = months[months.length - 1];
+  const list = async () => {
+    const L = await runFlow(tab, 'hrsList', {}, null, true);
+    if (!L.ok) throw P.err('hours-list', `רשימת העובדים לא נמצאה בכספית (צעד ${(L.miss || 0) + 1})`);
+  };
+  await list();
+  await guardBo(tab);
+  const sc = await inIso(tab, empIn, [GUARD, max, null]);
+  if (sc && sc.wrong) throw wrongPage();
+  if (!sc || !Array.isArray(sc.rows) || !sc.rows.length) throw P.err('hours-list', 'לא נמצאו עובדים עם "שעות לעובד" ברשימה');
+  const out = { emps: [], seen: sc.rows.length, skip: 0, out: 0, pm: { ok: 0, bad: 0, none: 0, why: '' }, grid: !!sc.grid, cnt: sc.cnt || 0, noCtl: sc.noCtl || 0, paged: !!sc.paged };
+  const ids = new Set();
+  let inList = true;
+  for (const row of sc.rows) {
+    let id = row.id;
+    if (id && ids.has(id)) continue;
+    if (id) await navTo(tab, '#/employee-time-tracks/' + id, false, 2500);
+    else {
+      if (!inList) await list();
+      await guardBo(tab);
+      const c = await inIso(tab, empIn, [GUARD, max, row.k]);
+      if (c && c.wrong) throw wrongPage();
+      if (!c || !c.clicked) { out.skip++; inList = true; continue; }
+      id = await hrsWaitId(tab, 20e3);
+      if (!id) { out.skip++; inList = false; continue; }
+    }
+    inList = false;
+    if (ids.has(id)) continue; // אותו עובד פעמיים ברשימה
+    ids.add(id);
+    const pg = await runFlow(tab, 'hrsPage', {}, null, true);
+    if (!pg.ok) throw P.err('hours-fail', `דף השעות של עובד לא נטען (צעד ${(pg.miss || 0) + 1})`);
+    const e = { id: String(id), nm: String(row.nm || '').slice(0, 60), m: {} };
+    let moved = false;
+    for (const ym of [cur].concat(months.filter((x) => x !== cur))) {
+      if (ym !== cur) {
+        if (out.pm.none) continue; // אין דרך לבחור חודש – לא מנסים שוב בכל עובד
+        await guardBo(tab);
+        const r = await inIso(tab, monthIn, [ym, GUARD]);
+        if (r && r.wrong) throw wrongPage();
+        if (!r || !r.ok) { out.pm.none++; out.pm.why = (r && r.why) || 'fail'; continue; }
+        moved = true;
+      }
+      const f = await hrsGrab(tab);
+      const R = rowsOf(f);
+      const p = HR.parse(R, ym);
+      if (!p.ok) throw P.err('hours-format', `קובץ השעות מכספית במבנה לא מוכר (${R.length} שורות) – השעות לא נשלחו`, { fmt: hrsFmt(R) });
+      if (!e.nm && p.nm) e.nm = p.nm.slice(0, 60);
+      out.out += p.out;
+      if (ym !== cur) { if (p.rows.length) out.pm.ok++; else if (p.out) out.pm.bad++; } // החודש לא התחלף (הקובץ מחודש אחר)
+      if (p.rows.length) e.m[ym] = p.rows;
+    }
+    if (moved) { const r = await inIso(tab, monthIn, [cur, GUARD]).catch(() => null); if (r && r.wrong) throw wrongPage(); } // חזרה לחודש הנוכחי (אם כספית זוכרת את הבחירה)
+    out.emps.push(e);
+  }
+  return out;
+}
+// כל הסניפים: הבית, ואחר כך כל סניף נוסף (inBranch – חזרה לבית תמיד). כישלון בסניף נוסף – הבית נשלח בכל זאת, השגיאה ב-br.
+// wrong-page / needs-login / branch-restore – תמיד נזרקות. → { list:[{ br, r }], br: null | { code, msg, fmt? } }
+async function hoursAll(tab, months) {
+  const B = await brCfg();
+  if (B) await brHome(tab);
+  const out = { list: [{ br: B ? B.home : 'main', r: await hoursBr(tab, months) }], br: null };
+  if (!B || !B.also.length) return out;
+  for (const name of B.also) {
+    try { out.list.push({ br: name, r: await inBranch(tab, name, () => hoursBr(tab, months)) }); } catch (e) {
+      const code = e && typeof e.code === 'string' ? e.code : 'tab';
+      if (['wrong-page', 'needs-login', 'branch-restore'].includes(code)) throw e;
+      if (!out.br) out.br = Object.assign({ code: code === 'hours-format' ? code : 'hours-branch', msg: (name + ': ' + String((e && e.message) || P.msgOf(code))).slice(0, 260) }, e.fmt ? { fmt: e.fmt } : {});
+    }
+  }
+  return out;
+}
+// העלאה: לכל סניף ולכל חודש – העלאה אחת עם העובדים שיש להם לפחות שורת נוכחות אחת בחודש (השרת מחליף לכל סניף+חודש+עובד)
+async function hoursSend(list, months, run, log) {
+  let n = 0;
+  const cl = await api();
+  for (const x of list) {
+    for (const ym of months) {
+      const emps = x.r.emps.filter((e) => e.m[ym] && e.m[ym].length).map((e) => ({ id: e.id, nm: e.nm, rows: e.m[ym] }));
+      if (!emps.length) continue;
+      await cl.call('upload', Object.assign({ run, kind: 'hours', br: x.br, m: ym, emps }, log ? { log } : {}));
+      n++;
+    }
+  }
+  return n;
+}
+// מספרים בלבד (בלי שמות ושעות) – לחלון התוסף ולדיווח הריצה
+function hoursInfo(A, months) {
+  const pm = A.list.reduce((a, x) => ({ ok: a.ok + x.r.pm.ok, bad: a.bad + x.r.pm.bad, none: a.none + x.r.pm.none, why: a.why || x.r.pm.why }), { ok: 0, bad: 0, none: 0, why: '' });
+  return Object.assign({ m: months, brs: A.list.map((x) => [x.br, x.r.seen, x.r.emps.filter((e) => Object.keys(e.m).length).length, x.r.emps.reduce((s0, e) => s0 + Object.values(e.m).reduce((a, r) => a + r.length, 0), 0)]) },
+    months.length > 1 ? { pm } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
+}
+
 // ---------- שלבי הריצה ----------
 const STEP = {
   async hello(run) {
@@ -747,11 +1028,32 @@ const STEP = {
     }
     return Object.assign({ n: lines.length, bad, other }, nb, A.br ? { br: A.br.code } : {});
   },
+  // 0.1.14: שעות העובדים – אחרי המכירות, לפני ההעלאות לכספית. כישלון לא מפיל את המכירות / ההעלאות: נרשם ב-flags.hrs ומדווח בסוף (report).
+  // נזרקות רק wrong-page / needs-login / branch-restore (עוצרות את כל הריצה, כמו במכירות). שרת בלי caps.hours – מדלגים
+  async hours(run) {
+    if (!((await get('caps')) || {}).hours) return { skip: 'caps' };
+    const months = HR.monthsFor(D.dayStr(Date.now(), (await sched()).tz));
+    const tab = await ownTab(false);
+    try {
+      const A = await hoursAll(tab, months);
+      await hoursSend(A.list, months, U.rid('ch'), run.srv);
+      const info = hoursInfo(A, months);
+      if (A.br) run.flags.hrs = A.br;
+      else if (info.pm && info.pm.bad && !info.pm.ok) run.flags.hrs = { code: 'hours-month', msg: P.msgOf('hours-month') };
+      return info;
+    } catch (e) {
+      const code = e && typeof e.code === 'string' ? e.code : 'tab';
+      if (['wrong-page', 'needs-login', 'branch-restore'].includes(code)) throw e;
+      run.flags.hrs = Object.assign({ code: /^hours-/.test(code) ? code : 'hours-fail', msg: String((e && e.message) || P.msgOf(code)).slice(0, 260) }, e && e.fmt ? { fmt: e.fmt } : {});
+      return { err: run.flags.hrs.code };
+    }
+  },
   exportNew: (run) => exportImport(run, 'new'),
   exportPrice: (run) => exportImport(run, 'price'),
   async report(run) {
     // 0.1.13: הסניף הנוסף נכשל (מעבר / דוח / branch-same) – הכול נשלח כרגיל, והריצה מסתיימת "נכשלה" עם הקוד (דיווח ב-finalize, בלי ניסיון חוזר)
     if (run.flags && run.flags.br) throw P.err(run.flags.br.code, run.flags.br.msg);
+    if (run.flags && run.flags.hrs) throw P.err(run.flags.hrs.code, run.flags.hrs.msg); // 0.1.14: שעות העובדים נכשלו – כל השאר נשלח
     await (await api()).call('report', { run: run.srv, kind: 'run', st: 'ok', steps: run.log, info: summary(run) });
     return {};
   },
@@ -828,7 +1130,7 @@ async function waitImport(tab, name, after, ms) {
 }
 function summary(run) {
   const i = run.info || {};
-  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
+  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, hrs: i.hours || null, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
 }
 
 // ---------- ריצה ----------
@@ -1243,7 +1545,7 @@ async function handle(m) {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
       run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null };
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null, hrs: (await get('hrsSt')) || null };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }
@@ -1272,4 +1574,6 @@ async function handle(m) {
 // לבדיקות (Playwright): הפעלת טריגר ידנית
 // discBr (0.1.13): היכרות הלקוחות בנחל לכיש לבד (בלי כל ההיכרות) + הסניף הנבחר אחרי
 const discBrTest = async () => { const tab = await ownTab(false); const out = await discBranch(tab, await sel(), D.addDays(D.dayStr(Date.now(), (await sched()).tz), -1)); const r = await brRead(tab, await brCfg(), 5e3); return { out, cur: r && r.cur }; };
-self.__cxTest = { discBr: discBrTest, sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, updReq, reload: null, isBusy: () => busy };
+// hrsRun (0.1.14): שעות העובדים מיד, בלי חלון הבוקר – full: גם החודש הקודם אם now בימים 1–5 (כמו בלילה)
+const hrsRunTest = async (o) => { const x = o || {}, now = x.now || Date.now(); return runHours('t' + Date.now(), HR.monthsFor(D.dayStr(now, (await sched()).tz), !x.full)); };
+self.__cxTest = { discBr: discBrTest, sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, hoursTick, hrsRun: hrsRunTest, updReq, reload: null, isBusy: () => busy };

@@ -19,14 +19,14 @@ function drive(run, fn, maxN) {
 test('ריצה מלאה: כל השלבים לפי הסדר, יום מכירות אחרי יום', () => {
   const { r, seen } = drive(run0(), (s, run) => { if (s === 'hello') run.days = ['2026-11-16', '2026-11-17']; return { ok: 1 }; });
   assert.equal(r.st, 'ok');
-  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'sales:2026-11-16', 'sales:2026-11-17', 'exportNew', 'exportPrice', 'report']);
+  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'sales:2026-11-16', 'sales:2026-11-17', 'hours', 'exportNew', 'exportPrice', 'report']);
   assert.ok(r.info.sales['2026-11-16']);
 });
 
 test('בלי ימים – מדלגים על מכירות; סנכרון ראשון ידני – מדלגים על קבצים לכספית', () => {
   const { r, seen } = drive(run0(), (s, run) => { if (s === 'catApply') run.flags.noCat = true; return {}; });
   assert.equal(r.st, 'ok');
-  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'report']);
+  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'hours', 'report']); // 0.1.14: שעות העובדים – גם בלי ימים ובלי קטלוג
 });
 
 test('שגיאת רשת: ניסיון חוזר אחרי 1, 4, 15 דקות ואז נכשל', () => {

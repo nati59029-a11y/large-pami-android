@@ -596,6 +596,6 @@ function rowScan(doc) {
     .filter((x) => visible(x) && !(x.closest && x.closest(DATA))).map((x) => own(x).slice(0, 80)).filter(Boolean).slice(0, 4);
   return { tables, msgs };
 }
-const api = { OPS, DENY_HE, denied, deniedLink, norm, find, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes, branchCur, branchPick, lists, errDialogs, rowScan };
+const api = { OPS, DENY_HE, denied, deniedLink, norm, find, setValue, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes, branchCur, branchPick, lists, errDialogs, rowScan };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);

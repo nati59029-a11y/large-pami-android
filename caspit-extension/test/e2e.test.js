@@ -813,7 +813,7 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(await tt(W), null);
   srv.caps = ['today', 'uq'];
   await sw.evaluate(() => self.__cxTest.pollOnce());
-  assert.deepEqual((await store()).caps, { today: true, uq: true });
+  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false });
   const c0 = cnt(), H0 = (await store()).salesHash || {};
   const r = await tt(W);
   assert.equal(r && r.st, 'ok', JSON.stringify(r));
@@ -1008,6 +1008,142 @@ test('"עדכון המחשב" (0.1.10): בקשה מהטלפון (poll uq) → ב
     srv.uq = null; srv.caps = null;
     await sw.evaluate(async () => { self.__cxTest.reload = null; await chrome.storage.local.remove(['updReload', 'upd', 'updSent', 'lastUq', 'caps']); await self.__cxTest.setupAlarms(); });
   }
+});
+
+// ---------- 0.1.14: שעות העובדים ----------
+// כספית המדומה (hrsMode=grid): 5 עובדים ברשימת ag-grid וירטואלית (2 שורות בתצוגה) – 11 לא פעיל, 12 ו-15 עם שעות ביהודה הנשיא (15 רק אחרי גלילה),
+// 13 עם שעות רק בנחל לכיש, 14 בלי שעות. מזהה + חודש + סניף של כל יצוא נרשמים ב-hrsX; לחיצה אסורה – ב-attHits
+const HRS_NAMES = ['שפרינצק', 'רוזנצוויג', 'טננבאום', 'פרלמוטר', 'שטרנברג', '07:41', '15:58', '22:10', '06:05'];
+const hrsUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'upload' && c.kind === 'hours');
+const curYm = () => { const p = D.parts(Date.now(), 'Asia/Jerusalem'); return p.y + '-' + String(p.m).padStart(2, '0'); };
+// יום חול בחודש הנוכחי (הנתונים בכספית המדומה לפי החודש של עכשיו) בשעה hm
+const curDay = (hm, from) => { for (let d = from || 1; d <= 28; d++) { const day = curYm() + '-' + String(d).padStart(2, '0'); if (!D.restDay(day) && !D.restDay(D.addDays(day, 1))) return D.zonedToUtc(day, hm, 'Asia/Jerusalem'); } return null; };
+async function hrsOn(o) {
+  srv.caps = ['hours'];
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('hrs'); await chrome.storage.local.set({ caps: { today: false, uq: false, hours: true } }); return chrome.storage.local.remove('hrsSt'); });
+  if (!caspitPage()) { const pg = await ctx.newPage(); await pg.goto('https://caspit.valu.co.il/bo#/'); await pg.evaluate(() => localStorage.setItem('auth', '1')); } // הרצה חלקית של הבדיקות (בלי הבדיקות הקודמות)
+  await ls(Object.assign({ auth: '1', hrsMode: 'grid', hrsX: null, attHits: null, brPicks: null }, o || {}));
+}
+async function hrsOff() {
+  srv.caps = null;
+  await ls({ hrsMode: null, hrsLink: null, hrsFmt: null, hrsMonthStuck: null, brFail: null, store: 'יהודה הנשיא' });
+  await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'hrsSt']); await self.__cxTest.setupAlarms(); });
+}
+const byId = (up) => Object.fromEntries(up.emps.map((e) => [e.id, e]));
+test('0.1.14 שעות בסנכרון הלילי: אחרי המכירות ולפני ההעלאות לכספית, שני סניפים, רק עובדים עם שעות; גלילה ברשימה; בלי לחיצות אסורות; בלי שמות בדיווח', async () => {
+  await hrsOn();
+  try {
+    const n0 = srv.calls.length;
+    const { s, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    const calls = srv.calls.slice(n0), ix = (f) => calls.findIndex(f);
+    const up = hrsUps(n0);
+    assert.equal(up.length, 2, JSON.stringify(up.map((u) => [u.br, u.m])));
+    const iH = ix((c) => c.kind === 'hours'), iS = calls.map((c, i) => (c.op === 'upload' && c.kind === 'sales' ? i : -1)).filter((i) => i >= 0).pop(), iE = ix((c) => c.op === 'export');
+    assert.ok((iS === undefined || iS < iH) && iH < iE, `סדר: מכירות ${iS} → שעות ${iH} → העלאות לכספית ${iE}`);
+    const sl = rep.steps.map((x) => x.s); // גם כשהמכירות של היום כבר נשלחו בריצה קודמת (אותו קובץ)
+    assert.ok(sl.lastIndexOf('sales') < sl.indexOf('hours') && sl.indexOf('hours') < sl.indexOf('exportNew'), sl.join(','));
+    const [yh, nl] = up;
+    assert.equal(yh.br, 'יהודה הנשיא'); assert.equal(nl.br, 'נחל לכיש'); assert.equal(yh.m, curYm()); assert.equal(nl.m, curYm());
+    assert.deepEqual(yh.emps.map((e) => e.id).sort(), ['12', '15'], 'רק עובדים עם שעות; 15 – אחרי גלילה; 11 (לא פעיל) ו-14 (בלי שעות) – לא');
+    assert.deepEqual(nl.emps.map((e) => e.id), ['13']);
+    const e12 = byId(yh)['12'], m = curYm();
+    assert.equal(e12.nm, 'מיכל רוזנצוויג');
+    assert.deepEqual(e12.rows, [{ d: m + '-01', i: '07:41', o: '15:58', b: 30, t: 467 }, { d: m + '-02', i: '22:10', o: '06:05', b: 15, t: 460, n: 1 }, { d: m + '-03', i: '07:39', o: '', b: 0 }]);
+    assert.equal(typeof yh.run, 'string'); assert.equal(yh.log, rep.run, 'log = מזהה הריצה בשרת');
+    const X = await caspitPage().evaluate(() => localStorage.getItem('hrsX') || '');
+    for (const id of ['12', '13', '14', '15']) assert.ok(X.includes(id + '|' + m + '|יהודה הנשיא;'), 'יהודה הנשיא ' + id + ': ' + X);
+    assert.ok(!/(^|;)11\|/.test(X), 'עובד לא פעיל לא נפתח: ' + X);
+    assert.equal((X.match(/\|נחל לכיש;/g) || []).length, 4);
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחצו "עריכה" / "עובד חדש" / "הוספת כניסה ויציאה" / "הצג רק מנהלים" / יצוא הרשימה');
+    assert.equal(await store0(), 'יהודה הנשיא');
+    assert.deepEqual(rep.info.hrs.brs, [['יהודה הנשיא', 4, 2, 4], ['נחל לכיש', 4, 1, 1]]);
+    const txt = JSON.stringify(rep) + JSON.stringify(s.st.lastRun);
+    for (const w of HRS_NAMES) assert.ok(!txt.includes(w), 'שם / שעה בדיווח: ' + w);
+  } finally { await hrsOff(); }
+});
+test('0.1.14 שעות כל 30 דקות בבוקר: רק החודש הנוכחי, בלי hello / report; פעם אחת בחצי שעה; לא לפני 07:00 / אחרי 11:00 / בשבת; שרת בלי caps.hours – לא; קישורים ברשימה', async () => {
+  await hrsOn({ hrsLink: '1' });
+  try {
+    const W = curDay('08:10');
+    const ht = (now) => sw.evaluate((n) => self.__cxTest.hoursTick({ now: n }), now);
+    const c0 = { hello: srv.ops('hello').length, report: srv.ops('report').length, sales: srv.ops('upload').filter((c) => c.kind === 'sales').length }, n0 = srv.calls.length;
+    const r = await ht(W);
+    assert.equal(r && r.st, 'ok', JSON.stringify(r));
+    assert.deepEqual(r.m, [curYm()]); assert.deepEqual(r.brs, [['יהודה הנשיא', 4, 2, 4], ['נחל לכיש', 4, 1, 1]]);
+    assert.equal(hrsUps(n0).length, 2);
+    assert.deepEqual({ hello: srv.ops('hello').length, report: srv.ops('report').length, sales: srv.ops('upload').filter((c) => c.kind === 'sales').length }, c0, 'בלי hello / report / מכירות');
+    assert.equal(await ht(W + 10 * 60e3), null, 'אותה חצי שעה');
+    assert.equal(await ht(W - 80 * 60e3), null, '06:50');
+    assert.equal(await ht(W + 200 * 60e3), null, '11:30');
+    const sat = (() => { for (let d = 1; d <= 28; d++) { const day = curYm() + '-' + String(d).padStart(2, '0'); if (new Date(day + 'T12:00:00Z').getUTCDay() === 6) return D.zonedToUtc(day, '09:00', 'Asia/Jerusalem'); } return null; })();
+    assert.equal(await ht(sat), null, 'שבת');
+    await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ runSaved: run, run: Object.assign({}, run, { st: 'run', touchedAt: Date.now() }) }); });
+    assert.equal(await ht(W + 30 * 60e3), null, 'ריצה אחרת פעילה');
+    await sw.evaluate(async () => { const { runSaved } = await chrome.storage.local.get('runSaved'); await chrome.storage.local.set({ run: runSaved }); await chrome.storage.local.remove('runSaved'); });
+    const n1 = srv.calls.length;
+    const r2 = await ht(W + 30 * 60e3);
+    assert.equal(r2 && r2.st, 'ok', JSON.stringify(r2)); assert.equal(hrsUps(n1).length, 2, 'חצי השעה הבאה');
+    await sw.evaluate(() => chrome.storage.local.set({ caps: { today: false, uq: false, hours: false } }));
+    assert.equal(await ht(W + 60 * 60e3), null, 'שרת בלי caps.hours');
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null);
+    const st = await sw.evaluate(() => chrome.storage.local.get('hrsSt'));
+    for (const w of HRS_NAMES) assert.ok(!JSON.stringify(st).includes(w), 'שם / שעה בחלון התוסף: ' + w);
+  } finally { await hrsOff(); }
+});
+test('0.1.14 שעות: כישלון בנחל לכיש → יהודה הנשיא נשלח, חזרה ליהודה הנשיא, hours-branch; החזרה נכשלת → branch-restore ודיווח', async () => {
+  await hrsOn({ hrsLink: '1', brFail: 'switch' });
+  try {
+    let n0 = srv.calls.length;
+    let r = await sw.evaluate(() => self.__cxTest.hrsRun());
+    assert.equal(r.st, 'fail', JSON.stringify(r)); assert.equal(r.code, 'hours-branch'); assert.match(r.msg, /^נחל לכיש: /);
+    const up = hrsUps(n0);
+    assert.equal(up.length, 1); assert.equal(up[0].br, 'יהודה הנשיא'); assert.deepEqual(up[0].emps.map((e) => e.id).sort(), ['12', '15']);
+    assert.equal(await store0(), 'יהודה הנשיא');
+    await ls({ brFail: 'restore', brPicks: null });
+    n0 = srv.calls.length;
+    r = await sw.evaluate(() => self.__cxTest.hrsRun());
+    assert.equal(r.code, 'branch-restore', JSON.stringify(r));
+    assert.equal(hrsUps(n0).length, 0, 'החזרה נכשלה – לא שולחים');
+    const rp = srv.calls.slice(n0).filter((c) => c.op === 'report').at(-1);
+    assert.equal(rp && rp.err.code, 'branch-restore'); assert.equal(rp.err.step, 'hours');
+  } finally { await hrsOff(); }
+});
+test('0.1.14 שעות: קובץ במבנה לא מוכר → hours-format (כותרות דרך הרשימה הלבנה, בלי שמות), בלי העלאת שעות; המכירות וההעלאות לכספית נשלחו', async () => {
+  await hrsOn({ hrsLink: '1', hrsFmt: 'bad' });
+  try {
+    const n0 = srv.calls.length;
+    const { s, sales, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'fail'); assert.equal(s.st.lastRun.code, 'hours-format', JSON.stringify(s.st.lastRun));
+    assert.equal(hrsUps(n0).length, 0);
+    assert.ok(rep.info.sales[days[1]], 'המכירות נקלטו (או שאותו קובץ כבר נשלח)'); assert.ok(Array.isArray(sales)); assert.ok(srv.calls.slice(n0).some((c) => c.op === 'export'), 'ההעלאות לכספית רצו');
+    assert.equal(rep.err.code, 'hours-format');
+    const f = rep.info.flags.hrs.fmt;
+    assert.deepEqual(f.hdr, ['מספר', 'שם', 'ערך'], JSON.stringify(f)); assert.equal(f.hi, 1); assert.equal(f.rows, 3);
+    const txt = JSON.stringify(rep);
+    for (const w of HRS_NAMES) assert.ok(!txt.includes(w), 'שם / שעה בדיווח: ' + w);
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await hrsOff(); }
+});
+test('0.1.14 שעות בימים 1–5: גם החודש הקודם (בחירה ב"בחר חודש"); בחירה שלא נקלטת → בלי החודש הקודם, pm.bad', async () => {
+  await hrsOn({ hrsLink: '1' });
+  try {
+    const W = curDay('09:00'), p = D.parts(Date.now(), 'Asia/Jerusalem'), prev = p.m === 1 ? (p.y - 1) + '-12' : p.y + '-' + String(p.m - 1).padStart(2, '0');
+    const W3 = D.zonedToUtc(curYm() + '-03', '09:00', 'Asia/Jerusalem');
+    let n0 = srv.calls.length;
+    let r = await sw.evaluate((n) => self.__cxTest.hrsRun({ now: n, full: true }), W3);
+    assert.equal(r.st, 'ok', JSON.stringify(r)); assert.deepEqual(r.m, [prev, curYm()]); assert.deepEqual(r.pm, { ok: 1, bad: 0, none: 0, why: '' });
+    let up = hrsUps(n0);
+    assert.deepEqual(up.map((u) => [u.br, u.m]), [['יהודה הנשיא', prev], ['יהודה הנשיא', curYm()], ['נחל לכיש', curYm()]]);
+    assert.deepEqual(up[0].emps.map((e) => [e.id, e.rows]), [['12', [{ d: prev + '-28', i: '08:00', o: '16:00', b: 30, t: 450 }]]]);
+    await ls({ hrsMonthStuck: '1' });
+    n0 = srv.calls.length;
+    r = await sw.evaluate((n) => self.__cxTest.hrsRun({ now: n, full: true }), W3);
+    assert.equal(r.pm.ok, 0); assert.ok(r.pm.bad >= 1, JSON.stringify(r));
+    up = hrsUps(n0);
+    assert.ok(!up.some((u) => u.m === prev), 'החודש הקודם לא נשלח');
+    assert.ok(W > 0);
+  } finally { await hrsOff(); }
 });
 
 test('ניתוק: הקוד נמחק', async () => {
