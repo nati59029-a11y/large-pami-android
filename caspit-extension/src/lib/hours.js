@@ -107,12 +107,19 @@ function parse(rows, ym) {
   const H = header(rows);
   if (!H) return { ok: false, why: 'no-hdr' };
   const c = H.c, out = [];
-  let skip = 0;
+  let skip = 0, bad = 0;
   for (const r of rows.slice(H.hi + 1)) {
     if (!Array.isArray(r)) continue;
     const d = pDate(r[c.d], ym);
     const ti = d ? pTime(r[c.i]) : null;
-    if (!d || !ti) continue;
+    if (!d || !ti) {
+      // 0.1.15: שורת נתונים שלא פוענחה (תאריך / כניסה בפורמט לא מוכר) נספרת ב-bad – רק bad = 0 מאפשר "אין שורות" (empty).
+      // לא נספרות: שורה ריקה, שורת סה"כ, ותאריך תקין בלי שעת כניסה (יום בלי החתמה)
+      const cell = (j) => norm(r[j]);
+      if (!r.some((v) => norm(v) !== '') || r.some((v) => /סה"?כ|סהכ|סך הכל/.test(norm(v)))) continue;
+      if (!d ? cell(c.d) !== '' || cell(c.i) !== '' : cell(c.i) !== '') bad++;
+      continue;
+    }
     if (d.slice(0, 7) !== ym) { skip++; continue; }
     const to = pTime(r[c.o]);
     const b = c.b != null ? pDur(r[c.b], H.bMin || (typeof r[c.b] === 'number' && r[c.b] > 12 && Number.isInteger(r[c.b])) || (/^\d+$/.test(norm(r[c.b])) && +norm(r[c.b]) > 12)) : null;
@@ -127,7 +134,7 @@ function parse(rows, ym) {
     out.push(ok);
     if (out.length >= MAX_ROWS) break;
   }
-  return { ok: true, rows: out, out: skip, nm: titleName(rows, H.hi) };
+  return { ok: true, rows: out, out: skip, bad, nm: titleName(rows, H.hi) };
 }
 // החודשים לסנכרון לפי היום (YYYY-MM-DD): החודש הנוכחי; בימים 1–5 – קודם החודש הקודם (morning: רק הנוכחי)
 function monthsFor(day, curOnly) {
@@ -135,6 +142,17 @@ function monthsFor(day, curOnly) {
   const cur = `${y}-${p2(m)}`, prev = m === 1 ? `${y - 1}-12` : `${y}-${p2(m - 1)}`;
   return !curOnly && d <= 5 ? [prev, cur] : [cur];
 }
-const api = { MAX_ROWS, M_RE, pDate, pTime, pDur, header, parse, monthsFor, titleName };
+// 0.1.15: מי נשלח ב-empty בסניף אחד. emps – [{ id, z:{ ym:1 } }] (z = יצוא החודש הצליח בלי אף שורה ובלי שורות לא מפוענחות),
+// seen – מזהים שנשלחו בעבר עם שורות לאותו סניף+חודש (רק להם יש מה למחוק). מעצור נגד מחיקה גורפת: כל העובדים בסניף ריקים,
+// או יותר מ-max מועמדים → אף אחד, warn 'hours-empty-many'. → { ids, warn }
+function emptyPick(emps, ym, seen, max) {
+  const L = Array.isArray(emps) ? emps : [], S = new Set(Array.isArray(seen) ? seen : []), lim = max == null ? 2 : max;
+  const z = L.filter((e) => e && e.z && e.z[ym]);
+  const ids = z.map((e) => String(e.id)).filter((id) => S.has(id));
+  if (!ids.length) return { ids: [], warn: '' };
+  if (z.length === L.length || ids.length > lim) return { ids: [], warn: 'hours-empty-many' };
+  return { ids, warn: '' };
+}
+const api = { MAX_ROWS, M_RE, pDate, pTime, pDur, header, parse, monthsFor, titleName, emptyPick };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxHours = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -1026,7 +1026,7 @@ async function hrsOn(o) {
 }
 async function hrsOff() {
   srv.caps = null;
-  await ls({ hrsMode: null, hrsLink: null, hrsFmt: null, hrsFmtOne: null, hrsGone: null, hrsMonthStuck: null, brFail: null, store: 'יהודה הנשיא' });
+  await ls({ hrsMode: null, hrsLink: null, hrsFmt: null, hrsFmtOne: null, hrsGone: null, hrsBackStuck: null, hrsMonthStuck: null, brFail: null, store: 'יהודה הנשיא' });
   await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'hrsSt']); await self.__cxTest.setupAlarms(); });
 }
 const byId = (up) => Object.fromEntries(up.emps.map((e) => [e.id, e]));
@@ -1146,37 +1146,46 @@ test('0.1.14 שעות בימים 1–5: גם החודש הקודם (בחירה �
     assert.ok(W > 0);
   } finally { await hrsOff(); }
 });
-test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספית → empty (רק עם caps.hours2, רק החודש הנוכחי); יצוא שנכשל / מבנה לא מוכר בסניף → בלי העלאה ובלי empty לסניף הזה', async () => {
-  await hrsOn({ hrsLink: '1', hrsGone: '12' });
+test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספית → empty (רק עם caps.hours2, רק מי שנשלח בעבר עם שורות, רק החודש הנוכחי); כל העובדים ריקים → בלי empty + אזהרה; מבנה לא מוכר בסניף → בלי העלאה ובלי empty; חזרה לחודש הנוכחי לא אושרה → בלי empty', async () => {
+  await hrsOn({ hrsLink: '1' });
   try {
     srv.caps = ['hours', 'hours2'];
-    await sw.evaluate(() => chrome.storage.local.set({ caps: { today: false, uq: false, hours: true, hours2: true } }));
-    let n0 = srv.calls.length;
-    let r = await sw.evaluate(() => self.__cxTest.hrsRun());
+    await sw.evaluate(async () => { await chrome.storage.local.remove('hrsSeen'); return chrome.storage.local.set({ caps: { today: false, uq: false, hours: true, hours2: true } }); });
+    const run = async (n) => { const n0 = srv.calls.length; const r = await sw.evaluate((x) => self.__cxTest.hrsRun(x ? { now: x, full: true } : undefined), n || 0); return { r, up: hrsUps(n0) }; };
+    // ריצה ראשונה – 12 ו-15 נשלחים עם שורות (hrsSeen); 13 / 14 בלי שורות ביהודה הנשיא – אף פעם לא נשלחו, אין מה למחוק
+    let { r, up } = await run();
     assert.equal(r.st, 'ok', JSON.stringify(r));
-    let up = hrsUps(n0);
+    assert.ok(up.every((u) => !('empty' in u)), JSON.stringify(up.map((u) => [u.br, u.empty])));
+    // 12 נמחק בכספית → empty ['12'] ביהודה הנשיא בלבד
+    await ls({ hrsGone: '12' });
+    ({ r, up } = await run());
+    assert.equal(r.st, 'ok', JSON.stringify(r)); assert.equal(r.warn, undefined);
     assert.deepEqual(up.map((u) => [u.br, u.m]), [['יהודה הנשיא', curYm()], ['נחל לכיש', curYm()]]);
-    assert.deepEqual(up[0].emps.map((e) => e.id), ['15']);
-    assert.deepEqual(up[0].empty.slice().sort(), ['12', '13', '14'], '12 – השורות נמחקו; 13 / 14 – בלי שורות ביהודה הנשיא; 11 (לא פעיל) – לא');
-    assert.deepEqual(up[1].emps.map((e) => e.id), ['13']); assert.deepEqual(up[1].empty.slice().sort(), ['12', '14', '15']);
-    // יצוא של עובד בנחל לכיש במבנה לא מוכר → יהודה הנשיא נשלח (עם empty), לנחל לכיש – כלום (גם לא empty של העובדים שכבר נקראו)
-    await ls({ hrsFmtOne: 'נחל לכיש|15' });
-    n0 = srv.calls.length;
-    r = await sw.evaluate(() => self.__cxTest.hrsRun());
-    assert.equal(r.st, 'fail'); assert.equal(r.code, 'hours-format', JSON.stringify(r));
-    up = hrsUps(n0);
-    assert.deepEqual(up.map((u) => u.br), ['יהודה הנשיא']); assert.deepEqual(up[0].empty.slice().sort(), ['12', '13', '14']);
-    // החודש הקודם (ימים 1–5): עובד בלי שורות בחודש הקודם – לא ב-empty (אי אפשר לוודא שהבחירה נקלטה)
-    await ls({ hrsFmtOne: null });
-    const W3 = D.zonedToUtc(curYm() + '-03', '09:00', 'Asia/Jerusalem');
-    n0 = srv.calls.length;
-    r = await sw.evaluate((n) => self.__cxTest.hrsRun({ now: n, full: true }), W3);
-    up = hrsUps(n0);
-    const pu = up.find((u) => u.m !== curYm());
-    assert.ok(pu, JSON.stringify(up.map((u) => [u.br, u.m]))); assert.equal(pu.empty, undefined, 'החודש הקודם – בלי empty');
-    const st = JSON.stringify(await sw.evaluate(() => chrome.storage.local.get('hrsSt')));
-    for (const w of HRS_NAMES) assert.ok(!st.includes(w), 'שם / שעה בחלון התוסף: ' + w);
-  } finally { await hrsOff(); }
+    assert.deepEqual(up[0].emps.map((e) => e.id), ['15']); assert.deepEqual(up[0].empty, ['12']);
+    assert.equal(up[1].empty, undefined, 'נחל לכיש – 12 לא נשלח שם עם שורות');
+    // שוב – 12 כבר נמחק (לא ב-hrsSeen) → בלי empty
+    ({ r, up } = await run());
+    assert.equal(up[0].empty, undefined);
+    // מעצור: כל העובדים ביהודה הנשיא ריקים (12 חזר, נשלח, ואז 12 ו-15 נמחקו) → בלי empty, אזהרה
+    await ls({ hrsGone: null }); await run();
+    await ls({ hrsGone: '12,15' });
+    ({ r, up } = await run());
+    assert.equal(r.warn, 'hours-empty-many', JSON.stringify(r));
+    assert.ok(up.every((u) => !('empty' in u)), JSON.stringify(up.map((u) => [u.br, u.empty])));
+    // יצוא במבנה לא מוכר בנחל לכיש → לנחל לכיש לא נשלח כלום
+    await ls({ hrsGone: '12', hrsFmtOne: 'נחל לכיש|15' });
+    ({ r, up } = await run());
+    assert.equal(r.code, 'hours-format', JSON.stringify(r));
+    assert.deepEqual(up.map((u) => u.br), ['יהודה הנשיא']); assert.deepEqual(up[0].empty, ['12']);
+    // ימים 1–5: המעבר לחודש הקודם נקלט, החזרה לחודש הנוכחי לא (הפקד "בחר חודש" נשאר בחודש הקודם) → בלי empty לסניף, אזהרה
+    await ls({ hrsFmtOne: null, hrsGone: null }); await run();
+    await ls({ hrsGone: '12', hrsBackStuck: '1' });
+    ({ r, up } = await run(D.zonedToUtc(curYm() + '-03', '09:00', 'Asia/Jerusalem')));
+    assert.ok(up.every((u) => !('empty' in u)), 'החזרה לחודש הנוכחי לא אושרה – בלי empty: ' + JSON.stringify(up.map((u) => [u.br, u.m, u.empty])));
+    assert.equal(r.warn, 'hours-empty-month', JSON.stringify(r));
+    const st = JSON.stringify(await sw.evaluate(() => chrome.storage.local.get(['hrsSt', 'hrsSeen'])));
+    for (const w of HRS_NAMES) assert.ok(!st.includes(w), 'שם / שעה באחסון: ' + w);
+  } finally { await sw.evaluate(() => chrome.storage.local.remove('hrsSeen')); await hrsOff(); }
 });
 
 test('ניתוק: הקוד נמחק', async () => {

@@ -888,11 +888,17 @@ async function hoursBr(tab, months) {
       out.out += p.out;
       if (ym !== cur) { if (p.rows.length) out.pm.ok++; else if (p.out) out.pm.bad++; } // החודש לא התחלף (הקובץ מחודש אחר)
       if (p.rows.length) e.m[ym] = p.rows;
-      // 0.1.15: היצוא הצליח ופוענח, ואין בו אף שורה (גם לא מחודש אחר) – כל השעות של העובד בחודש נמחקו בכספית → empty בהעלאה.
+      // 0.1.15: היצוא הצליח ופוענח, ואין בו אף שורה – לא מחודש אחר (out) ולא שורה שלא פוענחה (bad) – כל השעות של העובד בחודש נמחקו בכספית → מועמד ל-empty.
       // רק החודש הנוכחי (ברירת המחדל של הדף); בחודש הקודם אי אפשר לוודא שהבחירה נקלטה כשהקובץ ריק. יצוא שנכשל / מבנה לא מוכר – נזרק למעלה, ולא מגיע לכאן
-      else if (ym === cur && !p.out) e.z[ym] = 1;
+      else if (ym === cur && !p.out && !p.bad) e.z[ym] = 1;
     }
-    if (moved) { const r = await inIso(tab, monthIn, [cur, GUARD]).catch(() => null); if (r && r.wrong) throw wrongPage(); } // חזרה לחודש הנוכחי (אם כספית זוכרת את הבחירה)
+    // חזרה לחודש הנוכחי (אם כספית זוכרת את הבחירה). לא אושרה (הערך בפקד "בחר חודש" לא התחלף) – היצוא הבא עלול להיות מהחודש הקודם,
+    // ולכן אין empty לאף עובד בסניף הזה בריצה הזו (zOff)
+    if (moved) {
+      const r = await inIso(tab, monthIn, [cur, GUARD]).catch(() => null);
+      if (r && r.wrong) throw wrongPage();
+      if (!(r && r.ok)) out.zOff = 'month';
+    }
     out.emps.push(e);
   }
   return out;
@@ -914,26 +920,39 @@ async function hoursAll(tab, months) {
   return out;
 }
 // העלאה: לכל סניף ולכל חודש – העלאה אחת עם העובדים שיש להם לפחות שורת נוכחות אחת בחודש (השרת מחליף לכל סניף+חודש+עובד)
-// 0.1.15: עם caps.hours2 – גם empty: מזהי העובדים שהיצוא שלהם הצליח בלי אף שורה בחודש (השרת מוחק רק את המסמכים שלהם באותו סניף+חודש)
+// 0.1.15: עם caps.hours2 – גם empty: עובדים שהיצוא שלהם הצליח בלי אף שורה בחודש, ושנשלחו בעבר עם שורות לאותו סניף+חודש (hrsSeen – רק להם יש מה למחוק).
+// השרת מוחק רק את המסמכים שלהם באותו סניף+חודש. מעצור (HR.emptyPick): כל העובדים בסניף ריקים / יותר מ-2 → בלי empty, x.zw = 'hours-empty-many'.
+// החזרה לחודש הנוכחי לא אושרה (zOff) → בלי empty לסניף, x.zw = 'hours-empty-month'
 async function hoursSend(list, months, run, log) {
   let n = 0;
-  const cl = await api(), h2 = !!((await get('caps')) || {}).hours2;
+  const cl = await api(), h2 = !!((await get('caps')) || {}).hours2, seen = (await get('hrsSeen')) || {};
   for (const x of list) {
     for (const ym of months) {
       const emps = x.r.emps.filter((e) => e.m[ym] && e.m[ym].length).map((e) => ({ id: e.id, nm: e.nm, rows: e.m[ym] }));
-      const empty = h2 ? x.r.emps.filter((e) => e.z && e.z[ym]).map((e) => e.id) : [];
+      const key = x.br + '|' + ym;
+      let empty = [];
+      if (h2) {
+        const pk = HR.emptyPick(x.r.emps, ym, seen[key], 2);
+        if (pk.ids.length && x.r.zOff) x.zw = 'hours-empty-month';
+        else if (pk.warn) x.zw = pk.warn;
+        else empty = pk.ids;
+      }
       if (!emps.length && !empty.length) continue;
       await cl.call('upload', Object.assign({ run, kind: 'hours', br: x.br, m: ym, emps }, empty.length ? { empty } : {}, log ? { log } : {}));
+      const del = new Set(empty);
+      seen[key] = [...new Set((seen[key] || []).filter((id) => !del.has(id)).concat(emps.map((e) => e.id)))].slice(-500);
       n++;
     }
   }
+  const keep = Object.keys(seen).sort((a, b) => (a.slice(a.lastIndexOf('|') + 1) < b.slice(b.lastIndexOf('|') + 1) ? 1 : -1)).slice(0, 12); // סניפים × החודשים האחרונים
+  await set({ hrsSeen: Object.fromEntries(keep.map((k) => [k, seen[k]])) });
   return n;
 }
 // מספרים בלבד (בלי שמות ושעות) – לחלון התוסף ולדיווח הריצה
 function hoursInfo(A, months) {
   const pm = A.list.reduce((a, x) => ({ ok: a.ok + x.r.pm.ok, bad: a.bad + x.r.pm.bad, none: a.none + x.r.pm.none, why: a.why || x.r.pm.why }), { ok: 0, bad: 0, none: 0, why: '' });
   return Object.assign({ m: months, brs: A.list.map((x) => [x.br, x.r.seen, x.r.emps.filter((e) => Object.keys(e.m).length).length, x.r.emps.reduce((s0, e) => s0 + Object.values(e.m).reduce((a, r) => a + r.length, 0), 0)]) },
-    months.length > 1 ? { pm } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
+    months.length > 1 ? { pm } : {}, A.list.some((x) => x.zw) ? { warn: A.list.find((x) => x.zw).zw } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
 }
 
 // ---------- שלבי הריצה ----------

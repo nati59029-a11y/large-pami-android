@@ -186,7 +186,7 @@ function datePicker(host, init) {
 // ---------- 0.1.14: שעות העובדים (localStorage hrsMode = grid) ----------
 // רשימת עובדים כמו ag-grid: שורות וירטואליות (רק השורות שבתצוגה מצוירות, row-index), גלילה ב-.ag-body-viewport; "שעות לעובד" – כפתור (hrsLink=1: קישור).
 // דף השעות: "בחר חודש" (MM/YYYY, change מחליף חודש; hrsMonthStuck=1 – השינוי לא נקלט), "יצוא לאקסל" לפי העובד, החודש והסניף. hrsFmt=bad – קובץ במבנה לא מוכר.
-// hrsGone=<מזהה> – בחודש הנוכחי אין לעובד אף שורה (נמחקו); hrsFmtOne='<סניף>|<מזהה>' – קובץ במבנה לא מוכר רק לעובד הזה בסניף הזה
+// hrsGone=<מזהה>[,<מזהה>…] – בחודש הנוכחי אין לעובד אף שורה (נמחקו); hrsFmtOne='<סניף>|<מזהה>' – קובץ במבנה לא מוכר רק לעובד הזה בסניף הזה
 // כל לחיצה אסורה ("עריכה", "עובד חדש", "הוספת כניסה ויציאה", "הצג רק מנהלים", "יצוא לאקסל" של הרשימה) נרשמת ב-attHits; hrsX – כל יצוא שעות (מזהה|חודש|סניף)
 const HE = [[11, 'גלעד שפרינצק', false], [12, 'מיכל רוזנצוויג', true], [13, 'עומר טננבאום', true], [14, 'נגה פרלמוטר', true], [15, 'יואב שטרנברג', true]];
 const ymOf = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1);
@@ -194,7 +194,7 @@ function hrsData(id, ym) {
   const now = new Date(), cur = ymOf(now), prev = ymOf(new Date(now.getFullYear(), now.getMonth() - 1, 1)), nl = STORE() === 'נחל לכיש';
   const [y, m] = ym.split('-'), dd = (d) => d + '/' + m + '/' + y;
   if (ym === cur) {
-    if (localStorage.getItem('hrsGone') === String(id)) return []; // 0.1.15: כל השעות של העובד בחודש נמחקו בכספית
+    if ((localStorage.getItem('hrsGone') || '').split(',').includes(String(id))) return []; // 0.1.15: כל השעות של העובד בחודש נמחקו בכספית
     if (!nl && id === 12) return [[dd('01'), "א'", '07:41', '15:58', '0:30', '7:47'], [dd('02'), "ב'", '22:10', '06:05', '0:15', '7:40'], [dd('03'), "ג'", '07:39', '', '', '']];
     if (!nl && id === 15) return [[dd('02'), "ב'", '09:00', '13:00', '', '4:00']];
     if (nl && id === 13) return [[dd('01'), "א'", '10:00', '18:00', '0:30', '7:30']];
@@ -233,7 +233,12 @@ function hrsPage(app, id) {
   app.innerHTML = '<div class="time-tracks"><h2>דוח שעות עובד - ' + e[1] + '</h2><label for="month">בחר חודש</label><input id="month" value="' + pad(now.getMonth() + 1) + '/' + now.getFullYear() + '"><button class="btn" id="ttX">יצוא לאקסל</button><button class="btn btn-primary" id="ttAdd">הוספת כניסה ויציאה</button>'
     + '<table class="table"><thead><tr><th>תאריך</th><th>כניסה</th><th>יציאה</th><th>זמן הפסקה</th><th>סה"כ שעות</th><th>פעולות</th></tr></thead><tbody id="ttRows"></tbody></table></div>';
   const draw = () => { document.getElementById('ttRows').innerHTML = hrsData(+id, ym).map((r) => '<tr><td>' + r[0] + '</td><td>' + r[2] + '</td><td>' + r[3] + '</td><td>' + r[4] + '</td><td>' + r[5] + '</td><td><button class="btn">עריכה</button></td></tr>').join(''); };
-  document.getElementById('month').addEventListener('change', (ev2) => { const m = /^(\d{1,2})\/(\d{4})$/.exec(ev2.target.value); if (m && localStorage.getItem('hrsMonthStuck') !== '1') { ym = m[2] + '-' + pad(+m[1]); draw(); } });
+  document.getElementById('month').addEventListener('change', (ev2) => {
+    const m = /^(\d{1,2})\/(\d{4})$/.exec(ev2.target.value);
+    // hrsBackStuck=1 (0.1.15): המעבר לחודש אחר נקלט, אבל החזרה לחודש הנוכחי לא – הפקד חוזר לחודש שנבחר
+    if (m && localStorage.getItem('hrsBackStuck') === '1' && m[2] + '-' + pad(+m[1]) === ymOf(now) && ym !== ymOf(now)) { const [yy, mm] = ym.split('-'); ev2.target.value = mm + '/' + yy; return; }
+    if (m && localStorage.getItem('hrsMonthStuck') !== '1') { ym = m[2] + '-' + pad(+m[1]); draw(); }
+  });
   document.getElementById('ttAdd').onclick = () => hit('tt-add');
   document.getElementById('ttX').onclick = () => {
     localStorage.setItem('hrsX', (localStorage.getItem('hrsX') || '') + id + '|' + ym + '|' + STORE() + ';');

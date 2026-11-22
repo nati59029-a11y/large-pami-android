@@ -806,7 +806,7 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     const { assertFails } = require('@firebase/rules-unit-testing');
     await assertFails(env.authenticatedContext(MGR).firestore().doc(`b/${A}/cxHrs/${id}`).get());
   });
-  it('0.1.15 empty: מוחק רק את סניף+חודש+עובד שברשימה – לא סניף / חודש / עסק אחר, לא עובד שלא הופיע; emps ריק מותר רק עם empty; קלט לא תקין נדחה; caps כולל hours2', async () => {
+  it('0.1.15 empty: מוחק רק את סניף+חודש+עובד שברשימה – לא סניף / חודש / עסק אחר, לא עובד שלא הופיע; emps ריק מותר רק עם empty; קלט לא תקין נדחה; החודש הקודם → bad-empty-month; caps כולל hours2', async () => {
     assert.ok((await okb(TOK, { op: 'poll' })).caps.includes('hours2'));
     const em = (id) => ({ id, nm: 'x', rows: R1.slice(0, 1) });
     const pm = (id) => ({ id, nm: 'x', rows: [{ d: '2026-11-28', i: '08:00', o: '16:00', b: 30 }] });
@@ -825,10 +825,16 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     assert.equal(await has(A, M, 'נחל לכיש', '41'), true, 'סניף אחר – נשאר');
     assert.equal(await has(A, PM, 'יהודה הנשיא', '41'), true, 'חודש אחר – נשאר');
     assert.equal(await has(B, M, 'יהודה הנשיא', '41'), true, 'עסק אחר – נשאר');
-    // יחד עם emps (החודש הקודם): 41 נמחק בחודש הקודם, 43 נשמר; מזהה שאין לו מסמך – בלי שגיאה
-    const r2 = await up({ m: PM, emps: [pm('43')], empty: ['41', '99'] }, next());
+    // יחד עם emps: 42 נמחק, 43 נשמר; מזהה שאין לו מסמך – בלי שגיאה
+    const r2 = await up({ emps: [em('43')], empty: ['42', '99'] }, next());
     assert.equal(r2.code, 200, JSON.stringify(r2.body)); assert.equal(r2.body.del, 2);
-    assert.equal(await has(A, PM, 'יהודה הנשיא', '41'), false); assert.equal(await has(A, PM, 'יהודה הנשיא', '43'), true);
+    assert.equal(await has(A, M, 'יהודה הנשיא', '42'), false); assert.equal(await has(A, M, 'יהודה הנשיא', '43'), true);
+    assert.equal((await up({ emps: [em('42')] }, next())).code, 200); // 42 חוזר – לבדיקות הקלט הלא תקין
+    // החודש הקודם (מותר ל-emps) – empty נדחה (bad-empty-month), כלום לא נשמר ולא נמחק
+    const r3 = await up({ m: PM, emps: [pm('44')], empty: ['41'] }, next());
+    assert.equal(r3.code, 400, JSON.stringify(r3.body)); assert.equal(r3.body.reason, 'bad-empty-month');
+    assert.equal(await has(A, PM, 'יהודה הנשיא', '41'), true, 'החודש הקודם – לא נמחק'); assert.equal(await has(A, PM, 'יהודה הנשיא', '44'), false);
+    assert.equal((await up({ m: PM, emps: [], empty: ['41'] }, next())).body.reason, 'bad-empty-month');
     // קלט לא תקין – שום דבר לא נמחק
     const bad = async (b, reason) => { const x = await up(b, next()); assert.equal(x.code, 400, JSON.stringify(b).slice(0, 100) + ' ' + JSON.stringify(x.body)); assert.equal(x.body.reason, reason); };
     await bad({ emps: [], empty: [] }, 'bad-empty');
@@ -842,6 +848,7 @@ describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, up
     await bad({ emps: [], empty: Array.from({ length: 301 }, (_, k) => String(k + 1)) }, 'bad-empty');
     await bad({ emps: [em('1')], empty: Array.from({ length: 300 }, (_, k) => String(k + 2)) }, 'bad-emps');
     await bad({ m: '2026-10', emps: [], empty: ['42'] }, 'bad-month');
+    await bad({ m: PM, emps: [], empty: ['42'] }, 'bad-empty-month');
     await bad({ m: '2027-01', emps: [], empty: ['42'] }, 'bad-month');
     await bad({ emps: [] }, 'bad-emps');
     assert.equal(await has(A, M, 'יהודה הנשיא', '42'), true, 'קלט שנדחה לא מחק');
