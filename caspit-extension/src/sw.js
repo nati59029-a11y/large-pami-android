@@ -376,6 +376,7 @@ async function runFlow(tabId, name, vars, files, probe) {
     if (r.text) out.text = r.text;
     if (r.wrong) throw wrongPage();
     if (r.code) out.code = r.code;
+    if (r.qd) out.qd = String(r.qd);
     if (r.hmax !== undefined) out.hmax = r.hmax;
     if (r.already) { out.already = r.already; return out; }
     if (!r.ok) { out.ok = false; if (out.miss == null && r.miss != null) out.miss = r.miss + i; if (!probe) return out; }
@@ -1118,7 +1119,8 @@ async function exportImport(run, kind) {
   // שם ייחודי לריצה – כך מוצאים את השורה שלנו בטבלת "טעינות קודמות" (וניסיון חוזר של אותה ריצה לא מעלה פעמיים)
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
-  if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty');
+  // 0.1.16: עם פירוט התור (מסונן) – ההחלטה לא משתנה
+  if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty', res.qd ? (P.msgOf('import-queue-not-empty') + ' · ' + S.scrub(res.qd)).slice(0, 290) : undefined);
   if (!res || (!res.ok && !res.already)) {
     if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login');
     const scr = await scrOf(tab, kind === 'new' ? 'importNew' : 'importPrice', res); // 0.1.12: רק אבחון – ההחלטה (selector-miss) לא משתנה
