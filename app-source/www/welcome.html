@@ -29,6 +29,11 @@ input{width:100%;padding:13px 12px;border-radius:10px;border:1px solid rgba(255,
 .steps{margin:18px 0 0;padding:0 1.3em 0 0;color:var(--ink);line-height:1.6}
 .steps li{margin:0 0 10px}
 small{display:block;margin-top:10px;color:var(--mut);text-align:center}
+.pw{position:relative}
+.pw input{padding-left:52px}
+.eye{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:44px;height:44px;border:0;background:transparent;color:var(--mut);display:grid;place-items:center;cursor:pointer;border-radius:8px}
+.eye svg{width:22px;height:22px}
+.eye[aria-pressed="true"]{color:var(--acc)}
 </style>
 </head>
 <body>
@@ -39,9 +44,9 @@ small{display:block;margin-top:10px;color:var(--mut);text-align:center}
   <form id="f" class="hide" autocomplete="on" novalidate>
     <input type="email" id="user" class="hide" autocomplete="username" readonly>
     <label for="p1">בחרו סיסמה (לפחות 8 תווים)</label>
-    <input type="password" id="p1" autocomplete="new-password" minlength="8" required>
+    <div class="pw"><input type="password" id="p1" autocomplete="new-password" minlength="8" required><button type="button" class="eye" aria-label="הצג סיסמה" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
     <label for="p2">הקלידו שוב את הסיסמה</label>
-    <input type="password" id="p2" autocomplete="new-password" minlength="8" required>
+    <div class="pw"><input type="password" id="p2" autocomplete="new-password" minlength="8" required><button type="button" class="eye" aria-label="הצג סיסמה" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
     <button class="btn" id="go" type="submit">קביעת סיסמה</button>
   </form>
   <div id="msg" class="msg" role="status" aria-live="polite"></div>
@@ -62,6 +67,10 @@ small{display:block;margin-top:10px;color:var(--mut);text-align:center}
 'use strict';
 var REPO='nati59029-a11y/large-pami-android';
 var $=function(i){return document.getElementById(i)};
+// כפתור עין: מציג/מסתיר את הסיסמה בשדה שלידו
+Array.prototype.forEach.call(document.querySelectorAll('.pw .eye'),function(b){b.addEventListener('click',function(){
+  var i=b.previousElementSibling,show=i.type==='password';i.type=show?'text':'password';
+  b.setAttribute('aria-pressed',String(show));b.setAttribute('aria-label',show?'הסתר סיסמה':'הצג סיסמה')})});
 var q=new URLSearchParams(location.search);
 var mode=q.get('mode')||'',oob=q.get('oobCode')||'',key=q.get('apiKey')||'',cont=q.get('continueUrl')||'';
 var biz='';try{biz=new URL(cont).searchParams.get('biz')||''}catch(e){}
