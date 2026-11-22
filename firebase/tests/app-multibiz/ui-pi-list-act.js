@@ -147,6 +147,14 @@ const addSubs = (page) => page.evaluate(() => { S.cats.push({ id: 'cS9', name: '
   await waitFor(W.page, () => document.querySelectorAll('.pi-row').length > 0); await sleep(400);
   const rw = await rows(W.page);
   check('4 עובד עם הרשאת תמחור: "שינוי ספק" בלבד, בלי "מחק"', rw.length === 3 && rw[0].sup && !rw.some((r) => r.del), rw);
+  // 4א (22.11.2026): אצל עובד רשימת הספקים באה מהרשימה שהמנהל פרסם לעובדים (cfgLocal), לא מ-S.subs – אחרת "אין ספקים ברשימה"
+  await W.page.evaluate(() => { const c = cfgLocal(); c.cats = (c.cats || []).filter((x) => x.id !== 'cS9').concat([{ id: 'cS9', name: 'ספקי בדיקה', beh: 'sup', subs: [{ id: 's1', name: 'אסם בע"מ' }, { id: 's2', name: 'שטראוס בדיקה' }] }]); localStorage.setItem(CK, JSON.stringify(c)); });
+  const wid = await W.page.evaluate(() => document.querySelector('[data-a="piSup"]').dataset.id);
+  await W.page.click('[data-a="piSup"]'); await sleep(300);
+  const wl = await W.page.evaluate(() => [...document.querySelectorAll('#piSl [data-a="piSup2"] b')].map((b) => b.innerText));
+  check('4א עובד: "שינוי ספק" פותח את רשימת הספקים שפורסמה לעובדים', wl.length === 2 && wl.includes('אסם בע"מ'), wl);
+  await W.page.click('#piSl [data-a="piSup2"][data-v="s1"]'); await sleep(500);
+  check('4ב עובד: בחירת ספק נשמרת בחשבונית', S.inv[wid] && S.inv[wid].sup === 'אסם בע"מ', { wid, sup: S.inv[wid] && S.inv[wid].sup });
   if (out) fs.writeFileSync(out, JSON.stringify(res, null, 1));
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר');
   await browser.close(); process.exit(fail ? 1 : 0);
