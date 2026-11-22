@@ -436,7 +436,11 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
     assert.equal(await bo0.evaluate(() => localStorage.getItem('hkShow')), ['customer-sales-report', 'total-sales-per-customer', 'total-sales-all-customers'].map((k) => [k, pf0, pt0, 'כל הלקוחות'].join('|') + ';').join(''));
     for (const n of DOCP) { const d0 = hp(n).docs; assert.ok(d0 && d0.month === pt0.slice(5, 7) + '/' + pt0.slice(0, 4) && d0.d1 === 1 && d0.d2 === +pt0.slice(8), n + ' ' + JSON.stringify(d0)); }
     const mz = hp('hk-merakez').docs;
-    assert.equal(mz.dlg.length, 1); assert.equal(mz.dlg[0].closed, true); assert.match(mz.dlg[0].t, /חלה שגיאה בייבוא המידע/);
+    // תיקון בודק: בדף priv – רק סיווג החלון / ההודעה, בלי הטקסט
+    assert.deepEqual(mz.dlg, [{ k: 'err', closed: true }]);
+    assert.ok(!txt.includes('חלה שגיאה') && !txt.includes('צור קשר עם התמיכה'), 'טקסט חלון השגיאה בדוח');
+    assert.ok(DOCP.every((n) => hp(n).docs.msgs.every((m) => m === 'err' || m === 'nodata')));
+    assert.equal(rep.brStart, 'ok', 'בתחילת ההיכרות – וידוא יהודה הנשיא');
     // צילום מסך 21.11: בלי "הצג"; "יצוא לאקסל" נחשף רק אחרי סגירת החלון – ונלחץ
     assert.equal(mz.show.found, false);
     assert.deepEqual(mz.tables[0].th, ['מספר פתקית', 'תאריך הפקה', 'חשבונית', 'פעולות']); assert.equal(mz.tables[0].rows, 2);
@@ -923,6 +927,34 @@ test('0.1.13 היכרות לקוחות בנחל לכיש: כישלון באמצ�
     r = await sw.evaluate(() => self.__cxTest.discBr());
     assert.equal(r.out.err.code, 'branch-restore', JSON.stringify(r.out)); assert.equal(r.cur, 'נחל לכיש');
   } finally { await ls({ nlHkEmpty: null, brFail: null, store: 'יהודה הנשיא' }); }
+});
+
+test('0.1.13 (תיקון בודק) שעתי: נחל לכיש נכשל → בלי העלאה חלקית בכלל (התמונה הקודמת של נחל לכיש לא נמחקת), רישום ב-todaySt', async () => {
+  const TZ = 'Asia/Jerusalem', W = D.zonedToUtc('2026-11-18', '16:05', TZ);
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.storage.local.set({ caps: { today: true, uq: false } }); return chrome.storage.local.remove('todaySt'); });
+  nlMode = 'same';
+  try {
+    const n0 = srv.ops('upload').filter((c) => c.partial).length;
+    const r = await sw.evaluate((n) => self.__cxTest.todayTick({ now: n }), W);
+    assert.equal(r.st, 'fail', JSON.stringify(r)); assert.equal(r.code, 'branch-same'); assert.equal(r.br.code, 'branch-same');
+    assert.equal(srv.ops('upload').filter((c) => c.partial).length, n0, 'לא הועלה כלום');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { nlMode = 'rows'; await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); }); }
+});
+test('0.1.13 (תיקון בודק) היכרות שמתחילה כשכספית בנחל לכיש: קודם חזרה ליהודה הנשיא; לא מצליח → branch-restore, בלי לקרוא אף מסך', async () => {
+  await ls({ store: 'נחל לכיש', brFail: 'restore', brPicks: null });
+  await caspitPage().reload(); await caspitPage().waitForLoadState('load');
+  try {
+    await sw.evaluate(() => chrome.storage.local.remove(['disc', 'discSt']));
+    const pop = await ctx.newPage();
+    await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+    await pop.click('#disc');
+    const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 120e3, 'discovery');
+    await pop.close();
+    assert.equal(s.discSt.st, 'fail'); assert.equal(s.disc.rep.err.code, 'branch-restore', JSON.stringify(s.disc.rep.err));
+    assert.deepEqual(s.disc.rep.pages, [], 'לא נקרא אף מסך');
+    assert.ok((await picks()).startsWith('יהודה הנשיא;'), await picks());
+  } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
 });
 
 test('"עדכון המחשב" (0.1.10): בקשה מהטלפון (poll uq) → בדיקת הדיסק, תשובה לשרת (ack) פעם אחת, וטעינה מחדש רק כשיש גרסה חדשה שהועתקה; upd נשלח ב-poll רק כשהשתנה', async () => {

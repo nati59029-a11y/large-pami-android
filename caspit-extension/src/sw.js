@@ -174,6 +174,9 @@ async function runToday(slot, now, tz) {
     hm = D.hmOf(now + (Date.now() - t0), tz); // "עד השעה" = מתי הדוח הורד מכספית
     const lines = A.list.flatMap((x) => x.p.lines.filter((l) => l.d === day));
     if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
+    // 0.1.13 (תיקון בודק): נחל לכיש נכשל – לא מעלים בכלל. השרת מחליף את כל מסמכי היום (cxDayP), והעלאה של יהודה הנשיא בלבד
+    // הייתה מוחקת את נחל לכיש מהשעה הקודמת. התמונה הקודמת נשארת; השעה הבאה תנסה שוב
+    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br });
     if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
     out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {});
   } catch (e) {
@@ -184,7 +187,7 @@ async function runToday(slot, now, tz) {
       if (P.isTerminal(run)) await (await api()).call('report', { run: U.rid('ct'), kind: 'run', st: 'fail', err: { code, msg: String(e.message || '').slice(0, 300), step: 'today' }, steps: [], info: { today: day } }).catch(() => {});
     }
     // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
-    out = { slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) };
+    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {});
     // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
     if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }
@@ -429,9 +432,10 @@ async function putFile(tabId, s, q, vars, f) {
     rec.found = true; rec.done = true; rec.n = r.n; rec.try = k + 1; rec.fid = r.id;
     log.push(mode + '/' + (mime === 'text/csv' ? 'csv' : 'xls') + ':' + r.files + (r.vis ? '' : '@' + (pref === 'hid' ? 'hid' : 'h')));
     // 0.1.13: אחרי כל הניסיונות בשדה הגלוי – חלופה אחרונה בשדה המוסתר (רק אם התור עדיין ריק – נבדק בתחילת הסבב הבא)
-    if (q && k === tries.length - 1 && pref === 'vis' && r.alt) tries.push(['change', 'text/csv', 'hid']);
+    const lastTry = k === tries.length - 1;
+    if (q && lastTry && pref === 'vis' && r.alt) tries.push(['change', 'text/csv', 'hid']);
     if (!q) return { ok: true, rec };
-    const end = Date.now() + (k === tries.length - 1 ? 8000 : 6000);
+    const end = Date.now() + (lastTry ? 8000 : 6000);
     for (;;) {
       await sleep(400);
       const Q = await inIso(tabId, queueIn, [q, GUARD]);
@@ -1079,6 +1083,10 @@ async function runDisc() {
     await inMain(tab, () => window.__cxHook && window.__cxHook.discover(true));
     if (await isLoginTab(tab)) { rep.login = true; throw P.err('needs-login'); }
     await guardBo(tab);
+    // 0.1.13 (תיקון בודק): אם ריצה קודמת נקטעה בסניף אחר – מחזירים ליהודה הנשיא לפני שקוראים משהו; לא הצליח → branch-restore, עוצרים
+    brUsed = true;
+    await brHome(tab);
+    rep.brStart = 'ok';
     // קישורי התפריט – גם אם הניווט למסך מסוים ייכשל, לומדים מהם את הכתובות
     const heads = [...new Set((S0.disc || []).flatMap((p) => (Array.isArray(p.menu) ? p.menu : [])).map(String))];
     const mr = await inIso(tab, menuIn, [heads, 200, GUARD]);
@@ -1139,6 +1147,9 @@ async function runDisc() {
         // אחרי "הצג" (אם נלחץ): טבלאות / הודעות, ושוב חלון שגיאה אם קפץ
         const t = await docRows(tab, 10e3);
         const dlg2 = await dlgClose(tab, 0);
+        // 0.1.13 (תיקון בודק): בדף priv – מחלון השגיאה ומההודעות רק סיווג (err / nodata), בלי הטקסט (עלול לכלול שם לקוח)
+        const cls = (t) => (/אין נתונים|אין תוצאות|לא נמצא|no data/i.test(t) ? 'nodata' : 'err');
+        if (pg.priv) { dlg2.forEach((x, i) => { dlg2[i] = { k: cls(x.t), closed: x.closed }; }); (dlg || []).forEach((x, i) => { dlg[i] = { k: cls(x.t), closed: x.closed }; }); t.msgs = t.msgs.map(cls); }
         page.docs = { month: pm.to.slice(5, 7) + '/' + pm.to.slice(0, 4), d1: +pm.from.slice(8), d2: +pm.to.slice(8), dlg: (dlg || []).concat(dlg2), show: (probe.steps || []).filter((x) => x.op === 'click' && !(S0.flows[pg.flow][x.i] || {}).capture).map((x) => ({ found: x.found, done: x.done, err: x.err }))[0] || null, tables: t.tables, msgs: t.msgs };
       }
       const capI = (S0.flows[pg.flow] || []).findIndex((x) => x.capture), hasCap = capI >= 0;
