@@ -584,8 +584,8 @@ test('ייבוא: בתור "ממתין לטעינה" כבר יש קובץ של �
   await cp.evaluate(() => localStorage.removeItem('preq'));
 });
 
-// 0.1.15 – התקלה של 22.11 (15:02): בכספית שורת הכותרת של התור היא td רגיל – לא נספרת כשורת קובץ; הקובץ שלנו מועלה פעם אחת
-test('0.1.15 העלאה: כותרת התור בתאי td (כמו בכספית) → לא נחשבת קובץ נוסף; מועלה פעם אחת', async () => {
+// 0.1.16 – התקלה של 22.11 (15:02): בכספית שורת הכותרת של התור היא td רגיל – לא נספרת כשורת קובץ; הקובץ שלנו מועלה פעם אחת
+test('0.1.16 העלאה: כותרת התור בתאי td (כמו בכספית) → לא נחשבת קובץ נוסף; מועלה פעם אחת', async () => {
   const cp = caspitPage();
   await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.setItem('qtdhead', '1'); });
   await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
@@ -599,7 +599,7 @@ test('0.1.15 העלאה: כותרת התור בתאי td (כמו בכספית) �
   await cp.evaluate(() => localStorage.removeItem('qtdhead'));
 });
 
-test('0.1.15 קובץ של מישהו אחר בתור (כותרת td) → import-queue-not-empty עם פירוט התור בהודעה; בלי העלאה ובלי "הסר"', async () => {
+test('0.1.16 קובץ של מישהו אחר בתור (כותרת td) → import-queue-not-empty עם פירוט התור בהודעה; בלי העלאה ובלי "הסר"', async () => {
   const cp = caspitPage();
   await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.setItem('qtdhead', '1'); localStorage.setItem('preq', 'someone-else.csv'); });
   await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));

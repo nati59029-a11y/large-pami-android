@@ -1119,7 +1119,7 @@ async function exportImport(run, kind) {
   // שם ייחודי לריצה – כך מוצאים את השורה שלנו בטבלת "טעינות קודמות" (וניסיון חוזר של אותה ריצה לא מעלה פעמיים)
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
   const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
-  // 0.1.15: עם פירוט התור (מסונן) – ההחלטה לא משתנה
+  // 0.1.16: עם פירוט התור (מסונן) – ההחלטה לא משתנה
   if (res && res.code === 'import-queue-not-empty') throw P.err('import-queue-not-empty', res.qd ? (P.msgOf('import-queue-not-empty') + ' · ' + S.scrub(res.qd)).slice(0, 290) : undefined);
   if (!res || (!res.ok && !res.already)) {
     if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login');
