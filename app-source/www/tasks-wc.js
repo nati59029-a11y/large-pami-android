@@ -14,6 +14,7 @@
    עובדים בלי לפתוח את האפליקציה (בטלפון נעול – אחרי ביטול נעילה). הלחיצות נשמרות בטלפון ומיושמות כאן בפתיחה הבאה (wcDrain):
    דחייה ← lp-snz, "טופל" לתזכורת ← remDone, "טופל" למשימה פרטית ← עדכון לשרת. APK ישן – כמו קודם (@capacitor/local-notifications). */
 (function(){'use strict';
+const gS=()=>{try{return S}catch(e){return{}}};
 if(typeof V==='undefined'||typeof V.tk!=='function'||typeof tkIL==='undefined'||typeof tkDl!=='function')return;
 const W={},H=36e5,MIN=6e4,ND_GAP=30*MIN,MID=7000001;
 const on=()=>{try{return !!(fbRole()&&bzF('tasks'))}catch(e){return false}};
@@ -200,18 +201,22 @@ FRM.tkApRej=f=>{const A=W.ap;if(!A)return;const id=f.dataset.id,note=String(fd(f
 ACT.tkwApAll=()=>{const A=W.ap;if(!A)return;const L=A.ids.map(tkGet).filter(t=>t&&t.st==='wait'&&!A.rtn.includes(t.id));W.ap=null;closeDlg();if(!L.length)return;
  tkDo(async()=>{let ok=0,er=null;for(const t of L){try{await tkOkP(t)();ok++}catch(e){er=e}}if(er)throw new Error('אושרו '+ok+' מתוך '+L.length+'. '+tkErr(er));toast('✓ אושרו '+ok+' משימות')},'')};
 /* ---- לוח צוות (מנהל) ---- */
-function teamView(){const S=TKST.L,L=TK.L||[],now=Date.now(),t0=day0(0),m30=now-30*864e5,p=typeof tkPend==='function'?tkPend():{w:0,c:0},q=typeof rqN==='function'?rqN():0,fr=L.filter(t=>t.st==='open'&&tkNew(t)&&!t.ow).length;
+function teamView(){const S=TKST.L,L=TK.L||[],now=Date.now(),t0=day0(0),PD=W.pf||30,m30=now-PD*864e5,p=typeof tkPend==='function'?tkPend():{w:0,c:0},q=typeof rqN==='function'?rqN():0,fr=L.filter(t=>t.st==='open'&&tkNew(t)&&!t.ow).length;
  const op=(a,v,t,n)=>`<button class="opt" data-a="${a}" ${v?`data-v="${v}"`:''}><span>${t}</span><b style="color:${n?'var(--acc)':'var(--mut)'}">${n}</b></button>`;
  let h=`<div class="card"><h3 style="margin:0 0 8px">${icd('bell')} דורש ממני</h3>${op('tkwTab','wait','משימות שממתינות לאישור',p.w)}${op('tkwTab','wait','תגובות חדשות במשימות',p.c)}${op('go','rq','בקשות חדשות מעובדים',q)}${op('tkwTab','open','משימות שאף עובד לא תפס',fr)}${W.apBtn()?'<div style="margin-top:8px">'+W.apBtn()+'</div>':''}</div>`;
  if(!S)return h+`<p class="note">${TKST.busy||!TKST.t?'טוען רשימת עובדים…':'לא ניתן לטעון את רשימת העובדים.'}</p>`;
- const st={};S.forEach(s=>st[s.uid]={s,o:0,l:0,d:0,n30:0,ok30:0,w:0});
+ const st={};S.forEach(s=>st[s.uid]={s,o:0,l:0,d:0,n30:0,ok30:0,w:0,as:0,rt:0});
  const byEm={};S.forEach(s=>{if(s.em)byEm[s.em]=s.uid});
- L.forEach(t=>{if(t.st==='done'||t.st==='wait'){const u=t.ow&&st[t.ow]?t.ow:byEm[String(t.doneBy||'').toLowerCase()];const r=u&&st[u];if(!r)return;if(t.sub>=t0)r.d++;if(t.st==='done'&&t.sub>=m30){r.n30++;if(!tkIsLate(t))r.ok30++}return}
-  const us=t.ow?[t.ow]:tkNew(t)?t.to:[];us.forEach(u=>{const r=st[u];if(!r)return;r.o++;if(tkLateNow(t))r.l++;if(t.sa>0&&t.st==='open'&&t.ow===u)r.w++})});
+ L.forEach(t=>{if(t.st==='done'||t.st==='wait'){const u=t.ow&&st[t.ow]?t.ow:byEm[String(t.doneBy||'').toLowerCase()];const r=u&&st[u];if(!r)return;if(t.cr>=m30)r.as++;if(t.sub>=t0)r.d++;if(t.st==='done'&&t.sub>=m30){r.n30++;if(!tkIsLate(t))r.ok30++}return}
+  const us=t.ow?[t.ow]:tkNew(t)?t.to:[];us.forEach(u=>{const r=st[u];if(!r)return;if(t.cr>=m30)r.as++;if(t.rt==='1')r.rt++;r.o++;if(tkLateNow(t))r.l++;if(t.sa>0&&t.st==='open'&&t.ow===u)r.w++})});
  const rows=Object.values(st).sort((a,b)=>(b.l-a.l)||(b.o-a.o)||a.s.name.localeCompare(b.s.name,'he'));
  const k=(lb,v,c)=>`<div style="flex:1;min-width:60px;text-align:center"><b style="display:block;font-size:1.1rem;${c?'color:'+c:''}">${v}</b><small class="note">${lb}</small></div>`;
- h+=`<div class="mh"><span>העובדים</span><span>${rows.length}</span></div>`+(rows.length?rows.map(r=>`<div class="card" style="padding:10px 12px"><div style="font-weight:700;margin-bottom:6px">${esc(r.s.name)}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('פתוחות',r.o)}${k('באיחור',r.l,r.l?'var(--bad)':'')}${k('בוצעו היום',r.d,r.d?'var(--inc)':'')}${k('בזמן (30 יום)',r.n30?Math.round(r.ok30*100/r.n30)+'%':'–')}${k('בעבודה',r.w,r.w?'var(--acc)':'')}</div></div>`).join(''):'<p class="note">אין עובדים פעילים.</p>');
- return h+'<p class="note">מחושב מהמשימות שנטענו במכשיר. "בזמן" – מתוך המשימות שבוצעו ב-30 הימים האחרונים.</p>'}
+ const S0=gS(),sd=new Date(m30).toISOString().slice(0,10),ln=r=>{const sb=(S0.subs||[]).find(x=>x&&x.pay&&x.pay.uid===r.s.uid)||(S0.subs||[]).find(x=>x&&x.name&&x.name===r.s.name&&(cat(x.cat)||{}).beh==='emp');if(!sb)return '';const nn=(S0.enotes||[]).filter(x=>x&&x.sub===sb.id&&String(x.d||'')>=sd).length,bn=!!(sb.pay&&Array.isArray(sb.pay.comp)&&sb.pay.comp.some(c=>c&&c.k==='tk'));
+  return `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button type="button" class="btn s g" style="min-height:44px" data-a="go" data-v="card" data-arg="${esc(sb.id)}">הערות מנהל: ${nn}</button>${bn?`<button type="button" class="btn s g" style="min-height:44px" data-a="go" data-v="card" data-arg="${esc(sb.id)}">בונוס משימות – בכרטיס העובד</button>`:''}</div>`};
+ h+=`<div class="chips" style="margin:8px 0" role="group" aria-label="תקופת ביצועים">${[7,30,90].map(n=>`<button type="button" class="chip ${n===PD?'on':''}" style="min-height:44px" data-a="tkwPf" data-v="${n}">${n} ימים</button>`).join('')}</div>`;
+ h+=`<div class="mh"><span>העובדים</span><span>${rows.length}</span></div>`+(rows.length?rows.map(r=>`<div class="card" style="padding:10px 12px"><div style="font-weight:700;margin-bottom:6px">${esc(r.s.name)}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('פתוחות',r.o)}${k('באיחור',r.l,r.l?'var(--bad)':'')}${k('בוצעו היום',r.d,r.d?'var(--inc)':'')}${k('בזמן ('+PD+' ימים)',r.n30?Math.round(r.ok30*100/r.n30)+'%':'–')}${k('בעבודה',r.w,r.w?'var(--acc)':'')}</div><div class="note" style="margin:8px 0 2px">ב-${PD} הימים האחרונים</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('הוטלו',r.as)}${k('בוצעו',r.n30)}${k('באיחור',r.n30-r.ok30,r.n30-r.ok30?'var(--st-late)':'')}${k('הוחזרו לתיקון',r.rt)}${k('פתוחות באיחור',r.l,r.l?'var(--st-late)':'')}</div>${ln(r)}</div>`).join(''):'<p class="note">אין עובדים פעילים.</p>');
+ return h+'<p class="note">מחושב מהמשימות שנטענו במכשיר. "בזמן" – מתוך המשימות שבוצעו בתקופה שנבחרה. "הוטלו" – משימות שנכתבו בתקופה. "הוחזרו לתיקון" – משימות שהוחזרו ועדיין לא בוצעו שוב.</p>'}
+ACT.tkwPf=el=>{const v=+el.dataset.v;W.pf=[7,30,90].includes(v)?v:30;rerender()};
 ACT.tkwTab=el=>{TKT=el.dataset.v||'open';rerender()};
 W.view=(tab,card)=>{if(!on())return '';return tab==='team'?(fbAdmin()?teamView():''):myView(card)};
 /* ---- תגיות ופעולות בכרטיס משימה ---- */
@@ -602,5 +607,29 @@ ACT.tkwDlGo=el=>{const id=el.dataset.id,v=Math.max(0,+el.dataset.v||0);closeDlg(
 FRM.tkwDl=f=>{const x=fd(f),dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(x.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(x.tm||'');if(!dm||!tm)return toast('בחר תאריך ושעה');
  const at=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(at<Date.now()-MIN)return toast('הזמן שנבחר כבר עבר');if(at>Date.now()+365*864e5)return toast('אפשר עד שנה קדימה');
  const id=f.dataset.id;closeDlg();tkDo(()=>tkPatch(id,{dl:at}),'✓ היעד עודכן: '+whenTx(at))};
+/* ---- בית המנהל: כרטיס "מה דורש טיפול היום" (בראש הבית). רק מה שכבר בזיכרון: TK (משימות, מתרענן לכל היותר פעם ב-3 דקות), RQ (בקשות), חשבוניות מ-S. שורה עם 0 מוסתרת; הכול 0 ← "✓ אין דברים פתוחים". בלי שינוי נתונים ובלי קריאות רשת חדשות מעבר לרענון הקיים (tkLoad / rqLoad) ---- */
+{const h0=V.home;let hat=0;
+ ACT.hmTk=el=>{const v=el.dataset.v;TKT=['late','wait','open'].includes(v)?v:'open';MGF='';W.d0=1;if(cur().v!=='tk')go('tk');else rerender()};
+ ACT.hmTkNew=()=>{TKT='open';W.fo=1;W.d0=1;MGF='';if(cur().v!=='tk')go('tk');else rerender();setTimeout(()=>{const t=document.querySelector('form[data-f=tkAdd] textarea');if(t){t.scrollIntoView({block:'center'});t.focus()}},120)};
+ const homeCard=r0=>{const rows=[],opt=(a,v,t,n,c)=>n>0?`<button type="button" class="opt" style="min-height:44px" data-a="${a}"${v?` data-v="${v}"`:''}><span>${t}</span><b style="color:${c||'var(--acc)'}">${n}</b></button>`:'';
+  let pend=false;const tk=on()&&fbAdmin();
+  if(tk){const L=TK.L||[],now=Date.now(),t0=day0(0),t1=day0(1);let late=0,wait=0,open=0,rc=0;
+   L.forEach(x=>{const c=mgCat(x,now,t1);if(c.late)late++;else if(c.wait)wait++;else if(x.st==='open')open++;if(x.rc&&x.st==='open'){const d=tkDl(x);if(d>=t0&&d<t1)rc++}});
+   if(!TK.at)pend=true;
+   rows.push(opt('hmTk','late','משימות באיחור',late,'var(--st-late)'),opt('hmTk','wait','משימות שממתינות לאישור',wait,'var(--st-wait)'),opt('hmTk','open','משימות פתוחות',open,'var(--st-open)'));
+   const rq=typeof rqN==='function'?rqN():0;rows.push(opt('go','rq','בקשות עובדים שממתינות',rq));
+   rows.push(opt('hmTk','open','שגרה יומית שטרם בוצעה (יעד היום)',rc,'var(--st-wait)'))}
+  try{const m=HM,D=dueStats(m),td=today(),E=brFil(),late=inv().filter(t=>inBr(t,E)&&isLate(t,td));
+   rows.push(opt('hcLate','','חשבוניות באיחור לתשלום',late.length,'var(--st-late)'),opt('hcDue','','חשבוניות לתשלום ב'+mfmt(m),D.open.length,'var(--st-open)'))}catch(e){}
+  const any=rows.some(Boolean),sc=[];
+  if(tk)sc.push('<button type="button" class="chip" style="min-height:44px" data-a="hmTkNew">＋ משימה חדשה</button>');
+  if(/id="secHome"/.test(r0)&&typeof ACT.secOpen==='function')sc.push('<button type="button" class="chip" style="min-height:44px" data-a="secOpen">המזכירה</button>');
+  if(bzF('scan'))sc.push('<button type="button" class="chip" style="min-height:44px" data-a="go" data-v="scan">סריקת חשבונית</button>');
+  return `<div class="card" id="hmTodo" style="margin:0 0 10px"><h3 style="margin:0 0 8px">${icd('bell')} מה דורש טיפול היום</h3>${any?rows.join(''):pend?'<p class="note" style="margin:0">טוען…</p>':'<p class="note" style="margin:0;color:var(--st-done)">✓ אין דברים פתוחים</p>'}${sc.length?`<div class="chips" style="margin:8px 0 0">${sc.join('')}</div>`:''}</div>`};
+ if(typeof h0==='function')V.home=function(){const r=h0.apply(this,arguments);
+  try{if(!r||typeof r.h!=='string'||!(typeof isA==='function'&&isA())||isW())return r;
+   const now=Date.now();if(on()&&fbAdmin()&&now-hat>18e4&&(!TK.at||now-TK.at>18e4)){hat=now;Promise.resolve(tkLoad()).then(()=>{if(cur().v==='home')rerender()}).catch(()=>{})}
+   if(on()&&typeof rqLoad==='function'&&!RQ.b&&now-RQ.at>18e4)rqLoad();
+   r.h=homeCard(r.h)+r.h}catch(e){}return r}}
 window.TKW=W;
 })();
