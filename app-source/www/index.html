@@ -3112,6 +3112,12 @@ function shPromo(x,X,Y,W,H,it,key){
  let df=P.dt*s;while(df>2*s&&shW(x,dt,df)>aw)df-=.2*s;
  let os=P.os*s;const k=it.kind==='B'?'B':'A',els=[];
  let nH=nl.length*1.02*nf;const dH=dt?1.1*df:0,vH=7*s;
+ /* הצעה (מימין לשמאל): האגורות קטנות ומורמות (כמו בפתק מחיר), ואם השורה רחבה מהפתק – מקטינים את הגודל עד שנכנסת */
+ const pz=v=>{const t=shN(v),m=/^(\d+)\.(\d\d)$/.exec(t);return m?[m[1],m[2]]:[t,'']},ls=.4*s,gp=.6*s,mg=1.5*s;
+ const segF=o=>{const sw=.55*s,bs=o*.46,ds=o*.5,PZ=v=>{const q=pz(v);return q[1]?[[q[1],ds,.3*s,ls*.5,0,-.8465*(o-ds),1],[q[0],o,sw,ls,0]]:[[q[0],o,sw,ls,0]]};
+  return k==='A'?[[String(it.k),o,sw,ls,0],['ב-',bs,.3*s,0,mg],...PZ(it.tot),['₪',bs,0,0,mg]]:[['ב-',bs,.3*s,0,mg],...PZ(it.now),['₪',bs,0,0,mg]]};
+ const segW=sg=>sg.map(q=>shW(x,q[0],q[1],'rtl',q[3])+(q[4]?2*q[4]:0));
+ while(os>P.os*s*.4){const w=segW(segF(os));if(w.reduce((p,q)=>p+q,0)+gp*(w.length-1)<=aw)break;os-=.5*s}
  const top=ytop+1.5*s,bot=yf-P.bp*s,pull=dt?P.pull*s:0,n=dt?4:3,need=()=>nH+dH-pull+.9*os+vH;
  /* עם כיתוב הקו: מקטינים את המחיר הגדול ואם צריך גם את שם המוצר, עד שהכול נכנס בלי חפיפה */
  if(ln){while(bot-top-need()<0){if(os>P.os*s*.5)os-=.5*s;else if(nf>P.nm*s*.5){nf-=.3*s;nl=shWrap(x,nm,aw,nf);nH=nl.length*1.02*nf}else break}}
@@ -3120,10 +3126,8 @@ function shPromo(x,X,Y,W,H,it,key){
  nl.forEach((l,i)=>shT(x,l,cx,shBase(y+i*1.02*nf,1.02,nf),nf,{sw:.25*s}));y+=nH+g;
  if(dt){y-=pull;shT(x,dt,cx,shBase(y,1.1,df),df,{sw:.07*s});y+=dH+g}
  /* הצעה: מימין לשמאל */
- const ob=shBase(y,.9,os),sw=.55*s,ls=-.8*s,bs=os*.46,mg=1.5*s,gp=.6*s;
- const segs=k==='A'?[[String(it.k),os,sw,ls,0],['ב-',bs,.3*s,0,mg],[shN(it.tot),os,sw,ls,0],['₪',bs,0,0,mg]]:[['ב-',bs,.3*s,0,mg],[shN(it.now),os,sw,ls,0],['₪',bs,0,0,mg]];
- const ws=segs.map(q=>shW(x,q[0],q[1],'rtl',q[3])+(q[4]?2*q[4]:0)),tot=ws.reduce((p,q)=>p+q,0)+gp*(segs.length-1);
- let xr=cx+tot/2;segs.forEach((q,i)=>{const w=ws[i];shT(x,q[0],xr-(q[4]||0),ob,q[1],{al:'right',sw:q[2],ls:q[3]});xr-=w+gp});
+ const ob=shBase(y,.9,os),segs=segF(os),ws=segW(segs),tot=ws.reduce((p,q)=>p+q,0)+gp*(segs.length-1);
+ let xr=cx+tot/2;segs.forEach((q,i)=>{const w=ws[i],qb=ob+(q[5]||0);shT(x,q[0],xr-(q[4]||0),qb,q[1],{al:'right',sw:q[2],ls:q[3]});if(q[6]){x.fillStyle='#000';x.fillRect(xr-w,qb+.12*q[1],w,.07*q[1])}xr-=w+gp});
  y+=oH+g;
  shT(x,'בלבד!',cx,shBase(y,1,7*s),7*s,{sw:.3*s});
  /* כיתוב קו העדכונים: מסגרת בתחתית הפתק, כיתוב מימין ומספר הטלפון משמאל */

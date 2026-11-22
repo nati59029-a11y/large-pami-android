@@ -125,23 +125,37 @@ function prevIndex(items, PM, skipId) {
 }
 // picks(name, { prod: אינדקס המלאי (PM.index), prev: prevIndex }, PM) → עד 6 הצעות [{ n, k, src: 'prod'|'prev', sups: [{ id?, name }], s }].
 // המלאי קודם, אחריו חוסרים קודמים; בלי כפילויות לפי PM.key. סף PICK_MIN (0.6): רוב המילים שהוקלדו צריכות להתאים.
+// 21.11.2026: עד 2 מקומות (PICK_PREV) שמורים לחוסרים קודמים, אם יש כאלה; מקום שמור שלא נוצל – המלאי ממלא אותו.
 // הצעה יחידה שזהה בדיוק לשם שהוקלד – אין רשימה (אין מה לבחור).
-const PICK_MIN = 0.6, PICK_MAX = 6;
+const PICK_MIN = 0.6, PICK_MAX = 6, PICK_PREV = 2;
 function picks(name, ctx, PM) {
   const n = clean(name, 200); if (n.length < 2 || !PM) return [];
   ctx = ctx || {};
-  const out = [], seen = new Set();
-  const add = (nm, src, sups, s) => { const t = clean(nm, MAXN), k = keyOf(t, PM); if (!t || !k || seen.has(k) || out.length >= PICK_MAX) return; seen.add(k); out.push({ n: t, k, src, sups, s }); };
-  try { if (ctx.prod) PM.search(ctx.prod, n, { limit: PICK_MAX * 2, min: PICK_MIN }).forEach((h) => { const sp = h.p && typeof h.p.sup === 'string' ? clean(h.p.sup, 60) : ''; add(h.p && h.p.name, 'prod', sp ? [{ name: sp }] : [], h.s); }); } catch (e) { /* */ }
-  try { if (ctx.prev) PM.search(ctx.prev, n, { limit: PICK_MAX * 2, min: PICK_MIN }).forEach((h) => add(h.p.name, 'prev', (h.p.sups || []).slice(0, MAXS), h.s)); } catch (e) { /* */ }
+  const P = [], Q = [];
+  const cand = (A, nm, src, sups, s) => { const t = clean(nm, MAXN), k = keyOf(t, PM); if (!t || !k || A.some((c) => c.k === k)) return; A.push({ n: t, k, src, sups, s }); };
+  try { if (ctx.prod) PM.search(ctx.prod, n, { limit: PICK_MAX * 2, min: PICK_MIN }).forEach((h) => { const sp = h.p && typeof h.p.sup === 'string' ? clean(h.p.sup, 60) : ''; cand(P, h.p && h.p.name, 'prod', sp ? [{ name: sp }] : [], h.s); }); } catch (e) { /* */ }
+  try { if (ctx.prev) PM.search(ctx.prev, n, { limit: PICK_MAX * 2, min: PICK_MIN }).forEach((h) => cand(Q, h.p.name, 'prev', (h.p.sups || []).slice(0, MAXS), h.s)); } catch (e) { /* */ }
+  const seen = new Set(), op = [], oq = [];
+  const take = (c, to) => { if (seen.has(c.k) || op.length + oq.length >= PICK_MAX) return; seen.add(c.k); to.push(c); };
+  P.slice(0, PICK_MAX - PICK_PREV).forEach((c) => take(c, op));
+  Q.filter((c) => !seen.has(c.k)).slice(0, PICK_PREV).forEach((c) => take(c, oq)); // המקומות השמורים
+  P.slice(PICK_MAX - PICK_PREV).forEach((c) => take(c, op)); // מקום שמור שלא נוצל – למלאי
+  Q.forEach((c) => take(c, oq));
+  const out = op.concat(oq);
   if (out.length === 1 && out[0].k === keyOf(n, PM)) return [];
   return out;
 }
 
-// הודעת וואטסאפ לספק: הפריטים שלו, הכלליים ושורות "להזמין מספקים" – שם וכמות בלבד (בלי פרטי לקוחות)
+// split(L) → { need: שורות שעוד צריך להזמין, done: שורות של פריטים שכבר סומנו "הוזמן" (it.od) }. L: [{it, all}] (g.L של groups)
+function split(L) {
+  const need = [], done = [];
+  (Array.isArray(L) ? L : []).forEach((r) => { if (!r || !r.it) return; (r.it.od && typeof r.it.od === 'object' ? done : need).push(r); });
+  return { need, done };
+}
+// הודעת וואטסאפ לספק: הפריטים שלו, הכלליים ושורות "להזמין מספקים" – שם וכמות בלבד (בלי פרטי לקוחות). פריט שכבר הוזמן (od) לא נכלל
 function waText(g, biz) {
   const L = [];
-  (g && g.L || []).forEach((r) => L.push('• ' + r.it.n + (r.it.q ? ' – כמות ' + fmtQ(r.it.q) : '')));
+  split(g && g.L).need.forEach((r) => L.push('• ' + r.it.n + (r.it.q ? ' – כמות ' + fmtQ(r.it.q) : '')));
   (g && g.O || []).forEach((r) => L.push('• ' + clean(r.n, 120) + (typeof r.qty === 'number' ? ' – כמות ' + fmtQ(r.qty) : '')));
   return 'שלום' + (g && g.name ? ' ' + g.name : '') + ',\n' + (biz ? 'מ' + biz + '. ' : '') + 'אנחנו צריכים:\n' + L.join('\n') + '\nתודה!';
 }
@@ -251,6 +265,6 @@ function unpartQ(x) {
   return x && x.st === 'open' && e && e.k === 'part' && typeof e.q0 === 'number' && e.q === x.q ? e.q0 : null;
 }
 
-const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, prevIndex, picks, PICK_MIN, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ };
+const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, prevIndex, picks, PICK_MIN, PICK_PREV, split, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.HsCore = api;
 })(typeof self !== 'undefined' ? self : this);
