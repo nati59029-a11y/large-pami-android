@@ -135,13 +135,56 @@ async function choose(doc, el, option, ctx) {
   return true;
 }
 // טבלת "ממתין לטעינה" במסך הייבוא של כספית: הטבלה הראשונה אחרי הכותרת (head). → שורות [[שם, סוג]] או null אם אין כותרת
-function queueRows(doc, s) {
-  const h = byText(doc, [s.head || 'ממתין לטעינה'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
-  if (!h) return null;
-  const F = 4; // Node.DOCUMENT_POSITION_FOLLOWING
-  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & F) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
-  if (!tb) return [];
-  return all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+function queueRows(doc, s) { return qState(doc, s).R; }
+// → { R: שורות / [] / null, hid: true כשהכותרת מוסתרת או שקופה ואחריה טבלה גלויה עם שורות (לא מאשרים – מחכים / עוצרים) }
+function qState(doc, s) {
+  const Q = qTable(doc, s);
+  if (!Q.h) return { R: null, hid: false };
+  return { R: Q.tb ? qRowsOf(Q.tb) : [], hid: !!Q.hid };
+}
+const qRowsOf = (tb) => all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+// 0.1.17 (תקלה 22.11, 14:59 ו-19:19 – import-queue-not-empty כשהתור ריק): כשהכותרת "ממתין לטעינה" גלויה בלי טבלה משלה (תור ריק / רשימה שאינה
+// טבלה), "הטבלה הראשונה אחרי הכותרת" הייתה "טעינות קודמות" – והשורות שלה (קבצים שכבר נטענו) נספרו כקבצים בתור. עכשיו (תיקון בודק, סבב 1):
+// (1) טבלה היא "טעינות קודמות" רק אם היא אחרי כותרת "טעינות קודמות" גלויה (כותרת – לא לשונית / קישור / כפתור / תפריט), ואין ביניהן כותרת
+//     "ממתין לטעינה". הטבלה הראשונה אחרי "ממתין לטעינה" בלי "טעינות קודמות" ביניהן – תמיד תור (גם עם עמודות "מזהה" ו"סטטוס").
+// (2) כותרת "ממתין לטעינה" מוסתרת / שקופה: אם אחריה טבלה גלויה עם שורות שאינה היסטוריה – hid (לא מאשרים; queueEmpty / queue מחכים ואז עוצרים).
+//     אחרת – כאילו אין כותרת.
+// → { h: כותרת התור או null, tb: טבלת התור או null, hist: true אם הטבלה שנדחתה היא "טעינות קודמות", hid }
+const Q_HT = 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b';
+const Q_NAV = 'a,button,[role=tab],[role=tablist],[role=menuitem],[role=menu],[role=button],[role=link],nav,.nav,.nav-tabs,.nav-link,.breadcrumb,.tabs';
+function shown(el) {
+  if (!visible(el)) return false;
+  try {
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true })) return false;
+    const W = el.ownerDocument && el.ownerDocument.defaultView;
+    if (!W || !W.getComputedStyle) return true;
+    for (let p = el; p && p.nodeType === 1; p = p.parentElement) {
+      const cs = W.getComputedStyle(p), r = p.getBoundingClientRect();
+      if (p === el && (cs.visibility !== 'visible' || !(r.width > 0 && r.height > 0))) return false;
+      if (p !== el && cs.overflow !== 'visible' && !(r.width > 0 && r.height > 0)) return false;
+    }
+  } catch (e) { /* */ }
+  return true;
+}
+const qBefore = (a, b) => !!(a.compareDocumentPosition(b) & 4); // a לפני b במסמך
+function histTable(doc, tb, qh, s) {
+  const HH = byText(doc, [s.hist || 'טעינות קודמות'], Q_HT, true).filter((e) => shown(e) && !(e.closest && e.closest(Q_NAV)));
+  if (!HH.length) return false;
+  const QH = all(doc, Q_HT).filter((e) => norm(e.textContent) === qh); // כל כותרות התור, גם מוסתרות
+  return HH.some((hh) => qBefore(hh, tb) && !QH.some((q) => qBefore(hh, q) && qBefore(q, tb)));
+}
+function qTable(doc, s) {
+  const qh = norm(s.head || 'ממתין לטעינה');
+  const L = byText(doc, [qh], Q_HT, true);
+  const h = L.filter(shown)[0] || L[0];
+  if (!h) return { h: null, tb: null };
+  const hid = !shown(h);
+  const box = h.closest && h.closest('section,div');
+  const tb = all(doc, 'table').find((t) => qBefore(h, t)) || (box && box.querySelector('table'));
+  if (!tb) return hid ? { h: null, tb: null } : { h, tb: null };
+  if (histTable(doc, tb, qh, s)) return hid ? { h: null, tb: null } : { h, tb: null, hist: true };
+  if (hid && !(visible(tb) && qRowsOf(tb).length)) return { h: null, tb: null };
+  return { h, tb, hid };
 }
 // 0.1.16 (תקלה 22.11, 15:02): בכספית האמיתית שורת הכותרת "שם | סוג קובץ | פעולות" נספרה כשורת קובץ, ולכן "שלנו + עוד שורה" → עצירה.
 // שורת כותרת = בתוך thead, או עם תאי th, או ששני התאים הראשונים הם בדיוק "שם" ו"סוג קובץ" (שם קובץ אמיתי לא נראה כך)
@@ -154,17 +197,16 @@ function qHead(r) {
 // 0.1.16: פירוט קצר לעצירה בגלל התור (בלי לשנות את ההחלטה): כמה שורות, ולכל שורה – כמה תאים והאם השם / הסוג תואמים. שורה שאינה שלנו –
 // תחילת שני התאים הראשונים (עד 30 תווים, שם קובץ שלנו מוחלף ב-{file}); הסינון (scrub) נעשה ב-sw לפני היציאה
 function queueInfo(doc, s, name, type) {
-  const h = byText(doc, [s.head || 'ממתין לטעינה'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0];
-  if (!h) return 'אין כותרת ממתין';
-  const tb = all(doc, 'table').find((t) => h.compareDocumentPosition(t) & 4) || (h.closest && h.closest('section,div') && h.closest('section,div').querySelector('table'));
-  if (!tb) return 'אין טבלה';
+  const Q = qTable(doc, s), tb = Q.tb;
+  if (!Q.h) return 'אין כותרת ממתין';
+  if (!tb) return Q.hist ? 'אין טבלה (רק "טעינות קודמות", לא נספרת)' : 'אין טבלה';
   const T = all(tb, 'tr'), hd = T.filter((r) => r.querySelectorAll('td').length && qHead(r)).length;
   const R = queueRows(doc, s) || [];
   const one = (r, k) => {
     const nm = norm(r[0]) === name, ty = !type || norm(r[1]) === type;
     return (k + 1) + ': ' + r.length + ' תאים, שם ' + (nm ? 'תואם' : 'לא תואם') + ', סוג ' + (ty ? 'תואם' : 'לא תואם') + (nm && ty ? '' : ' [' + r.slice(0, 2).map((x) => noFile(x).slice(0, 30)).join(' | ') + ']');
   };
-  return 'שורות: ' + R.length + (hd ? ' (+' + hd + ' כותרת)' : '') + (R.length ? ' · ' + R.slice(0, 3).map(one).join(' · ') : '');
+  return 'שורות: ' + R.length + (hd ? ' (+' + hd + ' כותרת)' : '') + (Q.hid ? ' · כותרת מוסתרת' : '') + (R.length ? ' · ' + R.slice(0, 3).map(one).join(' · ') : '');
 }
 // טבלת "טעינות קודמות" (קריאה בלבד – לעולם לא לוחצים בה, גם לא על "ביטול טעינה" או על קישור): עמודות לפי הכותרות.
 // → { rows:[{ id, name, type, st, err, ok }], maxId } או null אם אין טבלה
@@ -190,8 +232,8 @@ async function queueCheck(doc, s, C) {
   const name = norm(fill(s.name, C.vars)), type = norm(s.type || '');
   const end = C.now() + (s.ms || 15000);
   for (;;) {
-    const R = queueRows(doc, s);
-    if (R && R.length) {
+    const { R, hid } = qState(doc, s);
+    if (R && R.length && !hid) { // 0.1.17: כותרת מוסתרת – לא מאשרים, מחכים
       const mine = (r) => norm(r[0]) === name && (!type || norm(r[1]) === type);
       // רק שורה אחת בדיוק, והיא שלנו (שתי שורות "שלנו" = שארית מניסיון קודם → לא מעלים)
       if (R.some(mine)) return R.length === 1 ? { ok: true, n: 1 } : { ok: false, code: 'import-queue-not-empty', n: R.length, d: queueInfo(doc, s, name, type) };
@@ -201,9 +243,15 @@ async function queueCheck(doc, s, C) {
   }
 }
 // לפני setFile: התור "ממתין לטעינה" חייב להיות ריק (אין טבלה / אין שורות). אחרת עוצרים לפני שמוסיפים את הקובץ שלנו
-function queueEmpty(doc, s) {
-  const R = queueRows(doc, s);
-  return !R || !R.length ? { ok: true } : { ok: false, code: 'import-queue-not-empty', n: R.length, d: 'לפני הבחירה · ' + queueInfo(doc, s, '', '') };
+async function queueEmpty(doc, s, C) {
+  const end = C.now() + (s.ms || 8000);
+  for (;;) {
+    const Q = qState(doc, s);
+    if (!Q.R || !Q.R.length) return { ok: true };
+    // 0.1.17: כותרת מוסתרת / שקופה עם טבלה גלויה עם שורות – לא עוברים; מחכים עד ms, ואם לא השתנה – עוצרים
+    if (!Q.hid || C.now() >= end) return { ok: false, code: 'import-queue-not-empty', n: Q.R.length, d: 'לפני הבחירה · ' + queueInfo(doc, s, '', '') };
+    await C.sleep(300);
+  }
 }
 // "טעינות קודמות" חייבת להיות קריאה לפני העלאה (בלי זה אי אפשר לדעת אם הקובץ כבר הועלה): מחכים לה, ואם לא – null
 async function histWait(doc, s, C) {
@@ -330,7 +378,7 @@ async function runSteps(steps, ctx) {
     if (s.op === 'queue' || s.op === 'queueGone' || s.op === 'queueEmpty') {
       if (ctx.probe) continue; // היכרות: אין קובץ בתור
       if (s.op === 'queueEmpty') {
-        const q = queueEmpty(doc, s);
+        const q = await queueEmpty(doc, s, C);
         rec.found = q.ok; rec.n = q.n;
         if (!q.ok) { rec.err = q.code; res.ok = false; res.miss = i; res.code = q.code; if (q.d) res.qd = q.d; break; }
       } else if (s.op === 'queue') {
