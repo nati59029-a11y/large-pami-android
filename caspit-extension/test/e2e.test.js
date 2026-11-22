@@ -26,6 +26,8 @@ const SECRETS = ['SESSIONabc123def456', 'eyJhbGciOiJIUzI1NiJ9', 'Zx9kQ2mP7vL4nR8
 let ctx, srv, sw, tmp, ext;
 const imports = [];
 const salesReq = [];
+const nlReq = []; // 0.1.13: דוחות מכירות שהורדו בסניף נחל לכיש
+let nlMode = 'rows';
 const today = D.dayStr(Date.now(), 'Asia/Jerusalem');
 const days = [D.addDays(today, -2), D.addDays(today, -1)];
 
@@ -43,7 +45,13 @@ async function caspitRoute(route) {
     if (f === 'catalogs_with_barcodes.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.catalogXlsx(X)) });
     if (f === 'catalogs.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.catalogXlsx(X, true)) });
     const m = /^sales_items_(\d{4})(\d{2})(\d{2})_\d{8}\.csv$/.exec(f);
-    if (m) { salesReq.push(f); return route.fulfill({ status: 200, headers: { 'content-type': 'text/csv; charset=windows-1255' }, body: Buffer.from(fx.win1255(fx.salesCsv(`${m[1]}-${m[2]}-${m[3]}`))) }); }
+    // 0.1.13: הדוח לפי הסניף הנבחר בכספית המדומה (store). נחל לכיש: nlMode = rows (סניף ב / 2, ברירת מחדל) · empty (בלי מכירות) · same (אותו סניף כמו יהודה הנשיא)
+    if (m) {
+      const nl = u.searchParams.get('store') === 'נחל לכיש', day = `${m[1]}-${m[2]}-${m[3]}`;
+      (nl ? nlReq : salesReq).push(f);
+      const br = !nl ? null : nlMode === 'empty' ? { rows: false } : nlMode === 'same' ? { bn: 'סניף א', bno: '1' } : { bn: 'סניף ב', bno: '2' };
+      return route.fulfill({ status: 200, headers: { 'content-type': 'text/csv; charset=windows-1255' }, body: Buffer.from(fx.win1255(fx.salesCsv(day, br))) });
+    }
     return route.fulfill({ status: 404, body: '' });
   }
   if (p === '/bo/merkaz/upload_csv_index') return JSONR({ load_catalog_jobs: [], meta: { files_structure: [{ job_type: 'new_items', columns: ['קוד פריט'], not_required_columns: [], skip_unnecessary_columns: true }], total: 1 } });
@@ -91,6 +99,7 @@ function impOn(dir) {
   const f = path.join(dir, 'selectors.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.equal(j.importEnabled, true, 'במוצר – פעיל (מ-0.1.4)');
   j.importEnabled = true;
+  j.branch.switch.ms = 8000; j.branch.switch.settle = 800; // 0.1.13: בבדיקה – המתנה קצרה לבחירת סניף שלא נקלטת
   fs.writeFileSync(f, JSON.stringify(j));
 }
 test.after(async () => {
@@ -158,7 +167,11 @@ test('חיבור לכספית פג → "צריך התחברות", בלי למל�
   // מכירות: כל יום שלם בנפרד, אף פעם לא היום
   const sales = up.filter((c) => c.kind === 'sales');
   assert.deepEqual(sales.map((c) => c.day), days);
-  for (const c of sales) { assert.equal(c.lines.length, 3); assert.ok(c.lines.every((l) => l.d === c.day)); }
+  // 0.1.13 (א): שני סניפים → העלאה אחת לכל יום עם שני מספרי סניף (יהודה הנשיא 3 שורות + נחל לכיש 2), וכספית חזרה ליהודה הנשיא
+  for (const c of sales) { assert.equal(c.lines.length, 5); assert.ok(c.lines.every((l) => l.d === c.day)); assert.deepEqual([...new Set(c.lines.map((l) => l.bk))].sort(), ['1', '2']); assert.equal(c.parts, 1); }
+  assert.deepEqual(nlReq.slice(0, 2).map((f) => f.slice(12, 20)), days.map((d) => d.replace(/-/g, '')), 'אותו דוח לאותו יום גם בנחל לכיש');
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('store') || 'יהודה הנשיא'), 'יהודה הנשיא');
+  assert.deepEqual(s.st.lastRun.sum.sales[days[0]].brs, [['יהודה הנשיא', 3], ['נחל לכיש', 2]]);
   assert.ok(!sales.some((c) => c.day === today));
   assert.ok(srv.ops('apply').length >= 3);
   // קבצים לכספית: פריטים חדשים ואז מחירים, עם האפשרות הנכונה, ודיווח תוצאה
@@ -282,6 +295,7 @@ test('יותר מ-500 מחירים → עוצר, לא טוען לכספית', as
 test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתולים, ניתן להורדה ולשליחה', async () => {
   const pop = await ctx.newPage();
   await pop.goto(`chrome-extension://${EXT_ID}/popup.html`);
+  await caspitPage().evaluate(() => localStorage.removeItem('brPicks')); // 0.1.13: רק הבחירות של ההיכרות
   await pop.click('#disc');
   const s = await waitFor(async () => { const x = await store(); return x.discSt && x.discSt.st !== 'run' && x.disc ? x : null; }, 300e3, 'discovery');
   assert.equal(s.discSt.st, 'ok', JSON.stringify(s.disc.rep.err));
@@ -289,41 +303,55 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   const txt = JSON.stringify(rep);
   for (const x of SECRETS) assert.ok(!txt.includes(x), 'leaked ' + x);
   assert.ok(s.disc.size <= 1024 * 1024);
-  const HKP = ['hk-customers', 'hk-reports', 'hk-cust-reports', 'hk-sales-lines', 'hk-sales-total', 'hk-monthly', 'hk-merakez', 'hk-shipments'];
-  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours', ...HKP, 'imp-screen', 'promos', 'pay-1', 'pay-2']);
-  // 0.1.12 דוחות אמצעי תשלום (findAll): "דוח אמצעי תשלום" + "סיכום קופה יומי" מתפריט "דוחות" (לא "דוח מלאי"); רק "יצוא לאקסל" נלחץ
-  const p1 = rep.pages.find((p) => p.name === 'pay-1'), p2 = rep.pages.find((p) => p.name === 'pay-2');
-  assert.deepEqual([p1.hash, p1.src, p2.hash, p2.src], ['#/payment-methods-report', 'דוח אמצעי תשלום', '#/cash-register-summary', 'סיכום קופה יומי'], JSON.stringify([p1, p2]).slice(0, 400));
+  const HKP = ['hk-customers', 'hk-reports', 'hk-cust-reports', 'hk-sales-lines', 'hk-sales-total', 'hk-monthly', 'hk-merakez', 'hk-shipments', 'hk-sales-all'];
+  const PAY = ['pay-reports', 'pay-hos', 'pay-rikuz', 'pay-cat', 'pay-x'];
+  assert.deepEqual(rep.pages.map((p) => p.name), ['catalogs', 'csv-imports', 'sales', 'employees', 'emp-hours', ...HKP, 'imp-screen', 'promos', ...PAY]);
+  // 0.1.13 דוחות אמצעי תשלום לפי hash ישיר; רק "יצוא לאקסל" נלחץ (רק ב-payment-reports יש)
+  const p1 = rep.pages.find((p) => p.name === 'pay-reports'), p2 = rep.pages.find((p) => p.name === 'pay-x');
+  assert.deepEqual(rep.pages.filter((p) => PAY.includes(p.name)).map((p) => p.hash), ['#/payment-reports', '#/payment-report-hos', '#/rikuz-reports', '#/payments-by-categories-reports', '#/xreports']);
   assert.deepEqual(p1.heads, [['תאריך', 'סניף', 'מזומן', 'אשראי', 'הקפה', 'סה"כ']]);
   assert.deepEqual(p1.probe.map((x) => [x.op, x.found, x.done]), [['click', true, true]]);
   assert.equal(p2.probe[0].found, false, 'בלי יצוא – לא לוחצים כלום');
   assert.ok(p1.controls.some((c) => c.id === 'payStore' && c.tag === 'select') && p1.controls.some((c) => c.id === 'payDay'));
   const payF = rep.files.filter((f) => f.flow === 'hkExport' && /^pay-/.test(f.page));
-  assert.deepEqual(payF.map((f) => [f.page, !f.none]), [['pay-1', true], ['pay-2', false]]);
+  assert.deepEqual(payF.map((f) => [f.page, !f.none]), [['pay-reports', true], ['pay-hos', false], ['pay-rikuz', false], ['pay-cat', false], ['pay-x', false]]);
   assert.deepEqual(payF[0].hdr, ['תאריך', 'סניף', 'מזומן', 'אשראי', 'הקפה', 'סה"כ']); assert.deepEqual(payF[0].kinds[1], ['date', 'text', 'num', 'num', 'num', 'num']);
   assert.equal(await caspitPage().evaluate(() => localStorage.getItem('payX')), '1');
+  // 0.1.13: רשימות בחירה קצרות (בלי לפתוח): סוג דוח / סניף / קופה / אמצעי תשלום – כן; קופאי (שמות) – רק '?'
+  const lsOf = (p) => Object.fromEntries((p.lists || []).filter((x) => x.lbl !== '?').map((x) => [x.lbl, x.opts]));
+  assert.deepEqual(lsOf(p1), { 'סניף': ['יהודה הנשיא', 'נחל לכיש'], 'סוג דוח': ['מפורט', 'מרוכז'], 'קופה': ['כל הקופות', 'קופה 1', 'קופה 2'], 'אמצעי תשלום': ['מזומן', 'אשראי', 'הקפה'] }, JSON.stringify(p1.lists));
+  assert.ok(p1.lists.some((x) => x.lbl === '?' && x.opts === undefined), 'רשימת הקופאים – בלי תווית ובלי אפשרויות');
+  assert.ok(!txt.includes('זלמן') && !txt.includes('קופאיסקי'), 'שם קופאי בדוח');
   assert.ok(!rep.pages.some((p) => p.hash === '#/stock-report'), 'דוח שלא קשור לאמצעי תשלום – לא נפתח');
   // תיקון בודק 0.1.12: "הגדרות אשראי", "ייבוא תקבולים", "הוסף אמצעי תשלום" (מילה אסורה / הגדר / ייבוא) ו"דוח תקבולים" שלא תחת "דוחות" – לא נפתחו
   for (const h of ['#/credit-settings', '#/receipts-import', '#/payment-methods/new', '#/receipts-outside']) assert.ok(!rep.pages.some((p) => p.hash === h), 'נפתח: ' + h);
-  for (const t of ['הגדרות אשראי', 'ייבוא תקבולים', 'הוסף אמצעי תשלום']) assert.equal(rep.menu.find((l) => l.t === t).bad, true, t);
-  assert.equal(rep.menu.find((l) => l.t === 'דוח אמצעי תשלום').u, 'דוחות');
+  // 0.1.13: בלי findAll – התפריט "דוחות" כבר לא נפתח במעבר עכבר; קישור עם מילה אסורה שגלוי בדף עדיין מסומן bad
   assert.equal(rep.menu.find((l) => l.h === '#/receipts-outside').u, undefined, 'קישור מחוץ לתפריט – בלי u');
   assert.ok(p1.controls.every((c) => c.options === undefined && c.placeholder === undefined && (c.text === undefined || /^(הצג|יצוא לאקסל)$/.test(c.text))), 'noText: ' + JSON.stringify(p1.controls.filter((c) => c.text || c.options)));
   assert.ok(!JSON.stringify(p1).includes('99887.5'), 'בלי tfoot');
   for (const nm of ['4321.5', '8765.25', '345.75', '13432.5']) assert.ok(!txt.includes(nm), 'סכום מהדוח: ' + nm);
   // 0.1.12 בחירת סניף: מתועד בכל מסך, בלי select / click / פוקוס על הפקד (attHits למטה, branch-*)
-  const br = rep.branch.picks.find((b) => b.css === 'select#brSel');
+  const br = rep.branch.picks.find((b) => /store-switch-field/.test(b.css));
   assert.ok(br, JSON.stringify(rep.branch));
-  assert.equal(br.kind, 'select'); assert.equal(br.aria, 'בחירת סניף'); assert.deepEqual(br.opts, ['יהודה הנשיא', 'נחל לכיש']); assert.equal(br.cur, 'יהודה הנשיא');
-  assert.ok(br.on.includes('catalogs') && br.on.includes('hk-customers') && br.on.includes('pay-1'), JSON.stringify(br.on));
+  assert.equal(br.kind, 'dropdown'); assert.deepEqual(br.opts, ['יהודה הנשיא', 'נחל לכיש']); assert.equal(br.t, 'יהודה הנשיא');
+  assert.ok(br.on.includes('catalogs') && br.on.includes('hk-customers') && br.on.includes('pay-reports'), JSON.stringify(br.on));
   assert.deepEqual(rep.branch.store, ['יהודה הנשיא'], 'רק שם הסניף, לא הטקסט המלא: ' + JSON.stringify(rep.branch.store));
   // תיקון בודק 0.1.12: "נחל לכיש: ₪12,345.00" → רק "נחל לכיש"; שום טקסט מלא / סכום מהפקדים
-  assert.ok(rep.branch.picks.some((b) => b.t === 'נחל לכיש' && b.on.includes('pay-1')), JSON.stringify(rep.branch.picks));
+  assert.ok(rep.branch.picks.some((b) => b.t === 'נחל לכיש' && b.on.includes('pay-reports')), JSON.stringify(rep.branch.picks));
   const brTxt = JSON.stringify(rep.branch);
   for (const x of ['12,345', '₪', 'לארג', 'חנות']) assert.ok(!brTxt.includes(x), 'טקסט מלא בפקד הסניף: ' + x + ' ' + brTxt);
   const hkB = rep.branch.picks.find((b) => b.css === 'select#hkStore');
   assert.ok(hkB && hkB.opts.every((o) => o === 'נחל לכיש' || o === 'יהודה הנשיא'), 'בדף priv – רק שמות סניפים: ' + JSON.stringify(hkB));
-  assert.equal(await caspitPage().evaluate(() => document.getElementById('brSel').value), 'יהודה הנשיא', 'הבחירה לא השתנתה');
+  // 0.1.13: הבחירה הוחלפה רק פעם אחת – לקוחות ההקפה בנחל לכיש (discBranch) – וחזרה ליהודה הנשיא; בשאר ההיכרות (גם דפי pay) – לא
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('brPicks')), 'נחל לכיש;יהודה הנשיא;');
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('store')), 'יהודה הנשיא');
+  assert.equal(rep.brEnd, 'ok');
+  const bd = rep.brDisc;
+  assert.equal(bd.ok, true, JSON.stringify(bd)); assert.equal(bd.br, 'נחל לכיש');
+  assert.deepEqual(bd.pages.map((x) => [x.name, x.tables[0].rows, x.file.rows]), [['hk-customers', 1, 3], ['hk-reports', 1, 3]], 'בנחל לכיש – רשימה אחרת (שורה אחת)');
+  assert.deepEqual(bd.pages[0].file.hdr, ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', '?']);
+  assert.deepEqual(bd.pages[0].tables[0].th, ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', 'פעולות']);
+  for (const nm of ['גן העיר', '515151515', '6999999', 'הגפן', '77.1']) assert.ok(!txt.includes(nm), 'פרט לקוח של נחל לכיש בדוח: ' + nm);
   // 0.1.12 מבצעים: "כרטיס הטבות" (מעבר עכבר) ← "מבצעים"; הלחיצה היחידה – "יצוא לאקסל"; "הוסף מבצע" / ייבוא – רק מתועדים (בלי לחיצה ובלי ניווט)
   const pr = rep.pages.find((p) => p.name === 'promos');
   assert.equal(pr.ok, true, JSON.stringify(pr)); assert.equal(pr.hash, '#/promotions');
@@ -381,13 +409,14 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   // לא נלחצו: "עריכה", "עובד חדש", "הצג רק מנהלים", "יצוא לאקסל" של הרשימה, "הוספת כניסה ויציאה", ולא "עובדים" בתפריט
   assert.equal(await bo0.evaluate(() => localStorage.getItem('attHits')), null, 'לא נלחץ שום כפתור אסור');
   // לקוחות הקפה (0.1.11): כל 8 המסכים, קריאה בלבד; "יצוא לאקסל" רק בזרימה hkExport; כותרות – רק מהרשימה הלבנה
-  const HKH = { 'hk-customers': '#/hakafa-customers', 'hk-reports': '#/hakafa-reports', 'hk-cust-reports': '#/hakafa-customer-reports', 'hk-sales-lines': '#/customer-sales-report', 'hk-sales-total': '#/total-sales-per-customer', 'hk-monthly': '#/hakafa_monthly_charge_customers', 'hk-merakez': '#/merakez_invoices', 'hk-shipments': '#/customer-shipments' };
+  const HKH = { 'hk-customers': '#/hakafa-customers', 'hk-reports': '#/hakafa-reports', 'hk-cust-reports': '#/hakafa-customer-reports', 'hk-sales-lines': '#/customer-sales-report', 'hk-sales-total': '#/total-sales-per-customer', 'hk-monthly': '#/hakafa_monthly_charge_customers', 'hk-merakez': '#/merakez_invoices', 'hk-shipments': '#/customer-shipments', 'hk-sales-all': '#/total-sales-all-customers' };
+  const DOCP = ['hk-sales-lines', 'hk-sales-total', 'hk-merakez', 'hk-shipments', 'hk-sales-all'];
   for (const n of HKP) {
     const p = rep.pages.find((x) => x.name === n);
     assert.equal(p.hash, HKH[n], n + ' ' + p.hash);
     assert.equal(p.title, undefined, n + ': בלי כותרת הדף');
     assert.ok(p.controls.length > 5 && p.controls.every((c) => c.options === undefined && c.aria === undefined && c.placeholder === undefined && (c.text === undefined || /^(הצג|יצוא לאקסל|לאקסל|הפק דוח)$/.test(c.text))), n + ' ' + JSON.stringify(p.controls.filter((c) => c.text || c.options)));
-    assert.ok(p.controls.some((c) => c.id === 'hkFrom' && c.type === 'date') && p.controls.some((c) => c.id === 'hkStore' && c.optN === 3), n + ': פקדי הסינון (תאריך, סניף) נאספו');
+    assert.ok((DOCP.includes(n) || p.controls.some((c) => c.id === 'hkFrom' && c.type === 'date')) && p.controls.some((c) => c.id === 'hkStore' && c.optN === 3), n + ': פקדי הסינון (תאריך, סניף) נאספו');
     assert.ok(Array.isArray(p.heads) && p.heads.length === 1, n + ' ' + JSON.stringify(p.heads));
   }
   const hp = (n) => rep.pages.find((x) => x.name === n);
@@ -396,17 +425,31 @@ test('מצב היכרות: דוח מסונן, עד 1MB, בלי סודות שתו
   assert.deepEqual(hp('hk-sales-total').heads, [['שם לקוח', 'ח.פ/ע.מ', 'סה"כ', '?']]);
   assert.equal(hp('hk-monthly').ro, true); assert.equal(hp('hk-monthly').flow, undefined, 'הפקת חשבוניות מרכזות – בלי זרימה');
   assert.deepEqual(hp('hk-customers').probe.map((x) => [x.op, x.found, x.done]), [['click', true, true]]);
-  assert.equal(hp('hk-sales-total').probe[0].found, false, 'אין יצוא – לא לוחצים כלום');
-  const tr = hp('hk-shipments').probe[0];
+  assert.deepEqual(hp('hk-sales-total').probe.map((x) => [x.op, x.found, x.done]), [['setDate', true, true], ['setDate', true, true], ['click', true, true], ['click', false, false]], 'אין יצוא – לא לוחצים');
+  const tr = hp('hk-shipments').probe[3];
   assert.equal(tr.err, 'denied', '"שמירה ויצוא לאקסל" – נחסם: ' + JSON.stringify(tr)); assert.equal(tr.done, false);
-  const hf2 = rep.files.filter((f) => f.flow === 'hkExport' && /^hk-/.test(f.page)); // 0.1.12: גם מבצעים / אמצעי תשלום משתמשים ב-hkExport
-  assert.deepEqual(hf2.map((f) => [f.page, !f.none]), [['hk-customers', true], ['hk-reports', true], ['hk-cust-reports', true], ['hk-sales-lines', true], ['hk-sales-total', false], ['hk-merakez', true], ['hk-shipments', false]], JSON.stringify(hf2));
+  const hf2 = rep.files.filter((f) => /^hk-/.test(f.page)); // 0.1.12: גם מבצעים / אמצעי תשלום משתמשים ב-hkExport; 0.1.13: מסמכי ההקפה – hkDocs
+  assert.deepEqual(hf2.map((f) => [f.page, !f.none]), [['hk-customers', true], ['hk-reports', true], ['hk-cust-reports', true], ['hk-sales-lines', true], ['hk-sales-total', false], ['hk-merakez', true], ['hk-shipments', false], ['hk-sales-all', false]], JSON.stringify(hf2));
+  // 0.1.13 מסמכי הקפה (hkDocs): חלון השגיאה נסגר ב"אישור" (הטקסט מתועד), טווח החודש הקודם, "הצג" בלי לבחור לקוח, כותרות ומספר שורות
+  { const yd = D.addDays(today, -1), [yy, mm] = yd.split('-').map(Number), pf0 = (mm === 1 ? yy - 1 : yy) + '-' + String(mm === 1 ? 12 : mm - 1).padStart(2, '0') + '-01', pt0 = D.addDays(yd.slice(0, 8) + '01', -1);
+    assert.equal(await bo0.evaluate(() => localStorage.getItem('dlgOk')), 'merakez_invoices;total-sales-all-customers;');
+    assert.equal(await bo0.evaluate(() => localStorage.getItem('hkShow')), ['customer-sales-report', 'total-sales-per-customer', 'total-sales-all-customers'].map((k) => [k, pf0, pt0, 'כל הלקוחות'].join('|') + ';').join(''));
+    for (const n of DOCP) { const d0 = hp(n).docs; assert.ok(d0 && d0.month === pt0.slice(5, 7) + '/' + pt0.slice(0, 4) && d0.d1 === 1 && d0.d2 === +pt0.slice(8), n + ' ' + JSON.stringify(d0)); }
+    const mz = hp('hk-merakez').docs;
+    assert.equal(mz.dlg.length, 1); assert.equal(mz.dlg[0].closed, true); assert.match(mz.dlg[0].t, /חלה שגיאה בייבוא המידע/);
+    // צילום מסך 21.11: בלי "הצג"; "יצוא לאקסל" נחשף רק אחרי סגירת החלון – ונלחץ
+    assert.equal(mz.show.found, false);
+    assert.deepEqual(mz.tables[0].th, ['מספר פתקית', 'תאריך הפקה', 'חשבונית', 'פעולות']); assert.equal(mz.tables[0].rows, 2);
+    assert.equal(hp('hk-merakez').probe[3].done, true, JSON.stringify(hp('hk-merakez').probe));
+    assert.deepEqual(mz.tables[0].hrefs, ['#/invoice/{id}']); assert.deepEqual(mz.tables[0].bw, ['עריכה']);
+    assert.equal(hp('hk-shipments').docs.show.found, false, 'בלי "הצג" מפורש ("הפק דוח" אסור) – לא לוחצים');
+    assert.equal(hp('hk-sales-lines').docs.dlg.length, 0); }
   for (const f of hf2.filter((x) => !x.none)) {
     assert.equal(f.ext, 'csv'); assert.equal(f.rows, 4); assert.equal(f.hi, 1);
     assert.deepEqual(f.hdr, ['מספר לקוח', 'שם לקוח', 'ח.פ/ע.מ', 'טלפון', 'כתובת', 'יתרה', '?'], JSON.stringify(f));
     assert.deepEqual(f.kinds[2], ['num', 'text', 'num', 'text', 'text', 'num', 'date']);
   }
-  assert.equal(await bo0.evaluate(() => localStorage.getItem('hkX')), 'hakafa-customers;hakafa-reports;hakafa-customer-reports;customer-sales-report;merakez_invoices;', 'יצוא לאקסל – רק במסכים שמותר');
+  assert.equal(await bo0.evaluate(() => localStorage.getItem('hkX')), 'hakafa-customers;hakafa-reports;hakafa-customer-reports;customer-sales-report;merakez_invoices;hakafa-customers;hakafa-reports;', 'יצוא לאקסל – רק במסכים שמותר (ושוב hk-customers / hk-reports בנחל לכיש)');
   // פרטיות: אין שמות לקוחות, טלפונים, ע.מ, כתובות או סכומים מהמסכים / מהקבצים
   for (const nm of ['שלומציון', 'ברקוביץ', 'פנינת', 'מרכולית', '514789632', '036547891', '9876543', '6712345', 'הדקל', 'אשקלון', 'שדרות', '1234.5', '88.2', 'סיווג פנימי', 'כהן', 'משה', 'כרטסת', 'c-4521', 'pick-c1001', 'cust_1001', 'cust_']) assert.ok(!txt.includes(nm), 'פרט לקוח בדוח: ' + nm);
   // תיקוני בודק 0.1.11: מהרכיב שנלחץ / נחסם – רק tag ו-css; פקד בתוך טבלה – בלי id/name; יומן הרשת – מקטע עם ספרה → '?'
@@ -581,7 +624,8 @@ test('"טעינות קודמות" נטענת באיחור → מחכים לה ו
 });
 
 // 0.1.6 – התקלה של 19.11: הקובץ לא נכנס ל"ממתין לטעינה" בבחירה הרגילה. ניסיונות חלופיים: גרירה, ואז סוג קובץ של Excel
-for (const [mode, evx] of [['drop', 'drop'], ['xls', 'add:application/vnd.ms-excel']]) {
+// 0.1.13 – האבחון מ-22.11: hidvis – הקובץ חייב להיכנס לשדה הגלוי שליד "בחר קובץ" (לא ל-#positive-file-uploader המוסתר); hidlast – רק המוסתר עובד (חלופה אחרונה)
+for (const [mode, evx] of [['drop', 'drop'], ['xls', 'add:application/vnd.ms-excel'], ['hidvis', 'vis-change'], ['hidlast', 'hidden-change']]) {
   test(`העלאה: בחירה רגילה לא נקלטת (${mode}) → ניסיון חלופי, קובץ אחד בדיוק בתור ומועלה פעם אחת`, async () => {
     const cp = caspitPage();
     await cp.evaluate((m) => { localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.setItem('upmode', m); }, mode);
@@ -598,6 +642,8 @@ for (const [mode, evx] of [['drop', 'drop'], ['xls', 'add:application/vnd.ms-exc
     const evs = (await Promise.all(tabs.map((p) => p.evaluate(() => window.ev || []).catch(() => [])))).flat();
     assert.ok(evs.includes(evx), evs.join('|'));
     assert.equal(evs.filter((e) => e.startsWith('add:')).length, 1, 'נוסף לתור פעם אחת בלבד: ' + evs.join('|'));
+    if (mode === 'hidvis') assert.ok(!evs.includes('hidden-change'), 'השדה המוסתר לא נוגע כשהגלוי עובד: ' + evs.join('|'));
+    if (mode === 'hidlast') assert.ok(evs.indexOf('vis-change') >= 0 && evs.indexOf('vis-change') < evs.indexOf('hidden-change'), 'קודם הגלוי, המוסתר רק בסוף: ' + evs.join('|'));
     await cp.evaluate(() => localStorage.removeItem('upmode'));
   });
 }
@@ -767,10 +813,13 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   const c0 = cnt(), H0 = (await store()).salesHash || {};
   const r = await tt(W);
   assert.equal(r && r.st, 'ok', JSON.stringify(r));
-  assert.equal(r.n, 3); assert.equal(r.hm, '10:05'); assert.equal(r.day, '2026-11-18');
+  assert.equal(r.n, 5); assert.equal(r.hm, '10:05'); assert.equal(r.day, '2026-11-18');
+  assert.deepEqual(r.brs, [['יהודה הנשיא', 3], ['נחל לכיש', 2]], '(ה) ריצה שעתית לשני הסניפים');
   const up = srv.ops('upload').filter((c) => c.partial).at(-1);
   assert.equal(up.partial, true); assert.equal(up.kind, 'sales'); assert.equal(up.day, '2026-11-18'); assert.equal(up.hm, '10:05');
-  assert.equal(up.part, 0); assert.equal(up.parts, 1); assert.equal(up.lines.length, 3); assert.ok(up.lines.every((l) => l.d === '2026-11-18'));
+  assert.equal(up.part, 0); assert.equal(up.parts, 1); assert.equal(up.lines.length, 5); assert.ok(up.lines.every((l) => l.d === '2026-11-18'));
+  assert.deepEqual([...new Set(up.lines.map((l) => l.bk))].sort(), ['1', '2'], 'העלאה חלקית אחת עם שני הסניפים');
+  assert.equal(await caspitPage().evaluate(() => localStorage.getItem('store') || 'יהודה הנשיא'), 'יהודה הנשיא');
   assert.ok(salesReq.at(-1).includes('20261118'), 'דוח המכירות של היום: ' + salesReq.at(-1));
   const c1 = cnt();
   assert.deepEqual({ ...c1, part: 0 }, { ...c0, part: 0 }, 'בלי hello, report, קטלוג או קבצים לכספית');
@@ -805,6 +854,75 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(cnt().report, c0.report, 'בלי דיווח לשרת');
   srv.noPartial = false; srv.caps = null;
   await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); });
+});
+
+// ---------- 0.1.13: סניפים ----------
+const store0 = () => caspitPage().evaluate(() => localStorage.getItem('store') || 'יהודה הנשיא');
+const picks = () => caspitPage().evaluate(() => localStorage.getItem('brPicks') || '');
+const ls = (o) => caspitPage().evaluate((x) => { for (const [k, v] of Object.entries(x)) { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } }, o);
+async function syncOneDay() {
+  srv.days = [days[1]];
+  const n0 = srv.calls.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  const calls = srv.calls.slice(n0);
+  return { s, sales: calls.filter((c) => c.op === 'upload' && c.kind === 'sales'), rep: calls.filter((c) => c.op === 'report').at(-1) };
+}
+test('0.1.13 (ב) branch-same: נחל לכיש מחזיר את אותו סניף → רק יהודה הנשיא נשלח, הריצה "נכשלה" עם הערכים, חזרה ליהודה הנשיא', async () => {
+  nlMode = 'same';
+  try {
+    const { s, sales, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'fail', JSON.stringify(s.st.lastRun)); assert.equal(s.st.lastRun.code, 'branch-same');
+    assert.equal(sales.length, 1); assert.equal(sales[0].lines.length, 3); assert.ok(sales[0].lines.every((l) => l.bk === '1'), 'רק יהודה הנשיא');
+    assert.equal(rep.st, 'fail'); assert.equal(rep.err.code, 'branch-same');
+    assert.match(rep.err.msg, /סניף א/); assert.match(rep.err.msg, /מספר: 1/);
+    assert.ok(rep.info.sales[days[1]], 'היום נחשב שנקלט (יהודה הנשיא)'); assert.equal(rep.info.flags.br.code, 'branch-same');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { nlMode = 'rows'; }
+});
+test('0.1.13 (ג) כישלון באמצע נחל לכיש (אין "צור קובץ") → יהודה הנשיא נשלח, חזרה ליהודה הנשיא, branch-sales', async () => {
+  await ls({ nlNoBtn: '1', brPicks: null });
+  try {
+    const { s, sales, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.code, 'branch-sales', JSON.stringify(s.st.lastRun));
+    assert.equal(sales.length, 1); assert.ok(sales[0].lines.every((l) => l.bk === '1'));
+    assert.match(rep.err.msg, /^נחל לכיש: /);
+    assert.equal(await picks(), 'נחל לכיש;יהודה הנשיא;');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ nlNoBtn: null }); }
+});
+test('0.1.13 (ד) מעבר לנחל לכיש לא נקלט → branch-switch (יהודה הנשיא נשלח); החזרה ליהודה הנשיא נכשלת → branch-restore, הריצה נעצרת', async () => {
+  await ls({ brFail: 'switch', brPicks: null });
+  let r = await syncOneDay();
+  assert.equal(r.s.st.lastRun.code, 'branch-switch', JSON.stringify(r.s.st.lastRun));
+  assert.equal(r.sales.length, 1); assert.ok(r.sales[0].lines.every((l) => l.bk === '1'));
+  assert.equal(await store0(), 'יהודה הנשיא');
+  await ls({ brFail: 'restore', brPicks: null });
+  try {
+    r = await syncOneDay();
+    assert.equal(r.s.st.lastRun.st, 'fail'); assert.equal(r.s.st.lastRun.code, 'branch-restore', JSON.stringify(r.s.st.lastRun));
+    assert.equal(r.rep.err.code, 'branch-restore'); assert.equal(r.rep.st, 'fail');
+    assert.equal(r.sales.length, 0, 'החזרה נכשלה – לא שולחים את היום');
+    assert.ok(!r.s.st.lastRun.sum.sales[days[1]]);
+    assert.equal(await store0(), 'נחל לכיש', 'כספית נשארה בנחל לכיש (הבחירה ביהודה הנשיא לא נקלטה)');
+    // תחילת הריצה הבאה: הנבחר אינו יהודה הנשיא → מחזירים קודם (עכשיו מצליח), ואז הכול כרגיל
+    await ls({ brFail: null, brPicks: null });
+    r = await syncOneDay();
+    assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
+    assert.ok((await picks()).startsWith('יהודה הנשיא;'), 'קודם חזרה ליהודה הנשיא: ' + (await picks()));
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+});
+test('0.1.13 היכרות לקוחות בנחל לכיש: כישלון באמצע (אין טבלה) → חזרה ליהודה הנשיא; החזרה נכשלת → branch-restore', async () => {
+  await ls({ nlHkEmpty: '1', brPicks: null });
+  try {
+    let r = await sw.evaluate(() => self.__cxTest.discBr());
+    assert.equal(r.out.err.code, 'selector-miss', JSON.stringify(r.out)); assert.equal(r.cur, 'יהודה הנשיא');
+    assert.equal(await picks(), 'נחל לכיש;יהודה הנשיא;');
+    await ls({ nlHkEmpty: null, brFail: 'restore' });
+    r = await sw.evaluate(() => self.__cxTest.discBr());
+    assert.equal(r.out.err.code, 'branch-restore', JSON.stringify(r.out)); assert.equal(r.cur, 'נחל לכיש');
+  } finally { await ls({ nlHkEmpty: null, brFail: null, store: 'יהודה הנשיא' }); }
 });
 
 test('"עדכון המחשב" (0.1.10): בקשה מהטלפון (poll uq) → בדיקת הדיסק, תשובה לשרת (ack) פעם אחת, וטעינה מחדש רק כשיש גרסה חדשה שהועתקה; upd נשלח ב-poll רק כשהשתנה', async () => {

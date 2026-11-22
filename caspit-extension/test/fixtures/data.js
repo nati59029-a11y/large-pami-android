@@ -7,13 +7,16 @@ const CAT_ROWS = [
   ['103', 'מפית חג', '7290000000103', '', '', 'ספק ב', 'כלים', '', '', '6.9', 'לא'],
 ];
 const SAL_HDR = ['תאריך מכירה', 'שם פריט', 'מספר ברקוד', 'מספר עסקה', 'שם סניף', 'מספר סניף', 'משקל', 'הנחה', 'פדיון'];
-function salesRows(day) {
+// br (0.1.13): סניף בדוח – ברירת מחדל "סניף א" / 1 (יהודה הנשיא); לנחל לכיש: { bn: 'סניף ב', bno: '2' }; rows: false – רק כותרות (אין מכירות)
+function salesRows(day, br) {
   const [y, m, d] = day.split('-');
-  const dt = `${d}/${m}/${y}`;
-  return [SAL_HDR, [dt, 'בלון לבן', '101', '5001', 'סניף א', '1', '', '0', '10'], [dt, 'צלחת נייר', '102', '5001', 'סניף א', '1', '', '0', '9.9'], [dt, 'מפית חג', '103', '5002', 'סניף א', '1', '', '0', '6.9']];
+  const dt = `${d}/${m}/${y}`, b = br || {}, bn = b.bn == null ? 'סניף א' : b.bn, bno = b.bno == null ? '1' : b.bno;
+  if (b.rows === false) return [SAL_HDR];
+  if (b.bno != null) return [SAL_HDR, [dt, 'בלון לבן', '101', '7001', bn, bno, '', '0', '20'], [dt, 'מפית חג', '103', '7002', bn, bno, '', '0', '6.9']];
+  return [SAL_HDR, [dt, 'בלון לבן', '101', '5001', bn, bno, '', '0', '10'], [dt, 'צלחת נייר', '102', '5001', bn, bno, '', '0', '9.9'], [dt, 'מפית חג', '103', '5002', bn, bno, '', '0', '6.9']];
 }
 const csvOf = (rows) => rows.map((r) => r.join(',')).join('\r\n') + '\r\n';
-const salesCsv = (day) => csvOf(salesRows(day));
+const salesCsv = (day, br) => csvOf(salesRows(day, br));
 // קידוד windows-1255 (עברית + ASCII) – כמו קובץ CSV שכספית מורידה
 function win1255(s) {
   const out = [];
