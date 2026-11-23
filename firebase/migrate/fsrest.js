@@ -198,9 +198,15 @@ class FsRest {
 // ---- מחיקה: רק לפקודה purge-root ----
 // אוספים שלעולם לא נמחקים, גם אם נמסרו ל-enablePurge בטעות (היעד, הזהות וההרשאות)
 const PURGE_NEVER = ['b', 'users', 'superadmins', 'admins', 'staff', 'private'];
+// הגנה שנייה, בלי לסמוך על מי שקורא: רשימות האוספים נטענות כאן ישירות מ-migrate.js (טעינה מאוחרת, כדי למנוע תלות מעגלית).
+// מותר רק אוסף שב-COPY, ואסור כל אוסף שב-DEFERRED (האתר), SHARED, NEW_ROOT, PURGE_KEEP או PURGE_NEVER.
+function purgeDeny(c) {
+  const L = require('./migrate.js');
+  return PURGE_NEVER.includes(c) || L.DEFERRED.includes(c) || L.SHARED.includes(c) || L.NEW_ROOT.includes(c) || L.PURGE_KEEP.includes(c) || !L.COPY.includes(c);
+}
 FsRest.prototype.enablePurge = function (colls) {
   if (this.mode !== 'write') throw new Error('מצב קריאה בלבד: אסור למחוק');
-  const bad = (colls || []).filter(c => PURGE_NEVER.includes(c) || !/^[A-Za-z0-9_-]{1,100}$/.test(c));
+  const bad = (colls || []).filter(c => !/^[A-Za-z0-9_-]{1,100}$/.test(c) || purgeDeny(c));
   if (bad.length) throw new Error('אוספים אסורים למחיקה: ' + bad.join(', '));
   this.purgeColls = new Set(colls);
 };
@@ -209,7 +215,7 @@ FsRest.prototype.assertDeletable = function (path) {
   if (!this.purgeColls || !this.purgeColls.size) throw new Error('מחיקה לא מופעלת (רק purge-root): ' + path);
   const segs = String(path).split('/');
   if (segs.length < 2 || segs.length % 2 !== 0 || segs.some(x => !x)) throw new Error('נתיב מסמך לא תקין למחיקה: ' + path);
-  if (PURGE_NEVER.includes(segs[0]) || !this.purgeColls.has(segs[0])) throw new Error('מחיקה מחוץ לתחום נחסמה: ' + path);
+  if (!this.purgeColls.has(segs[0]) || purgeDeny(segs[0])) throw new Error('מחיקה מחוץ לתחום נחסמה: ' + path);
 };
 // dels: [{path, updateTime}] – מחיקה רק אם המסמך לא השתנה מאז שנקרא (updateTime). מחזיר לכל מחיקה {path, ok, error}
 FsRest.prototype.deleteDocs = async function (dels, { chunkSize = 200, pauseMs = 250 } = {}) {
@@ -261,4 +267,4 @@ async function scanTree(fs, parent, collIds) {
   return out;
 }
 
-module.exports = { FsRest, PURGE_NEVER, scanTree, hashFields, stable, normFields, MISSING, pmap, encPath };
+module.exports = { FsRest, PURGE_NEVER, normTs, scanTree, hashFields, stable, normFields, MISSING, pmap, encPath };

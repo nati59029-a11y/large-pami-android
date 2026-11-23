@@ -810,7 +810,7 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
   // רק בשורש: נשארים ומדווחים "חסר ב-b"
   const ROOT_ONLY = ['cashout/onlyroot', 'tasks/t1/c/c2', 'fb/new'];
   // מחוץ לתחום – לא נמחקים גם כשיש להם עותק ב-b
-  const NEVER = ['admins/u_mgr', 'staff/u_emp', 'private/pay', 'orders/o1', 'site_income_daily/2026-11-20', 'sec_waq/largpeami__m1',
+  const NEVER = ['admins/u_mgr', 'staff/u_emp', 'private/pay', 'grp/g1', 'orders/o1', 'site_income_daily/2026-11-20', 'sec_waq/largpeami__m1',
     'impQ/largpeami_j1', 'mailRate/h', 'users/u_emp', 'superadmins/sa1', 'pact/x', 'push_dev/x', 'dev_cur/x', 'mystery/x'];
   const T0 = { t: S('root'), n: D(1.5) };
   const pr = (extra = [], env = {}) => run(['purge-root', ...extra], env);
@@ -823,7 +823,9 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     for (const p of BOTH) w.push([p, T0], [LP + '/' + p, { t: S('b – חדש יותר') }]);
     for (const p of ROOT_ONLY) w.push([p, T0]);
     for (const p of NEVER) { w.push([p, T0]); if (!/^(users|superadmins)\//.test(p)) w.push([LP + '/' + p, T0]); }
+    w.push([LP + '/cashout/newer', { t: S('b') }]);
     await putMany(w);
+    await put('cashout/newer', { t: S('השורש שונה אחרי b') }); // השורש חדש מ-b: לא נמחק
     const bk = storage();
     await bk.file('app_backups/u_mgr/1.enc').save(Buffer.alloc(100, 1), { contentType: 'application/octet-stream' });
     await bk.file(LP + '/app_backups/u_mgr/1.enc').save(Buffer.alloc(100, 1), { contentType: 'application/octet-stream' });
@@ -837,17 +839,23 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     assert.equal(r.code, 1, 'יש מסמכים שחסרים ב-b');
     const rep = report(F('pr-dry.json'));
     assert.equal(rep.write, false);
-    assert.equal(rep.candidates, BOTH.length);
+    assert.equal(rep.candidates, BOTH.length - 1, 'tasks/t1 נשאר: יש לו צאצא שנשאר בשורש');
     assert.equal(rep.deleted, 0);
     assert.deepEqual(rep.missingInBPaths.sort(), [...ROOT_ONLY].sort());
-    assert.equal(rep.collections.tasks.candidates, 3);
+    assert.deepEqual(rep.keptParentPaths, ['tasks/t1']);
+    assert.deepEqual(rep.rootNewerPaths, ['cashout/newer'], 'השורש חדש מ-b – מוצג כבר בספירה');
+    assert.equal(rep.differsFromB, BOTH.length + 1, 'מספר המסמכים שהתוכן שלהם שונה מ-b');
+    assert.equal(rep.collections.tasks.candidates, 2);
     assert.equal(rep.collections.fb.missingInB, 1);
-    for (const c of ['admins', 'staff', 'private', 'orders', 'sec_waq', 'users', 'superadmins', 'pact', 'mystery']) {
+    for (const c of ['admins', 'staff', 'private', 'grp', 'orders', 'sec_waq', 'users', 'superadmins', 'pact', 'mystery']) {
       assert.ok(!rep.scope.includes(c), c);
       assert.ok(rep.outOfScope.find(o => o.coll === c), 'מדווח כמחוץ לתחום: ' + c);
     }
     assert.deepEqual(await rootState(), s0, 'שום מסמך לא השתנה');
     assert.match(r.out, /ספירה בלבד \(לא נמחק כלום\)/);
+    assert.match(r.out, /השורש חדש מ-b \(שונה ונכתב אחרי b\), לא נמחק: cashout\/newer/);
+    assert.match(r.out, /אב של מסמך שנשאר בשורש, לא נמחק: tasks\/t1/);
+    assert.equal((await get(LP)).fields.rootPurgedAt, undefined, 'ספירה לא מסמנת את מסמך העסק');
     assert.match(r.out, /לא נוגעים: admins \(זהות והרשאות/);
     assert.match(r.out, /Storage \(app_backups\/ בשורש, לא נמחק\): 2 קבצים \/ 150 בתים\. זהים ב-b: 1/);
     assert.doesNotMatch(r.out, /b – חדש יותר|"root"/, 'בלי תוכן מסמכים בפלט');
@@ -899,6 +907,7 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     assert.equal(b.code, 0, b.out);
     uploaded = report(F('pr-bk1-r.json')).uploaded;
     await put('inbox/chg', { t: S('שונה אחרי הגיבוי') }); // "האפליקציה" שינתה אחרי הגיבוי
+    await put(LP + '/inbox/chg', { t: S('b – חדש יותר'), v: I(2) }); // ב-b נכתב אחר כך (b חדש מהשורש) – כדי לבדוק דווקא את "השתנה מאז הגיבוי"
     const never0 = {}; for (const p of NEVER) never0[p] = (await get(p)).updateTime;
     const bCopy0 = {}; for (const p of [...BOTH, ...NEVER]) { const d = await get(LP + '/' + p); bCopy0[p] = d ? d.updateTime : null; }
     const r = await W(['--backup', F('pr-bk1.json'), '--backup-gcs', uploaded, '--report', F('pr-w.json')]);
@@ -907,7 +916,7 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     const rep = report(F('pr-w.json'));
     assert.equal(rep.backup, uploaded.startsWith('gs://') ? uploaded : rep.backup);
     assert.match(r.out, /גיבוי טרי לפני המחיקה: gs:\/\/.*migrate_backups\//);
-    const deleted = BOTH.filter(p => p !== 'inbox/chg');
+    const deleted = BOTH.filter(p => p !== 'inbox/chg' && p !== 'tasks/t1');
     assert.equal(rep.deleted, deleted.length);
     for (const p of deleted) assert.equal(await get(p), null, 'נמחק: ' + p);
     for (const p of ROOT_ONLY) assert.ok(await get(p), 'חסר ב-b – נשאר: ' + p);
@@ -916,19 +925,39 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     for (const p of NEVER) assert.equal((await get(p)).updateTime, never0[p], 'מחוץ לתחום, לא השתנה: ' + p);
     for (const p of Object.keys(bCopy0)) { const d = await get(LP + '/' + p); assert.equal(d ? d.updateTime : null, bCopy0[p], 'העותק ב-b לא השתנה: ' + p); }
     assert.ok(await get(LP), 'מסמך העסק קיים');
-    // תת-אוסף: המסמך שחסר ב-b נשאר גם כשהאב נמחק
+    // תת-אוסף: המסמך שחסר ב-b נשאר, ולכן גם האב שלו נשאר (בלי "יתום")
     assert.ok(await get('tasks/t1/c/c2'));
+    assert.ok(await get('tasks/t1'), 'אב של מסמך שנשאר – לא נמחק');
+    assert.ok(await get('cashout/newer'), 'השורש חדש מ-b – לא נמחק');
+    assert.deepEqual(rep.rootNewerPaths, ['cashout/newer']);
+    const bz = (await get(LP)).fields;
+    assert.ok(bz.rootPurgedAt && bz.rootPurgedAt.timestampValue, 'נרשם rootPurgedAt');
+    assert.equal(bz.rootPurgeRun.stringValue, 'local');
+    assert.equal(bz.dataRoot.stringValue, 'b');
     const [files] = await storage().getFiles({ prefix: 'app_backups/' });
     assert.equal(files.length, 2, 'Storage לא נמחק');
-    assert.match(r.out, /cashout: נמחקו 1 \| נשארו \(חסרים ב-b\) 1/);
+    assert.match(r.out, /cashout: נמחקו 1 \| נשארו \(חסרים ב-b\) 1 \| נשארו \(השורש חדש מ-b\) 1/);
     assert.match(r.out, /חסר ב-b, לא נמחק: fb\/new/);
-    assert.match(r.out, /מחיקות: 7/);
+    assert.match(r.out, /מחיקות: 6/);
     // הרצה חוזרת: אין מה למחוק, החסרים עדיין מדווחים
     const b2 = await run(['backup', '--out', F('pr-bk2.json'), '--upload', '--upload-tag', 'pr2', '--report', F('pr-bk2-r.json')]);
     const again = await W(['--backup', F('pr-bk2.json'), '--backup-gcs', report(F('pr-bk2-r.json')).uploaded, '--report', F('pr-w2.json')]);
     assert.equal(b2.code, 0);
     assert.equal(report(F('pr-w2.json')).deleted, 1, 'inbox/chg נמחק עכשיו (בגיבוי החדש ויש לו עותק ב-b)');
     assert.equal(report(F('pr-w2.json')).missingInB, ROOT_ONLY.length);
+  });
+
+  it('אחרי purge-root: set-dataroot --to legacy, rollback ו-copy מסרבים (rootPurgedAt)', async () => {
+    assert.ok((await get(LP)).fields.rootPurgedAt);
+    const sd = await run(['set-dataroot', '--to', 'legacy', '--mode', 'write', '--no-storage']);
+    assert.notEqual(sd.code, 0);
+    assert.match(sd.out, /העותק בשורש נמחק/);
+    assert.equal((await get(LP)).fields.dataRoot.stringValue, 'b', 'dataRoot לא השתנה');
+    const cp = await run(['copy', '--mode', 'write', '--no-storage', '--state', F('pr-state.json'), '--backup', F('pr-bk1.json')]);
+    assert.notEqual(cp.code, 0);
+    assert.match(cp.out, /העותק בשורש נמחק/);
+    const toB = await run(['set-dataroot', '--to', 'b', '--mode', 'write', '--no-storage']);
+    assert.equal(toB.code, 0, 'set-dataroot --to b עדיין מותר');
   });
 
   it('שינוי בזמן הריצה: מחיקה עם updateTime ישן נכשלת והמסמך נשאר; מחיקה חסומה מחוץ לתחום ובלי הפעלה', async () => {
@@ -945,7 +974,9 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     for (const p of ['b/largpeami/cashout/a', 'b/largpeami', 'users/u_emp', 'admins/u_mgr', 'staff/u_emp', 'private/pay', 'orders/o1', 'sec_waq/x', 'cashout', 'cashout/a/c'])
       await assert.rejects(fsr.deleteDocs([{ path: p, updateTime: before1.updateTime }]), /מחוץ לתחום|לא תקין/, p);
     await assert.rejects(fsr.deleteDocs([{ path: 'cashout/race' }]), /בלי updateTime/);
-    for (const bad of [['admins'], ['b'], ['users'], ['private']]) assert.throws(() => fsr.enablePurge(bad), /אסורים למחיקה/);
+    for (const bad of [['admins'], ['b'], ['users'], ['private'], ['grp'], ['orders'], ['site_income_daily'], ['sec_route'], ['impQ'], ['superadmins'], ['pact'], ['cashout', 'products']])
+      assert.throws(() => fsr.enablePurge(bad), /אסורים למחיקה/, bad.join(','));
+    for (const p of ['sec_route/x', 'impQ/a/c/c1', 'products/p1', 'grp/g1']) await assert.rejects(fsr.deleteDocs([{ path: p, updateTime: before1.updateTime }]), /מחוץ לתחום/, p);
     const ro = new FsRest({ project: P, mode: 'readonly', bizId: BIZ, token: async () => 'owner', emulatorHost: EMU });
     assert.throws(() => ro.enablePurge(['cashout']), /קריאה בלבד/);
     // writeDocs לעולם לא מוחק בשורש
@@ -953,7 +984,7 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     const { purgeScope, PURGE_KEEP, DEFERRED: DEF, SHARED: SH, NEW_ROOT } = require(TOOL);
     const sc = purgeScope(['cashout', 'admins', 'staff', 'private', ...DEF, ...SH, ...NEW_ROOT, 'b', 'pact', 'push_dev', 'dev_cur']);
     assert.deepEqual(sc, ['cashout']);
-    assert.deepEqual(PURGE_KEEP, ['admins', 'staff', 'private']);
+    assert.deepEqual(PURGE_KEEP, ['admins', 'staff', 'private', 'grp']);
   });
 
   it('קובץ התהליך: purge-root = כתיבה עם אישור נפרד וגיבוי שנשמר לפני; purge-root-dry-run = קריאה בלבד', () => {

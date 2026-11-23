@@ -26,7 +26,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createRequire } = require('node:module');
-const { FsRest, scanTree, hashFields, MISSING, pmap } = require('./fsrest');
+const { FsRest, scanTree, hashFields, MISSING, pmap, normTs } = require('./fsrest');
 const { checkGuard, fromEnv, bucketBelongs } = require('./guard');
 
 // firebase-admin שכבר מותקן בפונקציות השרת (בלי להוסיף תלות)
@@ -302,7 +302,8 @@ function assertMigrationTarget(ctx, bizDoc, needLegacy) {
   if (!(f.migrationTarget && f.migrationTarget.booleanValue === true) || sv('createdBy') !== 'migrate') {
     throw new Error(`מסמך העסק b/${ctx.bizId} קיים ולא נוצר על ידי כלי ההעברה (חסר migrationTarget:true או createdBy:migrate). לא נוגעים בו`);
   }
-  if (needLegacy && sv('dataRoot') !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${sv('dataRoot')}", לא legacy. העתקה/השלמה רק לפני המעבר (ראו ROLLBACK.md)`);
+  if (f.rootPurgedAt && needLegacy) throw new Error(`העותק בשורש נמחק (purge-root, rootPurgedAt=${f.rootPurgedAt.timestampValue || ''}). אין חזרה ל-legacy ואין העתקה מהשורש – שחזור רק מהגיבוי ב-bucket (ראו ROLLBACK.md)`);
+  if (needLegacy === true && sv('dataRoot') !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${sv('dataRoot')}", לא legacy. העתקה/השלמה רק לפני המעבר (ראו ROLLBACK.md)`);
 }
 
 // מה צריך להיות ב-users/{uid} לכל חבר, באותו מבנה ש-syncLegacyMember (שרת, business.js) כותב:
@@ -635,7 +636,7 @@ async function cmdSetDataRoot(ctx) {
   if (ctx.mode !== 'write') throw new Error('set-dataroot דורש --mode write');
   const cur = await ctx.fsr.getDoc('b/' + ctx.bizId);
   if (!cur) throw new Error('מסמך העסק b/' + ctx.bizId + ' לא קיים');
-  assertMigrationTarget(ctx, cur, false);
+  assertMigrationTarget(ctx, cur, to === 'legacy' ? 'to-legacy' : false);
   const before = cur.fields.dataRoot && cur.fields.dataRoot.stringValue;
   const [r] = await ctx.fsr.writeDocs([{ path: 'b/' + ctx.bizId, kind: 'setField', fieldPaths: ['dataRoot'], fields: { dataRoot: { stringValue: to } } }]);
   if (!r.ok) throw new Error('הכתיבה נכשלה: ' + r.error);
@@ -728,7 +729,8 @@ async function cmdCopyDocs(ctx) {
 // רק אם הוא בגיבוי הטרי עם אותו גיבוב (כלומר ניתן לשחזור), ורק אם לא השתנה מאז שנקרא (תנאי updateTime).
 // Storage (app_backups/) לא נמחק – רק דוח. הסיבה: בגיבוי ב-bucket יש רק רשימת הקבצים, לא התוכן, וכללי app_backups/ בשורש
 // עדיין פתוחים לכתיבה ממכשירים ישנים.
-const PURGE_KEEP = ['admins', 'staff', 'private'];
+// grp: כלל Storage של grpv/{gid}/{mid} בשורש קורא את grp/{gid} בשורש (mem), והנתיב vp בהודעות שהועתקו נשאר שורשי
+const PURGE_KEEP = ['admins', 'staff', 'private', 'grp'];
 const PURGE_BACKUP_MAX_AGE_MS = 6 * 3600 * 1000;
 const purgeConfirmText = ctx => `delete-root-copy-of-${ctx.bizId}-in-${ctx.project}`;
 function purgeScope(colls) {
@@ -773,29 +775,55 @@ async function cmdPurgeRoot(ctx) {
   const src = await scanTree(ctx.fsr, '', scope);
   const dst = await scanTree(ctx.fsr, 'b/' + ctx.bizId, scope);
   const C = {};
-  const row = c => C[c] || (C[c] = { candidates: 0, deleted: 0, missingInB: 0, changedSinceBackup: 0, failed: 0 });
+  const row = c => C[c] || (C[c] = { candidates: 0, deleted: 0, missingInB: 0, rootNewer: 0, keptHasChildren: 0, changedSinceBackup: 0, failed: 0, differsFromB: 0 });
   for (const c of scope) row(c);
-  const del = [], missing = [], changed = [];
+  const pre = [], missing = [], changed = [], newer = [], parents = [];
+  const staying = new Set(); // מסמכים שנשארים בשורש (כדי לא למחוק את האב שלהם)
   for (const [rel, d] of [...src].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     if (d.missing) continue; // אב "ריק" של תת-אוסף: נעלם לבד כשהתת-אוסף ריק
     const c = topColl(rel);
     const t = dst.get(rel);
-    if (!t || t.missing) { row(c).missingInB++; missing.push(rel); continue; }
+    if (!t || t.missing) { row(c).missingInB++; missing.push(rel); staying.add(rel); continue; }
+    if (d.hash !== t.hash) {
+      row(c).differsFromB++;
+      // השורש השתנה אחרי הכתיבה האחרונה ל-b: השינוי לא הגיע ל-b – לא מוחקים
+      if (normTs(d.updateTime) > normTs(t.updateTime)) { row(c).rootNewer++; newer.push(rel); staying.add(rel); continue; }
+    }
     if (backup) {
       const b = backup.bk.docs[rel];
-      if (!b || b.missing || b.hash !== d.hash) { row(c).changedSinceBackup++; changed.push(rel); continue; }
+      if (!b || b.missing || b.hash !== d.hash) { row(c).changedSinceBackup++; changed.push(rel); staying.add(rel); continue; }
     }
-    row(c).candidates++;
-    del.push({ path: rel, updateTime: d.updateTime });
+    pre.push({ path: rel, updateTime: d.updateTime });
+  }
+  // אב שיש לו צאצא שנשאר בשורש – לא נמחק (לא משאירים "יתום" בשורש)
+  const hasStayingChild = p => { for (const x of staying) if (x.startsWith(p + '/')) return true; return false; };
+  const del = [];
+  for (const x of pre) {
+    if (hasStayingChild(x.path)) { row(topColl(x.path)).keptHasChildren++; parents.push(x.path); }
+    else { row(topColl(x.path)).candidates++; del.push(x); }
   }
   const failed = [];
+  let mark = null;
   if (write && del.length) {
+    // סימון במסמך העסק לפני המחיקה: אחרי זה set-dataroot --to legacy ו-copy מסרבים
+    mark = { at: new Date().toISOString(), run: String(ctx.args['run-tag'] || process.env.GITHUB_RUN_ID || 'local').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'local' };
+    const [mr] = await ctx.fsr.writeDocs([{ path: 'b/' + ctx.bizId, kind: 'setField', fieldPaths: ['rootPurgedAt', 'rootPurgeRun'], fields: { rootPurgedAt: { timestampValue: mark.at }, rootPurgeRun: { stringValue: mark.run } } }]);
+    if (!mr.ok) throw new Error('רישום rootPurgedAt במסמך העסק נכשל, לא נמחק כלום: ' + mr.error);
     ctx.fsr.enablePurge(scope);
-    const res = await ctx.fsr.deleteDocs(del);
-    res.forEach(r => {
-      if (r.ok) row(topColl(r.path)).deleted++;
-      else { row(topColl(r.path)).failed++; failed.push({ rel: r.path, error: r.error }); }
-    });
+    // מהעמוק לרדוד: אם מחיקת צאצא נכשלה, האב שלו לא נמחק
+    const depth = p => p.split('/').length;
+    const levels = [...new Set(del.map(x => depth(x.path)))].sort((a, b) => b - a);
+    for (const lv of levels) {
+      const batch = [];
+      for (const x of del.filter(y => depth(y.path) === lv)) {
+        if (hasStayingChild(x.path)) { row(topColl(x.path)).candidates--; row(topColl(x.path)).keptHasChildren++; parents.push(x.path); } else batch.push(x);
+      }
+      const res = batch.length ? await ctx.fsr.deleteDocs(batch) : [];
+      res.forEach(r => {
+        if (r.ok) row(topColl(r.path)).deleted++;
+        else { row(topColl(r.path)).failed++; failed.push({ rel: r.path, error: r.error }); staying.add(r.path); }
+      });
+    }
   }
   // Storage: דוח בלבד
   let storage = null;
@@ -812,21 +840,24 @@ async function cmdPurgeRoot(ctx) {
   if (backup) log('גיבוי טרי לפני המחיקה: ' + backup.gcs + ' (נלקח ' + backup.bk.takenAt + ')');
   for (const c of scope) {
     const x = C[c];
-    if (!x.candidates && !x.missingInB && !x.changedSinceBackup && !x.failed) continue;
-    log(`  ${c}: ${write ? 'נמחקו ' + x.deleted : 'יימחקו ' + x.candidates} | נשארו (חסרים ב-b) ${x.missingInB}${write ? ' | דולגו (השתנו מאז הגיבוי) ' + x.changedSinceBackup + ' | נכשלו ' + x.failed : ''}`);
+    if (!x.candidates && !x.missingInB && !x.rootNewer && !x.keptHasChildren && !x.changedSinceBackup && !x.failed) continue;
+    log(`  ${c}: ${write ? 'נמחקו ' + x.deleted : 'יימחקו ' + x.candidates} | נשארו (חסרים ב-b) ${x.missingInB} | נשארו (השורש חדש מ-b) ${x.rootNewer} | נשארו (אב של מסמך שנשאר) ${x.keptHasChildren} | תוכן שונה מ-b ${x.differsFromB}${write ? ' | דולגו (השתנו מאז הגיבוי) ' + x.changedSinceBackup + ' | נכשלו ' + x.failed : ''}`);
   }
   for (const o of outOfScope) log(`  לא נוגעים: ${o.coll} (${o.why})`);
   for (const r of missing.slice(0, 50)) log('  חסר ב-b, לא נמחק: ' + r);
   if (missing.length > 50) log(`  ... ועוד ${missing.length - 50} חסרים ב-b (הרשימה המלאה בדוח)`);
+  for (const r of newer.slice(0, 50)) log('  השורש חדש מ-b (שונה ונכתב אחרי b), לא נמחק: ' + r);
+  for (const r of parents.slice(0, 50)) log('  אב של מסמך שנשאר בשורש, לא נמחק: ' + r);
   for (const r of changed.slice(0, 50)) log('  השתנה מאז הגיבוי (או לא בגיבוי), לא נמחק: ' + r);
   for (const f of failed.slice(0, 50)) log('  לא נמחק (השתנה בזמן הריצה או שגיאה): ' + f.rel + ' – ' + f.error);
   if (storage) log(`  Storage (${STORAGE_PREFIX} בשורש, לא נמחק): ${storage.rootFiles} קבצים / ${storage.rootBytes} בתים. זהים ב-b: ${storage.sameInB} / ${storage.sameInBBytes} בתים. חסרים או שונים ב-b: ${storage.notInB} / ${storage.notInBBytes} בתים`);
   const tot = k => Object.values(C).reduce((n, x) => n + x[k], 0);
-  const sum = { candidates: tot('candidates'), deleted: tot('deleted'), missingInB: tot('missingInB'), changedSinceBackup: tot('changedSinceBackup'), failed: tot('failed') };
-  const ok = !sum.missingInB && !sum.changedSinceBackup && !sum.failed;
-  log(`סיכום: ${write ? 'נמחקו ' + sum.deleted + ' מתוך ' + sum.candidates : 'יימחקו ' + sum.candidates} | נשארו כי חסרים ב-b ${sum.missingInB}${write ? ' | דולגו ' + sum.changedSinceBackup + ' | נכשלו ' + sum.failed : ''}`);
+  const sum = { candidates: tot('candidates'), deleted: tot('deleted'), missingInB: tot('missingInB'), rootNewer: tot('rootNewer'), keptHasChildren: tot('keptHasChildren'), differsFromB: tot('differsFromB'), changedSinceBackup: tot('changedSinceBackup'), failed: tot('failed') };
+  const ok = !sum.missingInB && !sum.rootNewer && !sum.keptHasChildren && !sum.changedSinceBackup && !sum.failed;
+  if (mark) log(`סומן במסמך העסק: rootPurgedAt=${mark.at}, rootPurgeRun=${mark.run} (מעכשיו set-dataroot --to legacy ו-copy מסרבים)`);
+  log(`סיכום: ${write ? 'נמחקו ' + sum.deleted + ' מתוך ' + sum.candidates : 'יימחקו ' + sum.candidates + ' (לכל היותר – במחיקה עצמה מדלגים גם על מה שהשתנה מאז הגיבוי)'} | נשארו כי חסרים ב-b ${sum.missingInB} | השורש חדש מ-b ${sum.rootNewer} | אב של מסמך שנשאר ${sum.keptHasChildren} | תוכן שונה מ-b (b חדש יותר) ${sum.differsFromB}${write ? ' | דולגו ' + sum.changedSinceBackup + ' | נכשלו ' + sum.failed : ''}`);
   if (!ok) log('יש מסמכים שלא נמחקו – דורש בדיקה (למשל העברה ב-copy-docs, ואז הרצה חוזרת). שום מסמך שאין לו עותק ב-b לא נמחק.');
-  return { ok, write, dataRoot, backup: backup ? backup.gcs : null, ...sum, collections: C, missingInBPaths: missing, changedPaths: changed, failedPaths: failed, outOfScope, storage, scope };
+  return { ok, write, dataRoot, backup: backup ? backup.gcs : null, ...sum, collections: C, missingInBPaths: missing, rootNewerPaths: newer, keptParentPaths: parents, changedPaths: changed, failedPaths: failed, purgeMark: mark, outOfScope, storage, scope };
 }
 
 const COMMANDS = { 'purge-root': cmdPurgeRoot, backup: cmdBackup, 'dry-run': cmdDryRun, copy: cmdCopy, 'copy-docs': cmdCopyDocs, verify: cmdVerify, 'compare-backup': cmdCompareBackup, 'report-since': cmdReportSince, 'set-dataroot': cmdSetDataRoot };
