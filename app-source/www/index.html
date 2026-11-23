@@ -1864,8 +1864,14 @@ async function trSave(it,r,o){if(r.done||r.busy)return;if(!trOk())return toast('
  else if(b==='fixed'){if(st&&st.s==='a'){msApply([st.ex],[],rnd(T-Math.max(0,E)),d,'העברה',ref,fid,grp);if(E>=0.01)awMk(s,E,d,grp,ref,fid,M);txt='נסגרה היתרה של '+mfmt(M)}
   else{const x={id:uid(),t:'exp',cat:c.id,sub:s.id,date:d,amt:T,plan:M,inv:'',note:'',kind:'inv',pays:[P(T)],await:1,tgrp:grp};if(tp){x.fx=tp.id;const k0=S.fixOk[fxKey(tp,M)];if(k0)x.fxp=k0;S.fixOk[fxKey(tp,M)]={e:x.id}}S.tx.push(x);txt=mfmt(M)+' · שולם – ממתין לחשבונית'}}
  else{const x={id:uid(),t:'exp',cat:c.id,sub:b==='free'?null:s.id,pays:[],date:d,amt:T,note:ref?'העברה · אסמכתא '+ref:'העברה',file:fid,tgrp:grp};if(b==='free')x.desc=s_(r.desc);S.tx.push(x);txt='הוצאה רגילה'}
- trLearn(s,r.acct,grp);it.grps.push(grp);r.done=1;r.busy=0;r.grp=grp;r.doneTx=txt;save();if(typeof siTrPart==='function')siTrPart(it);toast('נשמר: '+ils(T)+' · '+(s?s.name:c.name));
- if(it.rows.every(x=>x.done)&&TR.items[TR.i]===it){const nx=TR.items.findIndex((x,i)=>i>TR.i&&!(x.type==='bank_transfer'&&x.rows.every(y=>y.done)));if(nx>0)TR.i=nx}rerender()}
+ trLearn(s,r.acct,grp);it.grps.push(grp);r.done=1;r.busy=0;r.grp=grp;r.doneTx=txt;save();if(typeof siTrPart==='function')siTrPart(it);toast('נשמר: '+ils(T)+' · '+(s?s.name:c.name)+(txt?' · '+txt:''));
+ if(it.rows.every(x=>x.done)&&TR.items[TR.i]===it){const nx=TR.items.findIndex((x,i)=>i>TR.i&&!(x.type==='bank_transfer'&&x.rows.every(y=>y.done)));if(nx>0)TR.i=nx}
+ if(trAllDone()){trFinish();return}rerender()}
+/* 23.11: כשכל ההעברות במסך נשמרו – חוזרים למסך הרגיל (ביטול אפשרי מכרטיס הרשומה: "ביטול ההעברה כולה") */
+const trAllDone=()=>TR.items.length>0&&TR.items.every(x=>x.type==='bank_transfer'&&x.rows.length&&x.rows.every(y=>y.done));
+function trFinish(){if(cur().v!=='tr')return rerender();
+ if(typeof US!=='undefined'&&US&&US.view==='scr'){const U=US;usDone();if(NAV.length>1&&cur().v==='tr')NAV.pop();if(US===U&&U.step==='done')usReset();render(-1);return}
+ if(NAV.length>1){NAV.pop();render(-1)}else rerender()}
 /* ---- "שולם – ממתין לחשבונית": חיבור חשבונית שהגיעה ----
  החשבונית נכנסת לרשומה הקיימת (מספר, תאריך, קובץ), await נמחק, ולא נוצרת הוצאה חדשה – כך היא לא נספרת פעמיים.
  חשבונית גבוהה מהתשלום: הסכום עולה, והיתרה נשארת לתשלום. חשבונית נמוכה מהתשלום: הסכום יורד לסכום החשבונית, והעודף עובר
