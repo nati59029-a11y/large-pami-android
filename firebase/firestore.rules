@@ -1,14 +1,9 @@
 rules_version = '2';
+// 23.11.2026: הערות ההסבר קוצרו (שורה ראשונה בלבד מכל גוש) בגלל מגבלת הגודל של גוגל. ההסברים המלאים: firebase/firestore-rules-explained.txt
 
 // המקור היחיד של הכללים: firebase/firestore.rules. הקובץ app-source/firestore.rules הוא עותק זהה תו-בתו – לא עורכים אותו ישירות.
 
 // כללי הרשאות ל-Firestore – שלב 0 (תיקוני אבטחה באפליקציה הקיימת).
-// מקור: טבלת ההרשאות (מחייבת) באפיון, פרק 3.3, ופרק 20.3 (app_backup_status).
-// עיקרון: הכול סגור, ופותחים רק מה שבטבלה. הכלל האחרון בקובץ סוגר כל מה שלא הוגדר.
-// "מנהל" = מסמך קיים ב-admins/{uid} (כמו היום).
-// "עובד"  = מסמך staff/{uid} עם active == true. הכללים קוראים אותו בכל בקשה,
-//           ולכן עובד שהושבת נחסם כבר בבקשה הבאה (לא סומכים על נתון בטוקן).
-// אין בשום מקום תנאי שמסתפק רק בכך שהמשתמש מחובר.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -33,14 +28,12 @@ service cloud.firestore {
     }
 
     // שם שהאפליקציה כותבת (fbBy(): מה שלפני ה-@ באימייל שהוקלד בכניסה) חייב להיות של המשתמש עצמו,
-    // לפי האימייל שבטוקן, בלי הבדל אותיות גדולות/קטנות. בלי אימייל בטוקן – נחסם.
     function isMyName(n) {
       return request.auth.token.email is string
         && n is string && n.lower() == request.auth.token.email.lower().split('@')[0];
     }
 
     // 2026-11-08 (סניפים): br שהעובד שולח (inbox / mq, לא חובה) חייב להיות אחד מהסניפים שלו (staff/{uid}.br).
-    // אין br לעובד (חסר) = כל הסניפים, ולכן כל מזהה תקין מותר. st = מסמך העובד.
     function brMine(d, st) {
       return !d.keys().hasAny(['br'])
         || (d.br is string && d.br.matches('^[a-z0-9_]{2,20}$')
@@ -48,11 +41,6 @@ service cloud.firestore {
     }
 
     // 16.11.2026: נעילת כתיבה לשורש אחרי המעבר של לארג' פעמי ל-b/largpeami.
-    // כל יצירה / עדכון / מחיקה באוספי העסק שבשורש (מכאן ועד yemot_lexicon) מותרת רק כשאין b/largpeami (לפני ההעברה,
-    // והאפליקציה מתנהגת אז כ-legacy), או כש-b/largpeami.dataRoot == 'legacy'. אחרי המעבר (dataRoot 'b') מכשיר ישן
-    // שעדיין במצב legacy לא יכול לכתוב לשורש. קריאה לא נחסמת. חזרה (dataRoot ← legacy) פותחת את הכתיבה מחדש.
-    // המזכירה (sOn) והסריקה בתלת מימד (s3On) כבר דורשות legacy. b/{bizId}, users, superadmins ואוספי האתר – לא מושפעים.
-    // עלות: קריאת מסמך אחת לכל כתיבה (אותו מסמך בכל הבקשה נספר פעם אחת).
     function lpW() {
       return !exists(/databases/$(database)/documents/b/largpeami)
         || get(/databases/$(database)/documents/b/largpeami).data.get('dataRoot', '') == 'legacy';
@@ -61,17 +49,12 @@ service cloud.firestore {
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
 
     // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
-    // כתיבה – רק בלוח הבקרה של Firebase.
     match /admins/{userId} {
       allow get: if isSelf(userId);
       allow list, create, update, delete: if false;
     }
 
     // cfg: קריאה – עובד פעיל או מנהל. כתיבה – מנהל.
-    // 17.11.2026: cfg/zc = סף פער מזומן בסגירת קופה, משותף לכל המנהלים. קריאה וכתיבה – מנהל בלבד: העובד לא צריך
-    // את הסף (הבדיקה מול הסף רצה רק אצל המנהל, zcNeed), ולא אמור לדעת אותו. לכן גם רשימת האוסף (list) – מנהל בלבד
-    // (האפליקציה אף פעם לא מושכת רשימה של cfg; עובד קורא רק get של cfg/main ו-cfg/tkw).
-    // שדות cfg/zc: thr (מספר 0 עד 1,000,000; 0 = ללא סף), by (שם המנהל), at (זמן). מחיקה – מנהל (= חזרה לערך המקומי).
     function zcCfgOk() {
       return request.resource.data.keys().hasAll(['thr'])
         && request.resource.data.keys().hasOnly(['thr', 'by', 'at'])
@@ -102,10 +85,6 @@ service cloud.firestore {
     }
 
     // fb: יצירה בשמו (עובד – רק בסטטוס 'new'; מנהל – גם מאושר). קריאה: מנהל – הכול; עובד – רק משוב מאושר.
-    // עדכון ומחיקה – מנהל.
-    // 16.11.2026: יצירת דף משוב חדש (st 'new') לא ננעלת אחרי המעבר ל-b. הסיבה: בקוד הישן (fbWSent ב-index.html),
-    // 403 בניסיון חוזר של עובד פעיל נחשב "כבר נשלח", והדף נמחק מהטלפון. בלי ההחרגה, דף ממכשיר ישן היה אובד בשקט.
-    // כך הוא נכתב לשורש, compare-backup מגלה אותו, ומעתיקים אותו ל-b ב-copy-docs. עדכון, מחיקה ויצירה מאושרת (מנהל) – נעולים.
     match /fb/{docId} {
       allow create: if (lpW() || request.resource.data.get('st', '') == 'new') && (isStaff()
         && request.resource.data.owner == request.auth.uid
@@ -122,9 +101,6 @@ service cloud.firestore {
     }
 
     // chunks: יצירה בשמו – עובד פעיל (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח).
-    // קריאה – של עצמו, או מנהל. מחיקה – מנהל.
-    // הקשחה (שלב 3, לפי הערת הבודק בשלב 2): רק השדות owner ו-data, data עד 700,000 תווים
-    // (CH=700000 באפליקציה), וחלק 1 ומעלה ({id}_1, {id}_2…) רק אם חלק 0 של אותו פריט שייך לאותו עובד.
     match /chunks/{docId} {
       allow create: if lpW() && (isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
@@ -141,9 +117,6 @@ service cloud.firestore {
     }
 
     // inbox: יצירה בשמו – עובד פעיל, בסטטוס 'new', ורק אחרי שהחלק הראשון של הצילום כבר ב-chunks (כמו היום).
-    // (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח.)
-    // קריאה – של עצמו, או מנהל. עדכון ומחיקה – מנהל.
-    // הקשחה (שלב 3): החלק הראשון של הצילום שייך לאותו עובד, ורק השדות שהאפליקציה כותבת (pushItem).
     match /inbox/{docId} {
       allow create: if lpW() && (isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
@@ -164,7 +137,6 @@ service cloud.firestore {
     // ---------- אוספים חדשים בשלב 0 ----------
 
     // staff: עובד פעיל קורא רק את המסמך של עצמו. מנהל קורא הכול.
-    // אף אחד לא כותב ישירות – כולל מנהל. כתיבה רק דרך פונקציה בשרת.
     match /staff/{userId} {
       allow get: if isManager()
         || (isSelf(userId) && resource.data.active == true);
@@ -173,7 +145,6 @@ service cloud.firestore {
     }
 
     // app_backup_status: עובד פעיל קורא רק את שלו. מנהל קורא הכול.
-    // אף אחד לא כותב ישירות – רק הפונקציה reportBackupStatus בשרת.
     match /app_backup_status/{userId} {
       allow get: if isManager()
         || (isSelf(userId) && isActiveEmployee());
@@ -182,13 +153,6 @@ service cloud.firestore {
     }
 
     // ---------- מרכז עבודה, סבב 2 (15.11.2026): שדות נוספים במשימות (tasks) ובמשימות פרטיות (ptk) ----------
-    // משותף לשורש ול-b/{bizId}. הכול אופציונלי: משימה ישנה בלי השדות עובדת בדיוק כמו היום, ו-due ממשיך להישמר (72 שעות ימי עסקים).
-    // dl = היעד בפועל: >0 תאריך ושעה (מ-2 דקות לפני cr ועד 400 יום אחריו), 0 = בלי יעד, חסר = due כמו היום.
-    // pri: '' רגיל / 'h' דחוף / 'l' נמוך. cat = נושא, עד 30 תווים. est = משך משוער בדקות, 0–1440.
-    // ck = רשימת סימון: עד 20 פריטים, כל פריט 1–120 תווים. ckd = מספרי הפריטים שסומנו (0 עד מספר הפריטים פחות 1, בלי כפילויות).
-    // sa = "התחלתי" (זמן; רק המטפל, saMark). nd = "הזכר לעובד" (זמן; רק מנהל, בעדכון).
-    // ck נבדק בבת אחת: מחברים את הפריטים בירידת שורה ובודקים בביטוי רגולרי שיש 1–20 פריטים של 1–120 תווים (פריט עם ירידת שורה בפנים
-    // נספר כשני פריטים – כך עדיין מוגבל ל-20 × 120; ערך שאינו מחרוזת נקרא באפליקציה כטקסט ריק). ckd: מספרים שלמים מתוך 0..(מספר הפריטים פחות 1), בלי כפילויות. (בלי לולאות – מגבלת 1000 ביטויים.)
     function tkCkOk(l) {
       return l is list && l.size() <= 20
         // בלי חזרה מקוננת (RE2 בשרת מגביל את גודל הביטוי): כל פריט – מחרוזת (השוואת הרשימה), בלי שורה חדשה, לא ריק, עד 120 תווים
@@ -212,17 +176,6 @@ service cloud.firestore {
     function tkLateOk(d, late) { return tkDlOf(d) == 0 ? late == '' : (late == '1') == (request.time.toMillis() > tkDlOf(d)); }
 
     // ---------- משימות (tasks) ----------
-    // הלוגיקה הועתקה כמו שהיא מהכללים שפעילים היום (app-source/firestore.rules הישן),
-    // רק "מחובר" הוחלף ב-isStaff() ו-isAdmin() ב-isManager(), ונוספה בדיקה שהשם (by, doneBy) הוא של הכותב (isMyName).
-    // תוספת: תגובות (תת-אוסף c) והשדות cAt/cBy על המשימה ("תגובה חדשה"). משימות ישנות בלי השדות ממשיכות לעבוד.
-    // תוספת (בקשת בעל העסק 2.11.2026): nc == '1' = "יש במשימה הערה של עובד". עובד מסמן אותו לפני שהוא מגיב,
-    // ומשימה עם nc לא נסגרת אצל עובד ב"בוצע" – היא עוברת להמתנה לאישור מנהל (st 'wait'). עובד לא מסיר את nc.
-    // rt == '1' = "המנהל החזיר את המשימה" (רק מנהל כותב). משימה ישנה בלי nc – כמו היום.
-    // שדרוג 2026-11-09: to/toN = נמענים (רק במשימת מנהל חדשה). ow/owN/clt = המטפל ("מי שתופס ראשון"; '' = לא נתפסה).
-    // np = תמונות נדרשות לסגירה (0–3) ב-p/w1..w{np}; mi = מספר תמונות מנהל (p/m1..m5); wp = מונה תמונות ביצוע;
-    // cT/cN = תצוגה מקדימה של התגובה האחרונה; rd = מפה uid → מתי סימן "נקרא".
-    // משימה בלי to = ישנה, ועובדת כמו היום – חוץ ממשימה ישנה שנתפסה (ow לא ריק): אז רק המטפל פועל.
-    // עובד לא משחרר ולא מעביר: אין כאן כלל שמאפשר לעובד לשנות ow שאינו ריק. ביטול תפיסה והעברה – מנהל (מעדכן הכול).
     match /tasks/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -242,9 +195,6 @@ service cloud.firestore {
             && (npOf() < 3 || exists(/databases/$(database)/documents/tasks/$(id)/p/w3)));
       }
       // עובד: מסמן בוצע (בלי דרישת תמונה) או מצרף תמונה (כשנדרשת). לא סוגר משימה שנדרשת בה תמונה.
-      // במשימה עם הערת עובד (nc) או עם חובת תמונות (np > 0): "בוצע" = st 'wait' (open נשאר '1'), בלי img,
-      // ו-late/ok לא משתנים – המנהל מאשר או מחזיר. עם np > 0 – רק אחרי שהועלו np תמונות ביצוע.
-      // עובד לא מחזיר משימה ל-open בעצמו: כל עדכון של עובד מתחיל ממשימה פתוחה (st 'open').
       function workerUpd() {
         return od().st == 'open' && canAct()
           && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
@@ -276,7 +226,6 @@ service cloud.firestore {
           && nowOk(nw().sa);
       }
       // תפיסה ("אני מטפל"): משימה פתוחה שלא נתפסה; המשתמש בין הנמענים (או משימת מנהל ישנה בלי to);
-      // רק ow/owN/clt, בשמו ובזמן אמת. תפיסה שנייה נדחית כי ow כבר לא ריק.
       function claim() {
         return od().st == 'open' && od().get('ow', '') == ''
           && ((isNew() && request.auth.uid in od().to) || (!isNew() && od().role == 'a'))
@@ -299,16 +248,12 @@ service cloud.firestore {
           || isSender(d);
       }
       // "שליחת משימות" (19.11.2026): dg == '1' = משימה שעובד מורשה שלח (owner = השולח, by = שמו). בלי dg – כמו היום
-      // (גם משימות משמרת sh-* שהשרת יוצר עם owner של עובד – לא נחשבות "שלחתי").
-      // עובד מורשה = עובד פעיל (לא מנהל) שהמתג perms.tkS דולק אצלו עכשיו. staff נכתב רק בשרת (setStaffTkS / setStaffPerms).
-      // כיבוי המתג או השבתת העובד – מיד אין לו גישה של שולח (גם לא למשימות שכבר שלח).
       function tkSendOk() {
         return !isManager() && isActiveEmployee()
           && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('tkS', false) == true;
       }
       function isSender(d) { return d.get('dg', '') == '1' && d.get('owner', '') == request.auth.uid && tkSendOk(); }
       // משימה חדשה של עובד מורשה: role 'a' עם dg, חובה נמענים (mgrNewOk), לא לעצמו, בלי תמונות מנהל (mi 0) ובלי pr (רק np).
-      // רק בתוך allow create, שכבר דורש isStaff(): לא מנהל ⇒ עובד פעיל. גרסה קצרה של tkSendOk – בגלל מגבלת 1000 הביטויים ביצירה.
       function dgNewOk() {
         return !isManager() && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('tkS', false) == true
           && nw().get('dg', '') == '1' && nw().role == 'a'
@@ -316,7 +261,6 @@ service cloud.firestore {
           && nw().pr == '' && nw().get('mi', 0) == 0;
       }
       // השולח מאשר (wait → done, late לפי היעד כמו בלקוח) או מחזיר (wait → open, עם הערה ואופציונלית סימון תגובה), רק משימה ששלח,
-      // רק כשהיא ממתינה לאישור, ולא כשהוא עצמו המטפל או נמען (המנהל העביר אליו) – לא מאשר עבודה של עצמו.
       function senderUpd() {
         return isSender(od()) && od().st == 'wait'
           && od().get('ow', '') != request.auth.uid && !(request.auth.uid in od().get('to', []))
@@ -344,14 +288,12 @@ service cloud.firestore {
           && canRead(od());
       }
       // סימון "יש הערת עובד": רק השדה nc, רק לערך '1' (אי אפשר להסיר), ורק במשימה פתוחה (st 'open').
-      // אחרי "בוצע" (done או wait) העובד כבר לא מוסיף הערה (החלטת בעל העסק 2.11.2026).
       function ncMark() {
         return nw().diff(od()).affectedKeys().hasOnly(['nc'])
           && nw().get('nc', '') == '1'
           && od().st == 'open' && od().open == '1';
       }
       // סימון "תגובה חדשה": cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו), ורק במשימה שהמגיב רשאי לקרוא.
-      // 2026-11-09: אפשר גם cT (תחילת התגובה, עד 120 תווים) ו-cN (שם המגיב, בשמו – isMyName). אפליקציה ישנה כותבת רק cAt/cBy.
       function commentMark() {
         return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy', 'cT', 'cN'])
           && nw().cBy == request.auth.uid
@@ -361,7 +303,6 @@ service cloud.firestore {
           && (isManager() || isSender(od()) || od().open == '1' || od().late == '1');
       }
       // שדות המשימה החדשה (רק מנהל): to 1–30, toN באותו אורך; נמען אחד ← ow == to[0], כמה ← ow ''.
-      // np 0–3 (עם np > 0 אין pr), mi 0–5, wp 0.
       function mgrNewOk() {
         return (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt'])
             || (nw().keys().hasAll(['to', 'toN', 'ow'])
@@ -402,8 +343,6 @@ service cloud.firestore {
       allow delete: if lpW() && (isManager() || isSender(resource.data));
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
-      // עובד מגיב רק במשימה פתוחה (st 'open', כולל משימה שהמנהל החזיר), ורק אחרי שהיא סומנה nc == '1' (ncMark) –
-      // כך לכל הערת עובד חדשה יש סימון על המשימה. מנהל מגיב תמיד.
       match /c/{cid} {
         function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
         function canReadTask() {
@@ -425,8 +364,6 @@ service cloud.firestore {
       }
 
       // תמונות המשימה (2026-11-09): tasks/{id}/p/{pid}, מסמך {img, t, uid}.
-      // m1..m5 – תמונות מנהל: יצירה/עדכון/מחיקה – מנהל. w1..w3 – תמונות ביצוע: יצירה/עדכון רק המטפל (ow), במשימה פתוחה,
-      // ורק wN עם N <= np; מחיקה – מנהל. קריאה – מי שרשאי לקרוא את המשימה.
       match /p/{pid} {
         function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
         function hasTask() { return exists(/databases/$(database)/documents/tasks/$(id)); }
@@ -459,10 +396,6 @@ service cloud.firestore {
     }
 
     // ---------- משימות פרטיות (ptk), משימות קבועות (rtk), בקשות למנהל (rq) – 12.11.2026 ----------
-    // ptk: תזכורת אישית. רואים רק הבעלים (owner) והמנהל – גם לא בשאילתה (עובד שולף where owner == uid).
-    // יצירה: צוות פעיל, בשמו, בזמן אמת, פתוחה, יעד בטווח של tasks. עדכון (בעלים או מנהל): רק st/sub/late/txt.
-    // סבב 2 (15.11.2026): גם dl/pri/cat/est/ck/ckd (tkXOk; ckd ריק ביצירה). dl לא כפוף לטווח של due, ו-due עדיין חובה.
-    // done: sub בזמן אמת (או ללא שינוי כשכבר done), late '' או '1'. open: sub 0, late ''. מחיקה: הבעלים או מנהל.
     match /ptk/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -491,16 +424,11 @@ service cloud.firestore {
     }
 
     // גלאי גרסת הכללים (מרכז עבודה, סבב 2): האפליקציה קוראת rv/tk2 (מסמך שלא קיים). כללים חדשים – צוות מקבל 404,
-    // כללים ישנים – 403. כך האפליקציה יודעת אם להציג את השדות החדשים. אין כתיבה ואין list.
-    // rv/tk3 (19.11.2026): כללי "שליחת משימות" (dg / tkS) פורסמו – רק אז האפליקציה מציגה לעובד המורשה את טופס השליחה.
     match /rv/{v} {
       allow get: if isStaff() && v in ['tk2', 'tk3'];
     }
 
     // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
-    // fq: 'd' יומי, 'w' שבועי (wd: ימים 0–5), 'm' חודשי (md: 1–31). hh 0–23, mm 0–55 בכפולות 5. ed = זמן העריכה (בזמן אמת בכל כתיבה):
-    // השרת לא פותח משימה למועד שלפני ed, ולכן שמירה/הפעלה לא פותחת משימה "באיחור".
-    // עדכון: רק שדות הכלל (מהאפליקציה – עם updateMask), ו-ed חייב להשתנות. owner/by נשארים, או עוברים למנהל המעדכן בשמו.
     match /rtk/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -534,8 +462,6 @@ service cloud.firestore {
     }
 
     // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
-    // יצירה: צוות פעיל, בשמו, בזמן אמת, st 'new', ans ''. עדכון: מנהל – מצב, תשובה וסימון תגובה;
-    // בעלים – רק סימון תגובה (cAt/cBy/cT/cN) ו-st == 'new' (תגובת עובד מחזירה ל"ממתין"). מחיקה: מנהל.
     match /rq/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -605,7 +531,6 @@ service cloud.firestore {
         allow delete: if lpW() && (isManager());
 
         // תמונות בתגובה (17.11.2026): rq/{id}/c/{cid}/p/1..3, מסמך {img, t, uid} (כמו p של הבקשה).
-        // יצירה: רק כותב התגובה, בשמו, בזמן אמת, ורק N <= np של התגובה. קריאה: מי שקורא את הבקשה. בלי עדכון. מחיקה: מנהל.
         match /p/{pid} {
           function cmt() { return get(/databases/$(database)/documents/rq/$(id)/c/$(cid)).data; }
           function imgOk() {
@@ -628,9 +553,6 @@ service cloud.firestore {
         }
       }
       // תמונות בבקשה (17.11.2026): rq/{id}/p/r1..r3, מסמך {img, t, uid} – אותו מבנה ואותה הגבלה כמו תמונות משימה
-      // (tasks/{id}/p): data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים (האפליקציה דוחסת ל-JPEG ועוצרת מעל 880,000).
-      // קריאה: מנהל, או בעל הבקשה. יצירה: רק בעל הבקשה, בשמו, בזמן אמת, ורק rN עם N <= np שנקבע ביצירת הבקשה.
-      // בלי עדכון (תמונה לא מוחלפת). מחיקה: מנהל.
       match /p/{pid} {
         function req() { return get(/databases/$(database)/documents/rq/$(id)).data; }
         function canRead() {
@@ -657,8 +579,6 @@ service cloud.firestore {
     }
 
     // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
-    // קריאה וכתיבה – מנהלים בלבד (עובד ומנהל של עסק אחר נחסמים). תמונה: {img, t, uid}, jpeg/png/webp, 100 עד 900,000 תווים,
-    // רק יצירה (בלי דריסה), ורק כשהתבנית קיימת. מחיקת תבנית: מנהל (והאפליקציה מוחקת קודם את התמונה).
     match /tkt/{id} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -698,11 +618,6 @@ service cloud.firestore {
     }
 
     // ---------- קבוצות התכתבות (grp) – סבב 3, 17.11.2026 ----------
-    // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
-    // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
-    // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. pin – ההודעה המוצמדת (ראו pinOk). השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
-    // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
-    // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
     match /grp/{gid} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -715,7 +630,6 @@ service cloud.firestore {
             && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
       }
       // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
-      // ביטול הצמדה = מחיקת השדה. השרת (grpMDel) מוחק את pin כשההודעה המוצמדת נמחקת.
       function pinOk(d) {
         return !d.keys().hasAny(['pin'])
           || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
@@ -739,10 +653,6 @@ service cloud.firestore {
       allow delete: if lpW() && (isManager());
 
       // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid', txt? (<= 2000) }.
-      // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
-      // grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
-      // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
-      // re? (תשובה) ו-fw? (הועברה) – ראו reOk. אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
       match /m/{mid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
         function hasG() { return exists(/databases/$(database)/documents/grp/$(gid)); }
@@ -780,8 +690,6 @@ service cloud.firestore {
         allow delete: if lpW() && (isManager());
 
         // תמונה בהודעה: grp/{gid}/m/{mid}/p/1 = { img, t, uid } – אותו מבנה ואותה הגבלה כמו תמונות בבקשות (rq/{id}/p):
-        // data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים. יצירה: רק שולח ההודעה, רק להודעה מסוג 'img', רק המזהה 1.
-        // בלי עדכון (בלי דריסה). קריאה: כמו הקבוצה. מחיקה: מנהל.
         match /p/{pid} {
           function msg() { return get(/databases/$(database)/documents/grp/$(gid)/m/$(mid)).data; }
           function imgOk() {
@@ -802,8 +710,6 @@ service cloud.firestore {
       }
 
       // סימון (אימוג'י) על הודעה (תוספת 19.11): grp/{gid}/x/{mid}_{uid} = { mid, uid, byN, e, t } – סימון אחד לכל משתמש בכל הודעה.
-      // e אחד מהרשימה הקבועה, או '' = הסימון בוטל (עדכון ולא מחיקה, כדי שהסקירה לפי t תראה גם ביטול).
-      // קריאה וכתיבה: מי שרשאי לקרוא את הקבוצה (גם בקבוצה עם ao – החלטת הבעלים 19.11), רק המסמך שלו, ורק להודעה שקיימת. מחיקה: הבעלים או המנהל.
       match /x/{xid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
         function canRead() {
@@ -824,12 +730,6 @@ service cloud.firestore {
       }
 
       // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
-      // 23.11.2026 (וי קריאה, ביטול השתקה): קריאה – כל מי שרשאי לקרוא את הקבוצה (גם חבר אחר, בשביל ✓✓). mu מותר רק false
-      // (ההשתקה בוטלה; האפליקציה מחזירה mu=true ל-false). חדשים (רשות): d (התקבל עד, ms, עד עכשיו + 2 דק'), u (זמן הכתיבה, זמן אמת),
-      // n (השם, isMyName, עד 100). ההערות למטה על "רק הבעלים והמנהל" ועל mu ב-ao – היסטוריה (עד 22.11).
-      // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
-      // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
-      // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
       match /r/{uid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
         function canRead() {
@@ -851,8 +751,6 @@ service cloud.firestore {
     }
 
     // ---------- נוכחות (pres) ויומן שימוש (act) – 23.11.2026 ----------
-    // pres/{uid}: { on (bool), t (זמן אמת), n? (שם אמיתי: staff/{uid}.name, או isMyName – מנהל בלי staff), e? (תחילית המייל, isMyName) }.
-    // קריאה – הצוות. כתיבה – רק הבעלים, אם הוא עובד פעיל או מנהל. מחיקה – אף אחד. מחובר = on && t לפני פחות מ-5 דקות (באפליקציה).
     match /pres/{uid} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -872,8 +770,6 @@ service cloud.firestore {
     }
 
     // act/{uid}_{YYYY-MM-DD}: { uid, n (השם, עד 100), day, s (כניסות-יציאות, עד 300), v (מסכים, עד 3000), t (זמן אמת) }.
-    // כתיבה – רק עובד פעיל שאינו מנהל, רק המסמך שלו (המזהה = uid + '_' + day). קריאה (get + list) – מנהל בלבד. מחיקה – אף אחד (שמירה לתמיד).
-    // הפריטים שבתוך s ו-v לא נבדקים אחד-אחד (בלי לולאות בכללים) – רק סוג וגודל הרשימה. המתג cfg/act נאכף באפליקציה, לא כאן.
     match /act/{aid} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -893,14 +789,6 @@ service cloud.firestore {
     }
 
     // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 ----------
-    // hsr/{id}: פריט חוסר. מנהל ועובד פעיל – אותן הרשאות (האפיון): קריאה, יצירה, עריכה, "הגיע" ומחיקה רכה (st 'del', נשמר ואפשר לשחזר).
-    // מחיקה אמיתית – מנהל בלבד (אין כזו בממשק). שדות: n (1..80), nk (מפתח מנורמל, עד 200), gen (פריט כללי), sups / supN (מזהי ושמות ספקים, עד 10;
-    // בפריט כללי – ריקים), why ('store' | 'order' | 'both'), q? (מספר מעל 0 עד 100,000), cust? { nm עד 60, ph ספרות עד 15, cid? },
-    // ord? { id, no }, np (0 | 1 – יש תמונה), st ('open' | 'arr' | 'del'), by (uid), byN (השם – isMyName), t (זמן אמת), ub? / ut? (מי ומתי עדכן), h? (היסטוריה, עד 30).
-    // יצירה: st 'open', by = הכותב, בלי ub / ut / h. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
-    // hsr/{id}/p/1: תמונה { img, t, uid } (jpeg / png / webp, 100 עד 900,000 תווים) – יצירה בלבד, בלי עדכון (החלפה = מחיקה ויצירה). מחיקה – הצוות.
-    // hsph/{supId}: טלפון ספק { ph (9..15 ספרות), n (שם הספק), byN, t } – נשמר בפעם הראשונה ששולחים לספק בוואטסאפ.
-    // hsx/{supId}: שמות מוצרים מחשבוניות ספק { n, it (רשימה, עד 3000), t } – להצעת ספק. קריאה – הצוות; כתיבה – מנהל או עובד עם prc (בלי מחירים).
     match /hsr/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -916,19 +804,12 @@ service cloud.firestore {
           && snOk(d.supN, 5) && snOk(d.supN, 6) && snOk(d.supN, 7) && snOk(d.supN, 8) && snOk(d.supN, 9);
       }
       // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
-      // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
-      // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
-      // שלב 2 (19.11.2026) – הורדה אוטומטית מחשבונית ספק: רשומה { k, t, byN, u, pinv, inv, sup, q0?, q? } (pinv מזהה החשבונית, inv מספרה עד 30, sup ספק עד 60).
-      // 'inv' ← הגיע כולו (open → arr, הכמות לא משתנה, בלי q0 / q). 'part' ← הגיע חלקית: st נשאר open, q0 = הכמות הקודמת, q = החדשה (קטנה ממנה).
-      // 'unp' ← ביטול 'part' ({ k, t, byN, u }): st נשאר open, הרשומה הקודמת היא 'part', הכמות עדיין q שלה וחוזרת בדיוק ל-q0 שלה.
-      // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
       function hInv(e) {
         return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
           && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60
           && pinvOk(e.pinv);
       }
       // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף (get – לא תלוי בהרשאת הקריאה של pinv).
-      // inv / sup נשמרים כפי שהאפליקציה קיבלה אותם (השרת מנקה אותם אחרת) ולכן לא מושווים; הרשומה תמיד בשם המבצע (u, byN).
       function pinvOk(p) {
         let d = get(/databases/$(database)/documents/pinv/$(p)).data;
         return d.get('st', '') != 'void' && d.get('at', 0) is int && d.get('at', 0) >= resource.data.t;
@@ -981,9 +862,6 @@ service cloud.firestore {
           && (!d.keys().hasAny(['h']) || (d.h is list && d.h.size() <= 30));
       }
       // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
-      // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
-      // 19.11.2026 – "הוזמן": od = { u, byN, t, sup, eta } – בשם המבצע (u = המחובר, byN = השם שלו), t = ut, ספק עד 60 תווים,
-      // צפי הגעה YYYY-MM-DD או ריק. משתנה רק בעדכון שנוגע ב-od / ub / ut בלבד (סימון, עדכון או ביטול = מחיקת od). ביצירה – אסור.
       function odOk(d) {
         return !d.keys().hasAny(['od']) || (d.od is map && d.od.keys().hasOnly(['u', 'byN', 't', 'sup', 'eta']) && d.od.keys().hasAll(['u', 'byN', 't', 'sup', 'eta'])
           && d.od.u == request.auth.uid && isMyName(d.od.byN) && d.od.t == d.get('ut', 0)
@@ -1045,9 +923,6 @@ service cloud.firestore {
     }
 
     // ---------- חשבוניות ספקים לעובד (supinv) ----------
-    // טלפון המנהל משקף לכאן רק חשבוניות "ספקים" ו"ספקים אפייה" של החודש הנוכחי (כולל ממתינות לאישור), בלי שום נתון כספי אחר.
-    // קריאה: עובד פעיל או מנהל. כתיבה ומחיקה: מנהל בלבד, ורק השדות שהאפליקציה כותבת (supSync).
-    // התמונה בחלקים בתת-האוסף p (כמו chunks): רק השדה data, עד 700,000 תווים.
     match /supinv/{id} {
       allow read: if isStaff();
       allow create, update: if lpW() && (isManager()
@@ -1065,9 +940,6 @@ service cloud.firestore {
     }
 
     // ---------- בקשות לעדכון האפליקציה (appreq) ----------
-    // בקשת בעל העסק 2.11.2026: עובד או מנהל כותב מה צריך לתקן, עם צילומי מסך (לא חובה). כל הצוות רואה את כל הבקשות.
-    // יצירה: בשמו, בסטטוס 'new', בלי שדות סטטוס. העובד לא עורך ולא מוחק. רק מנהל משנה סטטוס (ורק שדות הסטטוס) ומוחק.
-    // np = מספר חלקי התמונות (0 = בלי תמונות, עד 8).
     match /appreq/{id} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -1091,7 +963,6 @@ service cloud.firestore {
       allow delete: if lpW() && (isManager());
 
       // חלקי התמונות: appreq/{id}/p/{k} (כמו supinv): רק השדה data, עד 700,000 תווים.
-      // כותב רק מי שיצר את הבקשה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. אין עדכון (אין עריכה אחרי השליחה).
       match /p/{k} {
         function req() { return get(/databases/$(database)/documents/appreq/$(id)).data; }
         allow read: if isStaff();
@@ -1109,9 +980,6 @@ service cloud.firestore {
     }
 
     // ---------- תור "נשלח למנהל לטיפול" (mq) – סריקה אחידה, שלב 6 ----------
-    // עובד שסרק מסמך מסוג שאין לו הרשאה להזין: נשלחים רק הצילום (בחלקים, p) והסוג המשוער (k) – בלי סכומים ובלי רשומה כספית.
-    // יצירה: עובד פעיל (לא מנהל), בשמו, בזמן אמת, בסטטוס 'new', רק השדות האלה. קריאה: מנהל – הכול; עובד – רק את שלו.
-    // עדכון: מנהל בלבד, פעם אחת (רק מ-'new' ל-'done'/'rej'), ורק שדות הסטטוס – כך פריט שטופל לא נשמר פעמיים. העובד לא עורך ולא מוחק.
     match /mq/{id} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -1154,11 +1022,6 @@ service cloud.firestore {
     }
 
     // ---------- סגירת קופה (closings) ----------
-    // בקשת בעל העסק 2.11.2026 (שלב 1): עובד או מנהל שולח סגירת קופה (דוח Z והצהרת פתיחה) עם הסכומים שזוהו.
-    // הנתונים הכספיים נשמרים רק בטלפון המנהל, ולכן: קריאה – מנהל בלבד. העובד לא רואה כלום אחרי השליחה (גם לא את שלו).
-    // יצירה: עובד פעיל או מנהל, בשמו, בזמן אמת. עובד – רק בסטטוס 'new'. מנהל – גם 'ok' (סגירה שהכניס בעצמו להכנסות).
-    // עדכון: מנהל בלבד, ורק שדות הסטטוס (הסכומים לא משתנים בענן). מחיקה: מנהל בלבד.
-    // data = JSON של שדות הטופס (עד 20,000 תווים); np = מספר חלקי הצילומים (1 עד 8).
     match /closings/{id} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -1190,7 +1053,6 @@ service cloud.firestore {
       allow delete: if lpW() && (isManager());
 
       // חלקי הצילומים: closings/{id}/p/{k} (כמו appreq): רק השדה data, עד 700,000 תווים.
-      // כותב רק מי ששלח את הסגירה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
       match /p/{k} {
         function cl() { return get(/databases/$(database)/documents/closings/$(id)).data; }
         allow read: if isManager();
@@ -1208,15 +1070,6 @@ service cloud.firestore {
     }
 
     // ---------- הוצאות מקופה (cashout) ----------
-    // סגירת קופה – שלב 2 (בקשת בעל העסק 2.11.2026): מראה לכל הוצאה מקופה, כדי שכל הצוות יראה אותן בבדיקת הסגירה ובתזכורת ההפקדות.
-    // קריאה: עובד פעיל או מנהל (גם של אחרים – החלטת בעל העסק).
-    // יצירה: בשמו, בזמן אמת, עם קופה מוכרת, תאריך תקין, סכום חיובי עד 1,000,000 וסיבה (1–300 תווים).
-    //   dep חייב להתאים לסיבה: '1' אם יש בה מילה מהשורש פ-ק-ד (כמו ZDEP באפליקציה), אחרת ''.
-    //   עובד: zc ו-dp ריקים, והמזהה = מזהה ההוצאה שלו ב-inbox (src), שעוד לא נקלטה (status 'new') ונשלחה ב-15 הדקות האחרונות (inbox.t).
-    //   מנהל: מראה מהטלפון שלו.
-    // עדכון: מנהל – zc ו-dp, ותוכן ההוצאה (קופה, תאריך, סכום, סיבה ו-dep, באותם תנאים כמו ביצירה) כשהוא עורך אותה – עדכון במקום, בלי מחיקה. עובד – רק dp, רק מריק, רק בהוצאה שצריכה הפקדה, ורק למזהה של הפקדה שהוא עצמו יוצר
-    //   באותו commit (או ב-15 הדקות שלפני), בסטטוס 'new', שכוללת את ההוצאה הזו (getAfter). עובד לא משנה סכום, סיבה או שיוך לסגירה.
-    // מחיקה: מנהל בלבד.
     match /cashout/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
@@ -1245,8 +1098,6 @@ service cloud.firestore {
           && request.time.toMillis() - dd.t < 900000;
       }
       // 6ח (עדכון חוזה 18, החלטת המשתמש): עובד לא רושם הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה (zlast/{reg}).
-      // הגבול כמו zcB באפליקציה ו-bound בשרת: הפתיחה שצורפה (od/otm) אם היא אחרי הסגירה ועד יום אחד אחריה; אחרת זמן הסגירה.
-      // אותו יום כמו הגבול בלי שעה (בהוצאה או בגבול) – מותר ("לא ברור", המנהל מכריע בסגירה). אין zlast – מותר.
       function dt(s) { return timestamp.date(int(s[0:4]), int(s[5:7]), int(s[8:10])); }
       function afterB(z) {
         let cd = z.get('d', ''); let ctm = z.get('tm', ''); let od = z.get('od', ''); let otm = z.get('otm', '');
@@ -1281,11 +1132,6 @@ service cloud.firestore {
     }
 
     // ---------- אישורי הפקדה (deposits) ----------
-    // שלב 2: עובד או מנהל מעלה אישור הפקדה (צילום אחד או כמה) ומסמן אילו הוצאות "להפקדה" הוא מכסה (items, 1–30).
-    // קריאה: עובד פעיל או מנהל – כולם צריכים לדעת מה כבר הופקד. יצירה: בשמו, בזמן אמת, בסטטוס 'new' בלבד;
-    // a = סכום האישורים (חיובי, עד 1,000,000); d = תאריך האישור; why = סיבה כשהסכום לא תואם (עד 500); np = חלקי הצילומים (1–8);
-    // data = JSON {v, rows:[{d, a, ai:{d, a}|null}]} – מה שהוקלד ומה שזוהה מכל צילום (עד 5,000 תווים). המנהל מאשר אוטומטית רק כשמה שזוהה תואם.
-    // המנהל מאשר או דוחה (רק שדות הסטטוס) ומוחק. העובד לא משנה ולא מוחק.
     match /deposits/{id} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -1313,7 +1159,6 @@ service cloud.firestore {
       allow delete: if lpW() && (isManager());
 
       // חלקי הצילומים: deposits/{id}/p/{k} (כמו closings): רק השדה data, עד 700,000 תווים.
-      // כותב רק מי ששלח את האישור, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
       match /p/{k} {
         function dp() { return get(/databases/$(database)/documents/deposits/$(id)).data; }
         allow read: if isManager();
@@ -1331,10 +1176,6 @@ service cloud.firestore {
     }
 
     // ---------- הסגירה האחרונה של כל קופה (zlast) ----------
-    // שלב 2 (2.11.2026): השוואת ההוצאות מקופה היא בחלון שבין הסגירה הקודמת של הקופה לנוכחית. עובד לא קורא closings,
-    // ולכן זמן הסגירה האחרונה נשמר כאן: zlast/{reg} = {d, tm, id, uid, t, od, otm} (od/otm – הפתיחה שצורפה לסגירה). קריאה: עובד פעיל או מנהל.
-    // עובד כותב רק יחד עם יצירת הסגירה שלו (אותו commit: הסגירה עוד לא הייתה קיימת לפני, ו-getAfter מראה אותה – שלו,
-    // באותה קופה, אותו תאריך ושעה, נוצרה עכשיו), ורק קדימה בזמן. מנהל – כל ערך (גם אחורה, כשהוא דוחה סגירה), ומחיקה.
     match /zlast/{reg} {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -1366,7 +1207,6 @@ service cloud.firestore {
     }
 
     // ---------- ימות: תוכן שלוחות הקו (חוזה 5.3, משימה 2026-11-02) ----------
-    // רק השרת (Admin SDK) כותב וקורא את yemot_items ואת yemot_line_backups. כתוב במפורש, גם אם הכלל האחרון סוגר.
     match /yemot_items/{id} {
       allow read, write: if false;
     }
@@ -1386,7 +1226,6 @@ service cloud.firestore {
       allow read, write: if false;
     }
     // מילון ההגייה: מסמך אחד (main). רק מנהל קורא וכותב, בשלושה שדות בלבד. השרת קורא אותו לפני כל העלאה.
-    // updatedAt = זמן במילישניות (כמו במשימות), עד 2 דקות מהשעון של השרת. updatedBy = המשתמש עצמו. אין מחיקה.
     match /yemot_lexicon/{docId} {
       allow read: if docId == 'main' && isManager();
       allow create, update: if lpW() && (docId == 'main' && isManager()
@@ -1398,12 +1237,6 @@ service cloud.firestore {
     }
 
     // ---------- ריבוי עסקים (משימה 2026-11-05, שלב 2) ----------
-    // כל הכללים שלמעלה (בשורש) נשארו בדיוק כמו שהיו: לארג' פעמי במצב legacy והגרסאות הישנות ממשיכים לעבוד בלי שינוי.
-    // מכאן ועד הכלל האחרון: רק תוספות. הנתונים של כל עסק נמצאים מתחת ל-b/{bizId}, והתפקיד נבדק בתוך העסק בלבד:
-    //   מנהל עסק = b/{bizId}/admins/{uid}; עובד = b/{bizId}/staff/{uid} עם active == true.
-    //   מנהל־על = superadmins/{uid}: מנהל מלא בכל עסק (כולל נתונים כספיים, וגם בעסק מושהה). עדכון חוזה 2.
-    //   עסק מושהה (status != 'active'): מנהל העסק ועובדיו חסומים בכל הנתונים. מותרת להם רק קריאה של מסמך העסק.
-    //   תוספת כבויה (features[key] != true, כולל מסמך בלי features): אין גישה לאוסף שלה, לאף אחד.
 
     function isSuper() {
       return request.auth != null && exists(/databases/$(database)/documents/superadmins/$(request.auth.uid));
@@ -1416,11 +1249,6 @@ service cloud.firestore {
     }
 
     // ----- הזמנות ומלאי בשורש – רק ללארג' פעמי במצב legacy (2026-11-08, שלב 1). אותם נתיבים ותנאים כמו ב-b/{bizId},
-    // כך שכלי ההעברה מעתיק אותם כמו שהם. בשורש כל התוספות פעילות.
-    // כל כתיבה – רק השרת (functions/orders.js). private/pay – אף אחד מהאפליקציה (הכלל האחרון).
-    // fb/ord-perm-enforce (2026-11-11): מתג "הזמנות" (perms.ord) נאכף גם בשורש, בדיוק כמו בשרת (roles.js hasPerm, שקורא את staff/{uid} בשורש)
-    // וכמו perm('ord') ב-b/{bizId}: מנהל / מנהל־על = כן; עובד פעיל בלי perms (עובד ישן) = כן (ברירת המחדל); עם perms – רק ord == true.
-    // הקריאה ל-staff/{uid} זהה לזו של isActiveEmployee, ולכן לא נספרת פעמיים.
     function rOrdPerm() {
       return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', null) == null
         || get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.perms.get('ord', false) == true;
@@ -1516,13 +1344,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
     // 14.11.2026 (שלב 3 חלק ב'): פרטי העסק למסמכים (arcfg/main) – עובד עם הזמנות ומנהל קוראים. מונים (seq_*), מזהי בקשה (req_*) ולוגו – אף אחד. כתיבה – רק השרת (ar.js)
-    // 15.11.2026 (שלב 4): arcfg/off (רשמי/טיוטה, סוג העסק, מספרי התחלה – מנהל־על כותב דרך setArOff) – מנהל קורא
     match /arcfg/{docId} {
       allow get: if (rOrd() && docId == 'main') || (rMgr() && docId == 'off');
       allow list, create, update, delete: if false;
     }
     // 15.11.2026 (שלב 4): חשבוניות, קבלות וזיכויים (ardoc) והקצאות (aralloc) – עובד עם הזמנות ומנהל קוראים (106). כתיבה – רק השרת (ar.js, lib/ar-doc.js).
-    // אסמכתאות (arproof) וסיכומים חודשיים (arsum) – בלי כלל = אף אחד מהאפליקציה
     match /ardoc/{id} {
       allow read: if rOrd();
       allow create, update, delete: if false;
@@ -1537,13 +1363,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
     // ייבוא ברקע (2026-11-11, functions/imports.js): מסמך העבודה – מונים בלבד, מנהל קורא; כתיבה – רק השרת.
-    // החלקים המוצפנים (impQ/**) ותוצאות השורות – בלי שום כלל, כלומר סגורים לכולם (הכלל האחרון).
     match /impJobs/{id} {
       allow read: if rMgr();
       allow create, update, delete: if false;
     }
     // תמחור מחשבונית ספק (12.11.2026, functions/pricing.js): חשבוניות לתמחור. קריאה – מנהל, או עובד פעיל עם מתג prc
-    // ("עדכון מחירים ומלאי"; עובד בלי perms = כבוי – החלטה 5, גם בלארג' פעמי). כתיבה – רק השרת (נעילה, סיום, ביטול).
     function rPrc() {
       return rMgr() || (isActiveEmployee()
         && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('prc', false) == true);
@@ -1558,10 +1382,6 @@ service cloud.firestore {
     }
 
     // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
-    // משתמש במזכירה = מנהל אמיתי של העסק (admins/{uid}, לא מנהל־על בתוקף תפקידו) + התוספת פעילה + עסק פעיל +
-    // במצב "מנהל ראשי בלבד" (sec_cfg/main.mode == 'main') – רק mainUid + אישר את הנוסח הנוכחי של מסך ההסכמה (mgr.<uid>.cv ==
-// CONSENT_VER בשרת, functions/secretary.js; החלפת נוסח = לעדכן כאן ובשרת יחד – בדיקה ב-secretary.test.js).
-    // עובד – אין גישה לשום אוסף sec_*. sec_mirror, sec_facts_sensitive – אף אחד מהאפליקציה (רק השרת).
     function sOn() { return exists(/databases/$(database)/documents/b/largpeami) && get(/databases/$(database)/documents/b/largpeami).data.get('dataRoot', '') == 'legacy' && get(/databases/$(database)/documents/b/largpeami).data.get('status', '') == 'active' && get(/databases/$(database)/documents/b/largpeami).data.get('features', {}).get('secretary', false) == true; }
     function sCfg() { return get(/databases/$(database)/documents/sec_cfg/main).data; }
     function sUser() {
@@ -1576,7 +1396,6 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
     // שיחה אישית: רק המנהל עצמו. מנהל־על חסום במפורש, גם אם הוא מנהל של העסק לפי admins (החלטה 8):
-    // הוא קורא רק דרך secAdminReadChat, שרושמת כל צפייה ב-sec_log.
     match /sec_chat/{uid} {
       allow read, create, update, delete: if false;
       match /m/{id} {
@@ -1654,11 +1473,6 @@ service cloud.firestore {
     }
 
     // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
-    // התוספת כבויה כברירת מחדל בכל עסק, גם בלארג' פעמי (כמו secretary). כבויה = אין גישה לאף אוסף של התוספת (s3br, s3set, smap, sround, srun ועוד).
-    // השרת (Admin SDK, functions/) כותב כל מה שרגיש: מפה וגרסאות (s3SaveMap – גם לעובד עם מתג s3m "שרטוט מפה"), סבבים,
-    // תמונות, תוצאות AI, סיכומים, מונים, ביצועים, משימות תיקון. הלקוח כותב ישירות רק: s3set (מנהל), smap/{mapId}/bay (מנהל),
-    // sround (מנהל), s3appeal (יצירה – עובד בסבב או מנהל; הכרעה – מנהל), s3short (אישור – מנהל). מחיקה (delete) – לאף לקוח.
-    // פונקציות בדיקה משותפות לשני המסלולים (בשורש ובתוך b/{bizId}). "מי" = request.auth.uid; זמן = מילישניות (כמו nowOk).
     function s3Now(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
     function s3Uid(v) { return v is string && v.matches('^[A-Za-z0-9_-]{6,128}$'); }
     function s3Str(v, a, b) { return v is string && v.size() >= a && v.size() <= b; }
@@ -1694,7 +1508,6 @@ service cloud.firestore {
         && s3Now(d.upd) && d.by == request.auth.uid;
     }
     // בעדכון (sround, bay) upd חייב להשתנות – כדי שעדכון לא ישתמש שוב בזמן של עדכון קודם.
-    // sround/{rid} – כלל סבב (חוזה 4.7). שדות השרת (uids, next, last, lastRun, err) – לא ברשימות, ולכן חסומים ללקוח.
     function s3FOk(f) {
       return f is map && f.keys().hasOnly(['k', 'dow', 'dom', 'n']) && f.keys().hasAll(['k'])
         && f.k in ['week', 'month', 'days', 'manual']
@@ -1720,7 +1533,6 @@ service cloud.firestore {
       return d.keys().hasOnly(['br', 'map', 'name', 'f', 'asg', 'sub', 'subU', 'due', 'on', 'upd', 'by']) && s3RoundOk(d);
     }
     // שינוי סימון המחיקה (סל מחזור, ע5): (א) מחיקה – del ל-1 עם delAt עכשווי ו-delBy = המשתמש; (ב) ביטול מחיקה – del ל-0,
-    // רק בתוך 30 יום מ-delAt (delAt/delBy נשארים או נמחקים שניהם). בלי שינוי ב-del – אסור לגעת ב-delAt/delBy.
     function s3DelChg(nw, od) {
       return !nw.diff(od).affectedKeys().hasAny(['del', 'delAt', 'delBy'])
         || (od.get('del', 0) != 1 && nw.get('del', 0) is int && nw.get('del', 0) == 1
@@ -1827,9 +1639,6 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
     // ----- תהליך הקמת חנות (17.11.2026; חוזה: משימות/2026-11-17_תהליך-הקמת-חנות/תוצרים/0-חוזה-נתונים.md) -----
-    // אוספים חדשים בלבד. כל כתיבה – רק השרת (s3SetupNote, mapQs, mapFix, s3CapPut, s3CapCheck, s3SaveMap, s3SetupDone). אין שינוי באף כלל קיים.
-    // s3setup/{mapId} + n/{itemId} + cap/{key}: מצב ההקמה, הערות, שאלות, תוכנית הצילום ותוצאות – מנהל ומי שמשרטט (s3m), כי הם המצלמים.
-    // s3look/{mapId}: תמונות הקירות/רצפה/תקרה/דלתות/קופות לדגם – כל הצוות (כמו s3sum).
     match /s3setup/{mapId} {
       allow read: if s3On() && (rMgr() || r3S3m());
       allow create, update, delete: if false;
@@ -1905,15 +1714,11 @@ service cloud.firestore {
       function bEmp() { return bIsActiveStaff() && bActive(); }
       function bStaff() { return bMgr() || bEmp(); }
       // 6ה (עדכון חוזה 15): הרשאות עובד לפי מתגים. staff/{uid}.perms – מפה של מתגים (רק השרת כותב, setStaffPerms, מנהל־על).
-      // אין perms (עובד ישן) = בדיוק ההרשאות שהיו עד היום (dflt). יש perms = רק מתג שערכו true. מנהל / מנהל־על = הכול.
-      // הקריאה ל-staff/{uid} זהה לזו של bIsActiveStaff, ולכן לא נספרת פעמיים.
       function myStaff() { return get(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid)).data; }
       function dflt(k) { return k in ['expR', 'expW', 'incW', 'sup', 'ord']; }
       // 6ו (עדכון חוזה 16): pv(k) = ערך המתג של העובד (בלי perms = dflt). perm(k) = רק true.
-      // expR יכול להיות גם 'own' = "רואה רק את ההוצאות שהוא עצמו הזין". expOwn() = true או 'own'.
       function pv(k) { return myStaff().get('perms', null) == null ? dflt(k) : myStaff().perms.get(k, false); }
       // 18.11.2026 (הכרעת בעל העסק): קופה (pos / posMgr) – רק מנהל־על מחליט, גם למנהלים. מנהל עסק = admins/{uid}.perms (רק השרת כותב,
-      // setStaffPerms, מנהל־על). מנהל־על = הכול, כמו היום. שאר ההרשאות של מנהל לא השתנו. אותה הגדרה כמו hasPerm ב-functions/lib/roles.js.
       function myAdmin() { return get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data; }
       function saOnly(k) { return k in ['pos', 'posMgr']; }
       function posPerm(k) {
@@ -1927,28 +1732,20 @@ service cloud.firestore {
 
       function nowMs(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       // brand (שם תצוגה, לוגו, צבעים): אף אחד לא כותב מהאפליקציה – רק השרת (setBusinessBrand, מנהל־על בלבד, עם audit).
-      // עדכון חוזה 14: מנהל העסק ועובד – קריאה בלבד (כחלק ממסמך העסק).
       function aff() { return request.resource.data.diff(resource.data).affectedKeys(); }
       // מנהל־על כותב מהאפליקציה רק migrationTarget. status, features, adv, brand, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
-      // עדכון חוזה 6): כך כל שינוי נרשם ב-audit, ו-users/{uid}.bizStatus מתעדכן יחד עם status. ownerEmail/ownerPhone/adv
-      // נשמרים ב-b/{bizId}/private/info ולא במסמך העסק. name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
-      // עדכון חוזה 7א: migrationTarget (בוליאני, כלי ההעברה כותב אותו) – רק מנהל־על (או השרת). מנהל העסק ועובד – לא.
-      // 2026-11-08: org (סניפים, בנקים, כרטיסים) – רק השרת (setBusinessOrg, עם audit). לא ברשימה כאן, ולכן נחסם מהאפליקציה.
       function superUpdOk() {
         return aff().hasOnly(['migrationTarget'])
           && request.resource.data.migrationTarget is bool;
       }
 
       // מסמך העסק: קריאה – חברי העסק (גם כשהעסק מושהה, כדי להציג "החשבון מושהה") ומנהל־על. רשימת כל העסקים – רק מנהל־על.
-      // כתיבה: מנהל העסק – כלום (עדכון חוזה 14: גם לא brand). מנהל־על – לפי superUpdOk. יצירה ומחיקה – רק השרת.
       allow get: if bIsAdmin() || bIsActiveStaff() || bSuper();
       allow list: if isSuper();
       allow update: if bSuper() && superUpdOk();
       allow create, delete: if false;
 
       // private: הגדרות שרת של העסק (למשל גיבוב אסימון ימות, קודי הזמנה) – אף אחד מהאפליקציה.
-      // חריג אחד (עדכון חוזה 6): private/info (ownerEmail, ownerPhone, adv) – קריאה למנהל העסק (בעסק פעיל) ולמנהל־על.
-      // עובד לא קורא. כתיבה – רק השרת.
       match /private/{docId} {
         // 2026-11-08: גם private/org (מספרי חשבון מלאים של בנקים) – באותו תנאי כמו info. עובד לא קורא.
         allow get: if docId in ['info', 'org'] && ((bIsAdmin() && bActive()) || bSuper());
@@ -1969,8 +1766,6 @@ service cloud.firestore {
       }
 
       // ----- כל האוספים הקיימים, בתוך העסק (העתק של הכללים בשורש; isManager/isActiveEmployee/isStaff ← bMgr/bEmp/bStaff,
-      // וכל get/exists מצביע לתוך b/{bizId}). אוסף של תוספת עטוף ב-feat('<מפתח>'). -----
-      // admins: העתק של הכלל בשורש
       match /admins/{userId} {
         allow get: if (isSelf(userId) && bActive() && (bIsAdmin() || bIsActiveStaff())) || bSuper();
         // 18.11.2026: מנהל־על רואה את רשימת המנהלים של העסק (מסך העובדים – מתגי הקופה למנהלים). אחרים – לא
@@ -2043,11 +1838,6 @@ service cloud.firestore {
       }
 
       // 6ו (עדכון חוזה 16): wv – תצוגות לעובד (הכנסות, משכורות, דוחות), חודש אחד לכל מסמך: {inc|sal|rep}_YYYY-MM.
-      // רק המכשיר של המנהל כותב (המראה של הנתונים שלו). קריאה – לפי המתג: inc = incR, sal = sal. רק קריאה ישירה (get).
-      // 6ז (עדכון חוזה 17): הדוח מפוצל לפי רמה, כדי שעובד לא יוכל לקרוא נתון שאסור לו גם בבקשה ישירה:
-      //   rpi_ = הכנסות לפי קטגוריה (rep); rpe_ = הוצאות לפי קטגוריה בלי משכורות (rep + expR == true; 'own' / false – לא);
-      //   rps_ = סך המשכורות (rep + sal). המסמך הישן rep_ (6ו, כלל גם הוצאות ומשכורות) – רק למנהל, ולא נכתב יותר.
-      //   (החלטות 7.11, 20:45) rpi_ דורש גם incR. rpo_YYYY-MM_<uid> = ההוצאות שהעובד הזה הזין (לפי eu) – רק הוא קורא (uid במזהה), עם rep ו-expR 'own' או true.
       match /wv/{id} {
         function balAll() { return bMgr() || myStaff().perms.get('balB', []).size() == 0; }
         allow get: if (id.matches('^inc_.*') && perm('incR'))
@@ -2055,12 +1845,10 @@ service cloud.firestore {
           || (id.matches('^rpi_.*') && perm('rep') && perm('incR'))
           || (id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_.+$') && id == 'rpo_' + id.split('_')[1] + '_' + request.auth.uid && perm('rep') && expOwn())
           // 19.11.2026 (שלב E, "השכר שלי"): pay_YYYY-MM_<uid> = השכר המשוער של העובד הזה בלבד (מכשיר המנהל מפרסם רק עם המתג pay.show).
-          // קורא רק העובד שה-uid שלו במזהה, ורק כשהוא עובד פעיל בעסק פעיל (bEmp). בלי מתג הרשאה – המתג אצל המנהל בכרטיס העובד.
           || (id.matches('^pay_20[0-9]{2}-(0[1-9]|1[0-2])_[A-Za-z0-9_-]{1,128}$') && id == 'pay_' + id.split('_')[1] + '_' + request.auth.uid && bEmp())
           || (id.matches('^rpe_.*') && perm('rep') && perm('expR'))
           || (id.matches('^rps_.*') && perm('rep') && perm('sal'))
           // 2026-11-12: "מצב העסק" (bal) – סכומים בלבד {i,e}. bal_YYYY-MM = כל העסק; bal_YYYY-MM_<סניף> = סניף אחד.
-          // עובד שהוגבל לסניפים (perms.balB לא ריק) קורא רק את מסמכי הסניפים שלו, ולא את סך העסק.
           || (id.matches('^bal_20[0-9]{2}-(0[1-9]|1[0-2])$') && perm('bal') && balAll())
           || (id.matches('^bal_20[0-9]{2}-(0[1-9]|1[0-2])_[a-z0-9_]{2,20}$') && perm('bal')
               && (balAll() || id.replace('^bal_20[0-9]{2}-[0-9]{2}_', '') in myStaff().perms.get('balB', [])))
@@ -2295,9 +2083,6 @@ service cloud.firestore {
       }
 
       // ptk, rtk, rq (+ rq/{id}/c): העתק של הכללים בשורש (תוספת 'tasks'), 12.11.2026
-      // ptk: תזכורת אישית. רואים רק הבעלים (owner) והמנהל – גם לא בשאילתה (עובד שולף where owner == uid).
-      // יצירה: צוות פעיל, בשמו, בזמן אמת, פתוחה, יעד בטווח של tasks. עדכון (בעלים או מנהל): רק st/sub/late/txt.
-      // done: sub בזמן אמת (או ללא שינוי כשכבר done), late '' או '1'. open: sub 0, late ''. מחיקה: הבעלים או מנהל.
       match /ptk/{id} {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
@@ -2331,9 +2116,6 @@ service cloud.firestore {
       }
 
       // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
-      // fq: 'd' יומי, 'w' שבועי (wd: ימים 0–5), 'm' חודשי (md: 1–31). hh 0–23, mm 0–55 בכפולות 5. ed = זמן העריכה (בזמן אמת בכל כתיבה):
-      // השרת לא פותח משימה למועד שלפני ed, ולכן שמירה/הפעלה לא פותחת משימה "באיחור".
-      // עדכון: רק שדות הכלל (מהאפליקציה – עם updateMask), ו-ed חייב להשתנות. owner/by נשארים, או עוברים למנהל המעדכן בשמו.
       match /rtk/{id} {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
@@ -2367,8 +2149,6 @@ service cloud.firestore {
       }
 
       // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
-      // יצירה: צוות פעיל, בשמו, בזמן אמת, st 'new', ans ''. עדכון: מנהל – מצב, תשובה וסימון תגובה;
-      // בעלים – רק סימון תגובה (cAt/cBy/cT/cN) ו-st == 'new' (תגובת עובד מחזירה ל"ממתין"). מחיקה: מנהל.
       match /rq/{id} {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
@@ -2438,7 +2218,6 @@ service cloud.firestore {
           allow delete: if feat('tasks') && (bMgr());
 
           // תמונות בתגובה (17.11.2026): rq/{id}/c/{cid}/p/1..3, מסמך {img, t, uid} (כמו p של הבקשה).
-          // יצירה: רק כותב התגובה, בשמו, בזמן אמת, ורק N <= np של התגובה. קריאה: מי שקורא את הבקשה. בלי עדכון. מחיקה: מנהל.
           match /p/{pid} {
             function cmt() { return get(/databases/$(database)/documents/b/$(bizId)/rq/$(id)/c/$(cid)).data; }
             function imgOk() {
@@ -2461,9 +2240,6 @@ service cloud.firestore {
           }
         }
         // תמונות בבקשה (17.11.2026): rq/{id}/p/r1..r3, מסמך {img, t, uid} – אותו מבנה ואותה הגבלה כמו תמונות משימה
-        // (tasks/{id}/p): data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים (האפליקציה דוחסת ל-JPEG ועוצרת מעל 880,000).
-        // קריאה: מנהל, או בעל הבקשה. יצירה: רק בעל הבקשה, בשמו, בזמן אמת, ורק rN עם N <= np שנקבע ביצירת הבקשה.
-        // בלי עדכון (תמונה לא מוחלפת). מחיקה: מנהל.
         match /p/{pid} {
           function req() { return get(/databases/$(database)/documents/b/$(bizId)/rq/$(id)).data; }
           function canRead() {
@@ -2490,8 +2266,6 @@ service cloud.firestore {
       }
 
       // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
-      // קריאה וכתיבה – מנהלים בלבד (עובד ומנהל של עסק אחר נחסמים). תמונה: {img, t, uid}, jpeg/png/webp, 100 עד 900,000 תווים,
-      // רק יצירה (בלי דריסה), ורק כשהתבנית קיימת. מחיקת תבנית: מנהל (והאפליקציה מוחקת קודם את התמונה).
       match /tkt/{id} {
         function nw() { return request.resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -2531,11 +2305,6 @@ service cloud.firestore {
       }
 
       // grp: העתק של הכלל בשורש (תוספת 'groups' – מתג 'קבוצות התכתבות' של מנהל־העל), עם התפקידים של העסק (bMgr / bEmp)
-      // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
-      // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
-      // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. pin – ההודעה המוצמדת (ראו pinOk). השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
-      // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
-      // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
       match /grp/{gid} {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
@@ -2548,7 +2317,6 @@ service cloud.firestore {
               && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
         }
         // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
-        // ביטול הצמדה = מחיקת השדה. השרת (grpMDel) מוחק את pin כשההודעה המוצמדת נמחקת.
         function pinOk(d) {
           return !d.keys().hasAny(['pin'])
             || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
@@ -2572,10 +2340,6 @@ service cloud.firestore {
         allow delete: if feat('groups') && (bMgr());
 
         // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid', txt? (<= 2000) }.
-        // טקסט (k 't') – txt חובה. תמונה – txt רשות (כיתוב), והתמונה עצמה ב-p/1. סרטון – vp (בדיוק הנתיב שלה ב-Storage:
-        // b/{bizId}/grpv/{gid}/{mid}), vs (שניות, 1..60), vb (בתים, 1..30MB), txt רשות.
-        // שליחה: מנהל בכל קבוצה; עובד פעיל רק בקבוצה שהוא ב-mem שלה, ורק כש-ao לא true. תמונה וסרטון – רק כש-md == true.
-        // re? (תשובה) ו-fw? (הועברה) – ראו reOk. אין עדכון אחרי שליחה. מחיקה: מנהל בלבד.
         match /m/{mid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
           function hasG() { return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)); }
@@ -2613,8 +2377,6 @@ service cloud.firestore {
           allow delete: if feat('groups') && (bMgr());
 
           // תמונה בהודעה: grp/{gid}/m/{mid}/p/1 = { img, t, uid } – אותו מבנה ואותה הגבלה כמו תמונות בבקשות (rq/{id}/p):
-          // data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים. יצירה: רק שולח ההודעה, רק להודעה מסוג 'img', רק המזהה 1.
-          // בלי עדכון (בלי דריסה). קריאה: כמו הקבוצה. מחיקה: מנהל.
           match /p/{pid} {
             function msg() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(mid)).data; }
             function imgOk() {
@@ -2635,8 +2397,6 @@ service cloud.firestore {
         }
 
         // סימון (אימוג'י) על הודעה (תוספת 19.11): grp/{gid}/x/{mid}_{uid} = { mid, uid, byN, e, t } – סימון אחד לכל משתמש בכל הודעה.
-        // e אחד מהרשימה הקבועה, או '' = הסימון בוטל (עדכון ולא מחיקה, כדי שהסקירה לפי t תראה גם ביטול).
-        // קריאה וכתיבה: מי שרשאי לקרוא את הקבוצה (גם בקבוצה עם ao – החלטת הבעלים 19.11), רק המסמך שלו, ורק להודעה שקיימת. מחיקה: הבעלים או המנהל.
         match /x/{xid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
           function canRead() {
@@ -2657,12 +2417,6 @@ service cloud.firestore {
         }
 
         // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
-        // 23.11.2026 (וי קריאה, ביטול השתקה): קריאה – כל מי שרשאי לקרוא את הקבוצה (גם חבר אחר, בשביל ✓✓). mu מותר רק false
-        // (ההשתקה בוטלה; האפליקציה מחזירה mu=true ל-false). חדשים (רשות): d (התקבל עד, ms, עד עכשיו + 2 דק'), u (זמן הכתיבה, זמן אמת),
-        // n (השם, isMyName, עד 100). ההערות למטה על "רק הבעלים והמנהל" ועל mu ב-ao – היסטוריה (עד 22.11).
-        // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
-        // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
-        // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
         match /r/{uid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
           function canRead() {
@@ -2684,8 +2438,6 @@ service cloud.firestore {
       }
 
       // ---------- נוכחות (pres) ויומן שימוש (act) – 23.11.2026 – העתק של הכלל בשורש (בלי מתג תוספת), עם התפקידים של העסק ----------
-      // pres/{uid}: { on (bool), t (זמן אמת), n? (שם אמיתי: staff/{uid}.name, או isMyName – מנהל בלי staff), e? (תחילית המייל, isMyName) }.
-      // קריאה – הצוות. כתיבה – רק הבעלים, אם הוא עובד פעיל או מנהל. מחיקה – אף אחד. מחובר = on && t לפני פחות מ-5 דקות (באפליקציה).
       match /pres/{uid} {
         function nw() { return request.resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -2705,8 +2457,6 @@ service cloud.firestore {
       }
 
       // act/{uid}_{YYYY-MM-DD}: { uid, n (השם, עד 100), day, s (כניסות-יציאות, עד 300), v (מסכים, עד 3000), t (זמן אמת) }.
-      // כתיבה – רק עובד פעיל שאינו מנהל, רק המסמך שלו (המזהה = uid + '_' + day). קריאה (get + list) – מנהל בלבד. מחיקה – אף אחד (שמירה לתמיד).
-      // הפריטים שבתוך s ו-v לא נבדקים אחד-אחד (בלי לולאות בכללים) – רק סוג וגודל הרשימה. המתג cfg/act נאכף באפליקציה, לא כאן.
       match /act/{aid} {
         function nw() { return request.resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -2726,14 +2476,6 @@ service cloud.firestore {
       }
 
       // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 – העתק של הכלל בשורש (תוספת 'suppliers'), עם התפקידים של העסק ----------
-      // hsr/{id}: פריט חוסר. מנהל ועובד פעיל – אותן הרשאות (האפיון): קריאה, יצירה, עריכה, "הגיע" ומחיקה רכה (st 'del', נשמר ואפשר לשחזר).
-      // מחיקה אמיתית – מנהל בלבד (אין כזו בממשק). שדות: n (1..80), nk (מפתח מנורמל, עד 200), gen (פריט כללי), sups / supN (מזהי ושמות ספקים, עד 10;
-      // בפריט כללי – ריקים), why ('store' | 'order' | 'both'), q? (מספר מעל 0 עד 100,000), cust? { nm עד 60, ph ספרות עד 15, cid? },
-      // ord? { id, no }, np (0 | 1 – יש תמונה), st ('open' | 'arr' | 'del'), by (uid), byN (השם – isMyName), t (זמן אמת), ub? / ut? (מי ומתי עדכן), h? (היסטוריה, עד 30).
-      // יצירה: st 'open', by = הכותב, בלי ub / ut / h. עדכון: by, byN ו-t לא משתנים; ub = השם של המעדכן ו-ut זמן אמת חדש (שונה מהקודם).
-      // hsr/{id}/p/1: תמונה { img, t, uid } (jpeg / png / webp, 100 עד 900,000 תווים) – יצירה בלבד, בלי עדכון (החלפה = מחיקה ויצירה). מחיקה – הצוות.
-      // hsph/{supId}: טלפון ספק { ph (9..15 ספרות), n (שם הספק), byN, t } – נשמר בפעם הראשונה ששולחים לספק בוואטסאפ.
-      // hsx/{supId}: שמות מוצרים מחשבוניות ספק { n, it (רשימה, עד 3000), t } – להצעת ספק. קריאה – הצוות; כתיבה – מנהל או עובד עם prc (בלי מחירים).
       match /hsr/{id} {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
@@ -2749,19 +2491,12 @@ service cloud.firestore {
             && snOk(d.supN, 5) && snOk(d.supN, 6) && snOk(d.supN, 7) && snOk(d.supN, 8) && snOk(d.supN, 9);
         }
         // היסטוריה (h): לא נשלחת ביצירה. בעדכון – או שלא השתנתה (וגם st לא השתנה), או שנוספה רשומה אחת בדיוק בסוף, והקודמות זהות
-        // (כשיש כבר 30 – הראשונה נחתכת). הרשומה החדשה: { k, t, byN, u } – u = המבצע, byN = השם שלו, t = ut (זמן אמת), ו-k מתאים למעבר:
-        // 'man' ← הגיע, 'del' ← נמחק, 'undo' / 'res' ← חזר לפתוח. כך אי אפשר לזייף "הגיע / נמחק ע"י" או למחוק היסטוריה.
-        // שלב 2 (19.11.2026) – הורדה אוטומטית מחשבונית ספק: רשומה { k, t, byN, u, pinv, inv, sup, q0?, q? } (pinv מזהה החשבונית, inv מספרה עד 30, sup ספק עד 60).
-        // 'inv' ← הגיע כולו (open → arr, הכמות לא משתנה, בלי q0 / q). 'part' ← הגיע חלקית: st נשאר open, q0 = הכמות הקודמת, q = החדשה (קטנה ממנה).
-        // 'unp' ← ביטול 'part' ({ k, t, byN, u }): st נשאר open, הרשומה הקודמת היא 'part', הכמות עדיין q שלה וחוזרת בדיוק ל-q0 שלה.
-        // כל עדכון אחר שבו st לא משתנה – ההיסטוריה לא משתנה.
         function hInv(e) {
           return e.keys().hasAll(['pinv', 'inv', 'sup']) && e.keys().hasOnly(['k', 't', 'byN', 'u', 'pinv', 'inv', 'sup', 'q0', 'q'])
             && e.pinv is string && e.pinv.matches('^[A-Za-z0-9_-]{1,80}$') && e.inv is string && e.inv.size() <= 30 && e.sup is string && e.sup.size() <= 60
             && pinvOk(e.pinv);
         }
         // סבב בדיקה 1: pinv חייב להיות חשבונית קיימת, לא מבוטלת, שנקלטה אחרי שהפריט נוסף (get – לא תלוי בהרשאת הקריאה של pinv).
-        // inv / sup נשמרים כפי שהאפליקציה קיבלה אותם (השרת מנקה אותם אחרת) ולכן לא מושווים; הרשומה תמיד בשם המבצע (u, byN).
         function pinvOk(p) {
           let d = get(/databases/$(database)/documents/b/$(bizId)/pinv/$(p)).data;
           return d.get('st', '') != 'void' && d.get('at', 0) is int && d.get('at', 0) >= resource.data.t;
@@ -2814,9 +2549,6 @@ service cloud.firestore {
             && (!d.keys().hasAny(['h']) || (d.h is list && d.h.size() <= 30));
         }
         // שלב 2 (19.11.2026, חיסכון בחישוב – מגבלת 1,000 ביטויים לבקשה): עדכון שמשנה רק st / q / h / ub / ut (הגיע, החזר, מחיקה רכה,
-        // הורדה מחשבונית) לא בודק שוב את כל השדות שלא השתנו (נבדקו ביצירה ובעריכה) – רק את הערכים שהשתנו. כל עריכה אחרת – itOk המלא.
-        // 19.11.2026 – "הוזמן": od = { u, byN, t, sup, eta } – בשם המבצע (u = המחובר, byN = השם שלו), t = ut, ספק עד 60 תווים,
-        // צפי הגעה YYYY-MM-DD או ריק. משתנה רק בעדכון שנוגע ב-od / ub / ut בלבד (סימון, עדכון או ביטול = מחיקת od). ביצירה – אסור.
         function odOk(d) {
           return !d.keys().hasAny(['od']) || (d.od is map && d.od.keys().hasOnly(['u', 'byN', 't', 'sup', 'eta']) && d.od.keys().hasAll(['u', 'byN', 't', 'sup', 'eta'])
             && d.od.u == request.auth.uid && isMyName(d.od.byN) && d.od.t == d.get('ut', 0)
@@ -2934,9 +2666,6 @@ service cloud.firestore {
       }
 
       // mq: העתק של הכלל בשורש (תור "נשלח למנהל לטיפול", שלב 6). בלי תוספת – כל עסק
-      // עובד שסרק מסמך מסוג שאין לו הרשאה להזין: נשלחים רק הצילום (בחלקים, p) והסוג המשוער (k) – בלי סכומים ובלי רשומה כספית.
-      // יצירה: עובד פעיל (לא מנהל), בשמו, בזמן אמת, בסטטוס 'new', רק השדות האלה. קריאה: מנהל – הכול; עובד – רק את שלו.
-      // עדכון: מנהל בלבד, פעם אחת (רק מ-'new' ל-'done'/'rej'), ורק שדות הסטטוס – כך פריט שטופל לא נשמר פעמיים. העובד לא עורך ולא מוחק.
       match /mq/{id} {
         function nw() { return request.resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -2979,7 +2708,6 @@ service cloud.firestore {
       }
 
       // ----- הזמנות ומלאי (2026-11-08, שלב 1, תוספת 'orders'). כל כתיבה – רק השרת (functions/orders.js). -----
-      // עובד: רק עם מתג ord, ורק סניפים שלו (staff.br; חסר = הכול). שאילתת רשימה של עובד משויך חייבת לסנן לפי br.
       function ordOk() { return feat('orders') && perm('ord'); }
       function brOk(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
       match /ordcfg/{docId} {
@@ -2987,7 +2715,6 @@ service cloud.firestore {
         allow list, create, update, delete: if false;
       }
       // הדפסת מדבקות (22.11.2026): עובד עם המתג lbl קורא מוצרים כשתוספת ההזמנות פעילה (בלי p/cost ו-p/ws).
-      // lblp/{id} – מוצר שהוקלד ידנית במסך הדפסת המדבקות; מנהל או עובד עם lbl. מחיקה – מנהל בלבד. lblpOk – בשורש (אותה בדיקה).
       match /lblp/{id} {
         allow read: if perm('lbl');
         allow create, update: if perm('lbl') && lblpOk(request.resource.data);
@@ -3057,7 +2784,6 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // 14.11.2026 (שלב 3 חלק ב'): פרטי העסק למסמכים (arcfg/main) – עובד עם הזמנות ומנהל קוראים. מונים, מזהי בקשה ולוגו – אף אחד. כתיבה – רק השרת (ar.js)
-      // 15.11.2026 (שלב 4): arcfg/off – מנהל קורא (מנהל־על כותב דרך setArOff)
       match /arcfg/{docId} {
         allow get: if (ordOk() && docId == 'main') || (feat('orders') && bMgr() && docId == 'off');
         allow list, create, update, delete: if false;
@@ -3072,7 +2798,6 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
-      // lineLog – אין גישה מהאפליקציה בכלל (הבדיקה דרך checkLines בשרת). בנק/ת"ז בעל כרטיס – בתוך ord.cell, אותן הרשאות כמו ההזמנה (07:38)
       match /lineplan/{id} {
         allow read: if ordOk() && feat('cellular');
         allow create, update, delete: if false;
@@ -3102,10 +2827,6 @@ service cloud.firestore {
       }
 
       // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
-      // משתמש במזכירה = מנהל אמיתי של העסק (admins/{uid}, לא מנהל־על בתוקף תפקידו) + התוספת פעילה + עסק פעיל +
-      // במצב "מנהל ראשי בלבד" (sec_cfg/main.mode == 'main') – רק mainUid + אישר את הנוסח הנוכחי של מסך ההסכמה (mgr.<uid>.cv ==
-// CONSENT_VER בשרת, functions/secretary.js; החלפת נוסח = לעדכן כאן ובשרת יחד – בדיקה ב-secretary.test.js).
-      // עובד – אין גישה לשום אוסף sec_*. sec_mirror, sec_facts_sensitive – אף אחד מהאפליקציה (רק השרת).
       function bsOn() { return feat('secretary') && bActive(); }
       function bsCfg() { return get(/databases/$(database)/documents/b/$(bizId)/sec_cfg/main).data; }
       function bsUser() {
@@ -3120,7 +2841,6 @@ service cloud.firestore {
         allow list, create, update, delete: if false;
       }
       // שיחה אישית: רק המנהל עצמו. מנהל־על חסום במפורש, גם אם הוא מנהל של העסק לפי admins (החלטה 8):
-      // הוא קורא רק דרך secAdminReadChat, שרושמת כל צפייה ב-sec_log.
       match /sec_chat/{uid} {
         allow read, create, update, delete: if false;
         match /m/{id} {
@@ -3198,7 +2918,6 @@ service cloud.firestore {
       }
 
       // ----- store3d בתוך העסק (14.11.2026): אותם אוספים ותנאים כמו בשורש (הבדיקות המשותפות s3* מוגדרות שם), -----
-      // עם התפקידים של העסק. "צוות" = bStaff() + feat('store3d'). s3m = עובד פעיל עם perms.s3m == true (pv – בלי perms = כבוי).
       function b3s3m() { return bEmp() && pv('s3m') == true; }
       match /s3br/{brId} {
         allow read: if feat('store3d') && bStaff();
@@ -3309,10 +3028,6 @@ service cloud.firestore {
       }
 
       // ----- קופה – pos (שלב 0, 17.11.2026). רק בתוך העסק (לא בשורש – החלטה 10). כל כתיבה – רק השרת (pos.js): write: if false לכולם,
-      // גם למנהל ולמנהל־על. התוספת כבויה = אין גישה. posAny = מנהל, או עובד עם pos (קופאי) / posMgr (אחראי משמרת); posLead = מנהל או posMgr.
-      // סניף: posBr כמו brOk (staff.br חסר = כל הסניפים). קופאי – רק מה שרשום עליו (cashier / who). poslog – רק השרת מוסיף, אף אחד לא עורך.
-      // 18.11.2026: posAny / posLead לפי perm() – גם מנהל רק עם המתג (מנהל־על מדליק). posMgrRd = קריאה של מסכי הניהול (כל מנהל, כמו היום).
-      // עגלות מושהות (pospark) הן של הקופה בלבד – מנהל בלי מתג קופה לא קורא אותן.
       function posAny() { return feat('pos') && (perm('pos') || perm('posMgr')); }
       function posLead() { return feat('pos') && perm('posMgr'); }
       function posMgrRd() { return feat('pos') && bMgr(); }
@@ -3362,7 +3077,6 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // POS:W3 (גל 3): poscard – עסקאות אשראי במסוף מחובר (סכום, מצב, מספר אישור, 4 ספרות – אף פעם לא מספר כרטיס).
-      // קריאה – מי שבקופה באותו עסק ומנהל; כתיבה – רק השרת (pos-card.js, pos-sale.js)
       match /poscard/{id} {
         allow read: if posAny() || posMgrRd();
         allow create, update, delete: if false;
@@ -3372,7 +3086,6 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // POS:M7 – קופה ש7 (17.11.2026): יומן תקלות (poserr), התנגשויות (posconf), אינדקס גיבויים (posbk). קריאה – מנהל בלבד, כתיבה – רק השרת
-      // (pos-ops.js, pos-backup.js). poserr טכני בלבד, בלי פרטי לקוחות (אפיון ד 4).
       match /poserr/{id} {
         allow read: if feat('pos') && bMgr();
         allow create, update, delete: if false;
@@ -3411,9 +3124,6 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
       // POS:M4 – קופה ש4 (17.11.2026, אפיון ה 0.3): המסמכים של ההגדרות. כל כתיבה – רק השרת (pos-cfg.js). קריאה של מסמך שלם בלבד:
-      //   poscfg/saPub ו-poscfg/br_{br} – כמו poscfg/main (מי שמוכר, מנהל, מנהל־על); poscfg/sa (נעילות ומגבלות) – מנהל / בעלים / מנהל־על,
-      //   לא קופאי. poscfglog – בעל העסק (admins/{uid}.own) ומנהל־על בלבד (לא מנהל, לא קופאי, לא רו"ח). poscfg/apprlock – אף אחד.
-      //   postpl / posbug – גלובליים, רק השרת (אין כלל = חסום).
       function posOwn() { return feat('pos') && bIsAdmin() && bActive() && get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data.get('own', false) == true; }
       match /poscfg/{d} {
         allow get: if (d == 'saPub' || d.matches('br_[A-Za-z0-9_-]{1,40}')) && (posAny() || (feat('pos') && bMgr()) || bSuper());
@@ -3424,8 +3134,6 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // /POS:M4
-      // POS:M2 – ש2 (17.11.2026): עגלות מושהות (pospark) – אחראי / מנהל, או הקופאי שהשהה. קופונים אישיים (poscpn) – מנהל (הבדיקה בקופה דרך posCouponUse).
-      // כתיבה – רק השרת (pos-sale.js).
       match /pospark/{id} {
         allow read: if posLead() || (posAny() && resource.data.cashier == request.auth.uid);
         allow create, update, delete: if false;
@@ -3435,15 +3143,12 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       // /POS:M2
-      // POS:M5 – pospin/{uid}: קוד PIN מגובב, מונה ניסיונות ונעילה (ש5, pos-auth.js). אף אחד מהאפליקציה – גם לא מנהל
       match /pospin/{id} {
         allow read, create, update, delete: if false;
       }
       // /POS:M5
 
       // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
-      // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid של מסמך האב. x/m (טיוטת המנהל) – מנהל בלבד.
-      // x/w (מה שאושר, נוצר רק ב-approve) – מנהל והעובד בעל הדיווח. drcfg/main – צוות; drcfg/cap – מנהל־על; השאר (use, rem_*) – אף אחד.
       match /dr/{id} {
         allow read: if feat('dailyRep') && (bMgr() || (bEmp() && resource.data.uid == request.auth.uid));
         allow create, update, delete: if false;
@@ -3538,8 +3243,6 @@ service cloud.firestore {
             && request.time.toMillis() - dd.t < 900000;
         }
         // 6ח (עדכון חוזה 18, החלטת המשתמש): עובד לא רושם הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה (zlast/{reg}).
-        // הגבול כמו zcB באפליקציה ו-bound בשרת: הפתיחה שצורפה (od/otm) אם היא אחרי הסגירה ועד יום אחד אחריה; אחרת זמן הסגירה.
-        // אותו יום כמו הגבול בלי שעה (בהוצאה או בגבול) – מותר ("לא ברור", המנהל מכריע בסגירה). אין zlast – מותר.
         function dt(s) { return timestamp.date(int(s[0:4]), int(s[5:7]), int(s[8:10])); }
         function afterB(z) {
           let cd = z.get('d', ''); let ctm = z.get('tm', ''); let od = z.get('od', ''); let otm = z.get('otm', '');

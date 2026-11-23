@@ -338,7 +338,9 @@ jobs:
           W: ${{ inputs.what }}
         run: |
           if [ "$W" = "firestore-rules" ]; then ONLY="firestore:rules"; else ONLY="storage"; fi
-          firebase deploy --only "$ONLY" --project "$P" --non-interactive
+          # 23.11.2026: הכלי מסתיר את סיבת הכשל של עדכון הכללים (מציג רק 409). בכשל מדפיסים מ-firebase-debug.log רק את שורות שירות הכללים (בלי כותרות הרשאה).
+          firebase deploy --only "$ONLY" --project "$P" --non-interactive --debug > deploy.log 2>&1 || { grep -E "firebaserules|\[rules\]|Error" deploy.log | grep -viE "authorization|bearer|token" | cut -c1-1500 | tail -40; exit 1; }
+          grep -E "released rules|Deploy complete" deploy.log || true
           echo "פורסם $W ל-$P" >> "$GITHUB_STEP_SUMMARY"
 
       # ---------- Hosting לגרסת המחשב (צעד 5): פרסום הקבצים שנבנו למעלה ----------
