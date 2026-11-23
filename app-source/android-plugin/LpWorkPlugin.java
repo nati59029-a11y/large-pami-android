@@ -35,9 +35,12 @@ public class LpWorkPlugin extends Plugin {
         String text = call.getString("text", "");
         JSObject r = new JSObject();
         try {
+            LpWorkService.jsHold = true;
+            LpWorkService.jsText = text;
             LpWorkService s = LpWorkService.running;
             if (s != null) {
-                s.update(text);
+                // While an app update downloads its progress stays in the notification; this text comes back after
+                if (!LpWorkService.updHold) s.update(text);
                 r.put("on", true);
                 call.resolve(r);
                 return;
@@ -66,6 +69,13 @@ public class LpWorkPlugin extends Plugin {
     }
 
     void stopService() {
+        LpWorkService.jsHold = false;
+        LpWorkService.jsText = "";
+        if (LpWorkService.updHold) {
+            // An app update is downloading - the service stays until it ends (AppUpdatePlugin stops it)
+            priority(false);
+            return;
+        }
         try {
             Context c = getContext();
             c.stopService(new Intent(c, LpWorkService.class));

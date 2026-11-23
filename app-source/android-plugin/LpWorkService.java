@@ -30,6 +30,10 @@ public class LpWorkService extends Service {
     static final String EXTRA_TEXT = "text";
     static final long MAX_MS = 2L * 3600 * 1000;
     static volatile LpWorkService running;
+    /** 23.11.2026: two users of the same service - the screens (jsHold, with their text) and the app update download (updHold).
+     *  The service stops only when neither needs it. */
+    static volatile boolean jsHold, updHold;
+    static volatile String jsText = "";
 
     private final Handler h = new Handler(Looper.getMainLooper());
     private final Runnable limit = this::stopSelf;
@@ -115,7 +119,8 @@ public class LpWorkService extends Service {
     /** Swiped away from recent apps: the screens are gone, nothing left to keep running. */
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        stopSelf();
+        // An app update download goes on (it does not need the screens); it stops the service itself when done
+        if (!updHold) stopSelf();
         super.onTaskRemoved(rootIntent);
     }
 
