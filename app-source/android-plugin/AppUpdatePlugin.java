@@ -1,5 +1,6 @@
 package com.largepami.finance;
 
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -12,7 +13,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 
+import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.lifecycle.Lifecycle;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -146,6 +150,13 @@ public class AppUpdatePlugin extends Plugin {
             call.reject("permission");
             return;
         }
+        if (busy) {
+            call.reject("busy");
+            return;
+        }
+        busy = true;
+        pendingInstall = null;
+        hold(ctx, true);
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -153,20 +164,131 @@ public class AppUpdatePlugin extends Plugin {
                 try {
                     f = downloadApk(ctx, url, auth, sha256);
                 } catch (Exception e) {
+                    hold(ctx, false);
+                    busy = false;
                     call.reject("download failed: " + e.getMessage());
                     return;
                 }
-                if (Build.VERSION.SDK_INT < 31) {
-                    openInstaller(ctx, f, call, "legacy", "android " + Build.VERSION.SDK_INT);
-                    return;
-                }
-                try {
-                    commitSession(ctx, f, call);
-                } catch (Exception e) {
-                    openInstaller(ctx, f, call, "legacy", "session: " + e.getMessage());
+                hold(ctx, false);
+                busy = false;
+                final Runnable go = new Runnable() {
+                    @Override
+                    public void run() {
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                installNow(ctx, f, call);
+                            }
+                        }).start();
+                    }
+                };
+                if (visible()) {
+                    go.run();
+                } else {
+                    // The user left the app: Android does not let us open the install screen from the background.
+                    // Wait for the return to the app (handleOnResume), and meanwhile a notification that installs on tap.
+                    pendingInstall = go;
+                    notifyReady(ctx, f);
                 }
             }
         }).start();
+    }
+
+    private void installNow(Context ctx, File f, PluginCall call) {
+        if (Build.VERSION.SDK_INT < 31) {
+            openInstaller(ctx, f, call, "legacy", "android " + Build.VERSION.SDK_INT);
+            return;
+        }
+        try {
+            commitSession(ctx, f, call);
+        } catch (Exception e) {
+            openInstaller(ctx, f, call, "legacy", "session: " + e.getMessage());
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // 23.11.2026: the download goes on in the background. The screens are not blocked (a small progress strip
+    // instead of a window), and while downloading the LpWorkService foreground service (quiet notification
+    // "מוריד עדכון… 40%") keeps the app alive when the user leaves it. When the download ends with the app not on
+    // screen, the install waits for the return, or for a tap on the "ready to install" notification.
+    // ---------------------------------------------------------------------------------------
+
+    static volatile boolean busy;
+    static final int READY_NID = LpWorkService.NID + 1;
+    private volatile Runnable pendingInstall;
+
+    private boolean visible() {
+        try {
+            return getActivity() != null && getActivity().getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        Runnable p = pendingInstall;
+        if (p == null) return;
+        pendingInstall = null;
+        cancelReady(getContext());
+        p.run();
+    }
+
+    /** Keeps (on) or releases (off) the background service for the download, without touching the screens' use of it. */
+    private static void hold(Context ctx, boolean on) {
+        try {
+            if (on) {
+                LpWorkService.updHold = true;
+                LpWorkService s = LpWorkService.running;
+                if (s != null) s.update("מוריד עדכון…");
+                else ContextCompat.startForegroundService(ctx, new Intent(ctx, LpWorkService.class).putExtra(LpWorkService.EXTRA_TEXT, "מוריד עדכון…"));
+            } else {
+                LpWorkService.updHold = false;
+                LpWorkService s = LpWorkService.running;
+                if (s == null) return;
+                if (LpWorkService.jsHold) s.update(LpWorkService.jsText);
+                else ctx.stopService(new Intent(ctx, LpWorkService.class));
+            }
+        } catch (Exception e) {
+            // No service - the download still runs while the app is open, like before
+        }
+    }
+
+    private static Intent installIntent(Context ctx, File f) {
+        Uri uri = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".fileprovider", f);
+        Intent i = new Intent(Intent.ACTION_VIEW);
+        i.setDataAndType(uri, "application/vnd.android.package-archive");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        return i;
+    }
+
+    private static void notifyReady(Context ctx, File f) {
+        try {
+            LpWorkService.channel(ctx);
+            PendingIntent pi = PendingIntent.getActivity(ctx, READY_NID, installIntent(ctx, f), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            nm.notify(READY_NID, new NotificationCompat.Builder(ctx, LpWorkService.CH)
+                .setSmallIcon(R.drawable.ic_stat_notify)
+                .setColor(ContextCompat.getColor(ctx, R.color.notif_accent))
+                .setContentTitle("העדכון ירד ומוכן להתקנה")
+                .setContentText("לחצו כאן להתקנה. הנתונים נשמרים.")
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .build());
+        } catch (Exception e) {
+            // no notification - the install still starts when the user returns to the app
+        }
+    }
+
+    private static void cancelReady(Context ctx) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(READY_NID);
+        } catch (Exception e) {
+            // nothing to cancel
+        }
     }
 
     private File downloadApk(Context ctx, String url, String auth, String sha256) throws Exception {
@@ -174,6 +296,8 @@ public class AppUpdatePlugin extends Plugin {
         download(url, auth, sha256, f, new Progress() {
             @Override
             public void pct(int pct) {
+                LpWorkService s = LpWorkService.running;
+                if (s != null && LpWorkService.updHold && pct % 5 == 0) s.update("מוריד עדכון… " + pct + "%");
                 JSObject p = new JSObject();
                 p.put("pct", pct);
                 notifyListeners("progress", p);
@@ -260,11 +384,7 @@ public class AppUpdatePlugin extends Plugin {
     /** The old way (same as install()): Android's install screen. */
     private void openInstaller(Context ctx, File f, PluginCall call, String status, String detail) {
         try {
-            Uri uri = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".fileprovider", f);
-            Intent i = new Intent(Intent.ACTION_VIEW);
-            i.setDataAndType(uri, "application/vnd.android.package-archive");
-            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(i);
+            ctx.startActivity(installIntent(ctx, f));
             done(call, status, detail);
         } catch (Exception e) {
             call.reject("install failed: " + e.getMessage());

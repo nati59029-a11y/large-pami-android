@@ -69,7 +69,7 @@ async function nmLoad(){if(nmAt&&Date.now()-nmAt<600000)return;nmAt=Date.now();c
   if(mgr()){const j=await fsx('/staff?pageSize=300');((j&&j.documents)||[]).forEach(d=>put(fvj({mapValue:d})))}
   else{const d=await fsx('/staff/'+SY.uid);const f=fvj({mapValue:d})||{};const n=String(f.name||'').trim().slice(0,60);if(n)NM[fbBy().toLowerCase()]=n}}catch(e){}
  if(JSON.stringify(NM)!==nm0)paint()}
-const nmOf=b=>{const k=String(b||'').toLowerCase();if(!k)return '';return NM[k]||(mgr()&&k===fbBy().toLowerCase()?'מנהל':String(b))};
+const nmOf=b=>{const k=String(b||'').toLowerCase();if(!k)return '';return (window.NM&&window.NM.byPfx&&window.NM.byPfx(k))||NM[k]||(mgr()&&k===fbBy().toLowerCase()?'מנהל':String(b))};
 
 /* ---------- טעינה ---------- */
 async function hsLoad(){if(HS.busy||!on())return;HS.busy=1;HS.err='';const h=HS;

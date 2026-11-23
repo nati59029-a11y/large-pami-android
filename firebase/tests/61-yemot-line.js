@@ -783,7 +783,8 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.deepEqual(files.filter((f) => /resetList/.test(strip(fs.readFileSync(path.join(root, f), 'utf8')))), []);
     assert.deepEqual(files.filter((f) => f !== 'lib/yemot-client.js' && /TzintukimListManagement/.test(strip(fs.readFileSync(path.join(root, f), 'utf8')))), []);
     const yc = strip(fs.readFileSync(path.join(root, 'lib/yemot-client.js'), 'utf8'));
-    assert.deepEqual([...yc.matchAll(/action:\s*'([^']+)'/g)].map((m) => m[1]).filter((x) => x !== 'delete'), ['getlistEnteres']);
+    // 23.11.2026: גם getLogList (יומן הרשימה – קריאה בלבד)
+    assert.deepEqual([...yc.matchAll(/action:\s*'([^']+)'/g)].map((m) => m[1]).filter((x) => x !== 'delete'), ['getlistEnteres', 'getLogList']);
     assert.ok(!/yemot-hook/.test(strip(fs.readFileSync(path.join(root, 'index.js'), 'utf8'))), 'index.js מייבא את yemot-hook');
     assert.equal(require('../functions/yemot-hook.js')._core.BLOCKED, true);
   });

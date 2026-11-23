@@ -91,6 +91,7 @@ ACT.ytAsk=async el=>{
  const body=total===0?'<p class="note">אין למי לשלוח: הרשימות ריקות.</p>'
   :`<p style="margin:0 0 6px">יקבלו: <b>${esc(String(total))}</b> מספרים${target==='all'?` (חינם: ${esc(String(free))}, בתשלום: ${esc(String(paid))})`:' (כולם בתשלום)'}.</p>
   <p class="note" style="margin:0 0 6px">עלות משוערת: ${esc(String(n0(p.cost)))} יחידות – 0.1 יחידה לכל מספר בתשלום, לפי התיעוד של ימות.${target==='all'&&free?' הרשימה החינמית – בלי עלות.':''}</p>
+  ${n0(p.skipped)?`<p class="note" style="margin:0 0 6px">${esc(String(n0(p.skipped)))} לקוחות משוב יצאו מרשימת הצינתוקים ולא יקבלו.</p>`:''}
   ${p.listReady===false?'<p class="note" style="margin:0 0 6px">רשימת "לקוחות משוב" עוד לא נוצרה בימות.</p>':''}
   ${p.recent&&p.recent.at?`<p class="note" style="color:var(--warn);margin:0 0 6px">נשלח כבר צינתוק היום ב-${esc(hhmm(p.recent.at))} ל-${esc(String(n0(p.recent.sent)))} מספרים. שליחה חדשה תגיע שוב לכולם.</p>`:''}
   ${p.capped?`<p class="note" style="color:var(--bad);margin:0 0 6px">מעל המכסה (${esc(String(n0(p.max)))} מספרים בתשלום בשליחה אחת). אי אפשר לשלוח.</p>`:''}`;
@@ -128,11 +129,12 @@ function nbRows(){const D=NB.d;if(!D)return[];
  const fr=(Array.isArray(D.free)?D.free:[]).map(p=>({p:String(p||''),fb:false}));
  return fb.concat(fr).filter(r=>r.p).sort((a,b)=>a.p<b.p?-1:a.p>b.p?1:(a.fb?-1:1))}
 const nbFree=()=>new Set((NB.d&&Array.isArray(NB.d.free)?NB.d.free:[]).map(String));
+const nbGone=()=>new Set((NB.d&&Array.isArray(NB.d.gone)?NB.d.gone:[]).map(String)); // משימה 2026-11-23: יצאו מהרשימה החינמית
 function nbList(){
  const fs=nbFree(),k=nbKey(NB.q),all=nbRows(),hit=k?all.filter(r=>dig(r.p).includes(k)):all,show=hit.slice(0,NB_MAX);
  const head=k?(hit.length?`נמצאו ${hit.length}${hit.length>NB_MAX?` · מוצגים ${NB_MAX} הראשונים – הקלידו עוד ספרות`:''}`:'לא נמצא מספר כזה בשתי הרשימות.')
   :(all.length>NB_MAX?`${all.length} מספרים · מוצגים ${NB_MAX} הראשונים – הקלידו מספר לחיפוש`:`${all.length} מספרים`);
- return`<p class="note" role="status" style="margin:0 0 8px">${esc(head)}</p>`+show.map(r=>`<div class="li" style="cursor:default"><div class="m"><b dir="ltr" style="text-align:right">${esc(nbFmt(r.p))}</b><small>${r.fb?`לקוחות משוב · ${r.b?'<span style="color:var(--bad);font-weight:700">חסום</span>':'פעיל'}${r.n?' · '+esc(r.n):''}${fs.has(r.p)?' · <span style="color:var(--warn);font-weight:700">גם ברשימה החינמית</span>':''}`:'רשימה חינמית · מוציאים דרך שלוחת היציאה בקו או באתר ימות'}</small></div>${r.fb?`<button type="button" class="btn${r.b?'':' g'}" style="min-height:44px;padding:0 12px;flex:none" data-a="ynAsk" data-v="${esc(r.p)}"${NB.busy?' disabled':''}>${r.b?'בטל חסימה':'חסום'}</button>`:''}</div>`).join('')}
+ return`<p class="note" role="status" style="margin:0 0 8px">${esc(head)}</p>`+show.map(r=>`<div class="li" style="cursor:default"><div class="m"><b dir="ltr" style="text-align:right">${esc(nbFmt(r.p))}</b><small>${r.fb?`לקוחות משוב · ${r.b?'<span style="color:var(--bad);font-weight:700">חסום</span>':'פעיל'}${r.n?' · '+esc(r.n):''}${fs.has(r.p)?' · <span style="color:var(--warn);font-weight:700">גם ברשימה החינמית</span>':''}${!r.b&&nbGone().has(r.p)?' · <span style="color:var(--warn);font-weight:700">יצא מהצינתוקים – לא יקבל בתשלום</span>':''}`:'רשימה חינמית · מוציאים דרך שלוחת היציאה בקו או באתר ימות'}</small></div>${r.fb?`<button type="button" class="btn${r.b?'':' g'}" style="min-height:44px;padding:0 12px;flex:none" data-a="ynAsk" data-v="${esc(r.p)}"${NB.busy?' disabled':''}>${r.b?'בטל חסימה':'חסום'}</button>`:''}</div>`).join('')}
 function nbHtml(){
  if(NB.denied)return'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>';
  const D=NB.d;
@@ -173,4 +175,50 @@ ACT.ynOk=async()=>{
  catch(e){if(e&&e.status==='PERMISSION_DENIED')NB.denied=true;A.toast(nbErr(e));reload=!!(e&&['uncertain','not-in-list'].includes(e.reason))}
  finally{NB.busy=false}
  if(reload){NB.d=null;nbPaint();nbLoad()}else nbPaint()};
+/* "דוח הקו" (מנהל, משימה 2026-11-23): בחירת חודש ← כמה נרשמו, כמה התנתקו, כמה שמעו את הקו (כל השלוחות), ומי לא מקבל צינתוק בתשלום כי יצא מהרשימה החינמית.
+   yemotFbList { action:'report', month:'YYYY-MM' }. כל חלק מציג גם את המספרים, בטבלה. ההרשאה נאכפת בשרת. חושף window.yrOpen().
+   "שמעו" = התקשרו לקו (יומן הכניסות של ימות; לא בתיעוד הרשמי – אם לא נקרא, מוצגת הודעה). כל טקסט – esc בלבד. */
+const RP={m:null,d:null,err:null,loading:false,tab:'join',denied:false};
+const ilMonth=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);
+const mAdd=(ym,k)=>{let[y,m]=ym.split('-').map(Number);m+=k;while(m<1){m+=12;y--}while(m>12){m-=12;y++}return y+'-'+String(m).padStart(2,'0')};
+const mName=ym=>{const[y,m]=ym.split('-').map(Number);return new Intl.DateTimeFormat('he-IL',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(Date.UTC(y,m-1,15)))};
+// "2026-11-05T10:00:00" (שעון ישראל) ← "05.11 10:00"
+const atT=at=>{const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(at||''));return m?`${m[3]}.${m[2]}.${m[1].slice(2)} ${m[4]}:${m[5]}`:''};
+const secT=s=>{s=n0(s);return s<60?s+' שנ׳':Math.floor(s/60)+':'+String(s%60).padStart(2,'0')+' דק׳'};
+const HOWN={self:'הסיר את עצמו',admin:'הוצא ע״י מנהל',gone:'יצא מהרשימה'};
+const RPT={join:'נרשמו',left:'התנתקו',heard:'שמעו את הקו',out:'לא מקבלים בתשלום'};
+function rpTable(){const D=RP.d;
+ const tb=(head,rows)=>rows.length?`<div class="fbtw" style="max-height:none"><table class="fbt" style="min-width:0"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`:'<p class="note">אין מספרים להציג.</p>';
+ const ph=p=>`<td dir="ltr" style="text-align:right;white-space:nowrap">${esc(nbFmt(p))}</td>`;
+ if(RP.tab==='join'){if(!D.joined)return`<p class="note" style="color:var(--bad)">${D.logErr?'לא הצלחנו לקרוא מימות את יומן ההרשמות.':'אין נתונים.'}</p>`;
+  return tb(['מספר','מתי'],D.joined.map(x=>`<tr>${ph(x.p)}<td>${esc(atT(x.at))}</td></tr>`))}
+ if(RP.tab==='left'){if(!D.left)return`<p class="note" style="color:var(--bad)">${D.freeErr?'לא הצלחנו לקרוא מימות את רשימת הצינתוקים.':'לא הצלחנו לקרוא מימות את יומן ההרשמות, ועוד אין מידע שמור מבדיקה קודמת. נסו שוב מאוחר יותר.'}</p>`;
+  return(D.logOk?'':'<p class="note" style="margin:0 0 8px">יומן ההרשמות בימות לא נקרא – מוצגים רק מי שהמערכת ראתה שיצאו מהרשימה.</p>')+tb(['מספר','מתי','איך'],D.left.map(x=>`<tr>${ph(x.p)}<td>${esc(atT(x.at))}</td><td>${esc(HOWN[x.how]||'')}</td></tr>`))}
+ if(RP.tab==='heard'){const H=D.heard;if(!H)return'<p class="note" style="color:var(--bad)">לא הצלחנו לקרוא מימות את יומן השיחות של החודש הזה. ייתכן שלא היו שיחות, או שימות לא מאפשר לקרוא אותו.</p>';
+  return(H.more?`<p class="note" style="margin:0 0 8px">מוצגים ${H.rows.length} המספרים האחרונים מתוך ${H.rows.length+n0(H.more)}.</p>`:'')+tb(['מספר','שיחות','זמן בקו','אחרונה'],H.rows.map(x=>`<tr>${ph(x.p)}<td class="c">${esc(String(n0(x.n)))}</td><td>${esc(secT(x.sec))}</td><td>${esc(atT(x.last))}</td></tr>`))}
+ if(!D.out)return`<p class="note" style="color:var(--bad)">לא ידוע מי יצא מהרשימה החינמית${D.freeErr?' – הרשימה לא נקראה מימות':''}.</p>`;
+ return'<p class="note" style="margin:0 0 8px">מי שיצא מרשימת הצינתוקים החינמית ולא נרשם שוב. לקוח משוב שברשימה הזו לא יקבל צינתוק בתשלום. אם יירשם שוב בקו – יחזור לקבל.</p>'+tb(['מספר','מאז','איך','לקוח משוב'],D.out.map(x=>`<tr>${ph(x.p)}<td>${esc(atT(x.at))}</td><td>${esc(HOWN[x.how]||'')}</td><td class="c">${x.fb?'כן':''}</td></tr>`))}
+function rpHtml(){
+ if(RP.denied)return'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>';
+ const cur=ilMonth(),nav=`<div class="row" style="align-items:center;justify-content:space-between;margin:0 0 10px"><button type="button" class="btn s g" data-a="yrM" data-v="-1" aria-label="חודש קודם"${RP.loading?' disabled':''}>‹ הקודם</button><b>${esc(mName(RP.m))}</b><button type="button" class="btn s g" data-a="yrM" data-v="1" aria-label="חודש הבא"${RP.loading||RP.m>=cur?' disabled':''}>הבא ›</button></div>`;
+ const D=RP.d;
+ if(!D)return nav+(RP.err?`<p class="note" style="color:var(--bad)">${esc(RP.err)}</p><button class="btn s g" data-a="yrLoad">נסה שוב</button>`:'<p class="note">טוען את הנתונים מימות… (עד דקה)</p>');
+ const c=D.counts||{},H=D.heard,v=(ok,x)=>ok?x:'—';
+ return nav+`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${num('נרשמו החודש',v(D.joined,D.joined&&D.joined.length))}${num('התנתקו החודש',v(D.left,D.left&&D.left.length))}${num('שמעו את הקו (מספרים)',v(H,H&&H.phones))}${num('שיחות לקו',v(H,H&&H.calls))}</div>
+ <p class="note" style="margin:12px 0 6px">עכשיו:</p>
+ <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">${num('רשימה חינמית',v(D.counts,c.free))}${num('משוב – פעילים',v(D.counts&&!D.fbErr,c.fbActive))}${num('משוב שיצאו – לא מקבלים',v(D.counts&&c.skipped!=null,c.skipped))}</div>
+ <div class="row" role="tablist" style="flex-wrap:wrap;gap:6px;margin:14px 0 10px">${Object.keys(RPT).map(k=>`<button type="button" class="chip ${RP.tab===k?'on':''}" data-a="yrTab" data-v="${k}" aria-pressed="${RP.tab===k}">${RPT[k]}</button>`).join('')}</div>
+ ${rpTable()}
+ <button class="btn s g grow" data-a="yrLoad" style="margin-top:10px"${RP.loading?' disabled':''}>רענן מימות</button>`}
+function rpPaint(){const el=document.getElementById('yrBox');if(el)el.innerHTML=rpHtml()}
+async function rpLoad(){
+ if(RP.loading)return;RP.loading=true;RP.err=null;RP.d=null;rpPaint();const m=RP.m;
+ try{const r=await A.call('yemotFbList',{action:'report',month:m},150000);if(RP.m===m){RP.d=r;RP.denied=false}}
+ catch(e){if(e&&e.status==='PERMISSION_DENIED')RP.denied=true;else if(RP.m===m)RP.err=nbErr(e)}
+ finally{RP.loading=false}rpPaint()}
+V.ymr=()=>{if(!A.isMgr())return{t:'דוח הקו',h:'<div class="empty">המסך הזה פתוח למנהל בלבד.</div>'};setTimeout(()=>{if(!RP.d&&!RP.loading)rpLoad();else rpPaint()},0);return{t:'דוח הקו',s:'מנהל',h:'<div id="yrBox"><p class="note">טוען…</p></div>'}};
+window.yrOpen=()=>{if(!A.isMgr()){A.toast('המסך הזה פתוח למנהל בלבד.');return}RP.m=ilMonth();RP.d=null;RP.err=null;RP.denied=false;go('ymr')};
+ACT.yrLoad=()=>{rpLoad()};
+ACT.yrM=el=>{if(RP.loading)return;const k=+(el&&el.dataset&&el.dataset.v)||0,n=mAdd(RP.m,k);if(n>ilMonth())return;RP.m=n;rpLoad()};
+ACT.yrTab=el=>{const k=el&&el.dataset&&el.dataset.v;if(!RPT[k])return;RP.tab=k;rpPaint()};
 })();

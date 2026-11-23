@@ -19,7 +19,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const roles = require('./lib/roles');
 const T = require('./lib/tenant');
 const { inputObject } = roles;
-const { YemotError, apiBase, getTemplates, createTemplate, uploadPhoneList, getTemplateEntries, setEntryBlocked, tzlEntries } = require('./lib/yemot-client');
+const { YemotError, apiBase, getTemplates, createTemplate, uploadPhoneList, getTemplateEntries, setEntryBlocked, tzlEntries, renderYmgr, downloadFile } = require('./lib/yemot-client');
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
@@ -236,6 +236,8 @@ async function numbersOf(db, key, base) {
     out.fb = [...m.values()];
   } else { out.fbErr = yErr(fe.reason); logger.warn('yemot-fblist: numbers fb failed', { reason: 'fb-failed', code: out.fbErr }); }
   out.counts = { free: out.free.length, fbActive: out.fb.filter((x) => !x.b).length, fbBlocked: out.fb.filter((x) => x.b).length };
+  // (משימה 2026-11-23) מי שיצא מהרשימה החינמית – לפי מה שנשמר בבדיקה האחרונה (לא פונים לימות שוב). מוצג ליד המספר.
+  try { const o = (await db.doc(require('./yemot-optout').OPT).get()).get('out'); const fs = new Set(out.free); out.gone = o && typeof o === 'object' ? Object.keys(o).filter((p) => !fs.has(p)) : []; } catch (e) { out.gone = []; }
   return out;
 }
 
@@ -265,6 +267,57 @@ async function setBlocked(db, key, base, who, rawPhone, on) {
   return { ok: true, phone, blocked: on, changed: todo.length };
 }
 
+// ---------------- "דוח הקו" (משימה 2026-11-23) ----------------
+// { action:'report', month:'YYYY-MM' } – מנהל בלבד, קריאה בלבד מימות. כל חלק בנפרד: כשל באחד לא מסתיר את האחרים.
+//   counts: עכשיו – ברשימה החינמית, משוב פעילים / חסומים, ו-skipped (משוב פעיל שיצא מהרשימה החינמית – לא מקבל בתשלום).
+//   joined / left: מי נרשם ומי יצא בחודש (יומן הרשימה; בלי יומן – "יצא" מתמונת המצב השמורה). out: כל מי שיצא ולא חזר.
+//   heard: מי התקשר לקו בחודש (כל השלוחות) – יומן הכניסות של ימות (לא מאומת: הקובץ והשדות לא בתיעוד הרשמי).
+const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
+async function reportOf(db, key, base, month) {
+  const O = require('./yemot-optout');
+  const m = MONTH_RE.exec(String(month || ''));
+  const cur = israelMonth();
+  if (!m || month > cur) throw new HttpsError('invalid-argument', 'חודש לא תקין', { reason: 'bad-month' });
+  const ctx = yemotCtx(key, base);
+  const list = require('./yemot').shared.readCfg().list;
+  const tplId = await tplIdOf(db);
+  const out = { ok: true, month, counts: null, joined: null, left: null, out: null, heard: null, freeErr: null, logErr: null, fbErr: null, heardErr: null, logOk: false };
+  const [fr, fe] = await Promise.allSettled([tzlEntries(ctx, list), tplId ? getTemplateEntries(ctx, tplId) : Promise.resolve([])]);
+  const fbMap = new Map();
+  if (fe.status === 'fulfilled') for (const e of fe.value) { const p = normPhone(e.phone); if (p) fbMap.set(p, (fbMap.get(p) || false) || e.blocked); }
+  else out.fbErr = yErr(fe.reason);
+  let gone = null;
+  if (fr.status === 'fulfilled') {
+    const free = [...new Set(fr.value.map((p) => normPhone(p)).filter(Boolean))];
+    try {
+      const r = await O.optOut(db, ctx, list, free);
+      gone = r.out; out.logErr = r.logErr; out.logOk = !!r.events;
+      if (r.events) {
+        const ev = r.events.filter((e) => O.inMonth(e.at, month));
+        out.joined = ev.filter((e) => e.how === 'join').map((e) => ({ p: e.p, at: e.at })).reverse().slice(0, O.MAX_ROWS);
+        out.left = ev.filter((e) => e.how !== 'join').map((e) => ({ p: e.p, at: e.at, how: e.how })).reverse().slice(0, O.MAX_ROWS);
+      }
+    } catch (e) { out.logErr = yErr(e); }
+    const fbActive = [...fbMap].filter(([, b]) => !b).map(([p]) => p);
+    out.counts = { free: free.length, fbActive: fbActive.length, fbBlocked: fbMap.size - fbActive.length, skipped: gone ? fbActive.filter((p) => gone.has(p)).length : null };
+  } else { out.freeErr = yErr(fr.reason); logger.warn('yemot-fblist: report free failed', { reason: 'free-failed', code: out.freeErr }); }
+  if (gone) {
+    const all = [...gone].map(([p, v]) => ({ p, at: typeof v.at === 'string' ? v.at.slice(0, 19) : null, how: ['self', 'admin', 'gone'].includes(v.how) ? v.how : 'gone', fb: fbMap.has(p) }))
+      .sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+    out.out = all.slice(0, O.MAX_ROWS);
+    if (!out.left) out.left = all.filter((x) => O.inMonth(x.at, month)).map(({ p, at, how }) => ({ p, at, how }));
+  }
+  // מי התקשר: RenderYMGRFile, ואם נכשל – הורדת הקובץ כטקסט (עד 8MB)
+  const path = O.LOG_FILE(month);
+  try { out.heard = O.heardOf(await renderYmgr(ctx, path, 60000)); } catch (e1) {
+    try { out.heard = O.heardOf(O.parseYmgr((await downloadFile(Object.assign({}, ctx, { timeoutMs: 60000 }), path, 8 * 1024 * 1024)).toString('utf8'))); } catch (e2) {
+      out.heardErr = yErr(e1); logger.warn('yemot-fblist: report heard failed', { reason: 'heard-failed', code: out.heardErr, code2: yErr(e2) });
+    }
+  }
+  logger.info('yemot-fblist: report', { month, logOk: out.logOk, heard: !!out.heard });
+  return out;
+}
+
 async function fbList(request, key, base) {
   const who = await requireStaff(request);
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
@@ -282,6 +335,7 @@ async function fbList(request, key, base) {
     return stateOf(db);
   }
   if (input.action === 'numbers') return numbersOf(db, key, base);
+  if (input.action === 'report') return reportOf(db, key, base, input.month);
   if (input.action === 'block' || input.action === 'unblock') {
     if (typeof input.phone !== 'string' || input.phone.length > 30) throw new HttpsError('invalid-argument', 'קלט לא תקין', { reason: 'bad-input' });
     return setBlocked(db, key, base, who, input.phone, input.action === 'block');

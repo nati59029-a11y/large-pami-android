@@ -14,6 +14,7 @@
    עובדים בלי לפתוח את האפליקציה (בטלפון נעול – אחרי ביטול נעילה). הלחיצות נשמרות בטלפון ומיושמות כאן בפתיחה הבאה (wcDrain):
    דחייה ← lp-snz, "טופל" לתזכורת ← remDone, "טופל" למשימה פרטית ← עדכון לשרת. APK ישן – כמו קודם (@capacitor/local-notifications). */
 (function(){'use strict';
+const rnm=(u,p)=>{try{return (window.NM&&(NM.byUid(u)||NM.byPfx(p)))||p||''}catch(e){return p||''}};/* שם אמיתי לתצוגה בלבד */
 const gS=()=>{try{return S}catch(e){return{}}};
 if(typeof V==='undefined'||typeof V.tk!=='function'||typeof tkIL==='undefined'||typeof tkDl!=='function')return;
 const W={},H=36e5,MIN=6e4,ND_GAP=30*MIN,MID=7000001;
@@ -118,7 +119,7 @@ W.wkTags=(t,lt)=>{let s='';const k=STK(t);if(k==='late'||k==='wait')s+=W.stTag(t
 return s};
 W.wkDet=(t,tg)=>{const np=t.np||0,sa=rvNew()&&tkNew(t)&&t.st==='open'&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${esc(t.id)}" style="margin-top:8px">▶ התחלתי</button>`:'';
  tg=String(tg||'').trim();
- return `<details style="margin:8px 0 0"><summary style="cursor:pointer;color:var(--mut)">פרטים</summary><div style="margin-top:6px">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${t.wp||0})`:''}</p>${sa}</div></details>`};
+ return `<details style="margin:8px 0 0"><summary style="cursor:pointer;color:var(--mut)">פרטים</summary><div style="margin-top:6px">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(rnm('',t.by)||'עובד')}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${t.wp||0})`:''}</p>${sa}</div></details>`};
 function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew(t),lt=tkIsLate(t),dl=tkDl(t),cn=tkCNew(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
  const PS='min-height:52px;font-size:1.05rem;font-weight:700;background:var(--acc);color:var(--onacc);border-color:var(--acc);opacity:1',LK='background:none;border:0;padding:6px 4px;min-height:36px;color:var(--mut);font:inherit;font-size:.9rem;cursor:pointer';
  const lnk=(a,tx,x)=>`<button type="button" data-a="${a}" data-id="${did}" style="${LK}${x||''}">${tx}</button>`,glr=c=>`<label style="${LK}">${icd('img')} מהגלריה<input type="file" accept="image/*" data-c="${c}" data-id="${did}" hidden></label>`;
@@ -131,7 +132,7 @@ function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew
   if(np>0){if(wp<np){pb=cam('tkwimg',`${icd('cam')} צלם תמונה (${wp+1}/${np})`,1);nt=np===1?'נדרשת תמונה אחת':`נדרשות ${np} תמונות (הועלו ${wp})`;ex=glr('tkwimg')}else pb=go('tkDone','✓ בוצע')}
   else if(t.pr==='1'){pb=cam('tkimg',`${icd('cam')} צלם וסיים`,1);nt='נדרשת תמונה אחת';ex=glr('tkimg')}
   else pb=go('tkDone','✓ בוצע')}
- else nt='בטיפול של '+esc(t.owN||'עובד אחר');
+ else nt='בטיפול של '+esc(rnm(t.ow,t.owN)||'עובד אחר');
  const mi=t.mi>0?miImg(t.id):null,tg=W.wkTags(t,lt);
  return `<div class="card" id="tkc-${did}" style="border-color:${lt?'var(--bad)':'var(--acc)'};border-width:2px${W.bar(t)}">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<div style="white-space:pre-wrap;font-weight:700;font-size:1.2rem">${esc(t.txt)}</div>
   ${mi?`<img src="${esc(mi)}" alt="תמונת הוראות מהמנהל" data-a="tkPics" data-id="${did}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin:8px 0 0;display:block">`:''}${W.ckH(t)}
@@ -198,7 +199,7 @@ function apShow(){const A=W.ap;if(!A)return;const n=A.ids.length;
  const im=A.im[t.id],imH=im===undefined||im===null?'<p class="note">טוען תמונות…</p>':im.length?im.map((x,k)=>`<img src="${esc(x.img)}" alt="תמונת ביצוע ${k+1}" style="width:100%;display:block;border-radius:8px;margin-bottom:8px">`).join(''):`<p class="note">${A.er[t.id]?esc(A.er[t.id]):'אין תמונות במשימה הזו.'}</p>`;
  const rj=A.rj?`<form data-f="tkApRej" data-id="${esc(t.id)}"><label class="f"><span>הערה לעובד</span><textarea name="note" maxlength="300" required></textarea></label><div class="row"><button class="btn r grow">החזר לעובד</button><button type="button" class="btn g grow" data-a="tkwApRjX">ביטול</button></div></form>`
   :`<div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn r" data-a="tkwApRj">החזר לעובד</button>${A.i>0?'<button class="btn g" data-a="tkwApPrev">‹ הקודמת</button>':''}<button class="btn grow" data-a="tkwApNext">${A.i+1<n?'הבאה ›':'סיום ›'}</button></div>`;
- dlg(`<h3>משימה ${A.i+1} מתוך ${n}</h3><div style="max-height:62vh;overflow:auto"><div style="white-space:pre-wrap;font-weight:700;margin:0 0 4px">${esc(t.txt)}</div><p class="note" style="margin:0 0 8px">${esc(t.doneBy||'עובד')}${t.sub?' · '+esc(tkDT(t.sub)):''}</p>${imH}</div><div style="margin-top:8px">${rj}</div>`);$('#dlg').classList.add('wide')}
+ dlg(`<h3>משימה ${A.i+1} מתוך ${n}</h3><div style="max-height:62vh;overflow:auto"><div style="white-space:pre-wrap;font-weight:700;margin:0 0 4px">${esc(t.txt)}</div><p class="note" style="margin:0 0 8px">${esc(rnm('',t.doneBy)||'עובד')}${t.sub?' · '+esc(tkDT(t.sub)):''}</p>${imH}</div><div style="margin-top:8px">${rj}</div>`);$('#dlg').classList.add('wide')}
 ACT.tkwApNext=()=>{const A=W.ap;if(!A)return;A.i++;A.rj=0;apShow()};
 ACT.tkwApPrev=()=>{const A=W.ap;if(!A)return;A.i=Math.max(0,A.i-1);A.rj=0;apShow()};
 ACT.tkwApRj=()=>{const A=W.ap;if(!A)return;A.rj=1;apShow();setTimeout(()=>{const t=document.querySelector('#dlg textarea');if(t)t.focus()},40)};
@@ -229,7 +230,7 @@ ACT.tkwTab=el=>{TKT=el.dataset.v||'open';rerender()};
 W.view=(tab,card)=>{if(!on())return '';return tab==='team'?(fbAdmin()?teamView():''):myView(card)};
 /* ---- תגיות ופעולות בכרטיס משימה ---- */
 W.tag=t=>{if(!on())return '';let s=(inMy&&inMy.k==='t'?srcTag(inMy)+' ':'')+xTags(t);
- if(t.sa>0&&t.st==='open')s+=`<span class="tag t3">${icd('clock')} ${t.ow===SY.uid?'התחלתי ב-':'בעבודה אצל '+esc(t.owN||'עובד')+' מ-'}${hhmm(t.sa)}</span> `;
+ if(t.sa>0&&t.st==='open')s+=`<span class="tag t3">${icd('clock')} ${t.ow===SY.uid?'התחלתי ב-':'בעבודה אצל '+esc(rnm(t.ow,t.owN)||'עובד')+' מ-'}${hhmm(t.sa)}</span> `;
  if(t.nd>0&&t.st==='open'){if(fbAdmin())s+=`<span class="tag t2">${icd('bell')} נשלחה תזכורת · ${hhmm(t.nd)}</span> `;else if(ndNew(t))s+=`<span class="tag t4">${icd('bell')} תזכורת מהמנהל · ${hhmm(t.nd)}</span> `}return s};
 W.act=t=>{if(!on()||t.st!=='open')return '';const did=esc(t.id),sa=!W.wk()&&rvNew()&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${did}">▶ התחלתי</button>`:'';
  if(fbAdmin())return sa+(tkNew(t)?`<button class="btn g" data-a="tkwNd" data-id="${did}">${icd('bell')} הזכר לעובד</button>`:'');
@@ -335,7 +336,7 @@ const SHN=new Set();
 function wcAlert(){if(!on()||fbAdmin())return;const d=$('#dlg');if(d&&d.open)return;const now=Date.now();
  const nd=tkVis().filter(t=>ndNew(t)&&!SHN.has(t.id+':'+t.nd)),rm=LN()?[]:remL().filter(r=>r.at<=now&&!SHN.has('r'+r.id+':'+r.at)&&!(snzL()['r:'+r.id]>now));
  if(!nd.length&&!rm.length)return;nd.forEach(t=>SHN.add(t.id+':'+t.nd));rm.forEach(r=>SHN.add('r'+r.id+':'+r.at));W.al=nd.map(t=>t.id);
- dlg(`<h3>${icd('bell')} ${nd.length?'תזכורת מהמנהל':'תזכורת'}</h3><div style="max-height:55vh;overflow:auto">${nd.map(t=>`<div class="card" style="margin:0 0 8px;padding:8px 10px"><div style="font-weight:700;white-space:pre-wrap;max-height:3em;overflow:hidden">${esc(t.txt)}</div><p class="note" style="margin:2px 0 0">${esc(t.ndN||'המנהל')} · ${hhmm(t.nd)}</p></div>`).join('')}${rm.map(r=>`<div class="card" style="margin:0 0 8px;padding:8px 10px"><div style="font-weight:700;white-space:pre-wrap">${esc(r.txt)}</div><p class="note" style="margin:2px 0 0">${esc(whenTx(r.at))}</p></div>`).join('')}</div>
+ dlg(`<h3>${icd('bell')} ${nd.length?'תזכורת מהמנהל':'תזכורת'}</h3><div style="max-height:55vh;overflow:auto">${nd.map(t=>`<div class="card" style="margin:0 0 8px;padding:8px 10px"><div style="font-weight:700;white-space:pre-wrap;max-height:3em;overflow:hidden">${esc(t.txt)}</div><p class="note" style="margin:2px 0 0">${esc(rnm('',t.ndN)||'המנהל')} · ${hhmm(t.nd)}</p></div>`).join('')}${rm.map(r=>`<div class="card" style="margin:0 0 8px;padding:8px 10px"><div style="font-weight:700;white-space:pre-wrap">${esc(r.txt)}</div><p class="note" style="margin:2px 0 0">${esc(whenTx(r.at))}</p></div>`).join('')}</div>
  <div class="row" style="margin-top:8px"><button class="btn grow" data-a="tkwAlGo">לצפייה</button><button class="btn g grow" data-a="tkwAlOk">${nd.length?'ראיתי':'סגור'}</button></div>`)}
 ACT.tkwAlOk=()=>{ndMark(W.al||[]);closeDlg();tkRe()};
 ACT.tkwAlGo=()=>{ndMark(W.al||[]);closeDlg();TKT='my';W.d0=1;if(cur().v!=='tk')go('tk');else rerender()};
@@ -513,7 +514,7 @@ ACT.tkwRqW=el=>{const id=el.dataset.id,x=rqGet(id);if(!x||!rqOk())return;el.disa
 ACT.tkwRqTk=el=>{const id=el.dataset.id,x=rqGet(id);if(!x||!rqOk())return;const S=TKST.L;
  if(!S){if(typeof tkStaffLoad==='function'&&!TKST.busy)tkStaffLoad();return toast('טוען את רשימת העובדים… נסה שוב בעוד רגע')}
  const s=S.find(z=>z.uid===x.owner);if(S.length&&!s)return toast('העובד ששלח את הבקשה אינו פעיל ברשימת העובדים, ולכן אי אפשר לשלוח לו משימה');
- closeDlg();W.rqc={id,txt:String(x.txt||'').slice(0,500),n:s?s.name:(x.by||'עובד')};if(S.length)TKN.sel=new Set([x.owner]);TKN.np=0;TKN.imgs=[];FX=FX0();
+ closeDlg();W.rqc={id,txt:String(x.txt||'').slice(0,500),n:s?s.name:(rnm('',x.by)||'עובד')};if(S.length)TKN.sel=new Set([x.owner]);TKN.np=0;TKN.imgs=[];FX=FX0();
  TKT='open';W.fo=1;W.d0=1;if(cur().v!=='tk')go('tk');else rerender();
  setTimeout(()=>{const f=tkForm();if(!f||!W.rqc)return;if(f.elements.prv&&f.elements.prv.checked){f.elements.prv.checked=false;tkPrvSync()}const ta=f.elements.txt;if(ta&&!ta.value.trim())ta.value=W.rqc.txt;f.scrollIntoView({block:'start'});if(ta)ta.focus()},80)};
 function rqcBan(){const c=W.rqc;if(!c)return '';
