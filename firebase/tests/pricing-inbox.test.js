@@ -20,7 +20,7 @@ const GM = require('./gemini-mock');
 const A = 'biz-pix', OFF = 'biz-pix-off', NOSCAN = 'biz-pix-nos', OTHER = 'biz-pix-oth';
 const E1 = 'pix_e1', E2 = 'pix_e2', EOFF = 'pix_eoff', NOP = 'pix_nop', MGR = 'pix_mgr', FOR = 'pix_for', LE = 'pix_le';
 const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false };
-const CATS = JSON.stringify({ cats: [{ id: 'c_sup', name: 'ספקים', beh: 'sup', subs: [{ id: 's_tv', name: 'תבניכל' }] }, { id: 'c_simple', name: 'שונות', beh: 'simple', subs: [] }] });
+const CATS = JSON.stringify({ cats: [{ id: 'c_sup', name: 'ספקים', beh: 'sup', subs: [{ id: 's_tv', name: 'תבניכל' }, { id: 's_off', name: 'בדק בית', prOff: 1 }] }, { id: 'c_simple', name: 'שונות', beh: 'simple', subs: [] }] });
 
 // קבצים קטנים עם חתימה אמיתית (scanDocument בודק את התוכן)
 const jpeg = (n, seed) => { const b = Buffer.alloc(n || 64, seed || 7); b[0] = 0xff; b[1] = 0xd8; b[2] = 0xff; b[3] = 0xe0; return 'data:image/jpeg;base64,' + b.toString('base64'); };
@@ -137,13 +137,14 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
     assert.equal(p.supId, undefined);
   });
 
-  it('תנאים: קטגוריה שאינה ספק, צ\'ק, צילום חלופי, הוצאה מקופה, סכום 0, בלי צילום – אין pinv ואין זיהוי', async () => {
+  it('תנאים: קטגוריה שאינה ספק, צ\'ק, צילום חלופי, ספק כבוי לתמחור, סכום 0, בלי צילום – אין pinv ואין זיהוי', async () => {
     const C = [
       [EXP({ cat: 'c_simple' }), jpeg(), null, 'not-sup'],
       [EXP({ cat: 'c_missing' }), jpeg(), null, 'not-sup'],
       [EXP({ kind: 'check' }), jpeg(), { k: 'check' }, 'check'],
       [EXP({ repl: 'abc123' }), jpeg(), null, 'repl'],
-      [EXP({ reg: 'r1' }), jpeg(), null, 'reg'],
+      [EXP({ sub: 's_off', subName: 'בדק בית' }), jpeg(), null, 'sup-off'],
+      [EXP({ reg: 'r1', sub: 's_off', subName: 'בדק בית' }), jpeg(), null, 'sup-off'],
       [EXP({ amt: 0 }), jpeg(), null, 'amt'],
       [EXP({ amt: '' }), jpeg(), null, 'amt'],
       [EXP(), '', null, 'no-photo'], // nopic: חלק אחד ריק
@@ -156,6 +157,12 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
     }
     assert.equal(invReqs().length, 0);
     assert.equal(await get(`b/${A}/scan_usage/${E1}`), null);
+  });
+
+  it('הוצאה מקופה של ספק דלוק לתמחור (ברירת מחדל) – נוצר pinv', async () => {
+    const s = await stage(`b/${A}/`, E1, EXP({ reg: 'r1' }), jpeg());
+    assert.equal((await run(A, s)).r, 'created');
+    assert.ok(await get(`b/${A}/pinv/${pidOf(s.id)}`));
   });
 
   it('תוספות כבויות (בלי מדף והזמנות / בלי זיהוי חכם) – אין pinv', async () => {

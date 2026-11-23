@@ -2746,7 +2746,7 @@ async function pushItem(it){/* 6ח סבב 2: הוצאה מקופה מלפני ה
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
  try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
 /* ---- קונפיג קטגוריות (מנהל מפרסם, עובד מקבל) ---- */
-async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>Object.assign({id:s.id,name:s.name},s.hp?{hp:s.hp}:{},Array.isArray(s.al)&&s.al.length?{al:s.al.slice(0,10)}:{}))}));
+async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>Object.assign({id:s.id,name:s.name},s.hp?{hp:s.hp}:{},s.prOff?{prOff:1}:{},Array.isArray(s.al)&&s.al.length?{al:s.al.slice(0,10)}:{}))}));
  await fsx('/cfg/main',{method:'PATCH',body:JSON.stringify({fields:{data:sv(JSON.stringify(Object.assign({cats,th:S.theme||'paper',at:new Date().toISOString()},brAll().length>1?{org:{branches:brAll().map(b=>({id:b.id,name:b.name,on:b.on,sig:b.sig}))}}:{})))}})});return cats.length}
 async function getCfg(){const d=await fsx('/cfg/main');const j=JSON.parse(gv(d,'data')||'{}');try{localStorage.setItem(CK,JSON.stringify(j))}catch(e){}return j}
 const cfgLocal=()=>{try{return JSON.parse(localStorage.getItem(CK))||{cats:[]}}catch(e){return{cats:[]}}};
@@ -6434,6 +6434,10 @@ ACT.usBatchGo=()=>{const U=US;if(!U||!U.pg.length)return;U.batch=0;U.i=0;if(!U.p
 {const o=FRM.subsave;FRM.subsave=form=>{const s=subById(form.elements.id&&form.elements.id.value),el=form.elements.hp;
  if(s&&el){const h=hpN(el.value);if(h&&!hpOk(h))return toast('ח.פ / ע.מ: 7 עד 9 ספרות');const ot=h&&S.subs.find(x=>x!==s&&x.hp===h);if(ot)return toast('הח.פ הזה כבר שמור אצל "'+ot.name+'"');if(h)s.hp=h;else delete s.hp}
  return o(form)}}
+/* ---- 23.11.2026: מתג "נכנס לתמחור" בכרטיס ספק. ברירת מחדל דלוק (אין שדה). כבוי (s.prOff) = שום חשבונית של הספק לא נכנסת לתמחור:
+   לא חשבונית רגילה, לא הוצאה מהקופה ולא "שלח לתמחור". דלוק = גם הוצאות מהקופה נכנסות. מתפרסם לעובדים ולשרת דרך pubCfg (subs[].prOff) */
+{const o=ACT.subMenu;ACT.subMenu=el=>{o(el);const s=subById(el.dataset.id);if(!s||(cat(s.cat)||{}).beh!=='sup')return;const b=$('#dlg form[data-f=subsave] button.btn');if(b)b.insertAdjacentHTML('beforebegin',`<label class="f" style="display:flex;gap:10px;align-items:center"><input type="checkbox" name="prOn" value="1"${s.prOff?'':' checked'} style="width:22px;height:22px"><span>החשבוניות של הספק נכנסות לתמחור (כולל הוצאות מהקופה)</span></label>`)}}
+{const o=FRM.subsave;FRM.subsave=form=>{const s=subById(form.elements.id&&form.elements.id.value),el=form.elements.prOn;if(s&&el){if(el.checked)delete s.prOff;else s.prOff=1}return o(form)}}
 /* ---- שמות נוספים לאותו ספק (19.11.2026): למשל השם בכספית ("פלאס") לספק שהחשבונית שלו בשם אחר ("נטו").
    נשמר בכרטיס (s.al – רשימת שמות) ומתפרסם לעובדים (pubCfg). בתמחור חשבונית (pricing.js) מוצר שהספק שלו הוא אחד השמות
    נחשב "אותו ספק" ומקושר לבד. שדה רשות – כרטיס בלי al מתנהג כמו קודם */
