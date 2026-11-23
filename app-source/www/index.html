@@ -6265,7 +6265,11 @@ ACT.usDupSave=()=>{if(!USD)return;const f=USD.onSave;USD=null;closeDlg();f()};
 {const o=usDone;usDone=function(){const si=US&&US.si;o();if(si&&typeof siDrop==='function'){try{siDrop(si)}catch(e){}}}}
 /* שיתוף מוואטסאפ → המסך האחיד */
 ACT.siUs=async el=>{const x=siFind(el);if(!x)return;if(siUsed('ft'+x.h))return toast(SI_SAVED);let du;try{du=await fget(siKey(x))}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
- usOpen();US.si=x.id;if(x.mime==='application/pdf')US.pg.push({pdf:1,du});else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);US.pg.push({u:r.u||du,hi:hi.u||r.u||du})}catch(e){return toast('קריאת הקובץ נכשלה')}}
+ usOpen();US.si=x.id;
+ /* 23.11.2026: PDF ששותף עם כמה עמודים – מתפרק לעמודים, כל עמוד מזוהה לבד, ו"חיבור דפים" מחבר לחשבוניות (לפי מספר + ספק) ומסמן מה כבר במערכת */
+ if(x.mime==='application/pdf'&&bzF('scan')&&typeof window.USCLS==='function'){let P=[];try{const r=await pdfDocPages(du,{max:US_MAXP,scale:2,maxW:1600});P=(r&&r.pages||[]).filter(imgOk)}catch(e){}
+  if(US&&US.si===x.id&&P.length>1){P.forEach(u=>US.pg.push({u,hi:u}));US.i=0;usPane(1);toast('PDF עם '+P.length+' עמודים – מזהה ומפצל לחשבוניות…');usMulti();return}}
+ if(x.mime==='application/pdf')US.pg.push({pdf:1,du});else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);US.pg.push({u:r.u||du,hi:hi.u||r.u||du})}catch(e){return toast('קריאת הקובץ נכשלה')}}
  US.i=0;usPane(1);usDetect()};
 {const o=siCard;siCard=function(x){const h=o(x);return h.replace(/<\/div>$/,`<button class="btn w" style="margin-top:8px" data-a="siUs" data-id="${esc(x.id)}">📄 פתיחה במסך הסריקה האחיד</button></div>`)}}
 /* מסמך ששותף (מנהל): נפתח ישר במסך הסריקה האחיד – התמונה בחצי השמאלי, הזיהוי בוחר את הסוג והטופס שלו נפתח מימין, ואפשר לשנות סוג למעלה.
@@ -6376,6 +6380,17 @@ function usReview(){const U=US;if(!U||!U.grp)return;U.grp=U.grp.filter(g=>g.ix.l
   ${G.map(card).join('')}
   ${nx>=0?`<button class="btn w" style="margin-bottom:8px" data-a="usGo" ${pend?'disabled':''}>${pend?'יש שאלות פתוחות למעלה':'המשך עדכון חשבונית'+(tot>1?' ('+(nx+1)+'/'+tot+')':'')}</button>`:''}
   <button class="btn g w" data-a="usExit">ביטול</button><div style="text-align:center;font-size:12px;opacity:.65;margin-top:6px">אפשר להמשיך אחר כך</div>`)}
+/* 23.11.2026: "כבר במערכת" – חשבונית (ספק + מספר) שכבר יש לה הוצאה: מסומנת "טופל" ולא נשמרת שוב. אפשר לבטל ("שמור בכל זאת") */
+function usExOf(gr){try{if(gr.k!=='exp'||!gr.n||!S)return null;const c=usGcls(gr.ix.map(j=>(US.all[j]||{}).cls)),sb=usSup((c&&c.f)||{},usSupSubs());if(!sb)return null;
+ return S.tx.find(t=>t&&t.t==='exp'&&t.sub===sb.id&&t.inv&&NINV(t.inv)===gr.n)||null}catch(e){return null}}
+{const o=usReview;usReview=function(){const U=US;if(U&&U.grp)U.grp.forEach(gr=>{if(gr.exc)return;gr.exc=1;const t=usExOf(gr);if(t&&!gr.done){gr.done=1;gr.ex=t.id}});
+ const r=o.apply(this,arguments);
+ try{if(US===U&&U&&U.grp){const ex=U.grp.filter(g=>g.ex&&g.done).length,inv=U.grp.filter(g=>g.k==='exp').length,cards=document.querySelectorAll('.usrg');
+  U.grp.forEach((gr,gi)=>{const el=cards[gi];if(!el||!gr.ex||!gr.done)return;const t=S.tx.find(y=>y.id===gr.ex);
+   el.insertAdjacentHTML('beforeend',`<div class="usrq"><b>כבר במערכת</b>${t?' · '+esc(subName(t)||'')+(t.inv?' · חשבונית '+esc(t.inv):'')+' · '+esc(dfmt(t.date)):''} – לא יישמר שוב.<button type="button" class="btn g s" style="margin-top:6px" data-a="usRvUnEx" data-g="${gi}">שמור בכל זאת</button></div>`)});
+  if(ex&&cards[0])cards[0].insertAdjacentHTML('beforebegin',`<p class="note" style="margin:0 0 10px;font-weight:700">נמצאו ${inv} חשבוניות: ${ex} כבר במערכת, ${inv-ex} חדשות.</p>`)}}catch(e){}
+ return r}}
+ACT.usRvUnEx=el=>{const U=US;if(!U||!U.grp)return;const gr=U.grp[+el.dataset.g];if(!gr||!gr.ex)return;delete gr.ex;gr.done=0;usRvDone()};
 const usRvG=el=>{const U=US;if(!U||!U.grp)return null;const gr=U.grp[+el.dataset.g];return gr&&!gr.done?gr:null};
 const usRvDone=()=>{usqSave();usReview()};
 ACT.usRvSee=el=>{if(!US)return;US.i=+el.dataset.j||0;UZ={s:1,x:0,y:0};usPaneDraw()};
