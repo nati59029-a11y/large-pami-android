@@ -555,7 +555,9 @@ ACT.secSnzT=el=>{const id=el.dataset.id;X.snz=X.snz===id?'':id;rerender()};
 FRM.secSnzF=f=>{const id=f.dataset.id,at=new Date(String(f.at.value||'')).getTime();
  if(!Number.isFinite(at)||at<Date.now()+60e3||at>Date.now()+60*864e5)return toast('אפשר לבחור זמן מעכשיו ועד 60 יום קדימה');
  return snzDo(id,{at},f.querySelector('button:not([type=button])'))};
-const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
+/* 23.11.2026: התראות מייל ו-Google נשמרות בשרת כסוג ווצאפ – המקור (src) מגיע מהשרת */
+const SRCL={mail:'מייל',cal:'יומן Google'};
+const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(n.k==='wa'&&SRCL[n.src]?SRCL[n.src]:(KIND[n.k]||''));
 function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
@@ -659,6 +661,7 @@ function nAct(n){const typ=n.k==='emp'?'emp':n.k==='rem'?n.typ:'';const has=v=>t
  if(typ==='cal')return{p:{l:'פתח ביומן',k:'cal',v:nCalDay(n)},s:[]};
  if(typ==='inv')return{p:{l:'פתיחת החשבוניות שהתקבלו',k:'tab',v:'inv'},s:[]};
  if(typ==='win')return{p:{l:'פתיחת השיחה כדי לענות',k:'wa',v:nWaOf(n)},s:[]};
+ if(n.k==='wa'&&n.gx&&n.st!=='gone')return{p:{l:'חיבור מחדש',k:'gset'},s:[]};
  return null}
 const nBtnH=(n,x,cls,st)=>`<button type="button" class="${cls}" data-a="${x.a||'secNA'}" data-id="${esc(x.ref||n.id)}"${x.ref?'':` data-n="${esc(n.id)}"`}${x.k?` data-k="${x.k}"`:''}${x.v?` data-v="${esc(x.v)}"`:''}${x.g?` data-g="${esc(x.g)}" data-d="${esc(x.d)}"`:''}${x.pick?' data-pick="1"':''} style="${st}">${esc(x.l)}</button>`;
 /* li=1: שבב בשורה ברשימה (רק הראשית; לדוח כבר יש "פתיחת הדוח" בשורה). li=0: בראש חלון הפרטים – הראשית בולטת, המשניות מתחתיה */
@@ -679,6 +682,7 @@ ACT.secNA=el=>{const k=el.dataset.k,v=el.dataset.v||'',id=el.dataset.n||el.datas
  if(k==='tk'){closeDlg();try{TKT='late'}catch(e){}go('tk');return}
  if(k==='bk'){closeDlg();el.disabled=true;Promise.resolve(bkCloud(true)).then(r=>{if(r)nAuto(id,'✓ הגיבוי הושלם – ההתראה סומנה כטופלה',1800)}).catch(()=>{});return}
  if(k==='tab')return nTab(v);
+ if(k==='gset'){closeDlg();X.edit=0;X.mrv=0;X.rp=null;ACT.secSet();if(cur().v!=='sec')go('sec');let i=0;const f=()=>{const e=document.getElementById('secGSet');if(e)e.scrollIntoView({block:'start'});else if(++i<20)setTimeout(f,150)};setTimeout(f,50);return}
  if(k==='cal')return nTab('cal',()=>{if(/^\d{4}-\d{2}-\d{2}$/.test(v)){X.cd=v;X.cm=v.slice(0,7)}});
  if(k==='wa')return nTab('wa',()=>{if(v&&X.wa){X.wa.cur=v;X.wa.card=null}})};
 /* סגירת קופה מתוך ההתראה: סניף ותאריך ממולאים מראש (רק כשאין סגירה שהתחלת למלא – היא לא נדרסת). כמה סניפים – בוחרים. */
@@ -1251,7 +1255,7 @@ async function toInbox(x){const lid=lidOf(x.id),L=secL();let it=S.inbox.find(i=>
  let du='';try{du=await ivFile(x)}catch(e){}if(du){try{await fput('i'+lid,du)}catch(e){du=''}}
  const f=x.f||{},s=ivSub(x),ok=subOk(s),srcN='מהמזכירה – '+ivSrc(x)+(x.ns?' · שולח חדש – לבדוק':'');let d;
  if(x.k==='chk')d={kind:'check',amt:Math.max(0,+f.amt||0),date:'',cdate:f.cdate||'',no:String(f.no||'').replace(/\D/g,'').slice(0,20),bank:String(f.bank||'').slice(0,60),payee:String(f.payee||'').slice(0,80),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};
- else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};
+ else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};/* 23.11 (בעל העסק): קבלה – במסך הבדיקה סוג המסמך "קבלה" (אפשר לשנות); rel = החשבונית שהקבלה משלמת */if(x.k==='rcpt'){d.rcp=true;d.rno=String(f.num||'').slice(0,40);d.rel=String(f.rel||'').slice(0,40);d.inv=''}
  if(x.br&&brAll().some(b=>b.id===x.br))d.br=x.br;
  it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};if((x.src||[]).some(q=>q&&q.ch==='mail'))it.secM=1;if(ivFrom(x))it.secF=ivFrom(x);if(x.noStock||x.hist)it.noStock=1;
  S.inbox.push(it);L[x.id]={s:'in',ns:x.ns||''};save();return it}
@@ -1317,8 +1321,8 @@ function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act=''
    act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">${mineIn||x.mine?'המשך':'בדיקה ואישור'}</button>${view}${no}</div>`}
   else if(x.k==='rcpt'){const t=rcptOf(x);
    if(t)sug.push(`<div class="secivsug"><small>נמצאה חשבונית פתוחה: ${esc(t.inv||'')} · ${esc(ils(bal(t)))} לתשלום (${esc(dfmt(t.date))}). זו קבלה – לא הוצאה חדשה.</small><button class="btn w" style="margin-top:6px" data-a="secIvPay" data-id="${id}" data-t="${esc(t.id)}">סמן כשולם</button></div>`);
-   else sug.push('<div class="secivsug"><small><b>קבלה בלי חשבונית – מה לעשות?</b> לא נמצאה חשבונית פתוחה מתאימה. אפשר לרשום כהוצאה (רק אם אין עליה חשבונית), או לדחות.</small></div>');
-   act=`<div class="secrow">${t?'':`<button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כהוצאה</button>`}${view}${no}</div>`}
+   else sug.push('<div class="secivsug"><small><b>קבלה בלי חשבונית – מה לעשות?</b> לא נמצאה חשבונית פתוחה מתאימה. ב"בדיקה ואישור" אפשר לבחור: ממתינה לחשבונית כנגד, הוצאה חדשה בלי חשבונית, או לדחות.</small></div>');
+   act=`<div class="secrow"><button class="btn${t?' g':''}" data-a="secIvEd" data-id="${id}" style="flex:1">בדיקה ואישור</button>${view}${no}</div>`}
   else if(x.k==='dn')act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כתעודת משלוח</button>${view}${no}</div>`;
   else if(x.k==='chk')act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">שיוך לחשבונית</button>${view}${no}</div>`;
   else act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">פתיחה והזנה</button>${view}${no}</div>`;

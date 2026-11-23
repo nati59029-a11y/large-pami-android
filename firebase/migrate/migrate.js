@@ -68,6 +68,7 @@ const COPY = [
   'possale', 'pospay', 'posret', 'posshift', 'posz', 'posdev', 'poscfg', 'promo', 'clubcfg', 'clublog', 'poslog', 'poserr', 'posconf',
   'posbk', 'posgift', 'posgiftlog', 'posclock', 'posimp', 'pos_income_daily', 'posreq', 'poscfglog', 'pospark', 'poscpn', 'pospin',
   'posalert', 'poslbl', 'poscnt', 'posbc', 'posbr', 'poscard', // poscard: גל 3 (19.11.2026) – חיובי אשראי במסוף מחובר
+  'dr', 'drcfg', // main (#186–188, 23.11.2026): כללים רק תחת b/{bizId}, נוספו אחרי ההעברה – אין להם עותק בשורש
   'lblp', // מוצרים שהוקלדו ידנית במסך הדפסת המדבקות (main, 1d5a0bc): כלל ב-b/{bizId} וגם בשורש – נוסף 23.11.2026 כדי שבדיקה 13 תכסה אותו
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
