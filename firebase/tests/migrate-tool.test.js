@@ -932,7 +932,7 @@ describe('purge-root: מחיקת העותק הישן בשורש אחרי המע�
     assert.deepEqual(rep.rootNewerPaths, ['cashout/newer']);
     const bz = (await get(LP)).fields;
     assert.ok(bz.rootPurgedAt && bz.rootPurgedAt.timestampValue, 'נרשם rootPurgedAt');
-    assert.equal(bz.rootPurgeRun.stringValue, 'local');
+    assert.equal(bz.rootPurgeRun.stringValue, process.env.GITHUB_RUN_ID || 'local'); // ב-CI נרשם מזהה ההרצה
     assert.equal(bz.dataRoot.stringValue, 'b');
     const [files] = await storage().getFiles({ prefix: 'app_backups/' });
     assert.equal(files.length, 2, 'Storage לא נמחק');
