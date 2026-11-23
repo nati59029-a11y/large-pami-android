@@ -187,13 +187,12 @@ const atT=at=>{const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(at
 const secT=s=>{s=n0(s);return s<60?s+' שנ׳':Math.floor(s/60)+':'+String(s%60).padStart(2,'0')+' דק׳'};
 const HOWN={self:'הסיר את עצמו',admin:'הוצא ע״י מנהל',gone:'יצא מהרשימה'};
 const RPT={join:'נרשמו',left:'התנתקו',heard:'שמעו את הקו',out:'לא מקבלים בתשלום'};
-const rpErr=c=>c==='optout-unknown'?'לא ידוע':'לא הצלחנו לקרוא מימות';
 function rpTable(){const D=RP.d;
  const tb=(head,rows)=>rows.length?`<div class="fbtw" style="max-height:none"><table class="fbt" style="min-width:0"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`:'<p class="note">אין מספרים להציג.</p>';
  const ph=p=>`<td dir="ltr" style="text-align:right;white-space:nowrap">${esc(nbFmt(p))}</td>`;
  if(RP.tab==='join'){if(!D.joined)return`<p class="note" style="color:var(--bad)">${D.logErr?'לא הצלחנו לקרוא מימות את יומן ההרשמות.':'אין נתונים.'}</p>`;
   return tb(['מספר','מתי'],D.joined.map(x=>`<tr>${ph(x.p)}<td>${esc(atT(x.at))}</td></tr>`))}
- if(RP.tab==='left'){if(!D.left)return'<p class="note" style="color:var(--bad)">לא הצלחנו לקרוא מימות מי התנתק.</p>';
+ if(RP.tab==='left'){if(!D.left)return`<p class="note" style="color:var(--bad)">${D.freeErr?'לא הצלחנו לקרוא מימות את רשימת הצינתוקים.':'לא הצלחנו לקרוא מימות את יומן ההרשמות, ועוד אין מידע שמור מבדיקה קודמת. נסו שוב מאוחר יותר.'}</p>`;
   return(D.logOk?'':'<p class="note" style="margin:0 0 8px">יומן ההרשמות בימות לא נקרא – מוצגים רק מי שהמערכת ראתה שיצאו מהרשימה.</p>')+tb(['מספר','מתי','איך'],D.left.map(x=>`<tr>${ph(x.p)}<td>${esc(atT(x.at))}</td><td>${esc(HOWN[x.how]||'')}</td></tr>`))}
  if(RP.tab==='heard'){const H=D.heard;if(!H)return'<p class="note" style="color:var(--bad)">לא הצלחנו לקרוא מימות את יומן השיחות של החודש הזה. ייתכן שלא היו שיחות, או שימות לא מאפשר לקרוא אותו.</p>';
   return(H.more?`<p class="note" style="margin:0 0 8px">מוצגים ${H.rows.length} המספרים האחרונים מתוך ${H.rows.length+n0(H.more)}.</p>`:'')+tb(['מספר','שיחות','זמן בקו','אחרונה'],H.rows.map(x=>`<tr>${ph(x.p)}<td class="c">${esc(String(n0(x.n)))}</td><td>${esc(secT(x.sec))}</td><td>${esc(atT(x.last))}</td></tr>`))}

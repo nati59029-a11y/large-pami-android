@@ -237,7 +237,7 @@ async function numbersOf(db, key, base) {
   } else { out.fbErr = yErr(fe.reason); logger.warn('yemot-fblist: numbers fb failed', { reason: 'fb-failed', code: out.fbErr }); }
   out.counts = { free: out.free.length, fbActive: out.fb.filter((x) => !x.b).length, fbBlocked: out.fb.filter((x) => x.b).length };
   // (משימה 2026-11-23) מי שיצא מהרשימה החינמית – לפי מה שנשמר בבדיקה האחרונה (לא פונים לימות שוב). מוצג ליד המספר.
-  try { const o = (await db.doc(require('./yemot-optout').OPT).get()).get('out'); out.gone = o && typeof o === 'object' ? Object.keys(o).filter((p) => !out.free.includes(p)) : []; } catch (e) { out.gone = []; }
+  try { const o = (await db.doc(require('./yemot-optout').OPT).get()).get('out'); const fs = new Set(out.free); out.gone = o && typeof o === 'object' ? Object.keys(o).filter((p) => !fs.has(p)) : []; } catch (e) { out.gone = []; }
   return out;
 }
 

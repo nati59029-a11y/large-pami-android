@@ -132,6 +132,14 @@ describe('ימות 2026-11-23: מי שיצא מהצינתוקים לא מקבל 
     assert.deepEqual(paidSent(), ['0504444444', '0771234567'], 'בלי יומן אי אפשר לדעת על 0504444444 – רק מה שנשמר');
   });
 
+  it('יומן בפורמט לא מוכר (אירועי יציאה שלא פוענחו) – כמו יומן שלא נקרא: בלי מידע קודם לא נשלח', async () => {
+    await setup(env);
+    M.state.tzlLog.mivtzaim = [{ Phone: '0501111111', Date: '2026-11-02', Time: '11:00', TypeOperation: 'RemovingToListTzintuk' }];
+    const r = await tz('u_mgr', { action: 'preview', target: 'all' });
+    assert.equal(r.status, 'UNAVAILABLE', r.text); assert.equal(r.error.details.reason, 'optout-unknown');
+    assert.equal(M.calls('RunTzintuk').length, 0);
+  });
+
   it('numbers מסמן מי שיצא (מהמידע השמור, בלי פנייה נוספת ליומן)', async () => {
     await setup(env);
     await tz('u_mgr', { action: 'preview', target: 'all' });
