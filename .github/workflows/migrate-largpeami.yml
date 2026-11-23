@@ -1,7 +1,9 @@
 # העברת הנתונים של לארג' פעמי לעסק הראשון במבנה ריבוי העסקים (b/largpeami). העסק קבוע: largpeami.
 # ידני בלבד (Actions -> "Migrate largpeami data" -> Run workflow). אין push ואין schedule.
 # ברירת המחדל (action=check): גיבוי, ספירה ואימות, בלי שום כתיבה לנתוני העסק.
-# פעולות שכותבות (copy, copy-docs, switch-to-b, rollback-to-legacy) רק עם קלט אישור נוסף. המקור בשורש לא נמחק ולא מתעדכן לעולם.
+# פעולות שכותבות (copy, copy-docs, switch-to-b, rollback-to-legacy) רק עם קלט אישור נוסף. המקור בשורש לא נמחק ולא מתעדכן,
+# חוץ מ-purge-root (23.11.2026, בבקשת הבעלים): מחיקת העותק הישן בשורש אחרי המעבר, רק עם אישור נוסף (doc_paths) ואחרי גיבוי טרי שנשמר ב-bucket.
+# purge-root-dry-run = אותה ספירה, בלי למחוק כלום.
 # הגיבוי שלפני כל פעולה נשמר כברירת מחדל ב-bucket הפרטי של הפרויקט (migrate_backups/), לא ב-GitHub.
 # הוראות: firebase/migrate/README.md. חזרה: firebase/migrate/ROLLBACK.md.
 # סודות: FIREBASE_SERVICE_ACCOUNT (ייצור) ו-FIREBASE_SERVICE_ACCOUNT_TEST (פרויקט שמזהה שלו מכיל test), מ-secrets של GitHub בלבד.
@@ -19,13 +21,13 @@ on:
         required: true
         type: string
       action:
-        description: "check = גיבוי+ספירה+אימות (קריאה בלבד). copy = העתקה/השלמה. copy-docs = העתקת מסמכים בודדים (doc_paths), גם אחרי המעבר. report-since / compare-backup = דוחות. switch-to-b / rollback-to-legacy = שינוי dataRoot"
+        description: "check = גיבוי+ספירה+אימות (קריאה בלבד). copy = העתקה/השלמה. copy-docs = העתקת מסמכים בודדים (doc_paths), גם אחרי המעבר. report-since / compare-backup = דוחות. switch-to-b / rollback-to-legacy = שינוי dataRoot. purge-root-dry-run / purge-root = ספירה / מחיקת העותק הישן בשורש (אחרי המעבר)"
         required: true
         type: choice
-        options: [check, copy, copy-docs, report-since, compare-backup, switch-to-b, rollback-to-legacy]
+        options: [check, copy, copy-docs, report-since, compare-backup, switch-to-b, rollback-to-legacy, purge-root-dry-run, purge-root]
         default: check
       write_confirm:
-        description: "רק לפעולות שכותבות (copy, copy-docs, switch-to-b, rollback-to-legacy): הקלד write-to-<מזהה הפרויקט>"
+        description: "רק לפעולות שכותבות (copy, copy-docs, switch-to-b, rollback-to-legacy, purge-root): הקלד write-to-<מזהה הפרויקט>"
         required: false
         type: string
         default: ""
@@ -55,7 +57,7 @@ on:
         type: string
         default: ""
       doc_paths:
-        description: "ל-copy-docs בלבד: נתיבי מסמכים בשורש, מופרדים בפסיק (למשל cashout/abc,tasks/xyz). עד 50. יצירה בלבד, יעד קיים לא נדרס"
+        description: "ל-copy-docs: נתיבי מסמכים בשורש, מופרדים בפסיק (למשל cashout/abc,tasks/xyz), עד 50, יצירה בלבד. ל-purge-root: אישור המחיקה – הקלד delete-root-copy-of-largpeami-in-<מזהה הפרויקט>"
         required: false
         type: string
         default: ""
@@ -87,6 +89,8 @@ jobs:
           case "$ACTION" in
             check|report-since|compare-backup) echo "mode=readonly" >> "$GITHUB_OUTPUT" ;;
             copy|copy-docs|switch-to-b|rollback-to-legacy) echo "mode=write" >> "$GITHUB_OUTPUT" ;;
+            purge-root-dry-run) echo "mode=readonly" >> "$GITHUB_OUTPUT" ;;
+            purge-root) echo "mode=write" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::Unknown action"; exit 1 ;;
           esac
           # vars.FIREBASE_STORAGE_BUCKET רק אם הוא שייך לפרויקט שהוקלד; אחרת ה-bucket ברירת המחדל של הפרויקט
@@ -152,6 +156,7 @@ jobs:
           BACKUP_PATH: ${{ inputs.backup_path }}
           ACK: ${{ inputs.ack_unknown }}
           DOC_PATHS: ${{ inputs.doc_paths }}
+          MIGRATE_PURGE_CONFIRM: ${{ inputs.action == 'purge-root' && inputs.doc_paths || '' }}
         run: |
           set -o pipefail
           O="$RUNNER_TEMP/out"; mkdir -p "$O"
@@ -191,6 +196,15 @@ jobs:
               if [ -f "$O/state.json" ]; then "${T[@]}" report-since --state "$O/state.json" --report "$O/r-since.json" | tee -a "$O/log.txt"; fi
               "${T[@]}" set-dataroot --to legacy --mode write --report "$O/r-dataroot.json" | tee -a "$O/log.txt"
               "${T[@]}" compare-backup --backup-gcs "$BACKUP_PATH" --report "$O/r-compare.json" | tee -a "$O/log.txt" ;;
+            purge-root-dry-run)
+              "${T[@]}" purge-root --report "$O/r-purge.json" | tee -a "$O/log.txt" ;;
+            purge-root)
+              # אישור המחיקה ושמירת הגיבוי ב-bucket נבדקים לפני הגיבוי; הגיבוי חייב להצליח ולהישמר, אחרת עוצרים
+              [ "$MIGRATE_PURGE_CONFIRM" = "delete-root-copy-of-largpeami-in-$MIGRATE_PROJECT" ] || { echo "::error::purge-root: doc_paths must be exactly delete-root-copy-of-largpeami-in-$MIGRATE_PROJECT"; exit 1; }
+              [ "$UPLOAD" = "true" ] || { echo "::error::purge-root requires upload_backup=true (the backup must be saved in the bucket first)"; exit 1; }
+              backup
+              BK=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!r.ok||!r.uploaded)process.exit(1);process.stdout.write(r.uploaded)' "$O/r-backup.json") || { echo "::error::purge-root: the backup was not saved in the bucket - nothing deleted"; exit 1; }
+              "${T[@]}" purge-root --mode write --backup "$O/backup.json" --backup-gcs "$BK" --report "$O/r-purge.json" | tee -a "$O/log.txt" ;;
           esac
           tail -n 60 "$O/log.txt" >> "$GITHUB_STEP_SUMMARY"
 

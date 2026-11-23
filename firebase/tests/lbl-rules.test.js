@@ -93,5 +93,15 @@ describe('הדפסת מדבקות – חוקים בשורש (לארג\' פעמי
     await assertFails(db(ROLD).collection('lblp').get());
     await assertFails(db(ROLD).doc('lblp/x').set(good(ROLD)));
     await assertSucceeds(db(RMGR).doc('lblp/m1').delete());
+  });  it('נעילת השורש (lpW): אחרי המעבר (b/largpeami.dataRoot = b) אין כתיבה ומחיקה ב-lblp בשורש; קריאה מותרת; legacy פותח שוב', async () => {
+    const lp = (dataRoot) => prep((d) => d.doc('b/largpeami').set({ name: 'lp', status: 'active', dataRoot, schemaVersion: 1, createdAt: 1, createdBy: 'migrate', migrationTarget: true }));
+    await lp('b');
+    await assertFails(db(RLBL).doc('lblp/bc_2').set(good(RLBL)));
+    await assertFails(db(RLBL).doc('lblp/m1').set(good(RLBL, { price: 1 })));
+    await assertFails(db(RMGR).doc('lblp/m1').delete());
+    await assertSucceeds(db(RLBL).collection('lblp').get());
+    await lp('legacy');
+    await assertSucceeds(db(RLBL).doc('lblp/bc_2').set(good(RLBL)));
+    await assertSucceeds(db(RMGR).doc('lblp/m1').delete());
   });
 });

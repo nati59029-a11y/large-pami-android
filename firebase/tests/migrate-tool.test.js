@@ -455,16 +455,22 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     fs.writeFileSync(F('rollback-steps.txt'), OUT.join('\n\n'));
   });
 
-  it('12. אין בקוד הכלי מחיקה או עדכון של השורש (חיפוש בקוד)', () => {
+  it('12. אין בקוד הכלי מחיקה או עדכון של השורש (חיפוש בקוד) – חוץ מנקודת המחיקה היחידה של purge-root', () => {
     const dir = MDIR;
     const code = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => [f, fs.readFileSync(path.join(dir, f), 'utf8')]);
+    // 23.11.2026: נקודת מחיקה אחת בלבד – deleteDocs ב-fsrest.js (purge-root), עם תנאי updateTime. נבדקת בנפרד בבלוק purge-root
+    const PURGE_LINE = "writes: chunk.map(d => ({ delete: this.prefix + '/' + d.path, currentDocument: { updateTime: d.updateTime } })),";
     for (const [f, c] of code) {
-      const lines = c.split('\n').filter(l => !/^\s*\/\//.test(l));
+      const lines = c.split('\n').filter(l => !/^\s*\/\//.test(l)).filter(l => !(f === 'fsrest.js' && l.trim() === PURGE_LINE));
       const bad = lines.filter(l => /\.delete\(|DELETE|\bdelete\s*:|deleteDocument|firebase-admin\/firestore|getFirestore|:commit|\.batch\(|createWriteStream|\.move\(|\.rename\(/.test(l) && !/'GET' && method !== 'POST'/.test(l));
       assert.deepEqual(bad, [], f + ': אין מחיקה, אין כתיבה דרך SDK של Firestore, ואין כתיבת Storage חוץ מ-copy');
     }
     const all = code.map(x => x[1]).join('\n');
-    assert.equal((all.match(/:batchWrite/g) || []).length, 1, 'נקודת כתיבה אחת בלבד ל-Firestore');
+    assert.equal(all.split(PURGE_LINE).length - 1, 1, 'נקודת מחיקה אחת בלבד');
+    assert.match(all, /deleteDocs = async function[\s\S]{0,200}this\.assertDeletable\(d\.path\)/, 'כל מחיקה עוברת את assertDeletable');
+    assert.equal((all.match(/\.deleteDocs\(/g) || []).length, 1, 'רק purge-root קורא ל-deleteDocs');
+    assert.equal((all.match(/\.enablePurge\(/g) || []).length, 1, 'רק purge-root מפעיל מחיקה');
+    assert.equal((all.match(/:batchWrite/g) || []).length, 2, 'שתי נקודות בלבד ל-Firestore: כתיבה (writeDocs) ומחיקה (deleteDocs)');
     assert.equal((all.match(/\.copy\(/g) || []).length, 1, 'העתקה אחת בלבד ל-Storage (אל b/<bizId>/app_backups)');
     assert.equal((all.match(/\.save\(/g) || []).length, 1, 'שמירה אחת בלבד ל-Storage (קובץ הגיבוי, תחת migrate_backups/)');
   });
@@ -791,5 +797,246 @@ describe('copy-docs: העתקה ממוקדת של מסמכים בודדים אח
     assert.ok(!/inputs\.doc_paths/.test(runStep.run), 'אין הצבה ישירה של הקלט בתוך הסקריפט');
     const block = runStep.run.split('copy-docs)')[1].split(';;')[0];
     assert.ok(block.indexOf('parseDocPaths') < block.indexOf('backup') && block.indexOf('backup') < block.indexOf('copy-docs --mode write'), 'בדיקת נתיבים ← גיבוי ← העתקה');
+  });
+});
+
+// 23.11.2026: purge-root – מחיקת העותק הישן בשורש אחרי המעבר ל-b (בבקשת הבעלים).
+describe('purge-root: מחיקת העותק הישן בשורש אחרי המעבר', () => {
+  const LP = 'b/' + BIZ;
+  const CONFIRM = 'delete-root-copy-of-' + BIZ + '-in-' + P;
+  const bizFields = (dataRoot) => ({ name: S("לארג' פעמי"), status: S('active'), dataRoot: S(dataRoot), schemaVersion: I(1), createdAt: TS('2026-11-15T10:00:00Z'), createdBy: S('migrate'), migrationTarget: B(true) });
+  // בשורש ובעותק ב-b (התוכן ב-b חדש יותר ושונה – מותר)
+  const BOTH = ['cashout/a', 'tasks/t1', 'tasks/t1/c/c1', 'tasks/orphan/c/c9', 'fb/old', 'inbox/chg', 'cust/x', 'cust/x/p/card1'];
+  // רק בשורש: נשארים ומדווחים "חסר ב-b"
+  const ROOT_ONLY = ['cashout/onlyroot', 'tasks/t1/c/c2', 'fb/new'];
+  // מחוץ לתחום – לא נמחקים גם כשיש להם עותק ב-b
+  const NEVER = ['admins/u_mgr', 'staff/u_emp', 'private/pay', 'grp/g1', 'orders/o1', 'site_income_daily/2026-11-20', 'sec_waq/largpeami__m1',
+    'impQ/largpeami_j1', 'mailRate/h', 'users/u_emp', 'superadmins/sa1', 'pact/x', 'push_dev/x', 'dev_cur/x', 'mystery/x'];
+  const T0 = { t: S('root'), n: D(1.5) };
+  const pr = (extra = [], env = {}) => run(['purge-root', ...extra], env);
+  const W = (extra = []) => pr(['--mode', 'write', ...extra], { MIGRATE_PURGE_CONFIRM: CONFIRM });
+  async function rootState() { const o = {}; for (const p of [...BOTH, ...ROOT_ONLY, ...NEVER]) { const d = await get(p); o[p] = d ? d.updateTime : null; } return o; }
+  let uploaded = '';
+  before(async () => {
+    await clearAll();
+    const w = [[LP, bizFields('b')]];
+    for (const p of BOTH) w.push([p, T0], [LP + '/' + p, { t: S('b – חדש יותר') }]);
+    for (const p of ROOT_ONLY) w.push([p, T0]);
+    for (const p of NEVER) { w.push([p, T0]); if (!/^(users|superadmins)\//.test(p)) w.push([LP + '/' + p, T0]); }
+    w.push([LP + '/cashout/newer', { t: S('b') }]);
+    await putMany(w);
+    await put('cashout/newer', { t: S('השורש שונה אחרי b') }); // השורש חדש מ-b: לא נמחק
+    const bk = storage();
+    await bk.file('app_backups/u_mgr/1.enc').save(Buffer.alloc(100, 1), { contentType: 'application/octet-stream' });
+    await bk.file(LP + '/app_backups/u_mgr/1.enc').save(Buffer.alloc(100, 1), { contentType: 'application/octet-stream' });
+    await bk.file('app_backups/u_emp/2.enc').save(Buffer.alloc(50, 2), { contentType: 'application/octet-stream' });
+  });
+
+  it('ספירה (בלי --mode write): לא נמחק כלום, ספירות לפי אוסף, חסרים ב-b מדווחים, יוצא 1', async () => {
+    const s0 = await rootState();
+    const r = await pr(['--report', F('pr-dry.json')]);
+    show('purge-root (ספירה)', r);
+    assert.equal(r.code, 1, 'יש מסמכים שחסרים ב-b');
+    const rep = report(F('pr-dry.json'));
+    assert.equal(rep.write, false);
+    assert.equal(rep.candidates, BOTH.length - 1, 'tasks/t1 נשאר: יש לו צאצא שנשאר בשורש');
+    assert.equal(rep.deleted, 0);
+    assert.deepEqual(rep.missingInBPaths.sort(), [...ROOT_ONLY].sort());
+    assert.deepEqual(rep.keptParentPaths, ['tasks/t1']);
+    assert.deepEqual(rep.rootNewerPaths, ['cashout/newer'], 'השורש חדש מ-b – מוצג כבר בספירה');
+    assert.equal(rep.differsFromB, BOTH.length + 1, 'מספר המסמכים שהתוכן שלהם שונה מ-b');
+    assert.equal(rep.collections.tasks.candidates, 2);
+    assert.equal(rep.collections.fb.missingInB, 1);
+    for (const c of ['admins', 'staff', 'private', 'grp', 'orders', 'sec_waq', 'users', 'superadmins', 'pact', 'mystery']) {
+      assert.ok(!rep.scope.includes(c), c);
+      assert.ok(rep.outOfScope.find(o => o.coll === c), 'מדווח כמחוץ לתחום: ' + c);
+    }
+    assert.deepEqual(await rootState(), s0, 'שום מסמך לא השתנה');
+    assert.match(r.out, /ספירה בלבד \(לא נמחק כלום\)/);
+    assert.match(r.out, /השורש חדש מ-b \(שונה ונכתב אחרי b\), לא נמחק: cashout\/newer/);
+    assert.match(r.out, /אב של מסמך שנשאר בשורש, לא נמחק: tasks\/t1/);
+    assert.equal((await get(LP)).fields.rootPurgedAt, undefined, 'ספירה לא מסמנת את מסמך העסק');
+    assert.match(r.out, /לא נוגעים: admins \(זהות והרשאות/);
+    assert.match(r.out, /Storage \(app_backups\/ בשורש, לא נמחק\): 2 קבצים \/ 150 בתים\. זהים ב-b: 1/);
+    assert.doesNotMatch(r.out, /b – חדש יותר|"root"/, 'בלי תוכן מסמכים בפלט');
+    assert.match(r.out, /כתיבות: 0/);
+  });
+
+  it('סירוב: בלי אישור, אישור שגוי, בלי גיבוי, גיבוי שלא נשמר ב-bucket, גיבוי ישן, dataRoot legacy, מסמך עסק שלא נוצר בכלי, עסק אחר', async () => {
+    const s0 = await rootState();
+    const b = await run(['backup', '--out', F('pr-bk0.json'), '--upload', '--upload-tag', 'pr0', '--report', F('pr-bk0-r.json')]);
+    assert.equal(b.code, 0, b.out);
+    const gcs = report(F('pr-bk0-r.json')).uploaded;
+    assert.match(gcs, /migrate_backups\//);
+    const cases = [
+      ['בלי אישור מחיקה', pr(['--mode', 'write', '--backup', F('pr-bk0.json'), '--backup-gcs', gcs]), /חסר אישור מחיקה/],
+      ['אישור שגוי', pr(['--mode', 'write', '--backup', F('pr-bk0.json'), '--backup-gcs', gcs], { MIGRATE_PURGE_CONFIRM: 'delete-root-copy-of-largpeami-in-largpeami' }), /חסר אישור מחיקה/],
+      ['בלי גיבוי', W(), /--backup/],
+      ['גיבוי לא שמור ב-bucket', W(['--backup', F('pr-bk0.json')]), /--backup-gcs/],
+      ['נתיב גיבוי מחוץ ל-migrate_backups', W(['--backup', F('pr-bk0.json'), '--backup-gcs', 'app_backups/u_mgr/1.enc']), /--backup-gcs/],
+      ['קובץ גיבוי שלא קיים ב-bucket', W(['--backup', F('pr-bk0.json'), '--backup-gcs', 'migrate_backups/nope/backup.json']), /לא נמצא ב-bucket/],
+    ];
+    for (const [name, p, re] of cases) { const r = await p; assert.notEqual(r.code, 0, name); assert.match(r.out, re, name); }
+    // גיבוי ישן (takenAt לפני 7 שעות) – נדחה
+    const old = report(F('pr-bk0.json')); old.takenAt = new Date(Date.now() - 7 * 3600e3).toISOString();
+    fs.writeFileSync(F('pr-bk-old.json'), JSON.stringify(old));
+    const ro = await W(['--backup', F('pr-bk-old.json'), '--backup-gcs', gcs]);
+    assert.notEqual(ro.code, 0); assert.match(ro.out, /לא טרי/);
+    // קובץ מקומי ששונה אחרי השמירה ב-bucket – נדחה
+    const ed = report(F('pr-bk0.json')); ed.x = 1; fs.writeFileSync(F('pr-bk-ed.json'), JSON.stringify(ed));
+    const re2 = await W(['--backup', F('pr-bk-ed.json'), '--backup-gcs', gcs]);
+    assert.notEqual(re2.code, 0); assert.match(re2.out, /לא זהה לקובץ המקומי/);
+    // dataRoot legacy – נדחה גם בספירה
+    await put(LP, bizFields('legacy'));
+    for (const r of [await pr(), await W(['--backup', F('pr-bk0.json'), '--backup-gcs', gcs])]) { assert.notEqual(r.code, 0); assert.match(r.out, /לא b/); }
+    const { createdBy, ...noMark } = bizFields('b');
+    assert.ok(createdBy);
+    await put(LP, noMark);
+    const nm = await W(['--backup', F('pr-bk0.json'), '--backup-gcs', gcs]);
+    assert.notEqual(nm.code, 0); assert.match(nm.out, /לא נוצר על ידי כלי ההעברה/);
+    await put(LP, bizFields('b'));
+    await put('b/acme', bizFields('b'));
+    const ob = await W(['--biz', 'acme', '--backup', F('pr-bk0.json'), '--backup-gcs', gcs]);
+    assert.notEqual(ob.code, 0); assert.match(ob.out, /רק לעסק ההעברה/);
+    const s1 = await rootState();
+    for (const k of Object.keys(s0)) assert.equal(s1[k], s0[k], 'לא השתנה: ' + k);
+  });
+
+  it('מחיקה: רק מסמכים שיש להם עותק ב-b (כולל תתי-אוספים), חסר ב-b נשאר, שינוי אחרי הגיבוי מדלג, מחוץ לתחום לא נוגעים, Storage לא נמחק', async () => {
+    const b = await run(['backup', '--out', F('pr-bk1.json'), '--upload', '--upload-tag', 'pr1', '--report', F('pr-bk1-r.json')]);
+    assert.equal(b.code, 0, b.out);
+    uploaded = report(F('pr-bk1-r.json')).uploaded;
+    await put('inbox/chg', { t: S('שונה אחרי הגיבוי') }); // "האפליקציה" שינתה אחרי הגיבוי
+    await put(LP + '/inbox/chg', { t: S('b – חדש יותר'), v: I(2) }); // ב-b נכתב אחר כך (b חדש מהשורש) – כדי לבדוק דווקא את "השתנה מאז הגיבוי"
+    const never0 = {}; for (const p of NEVER) never0[p] = (await get(p)).updateTime;
+    const bCopy0 = {}; for (const p of [...BOTH, ...NEVER]) { const d = await get(LP + '/' + p); bCopy0[p] = d ? d.updateTime : null; }
+    const r = await W(['--backup', F('pr-bk1.json'), '--backup-gcs', uploaded, '--report', F('pr-w.json')]);
+    show('purge-root (מחיקה)', r);
+    assert.equal(r.code, 1, 'יש חסרים ב-b ומסמך שהשתנה – קוד 1');
+    const rep = report(F('pr-w.json'));
+    assert.equal(rep.backup, uploaded.startsWith('gs://') ? uploaded : rep.backup);
+    assert.match(r.out, /גיבוי טרי לפני המחיקה: gs:\/\/.*migrate_backups\//);
+    const deleted = BOTH.filter(p => p !== 'inbox/chg' && p !== 'tasks/t1');
+    assert.equal(rep.deleted, deleted.length);
+    for (const p of deleted) assert.equal(await get(p), null, 'נמחק: ' + p);
+    for (const p of ROOT_ONLY) assert.ok(await get(p), 'חסר ב-b – נשאר: ' + p);
+    assert.ok(await get('inbox/chg'), 'השתנה אחרי הגיבוי – נשאר');
+    assert.deepEqual(rep.changedPaths, ['inbox/chg']);
+    for (const p of NEVER) assert.equal((await get(p)).updateTime, never0[p], 'מחוץ לתחום, לא השתנה: ' + p);
+    for (const p of Object.keys(bCopy0)) { const d = await get(LP + '/' + p); assert.equal(d ? d.updateTime : null, bCopy0[p], 'העותק ב-b לא השתנה: ' + p); }
+    assert.ok(await get(LP), 'מסמך העסק קיים');
+    // תת-אוסף: המסמך שחסר ב-b נשאר, ולכן גם האב שלו נשאר (בלי "יתום")
+    assert.ok(await get('tasks/t1/c/c2'));
+    assert.ok(await get('tasks/t1'), 'אב של מסמך שנשאר – לא נמחק');
+    assert.ok(await get('cashout/newer'), 'השורש חדש מ-b – לא נמחק');
+    assert.deepEqual(rep.rootNewerPaths, ['cashout/newer']);
+    const bz = (await get(LP)).fields;
+    assert.ok(bz.rootPurgedAt && bz.rootPurgedAt.timestampValue, 'נרשם rootPurgedAt');
+    assert.equal(bz.rootPurgeRun.stringValue, process.env.GITHUB_RUN_ID || 'local'); // ב-CI נרשם מזהה ההרצה
+    assert.equal(bz.dataRoot.stringValue, 'b');
+    const [files] = await storage().getFiles({ prefix: 'app_backups/' });
+    assert.equal(files.length, 2, 'Storage לא נמחק');
+    assert.match(r.out, /cashout: נמחקו 1 \| נשארו \(חסרים ב-b\) 1 \| נשארו \(השורש חדש מ-b\) 1/);
+    assert.match(r.out, /חסר ב-b, לא נמחק: fb\/new/);
+    assert.match(r.out, /מחיקות: 6/);
+    // הרצה חוזרת: אין מה למחוק, החסרים עדיין מדווחים
+    const b2 = await run(['backup', '--out', F('pr-bk2.json'), '--upload', '--upload-tag', 'pr2', '--report', F('pr-bk2-r.json')]);
+    const again = await W(['--backup', F('pr-bk2.json'), '--backup-gcs', report(F('pr-bk2-r.json')).uploaded, '--report', F('pr-w2.json')]);
+    assert.equal(b2.code, 0);
+    assert.equal(report(F('pr-w2.json')).deleted, 1, 'inbox/chg נמחק עכשיו (בגיבוי החדש ויש לו עותק ב-b)');
+    assert.equal(report(F('pr-w2.json')).missingInB, ROOT_ONLY.length);
+  });
+
+  it('אחרי purge-root: set-dataroot --to legacy, rollback ו-copy מסרבים (rootPurgedAt)', async () => {
+    assert.ok((await get(LP)).fields.rootPurgedAt);
+    const sd = await run(['set-dataroot', '--to', 'legacy', '--mode', 'write', '--no-storage']);
+    assert.notEqual(sd.code, 0);
+    assert.match(sd.out, /העותק בשורש נמחק/);
+    assert.equal((await get(LP)).fields.dataRoot.stringValue, 'b', 'dataRoot לא השתנה');
+    const cp = await run(['copy', '--mode', 'write', '--no-storage', '--state', F('pr-state.json'), '--backup', F('pr-bk1.json')]);
+    assert.notEqual(cp.code, 0);
+    assert.match(cp.out, /העותק בשורש נמחק/);
+    const toB = await run(['set-dataroot', '--to', 'b', '--mode', 'write', '--no-storage']);
+    assert.equal(toB.code, 0, 'set-dataroot --to b עדיין מותר');
+  });
+
+  it('שינוי בזמן הריצה: מחיקה עם updateTime ישן נכשלת והמסמך נשאר; מחיקה חסומה מחוץ לתחום ובלי הפעלה', async () => {
+    const { FsRest } = require(path.join(MDIR, 'fsrest'));
+    await put('cashout/race', { a: D(1) });
+    const before1 = await get('cashout/race');
+    await put('cashout/race', { a: D(2) }); // שינוי אחרי הקריאה
+    const fsr = new FsRest({ project: P, mode: 'write', bizId: BIZ, token: async () => 'owner', emulatorHost: EMU });
+    await assert.rejects(fsr.deleteDocs([{ path: 'cashout/race', updateTime: before1.updateTime }]), /מחיקה לא מופעלת/, 'בלי enablePurge אין מחיקה');
+    fsr.enablePurge(['cashout', 'tasks']);
+    const [res] = await fsr.deleteDocs([{ path: 'cashout/race', updateTime: before1.updateTime }]);
+    assert.equal(res.ok, false);
+    assert.equal((await get('cashout/race')).fields.a.doubleValue, 2, 'המסמך ששונה לא נמחק');
+    for (const p of ['b/largpeami/cashout/a', 'b/largpeami', 'users/u_emp', 'admins/u_mgr', 'staff/u_emp', 'private/pay', 'orders/o1', 'sec_waq/x', 'cashout', 'cashout/a/c'])
+      await assert.rejects(fsr.deleteDocs([{ path: p, updateTime: before1.updateTime }]), /מחוץ לתחום|לא תקין/, p);
+    await assert.rejects(fsr.deleteDocs([{ path: 'cashout/race' }]), /בלי updateTime/);
+    for (const bad of [['admins'], ['b'], ['users'], ['private'], ['grp'], ['orders'], ['site_income_daily'], ['sec_route'], ['impQ'], ['superadmins'], ['pact'], ['cashout', 'products']])
+      assert.throws(() => fsr.enablePurge(bad), /אסורים למחיקה/, bad.join(','));
+    for (const p of ['sec_route/x', 'impQ/a/c/c1', 'products/p1', 'grp/g1']) await assert.rejects(fsr.deleteDocs([{ path: p, updateTime: before1.updateTime }]), /מחוץ לתחום/, p);
+    const ro = new FsRest({ project: P, mode: 'readonly', bizId: BIZ, token: async () => 'owner', emulatorHost: EMU });
+    assert.throws(() => ro.enablePurge(['cashout']), /קריאה בלבד/);
+    // writeDocs לעולם לא מוחק בשורש
+    await assert.rejects(fsr.writeDocs([{ path: 'cashout/race', kind: 'update', updateTime: before1.updateTime, fields: {} }]), /מחוץ ליעד/);
+    const { purgeScope, PURGE_KEEP, DEFERRED: DEF, SHARED: SH, NEW_ROOT } = require(TOOL);
+    const sc = purgeScope(['cashout', 'admins', 'staff', 'private', ...DEF, ...SH, ...NEW_ROOT, 'b', 'pact', 'push_dev', 'dev_cur']);
+    assert.deepEqual(sc, ['cashout']);
+    assert.deepEqual(PURGE_KEEP, ['admins', 'staff', 'private', 'grp']);
+  });
+
+  it('קובץ התהליך: purge-root = כתיבה עם אישור נפרד וגיבוי שנשמר לפני; purge-root-dry-run = קריאה בלבד', () => {
+    const yaml = require(require.resolve('js-yaml', { paths: [ROOT] }));
+    const y = yaml.load(fs.readFileSync(WF, 'utf8'));
+    const inp = (y.on || y[true]).workflow_dispatch.inputs;
+    assert.ok(inp.action.options.includes('purge-root') && inp.action.options.includes('purge-root-dry-run'));
+    assert.equal(inp.action.default, 'check');
+    assert.ok(Object.keys(inp).length <= 10, 'עד 10 קלטים בתהליך ידני');
+    const cfg = y.jobs.migrate.steps.find(s => s.id === 'cfg');
+    assert.match(cfg.run, /\n\s*purge-root-dry-run\) echo "mode=readonly"/);
+    assert.match(cfg.run, /\n\s*purge-root\) echo "mode=write"/);
+    const runStep = y.jobs.migrate.steps.find(s => s.name === 'Run');
+    assert.equal(runStep.env.MIGRATE_PURGE_CONFIRM, "${{ inputs.action == 'purge-root' && inputs.doc_paths || '' }}");
+    const block = runStep.run.split(/\n\s*purge-root\)/)[1].split(';;')[0];
+    const iC = block.indexOf('delete-root-copy-of-largpeami-in-'), iU = block.indexOf('upload_backup=true'), iB = block.indexOf('backup\n'), iR = block.indexOf('r.uploaded'), iP = block.indexOf('purge-root --mode write');
+    assert.ok(iC >= 0 && iC < iU && iU < iB && iB < iR && iR < iP, 'אישור ← חובת שמירה ב-bucket ← גיבוי ← בדיקה שנשמר ← מחיקה');
+    assert.match(block, /--backup-gcs "\$BK"/);
+    const dry = runStep.run.split('purge-root-dry-run)')[1].split(';;')[0];
+    assert.doesNotMatch(dry, /--mode write/);
+  });
+});
+
+// 23.11.2026: תהליך מדיניות הניקוי לעותקי הפונקציות (בדיקה סטטית של הקובץ, לא מריץ אותו)
+describe('set-artifacts-cleanup.yml: ידני, רק מ-main, פרויקט פעמיים, אישור, שני האזורים', () => {
+  it('מבנה הקובץ וההגנות', () => {
+    const yaml = require(require.resolve('js-yaml', { paths: [ROOT] }));
+    const file = path.resolve(ROOT, '..', '.github', 'workflows', 'set-artifacts-cleanup.yml');
+    const txt = fs.readFileSync(file, 'utf8');
+    const y = yaml.load(txt);
+    const on = y.on || y[true];
+    assert.deepEqual(Object.keys(on), ['workflow_dispatch'], 'ידני בלבד');
+    const inp = on.workflow_dispatch.inputs;
+    assert.deepEqual(inp.project.options, ['largpeami', 'largpeami-test-f4691']);
+    assert.equal(inp.project_confirm.required, true);
+    assert.deepEqual(inp.location.options, ['both', 'europe-west1', 'us-central1']);
+    const steps = y.jobs.setpolicy.steps;
+    const g = steps[0].run;
+    assert.match(g, /refs\/heads\/main/);
+    assert.match(g, /\[ "\$P" = "\$PC" \]/, 'מזהה הפרויקט פעמיים');
+    assert.match(g, /setpolicy-\$L-\$P/, 'קלט אישור');
+    const firstSecret = steps.findIndex(s => /secrets\./.test(JSON.stringify(s)));
+    assert.ok(firstSecret > 0, 'השומר רץ לפני הסוד');
+    const deploy = fs.readFileSync(path.resolve(ROOT, '..', '.github', 'workflows', 'deploy-firebase-manual.yml'), 'utf8');
+    const ver = t => (t.match(/firebase-tools@([0-9.]+)/) || [])[1];
+    assert.equal(ver(txt), ver(deploy), 'אותה גרסת firebase-tools כמו בפרסום הידני');
+    const set = steps.find(s => s.name === 'Set cleanup policy').run;
+    assert.match(set, /functions:artifacts:setpolicy --location "\$R" --days "\$D" --force --project "\$P" --non-interactive/);
+    assert.match(set, /europe-west1 us-central1/);
+    assert.match(set, /permission\|denied/i, 'הודעה ברורה על חוסר הרשאה');
+    assert.match(set, /exit \$FAIL/);
+    assert.equal(steps[steps.length - 1].if, 'always()', 'קובץ חשבון השירות נמחק תמיד');
+    assert.ok(!/-----BEGIN|private_key"\s*:/.test(txt), 'אין סוד בקובץ');
   });
 });

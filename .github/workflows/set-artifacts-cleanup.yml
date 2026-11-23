@@ -2,7 +2,9 @@
 # רקע: בפרסום פונקציות התקבלה אזהרה "No cleanup policy detected for repositories in europe-west1".
 # בלי מדיניות, עותקים ישנים נשמרים לתמיד ועלולים לגרום לחיוב חודשי קטן.
 # ידני בלבד, רק מ-main. לא נוגע בפונקציות, בנתונים, בחוקים או ב-Hosting – רק במדיניות הניקוי של האזור שנבחר.
-# פקודה: firebase functions:artifacts:setpolicy --location <אזור> --days <ימים> --force (firebase-tools 15.34.1).
+# פקודה: firebase functions:artifacts:setpolicy --location <אזור> --days <ימים> --force (firebase-tools 15.34.1; הדגלים נבדקו ב---help של הגרסה הזו).
+# 23.11.2026: מזהה הפרויקט מוקלד פעמיים (כמו deploy-firebase-manual.yml), אפשרות both = שני האזורים בהרצה אחת,
+# והודעה ברורה כשחסרה לחשבון השירות הרשאה לשנות את מאגר העותקים (Artifact Registry).
 name: Set Functions Artifacts Cleanup Policy
 
 on:
@@ -13,18 +15,22 @@ on:
         required: true
         type: choice
         options: [largpeami, largpeami-test-f4691]
+      project_confirm:
+        description: "הקלד שוב את מזהה הפרויקט המלא"
+        required: true
+        type: string
       location:
-        description: "האזור (רק אזורי הפונקציות של הפרויקט)"
+        description: "האזור (רק אזורי הפונקציות של הפרויקט). both = europe-west1 ואז us-central1"
         required: true
         type: choice
-        options: [europe-west1, us-central1]
+        options: [both, europe-west1, us-central1]
       days:
         description: "כמה ימים לשמור עותקים ישנים (1-30)"
         required: true
         type: string
         default: "1"
       confirm:
-        description: "הקלד setpolicy-<אזור>-<פרויקט>, למשל setpolicy-europe-west1-largpeami"
+        description: "הקלד setpolicy-<אזור>-<פרויקט>, למשל setpolicy-both-largpeami או setpolicy-europe-west1-largpeami"
         required: true
         type: string
 
@@ -40,14 +46,18 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.project == 'largpeami' && 'firebase-prod' || 'firebase-test' }}
     steps:
-      - name: Guard (main only, days, typed confirmation)
+      - name: Guard (main only, project typed twice, days, typed confirmation)
         env:
           P: ${{ inputs.project }}
+          PC: ${{ inputs.project_confirm }}
           L: ${{ inputs.location }}
           D: ${{ inputs.days }}
           C: ${{ inputs.confirm }}
         run: |
           [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::מותר להריץ רק מ-main"; exit 1; }
+          case "$P" in largpeami|largpeami-test-f4691) ;; *) echo "::error::פרויקט לא מוכר"; exit 1 ;; esac
+          [ "$P" = "$PC" ] || { echo "::error::מזהה הפרויקט שהוקלד שוב לא זהה"; exit 1; }
+          case "$L" in both|europe-west1|us-central1) ;; *) echo "::error::אזור לא מוכר"; exit 1 ;; esac
           echo "$D" | grep -Eq '^([1-9]|[12][0-9]|30)$' || { echo "::error::מספר ימים לא תקין: $D (1-30)"; exit 1; }
           [ "$C" = "setpolicy-$L-$P" ] || { echo "::error::האישור שהוקלד לא תואם (צריך: setpolicy-$L-$P)"; exit 1; }
 
@@ -72,8 +82,32 @@ jobs:
           L: ${{ inputs.location }}
           D: ${{ inputs.days }}
         run: |
-          firebase functions:artifacts:setpolicy --location "$L" --days "$D" --force --project "$P" --non-interactive
-          echo "הוגדרה מדיניות ניקוי: $P / $L – שמירת עותקים $D ימים" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$L" = "both" ]; then LOCS="europe-west1 us-central1"; else LOCS="$L"; fi
+          FAIL=0
+          for R in $LOCS; do
+            echo "== $P / $R"
+            set +e
+            OUT=$(firebase functions:artifacts:setpolicy --location "$R" --days "$D" --force --project "$P" --non-interactive 2>&1)
+            RC=$?
+            set -e
+            echo "$OUT"
+            if [ $RC -eq 0 ]; then
+              echo "הוגדרה מדיניות ניקוי: $P / $R – שמירת עותקים $D ימים" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              FAIL=1
+              if echo "$OUT" | grep -qiE 'permission|denied|forbidden|403|not authorized|IAM'; then
+                echo "::error::$R: אין לחשבון השירות הרשאה לשנות את מאגר העותקים ב-Artifact Registry. צריך לתת לו (במסוף Google Cloud, IAM) תפקיד עם artifactregistry.repositories.update, למשל Artifact Registry Administrator, ולהריץ שוב"
+                echo "$R: נכשל – חסרה הרשאה ב-Artifact Registry" >> "$GITHUB_STEP_SUMMARY"
+              elif echo "$OUT" | grep -qiE 'not found|does not exist|404'; then
+                echo "::error::$R: לא נמצא מאגר עותקים באזור הזה (אולי אין בו פונקציות שנפרסו)"
+                echo "$R: נכשל – לא נמצא מאגר עותקים" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::error::$R: הגדרת מדיניות הניקוי נכשלה (קוד $RC). הפירוט בפלט שלמעלה"
+                echo "$R: נכשל (קוד $RC)" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          done
+          exit $FAIL
 
       - name: Remove the service account file
         if: always()
