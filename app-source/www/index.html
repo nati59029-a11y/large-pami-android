@@ -6304,8 +6304,8 @@ async function siPreCls(du){let last=null;for(let i=1;i<=3;i++){if(navigator.onL
 async function siPreOne(x){const L=()=>(SI.L||[]).includes(x);let du=null;try{du=await fget(siKey(x))}catch(e){}if(!du||!L())return;
  let o=await siPreGet(x);
  if(!o){let pg=[];if(x.mime==='application/pdf'){let P=[];try{const r=await pdfDocPages(du,{max:US_MAXP,scale:2,maxW:1600});P=(r&&r.pages||[]).filter(imgOk)}catch(e){}
-   if(P.length>1||(x.big&&P.length===1))pg=P.map(u=>({u,hi:u}));else if(!x.big)pg=[{pdf:1}]}
-  else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);pg=[{u:r.u||du,hi:hi.u||r.u||du}]}catch(e){}}
+   if(P.length>1||(x.big&&P.length===1))pg=P.map(u=>({u}));else if(!x.big)pg=[{pdf:1}]}
+  else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);const u=r.u||du;pg=[hi.u&&hi.u!==u?{u,hi:hi.u}:{u}]}catch(e){}}
   if(!pg.length||!L())return;o={v:1,pg};try{await fput(SIPK(x),JSON.stringify(o))}catch(e){return}}
  const n=o.pg.length;for(let i=0;i<n;i++){const g=o.pg[i];if(g.cls)continue;if(!L())return;SIPP[x.id]={i:i+1,n};siPreTick(x);
   const r=await siPreCls(g.pdf?du:(g.hi||g.u));if(!L())return;g.cls=r;try{await fput(SIPK(x),JSON.stringify(o))}catch(e){}
@@ -6319,7 +6319,8 @@ function siPreTick(x){const U=US,P=SIPP[x.id];if(U&&U.si===x.id&&U.siw)usSheet('
 /* פתיחה במסך האחיד: מחכים לזיהוי שכבר רץ (בלי זיהוי כפול), ואז הדפים והזיהוי נכנסים כמו שהם */
 async function siPreOpen(x,du){if(!bzF('scan')||!isA())return false;if(!x.pre){siPreQ([x]);if(!x.pre)return false}
  const U=US;if(x.pre!=='ok'){U.siw=1;U.step='siw';siPreTick(x);while((x.pre==='q'||x.pre==='run')&&US===U&&(SI.L||[]).includes(x)){if(!SIPR[x.id]&&x.pre==='q')siPreRun();await (SIPR[x.id]||new Promise(r=>setTimeout(r,500)))}U.siw=0}
- if(US!==U||U.si!==x.id)return true;const o=await siPreGet(x);if(!o||US!==U)return !o?false:true;
+ if(US!==U||U.si!==x.id)return true;const o=await siPreGet(x);if(US!==U)return true;
+ if(!o){if(!x.big)return false;U.pg=[{pdf:1,du}];U.i=0;usPane(1);usChooser('ה-PDF גדול מדי לזיהוי אוטומטי, ולא הצלחתי לפרק אותו לעמודים. בחרו את סוג המסמך ומלאו ידנית.');return true}
  U.pg=o.pg.map(g=>g.pdf?{pdf:1,du,cls:g.cls||null}:{u:g.u,hi:g.hi||g.u,cls:g.cls||null});U.i=0;usPane(1);
  if(U.pg.length>1){toast('PDF עם '+U.pg.length+' עמודים – מפצל לחשבוניות…');usMulti()}else usDetect();return true}
 /* "צילום העברה" (בלי ספק שנבחר מראש) פותח את המסך האחיד (החלטה 7) */
