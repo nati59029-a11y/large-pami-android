@@ -7,7 +7,7 @@
 //   sendPromoToLine (עובד/מנהל), expirePromosOnLine (מתוזמנת, לא נקראת ממשתמש) – מבצע לקו ימות והורדתו (yemot.js).
 //   publishLineItem, getLineState (עובד/מנהל), removeLineItem, listLineFiles (מנהל) – תוכן שלוחות הקו (yemot-line.js).
 //   previewVoice (עובד/מנהל) – "שמע קודם" בקול המשוכפל (ElevenLabs, yemot-line.js + lib/voice.js).
-//   recurringTasks (מתוזמנת, לא נקראת ממשתמש) – משימות קבועות (recurring.js).
+//   recurringTasks (מתוזמנת, לא נקראת ממשתמש) – משימות קבועות (recurring.js), ופעם ב-15 דקות התראת טלפון לעובד על משימה שלו שבאיחור (lib/tk-late.js).
 //   s3Rounds (מתוזמנת), s3Run, s3Move, s3Log, s3View – סבבי סריקת חנות בתלת מימד (store3d.js).
 //   s3SaveMap, s3SetBranch (מנהל־על), s3PutTex – המפה של סריקת החנות: שמירה עם נעילה וגרסאות, הגדרות סניף, טקסטורות (store3d-map.js).
 //   s3PutPano, s3DelPano – נקודות סיור 360 (שלב 18א, store3d-map.js).

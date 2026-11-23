@@ -3,6 +3,7 @@
 // בלי קריאה ל-Firestore ובלי שליחה – רק חישובים. הקריאה, הכתיבה והשליחה – ב-secretary-remind.js.
 const K = require('./sec-know');   // bizDay, addDays, nextBizDay – אותו כלל ימי עסקים כמו tkBiz באפליקציה (7.4)
 const ST = require('./sec-tools'); // ideas, forecast – אותם חישובים כמו בצ'אט
+const TKT = require('./tk-time');  // tkLateAt – "באיחור" לפי היעד בפועל (tkDl: dl אם נקבע, dl=0 בלי יעד, אחרת due) – כמו באפליקציה
 
 const TZ = 'Asia/Jerusalem';
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -144,7 +145,7 @@ function finCands(fin, today, rt) {
   return out;
 }
 function taskCands(tasks, names, now, today) {
-  const late = tasks.filter((t) => t.st === 'open' && +t.due && +t.due < now);
+  const late = tasks.filter((t) => TKT.tkLateAt(t, now)); // 22.11.2026: לפי tkDl (כולל dl ו"בלי יעד"), לא due בלבד
   if (!late.length) return [];
   const who = (t) => names[t.ow] || names[t.owner] || '';
   const lines = late.slice(0, 10).map((t) => '• ' + String(t.txt || '').slice(0, 60) + (who(t) ? ' (' + who(t) + ')' : ''));
@@ -277,7 +278,7 @@ function buildReport(o) {
       const ch = (fin.chk || []).filter((r) => r[0] >= o.today && r[0] <= end);
       secs.push({ h: 'צ\'קים שייפרעו השבוע', lines: ch.length ? [ch.length + ' צ\'קים, סך ' + ils(sum(ch, (r) => Math.abs(r[2])))] : ['אין'] });
     }
-    const open = o.tasks.filter((t) => t.st === 'open'), late = open.filter((t) => +t.due && +t.due < o.now);
+    const open = o.tasks.filter((t) => t.st === 'open'), late = open.filter((t) => TKT.tkLateAt(t, o.now));
     secs.push({ h: 'משימות פתוחות', lines: [open.length + ' פתוחות, מהן ' + late.length + ' באיחור'] });
     const from = K.addDays(o.today, -7);
     const df = o.closings.filter(notRej).filter((c) => c.d >= from && c.d < o.today).map((c) => cashDiff(c)).filter((a) => a !== null && a >= EMP_MIN);

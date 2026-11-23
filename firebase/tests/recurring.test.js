@@ -4,6 +4,7 @@
 //      ותוספת tasks כבויה = אין גישה.
 //   2. הפונקציה recurringTasks (הליבה runAll, עם now מדומה) מול Firestore של האמולטור: פותחת משימה בזמן הנכון, לא פעמיים
 //      (גם בהרצה כפולה ובמקביל), לא ביום לא מתאים / חג (hol), לא לפני ed, מדלגת על נמען לא פעיל, ועובדת בשורש (legacy) וב-b/{bizId}.
+//   3. (22.11.2026) lateAll – התראה מאוגדת לעובד על משימות שבאיחור (לפי tkDl), פעם אחת (fn_rate/tkLate_*), שקט בשבת/לילה, legacy ו-b/.
 const { describe, it, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
@@ -328,6 +329,96 @@ describe('recurringTasks – פותחת משימות קבועות (ליבה מו
     await assertSucceeds(fs(U[A].emp).doc(`b/${A}/tasks/${id}`).get());
     const n = Date.now();
     await assertSucceeds(fs(U[A].emp).doc(`b/${A}/tasks/${id}`).update({ st: 'done', open: '', sub: n, ok: n, doneBy: U[A].emp, late: '' }));
+  });
+});
+
+// ---------------- 22.11.2026: התראת איחור לעובד (lateAll, בתוך recurringTasks) ----------------
+describe('recurringTasks – התראת טלפון לעובד על משימה שבאיחור (lateAll מול האמולטור)', () => {
+  let R, adm;
+  const at = (y, m, d, hh, mm) => TK.zoned(y, m - 1, d, hh, mm);
+  const N = at(2026, 11, 22, 10, 0); // ראשון 10:00 שעון ישראל – לא שקט
+  const H1 = 3600000;
+  const get = async (p) => { const s = await adm.doc(p).get(); return s.exists ? s.data() : null; };
+  const task = (o) => Object.assign({ owner: U[A].mgr, by: U[A].mgr, role: 'a', txt: 'משימה', cr: N - 5 * D1, due: N - H1, st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '', to: [U[A].emp], toN: ['א'], ow: U[A].emp, owN: 'א', clt: 1, np: 0, wp: 0, mi: 0 }, o);
+  const mock = () => { const calls = []; const send = async (toks, msg, tag) => { calls.push({ toks, msg, tag }); return toks.map((t) => ({ token: t, ok: true })); }; return { calls, send }; };
+
+  before(async () => {
+    env = await H.getEnv();
+    R = require('../functions/recurring.js')._core;
+    adm = require(require.resolve('firebase-admin/firestore', { paths: [require('node:path').join(__dirname, '..', 'functions')] })).getFirestore();
+  });
+  beforeEach(async () => {
+    await seedBiz();
+    const P = `b/${A}/`;
+    for (const u of [U[A].emp, U[A].emp2, U[A].off]) await adm.doc(P + 'push_tokens/' + u).set({ pushTokens: ['tok_' + u] });
+    await adm.doc(`b/${B}/push_tokens/${U[B].emp}`).set({ pushTokens: ['tok_b'] });
+    await adm.doc(P + 'tasks/t1').set(task({ txt: 'לנקות את המקרר', due: N - 2 * H1 }));
+    await adm.doc(P + 'tasks/t2').set(task({ txt: 'להזמין חלב', due: N + D1, dl: N - 5 * H1 }));     // יעד שנקבע (dl) עבר
+    await adm.doc(P + 'tasks/t3').set(task({ txt: 'בלי יעד', due: N - 3 * H1, dl: 0 }));             // dl=0 – לא באיחור
+    await adm.doc(P + 'tasks/t4').set(task({ txt: 'נדחה', due: N - 3 * H1, dl: N + D1 }));           // היעד הוזז – לא באיחור
+    await adm.doc(P + 'tasks/t5').set(task({ txt: 'ישנה', due: N - 31 * D1 }));                       // יותר מ-30 יום
+    await adm.doc(P + 'tasks/t6').set(task({ txt: 'קבוצתית', ow: '', owN: '', to: [U[A].emp, U[A].emp2, U[A].off], toN: ['א', 'ב', 'ג'] }));
+    await adm.doc(P + 'tasks/t7').set(task({ txt: 'בהמתנה', st: 'wait' }));
+    await adm.doc(P + 'tasks/t8').set(task({ txt: 'של מנהל־על', ow: SUPER, to: [SUPER] }));
+    await adm.doc(`b/${B}/tasks/b1`).set(task({ owner: U[B].mgr, ow: U[B].emp, to: [U[B].emp] }));
+    await adm.doc('b/' + B).update({ 'features.tasks': false });
+  });
+
+  it('התראה אחת מאוגדת לכל עובד, רק על משימות באיחור לפי tkDl, פעם אחת; סימון ב-fn_rate; המשימה לא משתנה', async () => {
+    const before1 = await get(`b/${A}/tasks/t1`);
+    const m = mock();
+    const out = await R.lateAll({ now: N, send: m.send });
+    assert.equal(out[A].users, 2, JSON.stringify(out));
+    assert.equal(out[B], undefined, 'עסק עם tasks כבויה לא נסרק');
+    const by = Object.fromEntries(m.calls.map((c) => [c.toks[0], c]));
+    assert.deepEqual(Object.keys(by).sort(), ['tok_' + U[A].emp, 'tok_' + U[A].emp2].sort(), JSON.stringify(m.calls));
+    const e1 = by['tok_' + U[A].emp];
+    assert.equal(e1.msg.title, 'יש לך 3 משימות באיחור');
+    assert.equal(e1.msg.id, 't2'); // הישנה ביותר (dl) ראשונה
+    assert.equal(e1.tag, 'tkl_t2');
+    assert.ok(e1.msg.body.includes('להזמין חלב') && e1.msg.body.includes('לנקות את המקרר') && e1.msg.body.includes('קבוצתית'));
+    assert.deepEqual(by['tok_' + U[A].emp2].msg, { id: 't6', title: 'יש לך משימה באיחור', body: 'קבוצתית' });
+    assert.deepEqual((await get(`b/${A}/fn_rate/tkLate_t1`)).u, [U[A].emp]);
+    assert.deepEqual((await get(`b/${A}/fn_rate/tkLate_t6`)).u.sort(), [U[A].emp, U[A].emp2].sort());
+    for (const id of ['t3', 't4', 't5', 't7', 't8']) assert.equal(await get(`b/${A}/fn_rate/tkLate_${id}`), null, id);
+    assert.equal(await get(`b/${B}/fn_rate/tkLate_b1`), null);
+    assert.deepEqual(await get(`b/${A}/tasks/t1`), before1, 'שדות המשימה לא השתנו');
+    // ריצה נוספת – כלום; משימה חדשה שנכנסה לאיחור – רק עליה
+    const m2 = mock();
+    await R.lateAll({ now: N + 15 * 60000, send: m2.send });
+    assert.equal(m2.calls.length, 0, JSON.stringify(m2.calls));
+    await adm.doc(`b/${A}/tasks/t9`).set(task({ txt: 'חדשה', due: N + 10 * 60000 }));
+    const m3 = mock();
+    await R.lateAll({ now: N + 30 * 60000, send: m3.send });
+    assert.deepEqual(m3.calls.map((c) => [c.toks[0], c.msg.title, c.msg.body]), [['tok_' + U[A].emp, 'יש לך משימה באיחור', 'חדשה']]);
+  });
+
+  it('שקט: שבת ולילה – לא נשלח ולא מסומן; אחרי השקט – נשלח', async () => {
+    const m = mock();
+    assert.deepEqual(await R.lateAll({ now: at(2026, 11, 21, 12, 0), send: m.send }), { quiet: true });
+    assert.deepEqual(await R.lateAll({ now: at(2026, 11, 22, 23, 0), send: m.send }), { quiet: true });
+    assert.equal(m.calls.length, 0);
+    assert.equal(await get(`b/${A}/fn_rate/tkLate_t1`), null);
+    await R.lateAll({ now: N, send: m.send });
+    assert.equal(m.calls.length, 2);
+  });
+
+  it('החוקים: fn_rate/tkLate_* חסום לקריאה ולכתיבה מהאפליקציה (גם למנהל)', async () => {
+    await R.lateAll({ now: N, send: mock().send });
+    await assertFails(fs(U[A].mgr).doc(`b/${A}/fn_rate/tkLate_t1`).get());
+    await assertFails(fs(U[A].emp).doc(`b/${A}/fn_rate/tkLate_t1`).get());
+    await assertFails(fs(U[A].emp).doc(`b/${A}/fn_rate/tkLate_t1`).delete());
+    await assertFails(fs(U[A].mgr).doc(`b/${A}/fn_rate/tkLate_x`).set({ t: 1, u: [] }));
+  });
+
+  it('לארג\' פעמי במצב legacy (בשורש): משימה של u_emp באיחור – התראה וסימון ב-fn_rate בשורש', async () => {
+    await H.seed(env);
+    await adm.doc('push_tokens/u_emp').set({ pushTokens: ['tok_root'] });
+    await adm.doc('tasks/r1').set(task({ owner: 'u_mgr', by: 'u_mgr', txt: 'בשורש', ow: 'u_emp', to: ['u_emp'] }));
+    const m = mock();
+    const out = await R.lateAll({ now: N, send: m.send });
+    assert.deepEqual(m.calls.map((c) => [c.toks[0], c.msg.body]), [['tok_root', 'בשורש']], JSON.stringify(out));
+    assert.deepEqual((await get('fn_rate/tkLate_r1')).u, ['u_emp']);
   });
 });
 
