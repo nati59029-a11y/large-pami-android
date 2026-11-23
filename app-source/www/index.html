@@ -3004,14 +3004,23 @@ async function checkUpdate(man){
   window.__upd=asset.browser_download_url;window.__updSt=null;
   dlg(`<h3>יש גרסה חדשה</h3><p>אפשר לעדכן עכשיו. ההורדה נפתחת בדפדפן; אחרי שהיא מסתיימת פותחים את הקובץ ומאשרים התקנה. הנתונים נשמרים.</p><div class="row"><button class="btn grow" data-a="updGo">הורד ועדכן</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}catch(e){}}
 ACT.updChk=()=>{toast('בודק עדכון...');checkUpdate(true);luCheck(true)};
+/* 23.11.2026: ההורדה לא חוסמת את העבודה – פס התקדמות קטן בתחתית (לא חלון), ואפשר להמשיך לעבוד. ב-APK חדש ההורדה ממשיכה
+   גם כשיוצאים מהאפליקציה (הודעה שקטה "מוריד עדכון… 40%"), ואם היא מסתיימת כשהאפליקציה סגורה – ההתקנה מתחילה כשחוזרים, או בלחיצה על ההודעה */
+function updPill(t,pct){let e=document.getElementById('updPill');if(t==null){if(e)e.remove();return}
+ if(!e){e=document.createElement('div');e.id='updPill';e.setAttribute('role','status');e.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:60;pointer-events:none;width:min(320px,calc(100% - 32px));box-sizing:border-box;padding:8px 14px;border-radius:14px;background:var(--card,#fff);color:var(--ink,#222);box-shadow:0 4px 16px rgba(0,0,0,.25);font-size:13px';
+  e.innerHTML='<div id="updPillT"></div><div style="height:4px;background:var(--line,#ddd);border-radius:3px;overflow:hidden;margin-top:6px"><div id="updBar" style="height:100%;width:0;background:var(--pri,#2a6)"></div></div>';document.body.append(e)}
+ document.getElementById('updPillT').textContent=t;if(pct!=null)document.getElementById('updBar').style.width=pct+'%'}
 ACT.updGo=async()=>{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.AppUpdate;
  if(!P){closeDlg();window.open(window.__upd,'_system');return}
- dlg('<h3>מוריד עדכון...</h3><div style="height:10px;background:var(--line,#ddd);border-radius:6px;overflow:hidden;margin:14px 0"><div id="updBar" style="height:100%;width:0;background:var(--pri,#2a6)"></div></div><p class="note" id="updTx">0%</p>');
- try{const h=await P.addListener('progress',e=>{const b=document.getElementById('updBar'),t=document.getElementById('updTx');if(b)b.style.width=e.pct+'%';if(t)t.textContent=e.pct<100?e.pct+'%':'מתקין… האפליקציה עשויה להיסגר לרגע ולהתעדכן. הנתונים נשמרים.'});
-  const S_=window.__updSt,o=S_?{url:window.__upd,auth:'Firebase '+await tok(),sha256:S_.sha256}:{url:window.__upd};const r=P.installSession?await P.installSession(o):await P.install(o);closeDlg();try{h.remove()}catch(e){};updDone(r)}
+ if(window.__updRun){closeDlg();toast('העדכון כבר בהורדה');return}
+ window.__updRun=1;closeDlg();updPill('מוריד עדכון… 0%',0);toast('העדכון יורד ברקע. אפשר להמשיך לעבוד');let h=null;
+ try{h=await P.addListener('progress',e=>updPill(e.pct<100?'מוריד עדכון… '+e.pct+'%':'מתקין… האפליקציה עשויה להיסגר לרגע ולהתעדכן. הנתונים נשמרים.',e.pct));
+  const S_=window.__updSt,o=S_?{url:window.__upd,auth:'Firebase '+await tok(),sha256:S_.sha256}:{url:window.__upd};const r=P.installSession?await P.installSession(o):await P.install(o);updDone(r)}
  catch(e){const m=String(e&&e.message||e);
-  if(/sha256 mismatch/.test(m))dlg('<h3>העדכון לא הותקן</h3><p>הקובץ שירד לא תואם לקובץ שפורסם, ולכן הוא נמחק ולא הותקן. האפליקציה ממשיכה לעבוד כרגיל. אפשר לנסות שוב מאוחר יותר.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');else if(/permission/.test(m))dlg('<h3>נדרשת הרשאה</h3><p>אנדרואיד פתח מסך הגדרות. אפשר לאפליקציה "להתקין אפליקציות לא ידועות", חזור לכאן ולחץ שוב על "בדוק עדכון".</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');
-  else dlg('<h3>ההורדה נכשלה</h3><p>אפשר לנסות שוב, או להוריד דרך הדפדפן.</p><div class="row"><button class="btn grow" data-a="updGo">נסה שוב</button><button class="btn g grow" data-a="updWeb">דרך הדפדפן</button></div>')}};
+  if(/busy/.test(m))toast('העדכון כבר בהורדה');
+  else if(/sha256 mismatch/.test(m))dlg('<h3>העדכון לא הותקן</h3><p>הקובץ שירד לא תואם לקובץ שפורסם, ולכן הוא נמחק ולא הותקן. האפליקציה ממשיכה לעבוד כרגיל. אפשר לנסות שוב מאוחר יותר.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');else if(/permission/.test(m))dlg('<h3>נדרשת הרשאה</h3><p>אנדרואיד פתח מסך הגדרות. אפשר לאפליקציה "להתקין אפליקציות לא ידועות", חזור לכאן ולחץ שוב על "בדוק עדכון".</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');
+  else dlg('<h3>ההורדה נכשלה</h3><p>אפשר לנסות שוב, או להוריד דרך הדפדפן.</p><div class="row"><button class="btn grow" data-a="updGo">נסה שוב</button><button class="btn g grow" data-a="updWeb">דרך הדפדפן</button></div>')}
+ finally{window.__updRun=0;updPill(null);try{h&&h.remove()}catch(e){}}};
 ACT.updWeb=()=>{closeDlg();window.open(window.__updSt?`https://github.com/${APP_REPO}/releases/download/latest/large-pami.apk`:window.__upd,'_system')};
 setTimeout(checkUpdate,3500);
 
