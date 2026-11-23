@@ -1,0 +1,110 @@
+'use strict';
+// גיטי – מרכז תקשורת (23.11.2026, "גיטי מנהלת עסק", סבב 3 חלק א, החלטות 1–2). קריאה בלבד – לא כותב שום דבר.
+//   secComm({ op:'feed', ch?: 'all'|'mail'|'wa'|'grp', st?: 'all'|'open', before?: ms, limit?: 1..50 })
+//     פיד אחד, מהחדש לישן: מייל (sec_in ch:'mail'), ווצאפ עסקי (sec_in ch:'wa', בלי הודעות אישיות של מנהל – own:'mgr', כמו בלשונית ווצאפ)
+//     והודעות מקבוצות פנימיות שהמנהל פתח לגיטי בלבד (sec_cfg/main.grp, נקרא מחדש בכל קריאה – כיבוי עוצר מיד).
+//     דפים: before = הזמן של הפריט האחרון שהוצג. פריטים עם אותו זמן בדיוק נכנסים כולם לאותו דף (כדי שלא יידלגו).
+//     מצב: מייל – "טופל" (hd / נענה); ווצאפ – נענה / סומן טופל; קבוצה – "לא נקרא" לפי מצב הקריאה של המנהל (grp/{gid}/r/{uid}). st:'open' = רק מה שפתוח.
+//     התראות מהטלפון לא כאן: הן נשמרות רק במכשיר ומתמזגות בפיד באפליקציה (sec-comm.js), בלי לעלות לשרת.
+//   secComm({ op:'groups' }) – קבוצות העסק עם מצב ההרשאה, למסך ההגדרות. השינוי עצמו – secPrefs op:'grp' (secretary.js).
+// הרשאה: אותו שער כמו כל המזכירה (gate + הסכמה). מייל וווצאפ – כמו secMail list / secInbox list. קבוצות – רק כשתוספת הקבוצות פעילה.
+
+const { onCall } = require('./lib/region');
+const { inputObject } = require('./lib/roles');
+const GRP = require('./lib/sec-grp');
+const C = require('./secretary')._core;
+const { gate, bad, wrap } = C;
+
+const PAGE = 50, PREV = 160;
+const CHS = ['all', 'mail', 'wa', 'grp'];
+const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n) : '');
+const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+function mailItem(id, x) {
+  const fl = Array.isArray(x.flags) ? x.flags : [];
+  const done = x.hd === true || x.st === 'replied';
+  const subj = clean(x.subj, 120), body = clean(x.text || x.sum || '', 400);
+  const it = { id: 'mail:' + id, ch: 'mail', t: +x.t || +x.rt || 0, from: clean(x.name, 60) || clean(x.from, 80) || 'שולח לא ידוע', prev: cut([subj, body].filter(Boolean).join(' – '), PREV), done, ref: { id } };
+  it.open = !done && x.st !== 'sus' && !fl.some((f) => f === 'hist' || f === 'promo' || f === 'spam');
+  if (x.st === 'sus' || fl.includes('sus')) it.sus = true;
+  if (fl.includes('file')) it.file = true;
+  return it;
+}
+function waItem(id, x) {
+  const done = x.st === 'replied' || x.st === 'handled';
+  const txt = clean(x.text || x.tr || '', 400);
+  const prev = txt || (x.type === 'audio' ? '[הודעה קולית]' : x.type === 'other' ? '[קובץ / מדיה]' : '');
+  const it = { id: 'wa:' + id, ch: 'wa', t: +x.rt || +x.t || 0, from: clean(x.name, 60) || clean(x.from, 30) || 'שולח לא ידוע', prev: cut(prev, PREV), done, open: !done, ref: { wa: clean(x.from, 30) } };
+  if (x.st === 'sus' || (Array.isArray(x.flags) && x.flags.includes('sus'))) it.sus = true;
+  return it;
+}
+function grpItem(g, id, x, uid, rt) {
+  const kind = GRP.KIND[x.k] || '';
+  const txt = clean(x.txt, 400);
+  const t = +x.t || 0;
+  const unread = x.by !== uid && t > rt;
+  return { id: 'grp:' + g.gid + ':' + id, ch: 'grp', t, from: clean(x.byN, 60) || 'משתמש', grp: g.name, prev: cut((kind ? '[' + kind + '] ' : '') + txt, PREV), unread, open: unread, done: null, ref: { gid: g.gid, mid: id } };
+}
+
+async function feed(who, db, input) {
+  const ch = input.ch === undefined ? 'all' : input.ch;
+  if (!CHS.includes(ch)) throw bad('bad-ch', 'ערוץ לא מוכר');
+  const st = input.st === undefined ? 'all' : input.st;
+  if (!['all', 'open'].includes(st)) throw bad('bad-st', 'מצב לא מוכר');
+  const lim = input.limit === undefined ? PAGE : input.limit;
+  if (!Number.isInteger(lim) || lim < 1 || lim > PAGE) throw bad('bad-limit', 'מספר פריטים: 1 עד ' + PAGE);
+  if (input.before !== undefined && !(Number.isInteger(input.before) && input.before > 0)) throw bad('bad-before', 'ערך לא תקין');
+  const before = input.before;
+  const grpOn = GRP.grpOn(who);
+  const jobs = [];
+  if (ch === 'all' || ch === 'mail') {
+    let q = db.collection('sec_in').where('ch', '==', 'mail');
+    if (before) q = q.where('t', '<', before);
+    jobs.push(q.orderBy('t', 'desc').limit(lim).get().then((s) => ({ full: s.size >= lim, items: s.docs.map((d) => mailItem(d.id, d.data())) })));
+  }
+  if (ch === 'all' || ch === 'wa') {
+    let q = db.collection('sec_in').where('ch', '==', 'wa');
+    if (before) q = q.where('rt', '<', before);
+    // הודעות אישיות של מנהל (own:'mgr') לא מוצגות – כמו בלשונית ווצאפ. הן תופסות מקום בדף, ולכן "full" לפי מה שנקרא
+    jobs.push(q.orderBy('rt', 'desc').limit(lim).get().then((s) => ({ full: s.size >= lim, items: s.docs.filter((d) => d.get('own') !== 'mgr').map((d) => waItem(d.id, d.data())) })));
+  }
+  let groups = [];
+  if (grpOn && (ch === 'all' || ch === 'grp')) {
+    // ההרשאה נקראת עכשיו – קבוצה שכובתה לא נקראת, גם אם הלשונית הייתה פתוחה
+    groups = await GRP.allowedGroups(db, await GRP.readAllowed(db));
+    for (const g of groups) {
+      let q = db.collection('grp/' + g.gid + '/m').orderBy('t', 'desc');
+      if (before) q = q.where('t', '<', before);
+      jobs.push(Promise.all([q.limit(lim).get(), db.doc('grp/' + g.gid + '/r/' + who.uid).get()]).then(([s, r]) => {
+        const rt = r.exists && Number.isInteger(r.get('t')) ? r.get('t') : 0;
+        return { full: s.size >= lim, items: s.docs.map((d) => grpItem(g, d.id, d.data(), who.uid, rt)) };
+      }));
+    }
+  }
+  const res = await Promise.all(jobs);
+  const all = [].concat(...res.map((r) => r.items)).filter((x) => x.t > 0).sort((a, b) => b.t - a.t);
+  // חיתוך הדף: lim פריטים, ועוד כל מה שבאותו זמן בדיוק כמו האחרון (הדף הבא מתחיל ב-before = הזמן הזה)
+  let page = all.slice(0, lim);
+  if (all.length > lim) { const tl = page[page.length - 1].t; page = all.filter((x) => x.t >= tl); }
+  const more = all.length > page.length || res.some((r) => r.full);
+  const next = more && page.length ? page[page.length - 1].t : null;
+  const items = st === 'open' ? page.filter((x) => x.open) : page;
+  return { ok: true, items, more, next, grpOn, groups: groups.map((g) => ({ gid: g.gid, name: g.name })), now: Date.now() };
+}
+
+async function secComm(request) {
+  const input = inputObject(request);
+  const g = await gate(request, { consent: true });
+  const { who, db, brLimited } = g;
+  if (input.op === 'feed') return feed(who, db, input);
+  if (input.op === 'groups') {
+    const on = GRP.grpOn(who);
+    if (!on) return { ok: true, on: false, edit: false, groups: [], max: GRP.MAX_ALLOWED };
+    return { ok: true, on: true, edit: !brLimited, groups: await GRP.listGroups(db, await GRP.readAllowed(db)), max: GRP.MAX_ALLOWED };
+  }
+  throw bad('bad-op', 'פעולה לא מוכרת');
+}
+
+exports.secComm = onCall(wrap('secComm', secComm));
+
+Object.defineProperty(exports, '_core', { enumerable: false, value: { mailItem, waItem, grpItem, PAGE } });

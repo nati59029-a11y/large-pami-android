@@ -11,6 +11,7 @@
 //   sec_log/{id}   { t, by, who: 'mgr'|'sa'|'sec'|'auto', act, ch, tgt?, note?, res?: 'ok'|'fail', why? } – הוספה בלבד (10.7). res/why – מ-23.11.2026 (logRes)
 //   sec_chat/{uid}/m/{id} { t, role: 'u'|'a', text, src?, asOf?, mode?, deep? } – שלב 2: נכתב רק כאן (secChat); נקרא דרך secChatLoad / secAdminReadChat
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
+//   sec_cfg/main   + 23.11.2026 (גיטי, סבב 3): grp [gid...] – קבוצות פנימיות שגיטי רשאית לקרוא (אין שדה = אף קבוצה). secPrefs op:'grp' בלבד (lib/sec-grp.js)
 //   sec_cfg/use    { m, mc, d, dmc, w80, w100, r: { <uid>: { h, n, d, dn } }, mp: { h, n } } – מונה עלות במילי־סנט + קצב. מנהל־על בלבד (83)
 //   sec_usage/{YYYY-MM} { msgs, deep, pct, saving, upd }               – מספרים בלבד; מנהל העסק רואה אחוז ניצול
 //   sec_mirror/fin { v, fin, at, devAt, by } ; sec_mirror/pay { pay, at, by } – מראה הכספים (5.2, 41–45). השרת בלבד
@@ -38,6 +39,7 @@ const ST = require('./lib/sec-tools');
 const SK = require('./lib/sec-know');   // שלב 3: בנק תשובות
 const SENS = require('./lib/sec-sens'); // שלב 3: מידע רגיש (מוצפן)
 const RM = require('./lib/sec-remind'); // שלב 4: הגדרות התראות ודוחות
+const GRP = require('./lib/sec-grp');   // 23.11.2026 (גיטי, סבב 3): הרשאת קריאה לקבוצות פנימיות
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -91,6 +93,7 @@ function cfgOf(snap, bizId) {
     rate: { hour: Number.isInteger(d.rate && d.rate.hour) ? d.rate.hour : RATE_HOUR, day: Number.isInteger(d.rate && d.rate.day) ? d.rate.day : RATE_DAY },
     // 15.11.2026 ("תגובה למזכירה"): כללים אישיים של מנהל – פעיל כברירת מחדל (החלטת בעל הפרויקט); learn:false במסמך = כבוי בעסק
     learn: d.learn !== false,
+    grp: GRP.allowedOf(d), // 23.11.2026: קבוצות פנימיות שפתוחות לגיטי (לתצוגה בלבד – הכלי וה-feed קוראים מחדש בכל קריאה)
   };
 }
 const empDefault = (bizId) => bizId === T.BIZ0;
@@ -183,6 +186,8 @@ async function secState(request) {
   // שלב 5: טיוטות ווצאפ שממתינות לאישור (שורה בכרטיס הבית – 11)
   const wp = consented ? (await db.collection('sec_draft').where('st', '==', 'pend').count().get()).data().count : 0;
   if (wp) out.rows.unshift({ k: 'wa', t: wp === 1 ? 'הודעת ווצאפ אחת ממתינה לתשובה' : wp + ' הודעות ווצאפ ממתינות לתשובה' });
+  // 23.11.2026 (גיטי, סבב 3): קבוצות פנימיות – האם התוספת פעילה וכמה קבוצות פתוחות לגיטי (מרכז שליטה והגדרות). בלי שמות ובלי תוכן
+  out.grp = { on: GRP.grpOn(who), n: cfg.grp.length, edit: !brLimited };
   Object.assign(out, { mirror: cfg.mirror, mirrorAt: mir && mir.exists && Number.isInteger(mir.get('at')) ? mir.get('at') : null, cfTh: cfg.cfTh, pct: u.pct, saving: u.saving });
   return out;
 }
@@ -336,7 +341,7 @@ async function secMirrorPut(request) {
 const NR_DAYS = 90, NR_MAX = 200, PREFS_HOUR = 30;
 async function secPrefs(request) {
   const input = inputObject(request);
-  const { who, cfg, me, db } = await gate(request, { consent: true });
+  const { who, cfg, me, db, brLimited } = await gate(request, { consent: true });
   const t = Date.now();
   // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל
   await db.runTransaction(async (tx) => {
@@ -422,6 +427,22 @@ async function secPrefs(request) {
     });
     if (r.already) return { ok: true, st: r.st, already: true };
     out = { st: r.st, ref: r.ref };
+  } else if (input.op === 'grp') {
+    // 23.11.2026 (גיטי, סבב 3 חלק א): מתג לכל קבוצה פנימית – האם גיטי רשאית לקרוא אותה (כלי getGroupMessages ולשונית "תקשורת").
+    // ברירת מחדל: כבוי. רק מנהל בלי הגבלת סניפים (הקבוצות הן של כל העסק), ורק כשתוספת הקבוצות פעילה. הפעלה – רק לקבוצה שקיימת;
+    // כיבוי – גם לקבוצה שנמחקה. נשמר ב-sec_cfg/main.grp ונקרא מחדש בכל קריאה, כך שכיבוי עוצר מיד
+    if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא משנה את הרשאות הקבוצות');
+    if (!GRP.grpOn(who)) throw pre('feature-off', 'קבוצות ההתכתבות לא פעילות בעסק הזה');
+    const gid = typeof input.gid === 'string' && GRP.GID_RE.test(input.gid) ? input.gid : null;
+    if (!gid || typeof input.on !== 'boolean') throw bad('bad-input', 'ערך לא תקין');
+    const gs = await db.doc('grp/' + gid).get();
+    const cur = GRP.allowedOf(await db.doc('sec_cfg/main').get().then((x) => (x.exists ? x.data() : null)));
+    if (input.on && !gs.exists) throw pre('not-found', 'הקבוצה לא נמצאה');
+    if (!input.on && !gs.exists && !cur.includes(gid)) throw pre('not-found', 'הקבוצה לא נמצאה');
+    if (input.on && !cur.includes(gid) && cur.length >= GRP.MAX_ALLOWED) throw pre('too-many', 'אפשר לפתוח לגיטי עד ' + GRP.MAX_ALLOWED + ' קבוצות');
+    b.set(main, { grp: input.on ? FieldValue.arrayUnion(gid) : FieldValue.arrayRemove(gid), upd: t }, { merge: true });
+    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', input.on ? 'grpOn' : 'grpOff', { tgt: gid, note: gs.exists ? GRP.cleanName(gs.get('name')) : '' }));
+    out = { gid, on: input.on };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);
@@ -555,7 +576,7 @@ async function secChat(request) {
   }
   if (reply === null) {
     offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn, notes: !!notes });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {} }; // feat: תוספות העסק (sec-biz-tools בודק בהפעלה)
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who) }; // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
       const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);

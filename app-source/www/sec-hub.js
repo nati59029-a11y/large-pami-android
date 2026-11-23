@@ -41,6 +41,8 @@ function connOf(src){
  else if(st.mirror===false)c('biz','מערכות העסק (נתוני הכספים)','off','מראה הכספים כבוי בהגדרות','set');
  else if(Number.isFinite(st.mirrorAt)&&st.mirrorAt>0)c('biz','מערכות העסק (נתוני הכספים)','ok','נכון ל-'+(root.__hubFmt?root.__hubFmt(st.mirrorAt):''));
  else c('biz','מערכות העסק (נתוני הכספים)','unk','עוד לא נשלחו נתונים');
+ /* סבב 3 (23.11.2026): קבוצות פנימיות – רק כשהתוספת פעילה (st.grp מ-secState). כמה קבוצות פתוחות לגיטי */
+ if(st&&st.ok&&st.grp&&st.grp.on){const n=+st.grp.n||0;c('grp','קבוצות פנימיות (קריאה של גיטי)',n?'ok':'off',n?(n===1?'קבוצה אחת פתוחה לגיטי':n+' קבוצות פתוחות לגיטי'):'אף קבוצה לא פתוחה לגיטי','set')}
  if(cx){const L='כספית (רובוט מחשב החנות)',lr=cx.lr,at=lr&&lr.at&&root.__hubFmt?root.__hubFmt(lr.at):'';
   if(cx.err)c('cx',L,'unk','לא נטען');
   else if(!cx.dev)c('cx',L,'off','אין מחשב מחובר','cx');
@@ -58,7 +60,7 @@ function mergeAttention(eyes,extra){
  return out}
 /* יומן: סוג לפי שם הפעולה */
 const LT=[['facts','מידע על העסק',/^(fact|fixed|price|sens|rule|bank|import)/],['cal','יומן ותזכורות',/^(cal|rem)/],['rep','דוחות והתראות',/^(report|insight|notify|empAlert|daySum)/],
- ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
+ ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap|grp)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
 const logType=a=>{a=String(a||'');const m=LT.find(x=>x[2].test(a));return m?m[0]:'other'};
 const logTypes=()=>LT.map(x=>[x[0],x[1]]).concat([['other','אחר']]);
 const WHO={mgr:'מנהל העסק',sa:'מנהל המערכת',auto:'פעולה אוטומטית',sec:'המזכירה'};
