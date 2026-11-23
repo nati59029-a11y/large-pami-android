@@ -18,6 +18,7 @@ const { gate, bad, wrap } = C;
 const PAGE = 50, PREV = 160;
 const CHS = ['all', 'mail', 'wa', 'grp'];
 const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n) : '');
+const lowOf = (s, f) => (s.size ? +s.docs[s.size - 1].get(f) || 0 : 0); // הזמן של המסמך הישן ביותר שנקרא
 const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 function mailItem(id, x) {
@@ -60,13 +61,13 @@ async function feed(who, db, input) {
   if (ch === 'all' || ch === 'mail') {
     let q = db.collection('sec_in').where('ch', '==', 'mail');
     if (before) q = q.where('t', '<', before);
-    jobs.push(q.orderBy('t', 'desc').limit(lim).get().then((s) => ({ full: s.size >= lim, items: s.docs.map((d) => mailItem(d.id, d.data())) })));
+    jobs.push(q.orderBy('t', 'desc').limit(lim).get().then((s) => ({ full: s.size >= lim, low: lowOf(s, 't'), items: s.docs.map((d) => mailItem(d.id, d.data())) })));
   }
   if (ch === 'all' || ch === 'wa') {
     let q = db.collection('sec_in').where('ch', '==', 'wa');
     if (before) q = q.where('rt', '<', before);
-    // הודעות אישיות של מנהל (own:'mgr') לא מוצגות – כמו בלשונית ווצאפ. הן תופסות מקום בדף, ולכן "full" לפי מה שנקרא
-    jobs.push(q.orderBy('rt', 'desc').limit(lim).get().then((s) => ({ full: s.size >= lim, items: s.docs.filter((d) => d.get('own') !== 'mgr').map((d) => waItem(d.id, d.data())) })));
+    // הודעות אישיות של מנהל (own:'mgr') לא מוצגות – כמו בלשונית ווצאפ. הן תופסות מקום בדף, ולכן "full" ו-low לפי מה שנקרא (לא לפי מה שמוצג)
+    jobs.push(q.orderBy('rt', 'desc').limit(lim).get().then((s) => ({ full: s.size >= lim, low: lowOf(s, 'rt'), items: s.docs.filter((d) => d.get('own') !== 'mgr').map((d) => waItem(d.id, d.data())) })));
   }
   let groups = [];
   if (grpOn && (ch === 'all' || ch === 'grp')) {
@@ -77,17 +78,22 @@ async function feed(who, db, input) {
       if (before) q = q.where('t', '<', before);
       jobs.push(Promise.all([q.limit(lim).get(), db.doc('grp/' + g.gid + '/r/' + who.uid).get()]).then(([s, r]) => {
         const rt = r.exists && Number.isInteger(r.get('t')) ? r.get('t') : 0;
-        return { full: s.size >= lim, items: s.docs.map((d) => grpItem(g, d.id, d.data(), who.uid, rt)) };
+        return { full: s.size >= lim, low: lowOf(s, 't'), items: s.docs.map((d) => grpItem(g, d.id, d.data(), who.uid, rt)) };
       }));
     }
   }
   const res = await Promise.all(jobs);
-  const all = [].concat(...res.map((r) => r.items)).filter((x) => x.t > 0).sort((a, b) => b.t - a.t);
+  // רצפה: מקור שהגיע לתקרה (full) אולי לא קרא את כל מה שמתחת למסמך הישן ביותר שקרא – ולכן שום פריט (מאף מקור) מתחת לרצפה
+  // לא נכנס לדף הזה; הוא יגיע בדף הבא (before = הרצפה). כך הודעה לא נדלגת גם כשמסמכים שנקראו סוננו (own:'mgr')
+  const floor = Math.max(0, ...res.filter((r) => r.full).map((r) => r.low || 0));
+  const raw = [].concat(...res.map((r) => r.items)).filter((x) => x.t > 0).sort((a, b) => b.t - a.t);
+  const all = raw.filter((x) => x.t >= floor);
   // חיתוך הדף: lim פריטים, ועוד כל מה שבאותו זמן בדיוק כמו האחרון (הדף הבא מתחיל ב-before = הזמן הזה)
-  let page = all.slice(0, lim);
+  let page = all.slice(0, lim), next = null;
   if (all.length > lim) { const tl = page[page.length - 1].t; page = all.filter((x) => x.t >= tl); }
-  const more = all.length > page.length || res.some((r) => r.full);
-  const next = more && page.length ? page[page.length - 1].t : null;
+  if (all.length > page.length) next = page[page.length - 1].t;
+  else if (floor > 0) next = floor;
+  const more = next !== null;
   const items = st === 'open' ? page.filter((x) => x.open) : page;
   return { ok: true, items, more, next, grpOn, groups: groups.map((g) => ({ gid: g.gid, name: g.name })), now: Date.now() };
 }

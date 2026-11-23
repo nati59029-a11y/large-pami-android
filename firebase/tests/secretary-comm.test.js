@@ -124,9 +124,14 @@ describe('גיטי – הרשאת קבוצות (secPrefs op:grp)', () => {
     await seed();
     assert.equal((await setGrp(M1, G2, true)).status, 'OK');
     await prep((d) => d.doc(`b/${A}/grp/${G2}`).delete());
+    assert.equal((await call('secState', M1, {})).result.grp.n, 0, 'קבוצה שנמחקה לא נספרת במרכז השליטה');
     const r = await setGrp(M1, G2, false);
     assert.equal(r.status, 'OK', r.text);
     assert.deepEqual((await get(`b/${A}/sec_cfg/main`)).grp, []);
+    // תקרה: 50 קבוצות פתוחות – ה-51 נדחית
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).set({ grp: Array.from({ length: 50 }, (_, i) => 'z' + i) }, { merge: true }));
+    assert.equal((await setGrp(M1, G1, true)).reason, 'too-many');
+    assert.equal((await get(`b/${A}/sec_cfg/main`)).grp.length, 50);
   });
 });
 
@@ -155,6 +160,10 @@ describe('גיטי – הכלי getGroupMessages', () => {
     assert.equal(R.count, 0); assert.deepEqual(R.groups, ['צוות בוקר'], 'שם של קבוצה סגורה – לא נקראת');
     R = await askGroups({ limit: 1 });
     assert.equal(R.count, 1); assert.equal(R.more, true);
+    // ליקוי 1 (בדיקה סבב 1): מילה אחרי התו ה-80 בהודעה ארוכה – נמצאת בחיפוש
+    await prep((d) => d.doc(`b/${A}/grp/${G1}/m/a4`).set({ by: E1, byN: 'דוד כהן', t: Date.now() - 8 * MIN, k: 't', txt: 'א'.repeat(150) + ' מילהנדירה בסוף' }));
+    R = await askGroups({ query: 'מילהנדירה' });
+    assert.equal(R.count, 1, 'התאמה אחרי 80 תווים'); assert.match(R.items[0].text, /מילהנדירה/);
     const log = (await coll(`b/${A}/sec_log`)).filter((l) => l.act === 'tool' && String(l.note).startsWith('getGroupMessages'));
     assert.ok(log.length >= 1);
     assert.equal((await setGrp(M1, G1, false)).status, 'OK');
@@ -213,6 +222,26 @@ describe('גיטי – secComm: פיד מאוחד ורשימת קבוצות', ()
       more = r.result.more; before = r.result.next;
     }
     assert.deepEqual(seen, ['mail:ml2', `grp:${G1}:a3`, `grp:${G1}:a2`, `grp:${G1}:a1`, 'mail:ml1', 'wa:w1']);
+  });
+  it('דפים: הודעות אישיות של מנהל (own:mgr) שנקראו וסוננו לא גורמות לדילוג על הודעת ווצאפ רגילה', async () => {
+    await seed();
+    const now = Date.now();
+    await prep(async (d) => {
+      const b = d.batch();
+      b.set(d.doc(`b/${A}/sec_in/ml3`), { ch: 'mail', own: 'sec', from: 'c@x.example', name: 'ספק ג', subj: 'ישן', text: 'ישן', t: now - 8 * MIN, rt: now - 8 * MIN, st: 'done', flags: [] });
+      b.set(d.doc(`b/${A}/sec_in/w3`), { ch: 'wa', own: 'mgr', mgr: M1, from: '972509999999', name: 'מנהל', text: 'אישי 2', t: now - 42000, rt: now - 42000, st: 'done', type: 'text', flags: [] });
+      b.set(d.doc(`b/${A}/sec_in/w4`), { ch: 'wa', own: 'sec', from: '972501111111', name: 'יוסי', text: 'הודעה רגילה', t: now - 4 * MIN, rt: now - 4 * MIN, st: 'done', type: 'text', flags: [] });
+      await b.commit();
+    });
+    const seen = [];
+    let before, n = 0, more = true;
+    while (more && n++ < 12) {
+      const r = await call('secComm', M1, Object.assign({ op: 'feed', limit: 2 }, before ? { before } : {}));
+      assert.equal(r.status, 'OK', r.text);
+      seen.push(...r.result.items.map((x) => x.id));
+      more = r.result.more; before = r.result.next;
+    }
+    assert.deepEqual(seen, ['mail:ml2', 'wa:w4', 'mail:ml1', 'wa:w1', 'mail:ml3'], 'w4 לא נדלגה, בלי כפילויות, בלי הודעות אישיות');
   });
   it('הרשאות וקלט: בלי התחברות, עובד, תוספת כבויה (בלי קבוצות), קלט לא תקין; עסק אחר לא רואה', async () => {
     await seed();

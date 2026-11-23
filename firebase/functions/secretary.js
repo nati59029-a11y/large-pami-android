@@ -187,7 +187,9 @@ async function secState(request) {
   const wp = consented ? (await db.collection('sec_draft').where('st', '==', 'pend').count().get()).data().count : 0;
   if (wp) out.rows.unshift({ k: 'wa', t: wp === 1 ? 'הודעת ווצאפ אחת ממתינה לתשובה' : wp + ' הודעות ווצאפ ממתינות לתשובה' });
   // 23.11.2026 (גיטי, סבב 3): קבוצות פנימיות – האם התוספת פעילה וכמה קבוצות פתוחות לגיטי (מרכז שליטה והגדרות). בלי שמות ובלי תוכן
-  out.grp = { on: GRP.grpOn(who), n: cfg.grp.length, edit: !brLimited };
+  // n – רק קבוצות שעדיין קיימות (קבוצה שנמחקה ונשארה ברשימה לא נספרת). קריאה רק כשיש רשימה (עד 50 מסמכים)
+  const grpOn = GRP.grpOn(who);
+  out.grp = { on: grpOn, n: grpOn && cfg.grp.length ? (await GRP.allowedGroups(T.tdb(), cfg.grp)).length : 0, edit: !brLimited };
   Object.assign(out, { mirror: cfg.mirror, mirrorAt: mir && mir.exists && Number.isInteger(mir.get('at')) ? mir.get('at') : null, cfTh: cfg.cfTh, pct: u.pct, saving: u.saving });
   return out;
 }
@@ -435,13 +437,16 @@ async function secPrefs(request) {
     if (!GRP.grpOn(who)) throw pre('feature-off', 'קבוצות ההתכתבות לא פעילות בעסק הזה');
     const gid = typeof input.gid === 'string' && GRP.GID_RE.test(input.gid) ? input.gid : null;
     if (!gid || typeof input.on !== 'boolean') throw bad('bad-input', 'ערך לא תקין');
-    const gs = await db.doc('grp/' + gid).get();
-    const cur = GRP.allowedOf(await db.doc('sec_cfg/main').get().then((x) => (x.exists ? x.data() : null)));
-    if (input.on && !gs.exists) throw pre('not-found', 'הקבוצה לא נמצאה');
-    if (!input.on && !gs.exists && !cur.includes(gid)) throw pre('not-found', 'הקבוצה לא נמצאה');
-    if (input.on && !cur.includes(gid) && cur.length >= GRP.MAX_ALLOWED) throw pre('too-many', 'אפשר לפתוח לגיטי עד ' + GRP.MAX_ALLOWED + ' קבוצות');
-    b.set(main, { grp: input.on ? FieldValue.arrayUnion(gid) : FieldValue.arrayRemove(gid), upd: t }, { merge: true });
-    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', input.on ? 'grpOn' : 'grpOff', { tgt: gid, note: gs.exists ? GRP.cleanName(gs.get('name')) : '' }));
+    // קריאה, בדיקת התקרה, כתיבה ויומן – בטרנזקציה אחת (שתי הפעלות בו-זמנית לא עוברות את תקרת MAX_ALLOWED)
+    await db.runTransaction(async (tx) => {
+      const [gs, ms] = await Promise.all([tx.get(db.doc('grp/' + gid)), tx.get(main)]);
+      const cur = GRP.allowedOf(ms.exists ? ms.data() : null);
+      if (input.on && !gs.exists) throw pre('not-found', 'הקבוצה לא נמצאה');
+      if (!input.on && !gs.exists && !cur.includes(gid)) throw pre('not-found', 'הקבוצה לא נמצאה');
+      if (input.on && !cur.includes(gid) && cur.length >= GRP.MAX_ALLOWED) throw pre('too-many', 'אפשר לפתוח לגיטי עד ' + GRP.MAX_ALLOWED + ' קבוצות');
+      tx.set(main, { grp: input.on ? FieldValue.arrayUnion(gid) : FieldValue.arrayRemove(gid), upd: t }, { merge: true });
+      tx.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', input.on ? 'grpOn' : 'grpOff', { tgt: gid, note: gs.exists ? GRP.cleanName(gs.get('name')) : '' }));
+    });
     out = { gid, on: input.on };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();

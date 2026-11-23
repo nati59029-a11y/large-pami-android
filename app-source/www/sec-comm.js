@@ -70,7 +70,7 @@ function commH(){
  if(!C.at&&!C.busy&&!C.err)load(false);
  const hasNf=nf()!==null,gOn=C.grpOn||!!(X.st&&X.st.grp&&X.st.grp.on);
  const CH=[['all','הכול'],['mail','מייל'],['wa','ווצאפ']].concat(gOn?[['grp','קבוצות']]:[]).concat(hasNf?[['notif','התראות מהטלפון']]:[]);
- if(!CH.some(c=>c[0]===C.ch))C.ch='all';
+ if(!CH.some(c=>c[0]===C.ch)){C.ch='all';reset();load(false)}/* הערוץ שנבחר כבר לא זמין (למשל הקליטה כובתה) – חוזרים ל"הכול" וטוענים מהשרת */
  const chip=(a,k,l,on)=>`<button class="chip${on?' on':''}" data-a="${a}" data-v="${k}" aria-pressed="${on}">${l}</button>`;
  let h=`<div class="cmf" role="group" aria-label="ערוץ">${CH.map(([k,l])=>chip('commCh',k,l,C.ch===k)).join('')}</div>
  <div class="cmf" role="group" aria-label="מצב">${chip('commSt','all','הכול',C.st==='all')}${chip('commSt','open','לטיפול / לא נקרא',C.st==='open')}<button class="chip" data-a="commRe">רענון</button></div>`;
