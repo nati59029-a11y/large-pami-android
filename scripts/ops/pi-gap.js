@@ -1,10 +1,13 @@
 // בדיקה/השלמה חד-פעמית: חשבוניות ספק של עובדים שנשלחו בחלון המעבר (22.11.2026) ולא נכנסו לתמחור.
 // MODE=check – קריאה בלבד. MODE=fix – יוצר pinv דרך אותו קוד של piInbox (onInbox).
-const admin = require('firebase-admin');
-const path = require('path');
-const FN = path.resolve(process.argv[2]);
+const path = require("path");
+const FN0 = path.resolve(process.argv[2]);
+const rq = require("module").createRequire(FN0 + "/index.js");
+const admin = rq("firebase-admin");
+
+const FN = FN0;
 admin.initializeApp({ credential: admin.credential.cert(require(process.env.SA)) });
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore } = rq("firebase-admin/firestore");
 const fs = getFirestore();
 const PIM = require(FN + '/pricing-inbox.js')._core;
 const FROM = Date.parse('2026-11-21T22:00:00Z'), TO = Date.parse('2026-11-22T13:30:00Z');

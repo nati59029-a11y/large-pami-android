@@ -20,6 +20,7 @@ jobs:
           umask 077
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
           trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
-          export SA="$RUNNER_TEMP/sa.json" GCLOUD_PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$SA")
+          export SA="$RUNNER_TEMP/sa.json"
+          export GCLOUD_PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$SA")
           (cd firebase/functions && npm ci --silent)
           node scripts/ops/pi-gap.js firebase/functions
