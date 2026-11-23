@@ -52,20 +52,26 @@ function doneToday(){const t0=day0(0),me=SY.uid,by=String(fbBy()||'').toLowerCas
 const ndSeen=()=>rd(KU('lp-tk-ndv'),{});
 const ndNew=t=>!!(t&&t.st==='open'&&t.nd>0&&!fbAdmin()&&tkSee(t)&&(!t.ow||t.ow===SY.uid)&&ndSeen()[t.id]!==t.nd);
 /* ---- סינון וחיפוש ---- */
-const FLK=()=>LK('lp-tk-flt'),fl=()=>{const f=rd(FLK(),{});return{q:typeof f.q==='string'?f.q.slice(0,60):'',c:typeof f.c==='string'?f.c:'',t:typeof f.t==='string'?f.t.slice(0,30):''}};
+const FLK=()=>LK('lp-tk-flt'),fl=()=>{const f=rd(FLK(),{});return{q:typeof f.q==='string'?f.q.slice(0,60):'',c:typeof f.c==='string'?f.c:'',t:typeof f.t==='string'?f.t.slice(0,30):'',u:typeof f.u==='string'?f.u.slice(0,128):''}};
 const FC=[['','הכול'],['mine','שלי'],['mgr','מהמנהל'],['urg','דחוף'],['prv','פרטיות'],['late','באיחור'],['today','להיום'],['week','השבוע']];
 function pass(x,F,now){if(F.q){const s=[x.txt,x.by,x.owN,x.cat,(x.toN||[]).join(' ')].join(' ').toLowerCase();if(!s.includes(F.q.toLowerCase()))return false}
  if(F.t&&(x.k==='r'||(x.cat||'')!==F.t))return false;
+ /* 23.11.2026 סינון לפי עובד (תצוגה בלבד): נמען, מטפל או כותב */
+ if(F.u&&(x.k==='r'||!(x.ow===F.u||x.owner===F.u||(x.to||[]).includes(F.u))))return false;
  const rem=x.k==='r',dl=rem?x.at:tkDl(x);
  switch(F.c){case'mine':return rem||(x.pv?x.owner===SY.uid:(x.ow===SY.uid||x.owner===SY.uid));case'mgr':return !rem&&!x.pv&&x.role==='a'&&x.dg!=='1';case'prv':return rem||!!x.pv;case'urg':return !rem&&x.pri==='h';
   case'late':return rem?x.at<now:x.pv?(x.st!=='done'&&now>dl)||x.late==='1':tkIsLate(x);case'today':return dl<day0(1);case'week':return dl<wkEnd()}return true}
-W.flt=L=>{const F=fl();if(!on()||(!F.q&&!F.c&&!F.t))return L;const now=Date.now();return L.filter(x=>pass(x,F,now))};
-W.fbar=tab=>{if(!on()||!['my','open','late','done','wait'].includes(tab))return '';const F=fl(),h0=fbar0(tab,F);
- if(!W.wk())return h0;return `<details class="card" style="padding:8px 12px;margin:0 0 8px" ${F.q||F.c||F.t?'open':''}><summary style="cursor:pointer;font-weight:600;color:var(--mut)">חיפוש וסינון</summary><div style="margin-top:8px">${h0}</div></details>`};
-function fbar0(tab,F){
- return `<div class="chips" style="flex-wrap:nowrap;overflow-x:auto;margin:-4px 0 8px;padding-bottom:2px">${FC.map(c=>`<button class="chip ${F.c===c[0]?'on':''}" data-a="tkwF" data-v="${c[0]}" style="flex:none;min-height:36px;padding:0 12px">${c[1]}</button>`).join('')}</div>
+W.flt=L=>{const F=fl();if(!on()||(!F.q&&!F.c&&!F.t&&!F.u))return L;const now=Date.now();return L.filter(x=>pass(x,F,now))};
+/* 23.11.2026: שורת חיפוש + כפתור "סינון" אחד; כל אפשרויות הסינון (סוג, עובד, נושא) בחלונית שנפתחת */
+W.fbar=tab=>{if(!on()||!['my','open','late','done','wait'].includes(tab))return '';const F=fl(),n=(F.c?1:0)+(F.t?1:0)+(F.u?1:0);
+ return `<div class="tkfb"><input type="search" data-i="tkwQ" value="${esc(F.q)}" maxlength="60" placeholder="חיפוש במשימות…" aria-label="חיפוש במשימות"><button type="button" class="chip ${n?'on':''}" data-a="tkwFp" aria-expanded="${!!W.fp}">סינון${n?' ('+n+')':''} ${W.fp?'▴':'▾'}</button></div>${W.fp?`<div class="tkfp">${fbar0(tab,F)}${n?'<button type="button" class="btn g" data-a="tkwFx" style="min-height:36px">נקה סינון</button>':''}</div>`:''}`};
+ACT.tkwFp=()=>{W.fp=W.fp?0:1;tkRe()};
+ACT.tkwFx=()=>{const F=fl();F.c='';F.t='';F.u='';wr(FLK(),F);tkRe()};
+CHG.tkwU=el=>{const F=fl();F.u=String(el.value||'').slice(0,128);wr(FLK(),F);tkRe()};
+function fbar0(tab,F){const SL=fbAdmin()&&typeof TKST!=='undefined'&&TKST.L||[];
+ return `<p class="tkh" style="margin:0 0 4px">הצג</p><div class="chips" style="margin:0 0 10px">${FC.map(c=>`<button class="chip ${F.c===c[0]?'on':''}" data-a="tkwF" data-v="${c[0]}" style="flex:none;min-height:36px;padding:0 12px">${c[1]}</button>`).join('')}</div>
  ${(()=>{const C=cats();if(F.t&&!C.includes(F.t))C.unshift(F.t);return C.length?`<label class="f" style="margin:0 0 8px"><span>נושא</span><select data-c="tkwT" aria-label="סינון לפי נושא"><option value="">כל הנושאים</option>${C.map(c=>`<option value="${esc(c)}" ${c===F.t?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''})()}
- <label class="f" style="margin:0 0 10px"><input type="search" data-i="tkwQ" value="${esc(F.q)}" maxlength="60" placeholder="חיפוש במשימות…" aria-label="חיפוש במשימות" style="width:100%"></label>`}
+ ${SL.length?`<label class="f" style="margin:0 0 8px"><span>עובד</span><select data-c="tkwU" aria-label="סינון לפי עובד"><option value="">כל העובדים</option>${SL.map(x=>`<option value="${esc(x.uid)}" ${x.uid===F.u?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>`:''}`}
 CHG.tkwT=el=>{const F=fl();F.t=String(el.value||'').slice(0,30);wr(FLK(),F);tkRe()};
 ACT.tkwF=el=>{const F=fl();F.c=el.dataset.v||'';wr(FLK(),F);tkRe()};
 let qT=0;INP.tkwQ=el=>{clearTimeout(qT);qT=setTimeout(()=>{const F=fl();F.q=String(el.value||'').slice(0,60);wr(FLK(),F);tkRe();const n=document.querySelector('input[data-i=tkwQ]');if(n){n.focus();try{n.setSelectionRange(n.value.length,n.value.length)}catch(e){}}},300)};
@@ -452,6 +458,12 @@ W.formX=()=>{if(!on())return '';
   <label class="f"><span>נושא</span><input data-i="tkwCat" list="tkwCats" maxlength="30" value="${esc(FX.cat)}" placeholder="למשל: מלאי, קופה, ניקיון" autocomplete="off"></label><datalist id="tkwCats">${C.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>
   <div class="f"><span>רשימת סימון${FX.ck.length?' ('+FX.ck.length+'/20)':''}</span>${FX.ck.map((v,i)=>`<div class="row" style="gap:6px;margin:4px 0;flex-wrap:nowrap"><input data-i="tkwCkI" data-n="${i}" value="${esc(v)}" maxlength="120" placeholder="פריט ${i+1}" aria-label="פריט ${i+1}" style="flex:1;min-width:0"><button type="button" class="btn g" data-a="tkwCkDel" data-n="${i}" aria-label="הסר פריט ${i+1}" style="flex:none;min-height:40px;padding:0 12px">✕</button></div>`).join('')}${FX.ck.length<20?'<button type="button" class="btn g" data-a="tkwCkAdd" style="min-height:40px;margin:4px 0 8px">+ הוסף פריט</button>':''}<p class="note" style="margin:0 0 8px">הרשימה לא חוסמת "בוצע" – רק מזכירה.</p></div>`}
  return h+wpT};
+/* 23.11.2026 ארגון מחדש: אותם רכיבים כמו formX, מפוצלים לאזורים. "הגדרות נוספות" נפתח/נסגר בטופס עצמו, ולכן משך/נושא/רשימה מוצגים כאן בלי כפתור משלהם */
+W.formParts=()=>{if(!on())return null;if(!rvNew())return {old:W.formX()};const m0=FX.more;FX.more=1;let h;try{h=W.formX()}finally{FX.more=m0}
+ const cut=(a,b)=>{const i=h.indexOf(a);if(i<0)return '';const j=b?h.indexOf(b,i):h.length;return h.slice(i,j<0?h.length:j)};
+ const iM=h.indexOf('data-a="tkwMore"'),bS=h.lastIndexOf('<button',iM),bE=h.indexOf('</button>',iM)+9,iW=h.indexOf('<div class="f" style="margin:8px 0 2px"><button type="button" class="chip',bE);
+ const pre=h.slice(0,bS),iP=pre.indexOf('<div class="f" style="margin:2px 0"><span>עדיפות</span>');
+ const st=x=>x.replace('<span>יעד לביצוע</span>','').replace('<span>עדיפות</span>','');return {dl:st(iP<0?pre:pre.slice(0,iP)),pri:st(iP<0?'':pre.slice(iP)),more:h.slice(bE,iW<0?h.length:iW),wp:iW<0?'':h.slice(iW)}};
 ACT.tkwWp=()=>{if(!fbAdmin())return;const v=!wpOk();tkWpSet(v).then(()=>{wpSet(v);toast(v?'✓ עובדים יכולים לקבוע עדיפות ויעד':'✓ עובדים לא יכולים לקבוע עדיפות ויעד')}).catch(e=>toast(tkErr(e)))};
 ACT.tkwDk=el=>{FX.dk=el.dataset.v;if(FX.dk==='at'&&!FX.d){const t=Date.now()+2*H,r=t-(t%(15*MIN))+15*MIN;FX.d=ymd(r);FX.tm=hhmm(r)}tkRe()};
 ACT.tkwPri=el=>{FX.pri=el.dataset.v||'';tkRe()};
