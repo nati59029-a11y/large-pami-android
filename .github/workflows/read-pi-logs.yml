@@ -1,0 +1,25 @@
+name: Read piInbox logs (read-only)
+on:
+  push:
+    branches: ["fix/read-piinbox-logs"]
+    paths: [".github/workflows/read-pi-logs.yml"]
+permissions:
+  contents: read
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read logs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          umask 077
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json")
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/sa.json" --quiet
+          BASE='resource.type="cloud_run_revision" AND resource.labels.service_name:"piinbox" AND timestamp>="'$(date -u -d '-48 hours' +%Y-%m-%dT%H:%M:%SZ)'"'
+          mask() { sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/<email>/g' | cut -c1-260; }
+          echo "== piInbox log lines (48h) =="
+          gcloud logging read "$BASE AND (jsonPayload.message:\"piInbox\" OR severity>=WARNING)" --project "$PROJECT" --limit 200 \
+            --format='value(timestamp,resource.labels.service_name,severity,jsonPayload.message,jsonPayload.reason,jsonPayload.r,jsonPayload.n,jsonPayload.code,textPayload)' | mask
