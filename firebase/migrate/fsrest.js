@@ -8,7 +8,9 @@
 // הגנות כתיבה (בקוד, לא רק בתהליך):
 //  1. כתיבה רק במצב write (mode === 'write'). במצב readonly כל ניסיון כתיבה זורק שגיאה.
 //  2. כתיבה רק ליעד: b/<bizId> (מסמך העסק), b/<bizId>/... (הנתונים המועתקים), ו-users/<uid> ביצירה בלבד.
-//  3. אין בקוד מחיקה: אין שימוש ב-DELETE ואין פעולת delete בכתיבה המרוכזת.
+//  3. אין שימוש ב-DELETE. מחיקה רק בפקודה purge-root (23.11.2026), דרך deleteDocs בלבד: רק אחרי enablePurge(רשימת אוספים)
+//     שהפקודה הזו בלבד קוראת, רק במצב write, רק לאוספי השורש שברשימה (אף פעם לא b, users, superadmins, admins, staff, private),
+//     ורק עם תנאי מוקדם updateTime (המסמך לא השתנה מאז שקראנו אותו). כתיבה (writeDocs) אף פעם לא מוחקת.
 //  4. כל כתיבה מוגנת בתנאי מוקדם: יצירה = "המסמך לא קיים" (exists:false). עדכון = "המסמך לא השתנה מאז שקראנו אותו"
 //     (updateTime), או "המסמך קיים" לשינוי dataRoot בלבד. כך אף פעם לא נדרס מסמך ששונה בינתיים.
 
@@ -74,7 +76,8 @@ class FsRest {
     this.prefix = `projects/${project}/databases/${DB}/documents`;
     this.base = (emulatorHost ? `http://${emulatorHost}` : 'https://firestore.googleapis.com') + '/v1/' + this.prefix;
     this.token = token; // פונקציה שמחזירה אסימון (באמולטור: 'owner')
-    this.stats = { reads: 0, writes: 0 };
+    this.stats = { reads: 0, writes: 0, deletes: 0 };
+    this.purgeColls = null; // מחיקה כבויה, עד enablePurge (רק purge-root)
   }
 
   rel(name) { return name.startsWith(this.prefix + '/') ? name.slice(this.prefix.length + 1) : name; }
@@ -192,6 +195,46 @@ class FsRest {
   }
 }
 
+// ---- מחיקה: רק לפקודה purge-root ----
+// אוספים שלעולם לא נמחקים, גם אם נמסרו ל-enablePurge בטעות (היעד, הזהות וההרשאות)
+const PURGE_NEVER = ['b', 'users', 'superadmins', 'admins', 'staff', 'private'];
+FsRest.prototype.enablePurge = function (colls) {
+  if (this.mode !== 'write') throw new Error('מצב קריאה בלבד: אסור למחוק');
+  const bad = (colls || []).filter(c => PURGE_NEVER.includes(c) || !/^[A-Za-z0-9_-]{1,100}$/.test(c));
+  if (bad.length) throw new Error('אוספים אסורים למחיקה: ' + bad.join(', '));
+  this.purgeColls = new Set(colls);
+};
+FsRest.prototype.assertDeletable = function (path) {
+  if (this.mode !== 'write') throw new Error('מצב קריאה בלבד: אסור למחוק (' + path + ')');
+  if (!this.purgeColls || !this.purgeColls.size) throw new Error('מחיקה לא מופעלת (רק purge-root): ' + path);
+  const segs = String(path).split('/');
+  if (segs.length < 2 || segs.length % 2 !== 0 || segs.some(x => !x)) throw new Error('נתיב מסמך לא תקין למחיקה: ' + path);
+  if (PURGE_NEVER.includes(segs[0]) || !this.purgeColls.has(segs[0])) throw new Error('מחיקה מחוץ לתחום נחסמה: ' + path);
+};
+// dels: [{path, updateTime}] – מחיקה רק אם המסמך לא השתנה מאז שנקרא (updateTime). מחזיר לכל מחיקה {path, ok, error}
+FsRest.prototype.deleteDocs = async function (dels, { chunkSize = 200, pauseMs = 250 } = {}) {
+  for (const d of dels) {
+    this.assertDeletable(d.path);
+    if (!d.updateTime) throw new Error('מחיקה בלי updateTime נחסמה: ' + d.path);
+  }
+  const results = [];
+  for (let i = 0; i < dels.length; i += chunkSize) {
+    const chunk = dels.slice(i, i + chunkSize);
+    const r = await this.req('POST', this.base + ':batchWrite', {
+      writes: chunk.map(d => ({ delete: this.prefix + '/' + d.path, currentDocument: { updateTime: d.updateTime } })),
+    });
+    const st = r.status || [];
+    chunk.forEach((d, k) => {
+      const s = st[k] || {};
+      const ok = !s.code;
+      if (ok) this.stats.deletes++;
+      results.push({ path: d.path, ok, error: ok ? undefined : `${s.code}: ${s.message || ''}` });
+    });
+    if (i + chunkSize < dels.length && pauseMs) await new Promise(res => setTimeout(res, pauseMs)); // קצב מתון
+  }
+  return results;
+};
+
 async function pmap(items, n, fn) {
   const out = new Array(items.length);
   let i = 0;
@@ -218,4 +261,4 @@ async function scanTree(fs, parent, collIds) {
   return out;
 }
 
-module.exports = { FsRest, scanTree, hashFields, stable, normFields, MISSING, pmap, encPath };
+module.exports = { FsRest, PURGE_NEVER, scanTree, hashFields, stable, normFields, MISSING, pmap, encPath };
