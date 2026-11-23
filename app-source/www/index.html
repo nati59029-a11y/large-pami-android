@@ -6282,6 +6282,12 @@ async function siUsNext(){if(siUsNext.b)return;siUsNext.b=1;try{while(SIUQ.lengt
 {const o=ACT.siUs;ACT.siUs=async el=>{const x=siFind(el);if(x&&!SIUQ.includes(x.id)){x.st='us';siSave()}return o(el)}}
 {const o=usReset;usReset=function(){const si=US&&US.si;o();const x=si&&(SI.L||[]).find(y=>y.id===si);if(x&&x.st==='us'){x.st='q';siSave();siPump()}if(si&&SIUQ.length&&!siUsNext.b)setTimeout(siUsNext,0)}}
 {const o=usDone;usDone=function(){o();if(SIUQ.length)setTimeout(siUsNext,600)}}
+/* 23.11.2026: מסמכים ששותפו בזמן שטופס או חלון היו פתוחים – נפתחים במסך האחיד מיד כשהטופס/החלון נסגר */
+function siUsKick(){clearTimeout(siUsKick.t);if(!SIUQ.length)return;siUsKick.t=setTimeout(()=>{if(SIUQ.length&&!US&&!A&&!$('#dlg').open&&!siUsNext.b&&isA())siUsNext()},400)}
+{const o=sheetClose;sheetClose=function(){o.apply(this,arguments);siUsKick()}}
+try{$('#dlg').addEventListener('close',siUsKick)}catch(e){}
+/* פתיחה ידנית מהכרטיס: המסמך יוצא מתור ההמתנה, כדי שלא ייפתח שוב אחר כך */
+{const o=ACT.siUs;ACT.siUs=async el=>{if(el&&el.nodeType===1&&el.dataset&&el.dataset.id)SIUQ=SIUQ.filter(i=>i!==el.dataset.id);return o(el)}}
 /* "צילום העברה" (בלי ספק שנבחר מראש) פותח את המסך האחיד (החלטה 7) */
 {const o=ACT.trGo;ACT.trGo=el=>{if(!el.dataset.sub&&usAllowed('transfer')){usOpen();return}o(el)}}
 /* ===== סריקה אחידה, שלב 5: חיבור דפים. כל דף מזוהה לבד (דף = 1 במכסה), והאפליקציה מחברת: Z בשלושה חלקים (עליון/אמצעי/תחתון, בסדר הנכון), חשבונית עד 12 דפים (לפי מספר+ספק),
