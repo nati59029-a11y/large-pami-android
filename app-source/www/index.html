@@ -127,6 +127,31 @@ main{padding:14px;max-width:760px;margin:0 auto}
 .chip{min-height:44px;padding:0 14px;border-radius:999px;border:1.5px solid var(--line);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .chip.on{background:var(--acc);border-color:var(--acc);color:var(--onacc)}
 .chips{display:flex;gap:8px;flex-wrap:wrap}
+/* 23.11.2026 מסכי משימות: אזורים, היררכיה, פחות צללים, בחירה בולטת ועדינה */
+.tkv{max-width:820px;margin-inline:auto}
+.tkv .card,html[data-ds] .tkv .card{box-shadow:none}
+.tkv .chip,html[data-ds] .tkv .chip{min-height:38px;padding:0 13px;font-size:.9rem;box-shadow:none}
+.tkv .chip.on,html[data-ds] .tkv .chip.on{background:color-mix(in srgb,var(--acc) 13%,var(--card));border-color:var(--acc);color:var(--acc);box-shadow:none}
+.tkv .tkst .chip.on,html[data-ds] .tkv .tkst .chip.on{background:var(--acc);color:var(--onacc)}
+.tkv .opt,html[data-ds] .tkv .opt{box-shadow:none}
+.tkv .opt.on{background:color-mix(in srgb,var(--acc) 8%,var(--card))}
+.tkf{padding:6px 18px 18px}
+.tks{padding:18px 0 16px;border-top:1px solid var(--line)}
+.tkf>.tks:first-child{border-top:0}
+.tks h4{margin:0 0 3px;font-size:1rem;font-weight:800;color:var(--acc)}
+.tks .f>span{font-weight:600;font-size:.9rem}
+.tkh{margin:0 0 10px;font-size:.8rem;color:var(--mut);line-height:1.4}
+.tksub{margin-top:16px}.tksub h5{margin:0 0 6px;font-size:.9rem;font-weight:700}
+.tkadv{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:4px 0}
+.tkadv span{display:flex;flex-direction:column;gap:2px}.tkadv b{font-size:1rem;color:var(--acc)}.tkadv small{font-size:.8rem;color:var(--mut)}.tkadv i{font-style:normal;color:var(--mut)}
+.tkadv:focus-visible{outline:2px solid var(--acc);outline-offset:4px;border-radius:6px}
+.tkadvb{padding-top:12px}
+.tksend{margin-top:8px}
+.tkgrid{display:block}
+.tkfb{display:flex;gap:8px;align-items:center;margin:0 0 10px}.tkfb input{flex:1;min-width:0}.tkfb .chip{flex:none}
+.tkfp{border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 12px;background:var(--card)}
+@media(min-width:720px){.tkgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;border-top:1px solid var(--line)}.tkgrid .tks{border-top:0}.tkf{padding:8px 26px 22px}}
+
 .scroll-x{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
 /* bottom bar */
 .bar{position:fixed;inset:auto 0 0 0;z-index:30;background:var(--card);border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr 78px 1fr 1fr;align-items:end;padding:6px 6px calc(6px + env(safe-area-inset-bottom));box-shadow:0 -8px 24px -18px rgba(0,0,0,.4)}
@@ -3892,24 +3917,33 @@ V.tk=()=>{TKGM={};(TK.L||[]).forEach(x=>{const k=tkGrpKey(x);if(!k)return;const 
   ${t.note&&t.st==='open'?`<p class="note" style="color:var(--bad);margin:6px 0 0;white-space:pre-wrap">${t.rt==='1'?(t.dg==='1'?'המשימה הוחזרה':'המנהל החזיר את המשימה'):'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
   ${t.st==='open'&&t.nc==='1'&&t.pr!=='1'&&!adm?'<p class="note" style="margin:6px 0 0">יש במשימה הערה, ולכן אחרי "בוצע" היא תעבור לאישור המנהל.</p>':''}
   ${act?`<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${act}</div>`:''}</div>`};
- return{t:'מרכז משימות',s:adm?'לעובדים':'שלי ושל הצוות',h:`${window.TKW&&TKW.fold(TKT)&&!TKW.wk()?'<button class="btn w" data-a="tkwFold" style="margin:0 0 10px">+ משימה חדשה</button>':''}<form class="card" data-f="tkAdd"${window.TKW&&TKW.fold(TKT)?' hidden':''}><label class="f"><span>משימה חדשה</span><textarea name="txt" maxlength="500" required placeholder="מה צריך לעשות?"></textarea></label>
-  <label class="cb"><input type="checkbox" name="prv" value="1" data-c="tkPrv"> ${icd('lock')} משימה פרטית (${adm?'לא נשלחת לעובדים':'רק אני והמנהל'})</label>
-  <div id="tkx">${adm||dgo?tkFormExtra():''}</div>${adm&&window.TKW?TKW.tplBar():''}
-  ${window.TKW&&TKW.formX()||'<p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p>'}<button class="btn w">הוסף משימה</button></form>
+ return{t:'מרכז משימות',s:adm?'לעובדים':'שלי ושל הצוות',h:`<div class="tkv">${window.TKW&&TKW.fold(TKT)&&!TKW.wk()?'<button class="btn w" data-a="tkwFold" style="margin:0 0 10px">+ משימה חדשה</button>':''}<form class="card tkf" data-f="tkAdd"${window.TKW&&TKW.fold(TKT)?' hidden':''}>${(()=>{const FP=adm||dgo?tkFormParts():null,XP=window.TKW&&TKW.formParts?TKW.formParts():null,TPL=adm&&window.TKW?TKW.tplBar():'',pv=!!(document.querySelector('form[data-f=tkAdd] input[name=prv]:checked')),
+   sec=(t,hn,b,x)=>b?`<section class="tks"${x||''}><h4>${t}</h4>${hn?`<p class="tkh">${hn}</p>`:''}${b}</section>`:'',HX=pv?' data-tkx hidden':' data-tkx',
+   NT='<p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p>',
+   adv=(XP&&XP.more||'')+(TPL?`<div class="tksub"><h5>תבניות</h5>${TPL}</div>`:'')+(XP&&XP.wp?`<div class="tksub"><h5>הרשאות</h5>${XP.wp}</div>`:'');
+  return sec('פרטי המשימה','',`<label class="f"><span>תיאור</span><textarea name="txt" maxlength="500" required placeholder="מה צריך לעשות?"></textarea></label>
+  <label class="cb"><input type="checkbox" name="prv" value="1" data-c="tkPrv"> ${icd('lock')} משימה פרטית (${adm?'לא נשלחת לעובדים':'רק אני והמנהל'})</label>${FP&&FP.mi?`<div${HX}>${FP.mi}</div>`:''}`)
+  +`<div id="tkx"${pv?' hidden':''}>${FP?sec('למי המשימה','בחר עובדים ואת אופן החלוקה ביניהם',FP.who):''}</div>`
+  +(XP&&XP.old!=null?sec('מועד ביצוע','',XP.old):`<div class="tkgrid">${sec('מועד ביצוע','',XP?XP.dl:NT)}${XP?sec('עדיפות','',XP.pri):''}</div>`)
+  +(FP?sec('אישור ביצוע','אפשר לדרוש מהעובד תמונה שמראה שהמשימה בוצעה',FP.np,HX):'')
+  +(adv?`<section class="tks"><button type="button" class="tkadv" data-a="tkAdv" aria-expanded="${!!window.TKADV}"><span><b>הגדרות נוספות</b><small>נושא, רשימת סימון, משך, תבניות והרשאות</small></span><i>${window.TKADV?'▴':'▾'}</i></button>${window.TKADV?`<div class="tkadvb">${adv}</div>`:''}</section>`:'')})()}
+  <button class="btn w tksend">הוסף משימה</button></form>
   ${adm||(window.TKW&&TKW.wk())?'':rqBtn()}
-  <div class="chips" style="margin:12px 0">${(window.TKW&&TKW.wk()?tabs.filter(x=>x[0]==='my'||x[0]==='done'||x[0]==='snt'):tabs).map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>${MGB}${window.TKW?TKW.fbar(TKT):''}
+  <div class="chips tkst" style="margin:16px 0 10px">${(window.TKW&&TKW.wk()?tabs.filter(x=>x[0]==='my'||x[0]==='done'||x[0]==='snt'):tabs).map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>${MGB}${window.TKW?TKW.fbar(TKT):''}
   ${TKT==='wait'&&adm&&window.TKW&&TKW.apBtn?TKW.apBtn():''}
   ${TKT==='my'||TKT==='team'?(window.TKW?TKW.view(TKT,card):''):TKT==='sum'?tkSumView():TKT==='rc'?rcView():S0.length?S0.map(t=>t.pv?ptCard(t):card(t)).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':TKT==='wait'?'אין משימות שממתינות לטיפול.':TKT==='snt'?'עוד לא שלחת משימות.':'עוד אין משימות שבוצעו.'}</p>`}
-  <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
+  <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button></div>`}};
+ACT.tkAdv=()=>{window.TKADV=window.TKADV?0:1;tkRe()};
 function tkSelInit(){if(TKN.sel===null&&TKST.L)TKN.sel=new Set(TKST.L.map(x=>x.uid));return TKN.sel||new Set()}
-function tkFormExtra(){const S=TKST.L,dg=!fbAdmin()&&tkDg();
+function tkFormExtra(){const P=tkFormParts();return P.mi+P.who+P.np}
+/* 23.11.2026 ארגון מחדש של הטופס: אותו תוכן כמו tkFormExtra, מפוצל לאזורים (תמונות להוראות / למי / אישור ביצוע) */
+function tkFormParts(){const S=TKST.L,dg=!fbAdmin()&&tkDg();
  const mi=dg?'':`<div id="tkmi" style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">${tkMiHtml()}</div><label class="btn g" style="cursor:pointer;margin:2px 0">${icd('cam')} הוסף תמונה להוראות (עד 5)<input type="file" accept="image/*" multiple data-c="tkMimg" hidden></label>`;
- if(!S||!S.length)return (TKST.busy||!TKST.t?'<p class="note">טוען רשימת עובדים…</p>':`<p class="note" style="color:var(--bad)">${S?'אין עובדים פעילים.':'לא ניתן לטעון את רשימת העובדים.'} ${dg?'אי אפשר לשלוח משימה לעובדים עד שהרשימה תיטען.':'המשימה תישלח לכל הצוות.'} <button type="button" class="btn g" data-a="tkStaffRetry">נסה שוב</button></p>`)+(dg?'':'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>')+mi;
+ if(!S||!S.length)return {who:(TKST.busy||!TKST.t?'<p class="note">טוען רשימת עובדים…</p>':`<p class="note" style="color:var(--bad)">${S?'אין עובדים פעילים.':'לא ניתן לטעון את רשימת העובדים.'} ${dg?'אי אפשר לשלוח משימה לעובדים עד שהרשימה תיטען.':'המשימה תישלח לכל הצוות.'} <button type="button" class="btn g" data-a="tkStaffRetry">נסה שוב</button></p>`),np:dg?'':'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>',mi};
  const sel=tkSelInit();
  const KD=[['one','לעובד אחד','נשלחת ישר לעובד שבחרת, כמשימה שלו.'],['all','כל העובדים שנבחרו צריכים לבצע','כל עובד מקבל עותק משלו, וכל אחד מבצע.'],['any','אחד מהעובדים שנבחרו (מי שלוקח ראשון)','מופיע "אני לוקח את זה"; מי שלוקח – המשימה שלו.']];
- return mi+`<div class="f"><span>למי</span><div class="chips" id="tkrc" style="margin:4px 0"><button type="button" class="chip ${sel.size===S.length?'on':''}" data-a="tkSel" data-v="*">כל העובדים</button>${S.map(x=>`<button type="button" class="chip ${sel.has(x.uid)?'on':''}" data-a="tkSel" data-v="${esc(x.uid)}">${esc(x.name)}</button>`).join('')}</div></div>
- <div class="f"><span>סוג המשימה (בחירה אחת)</span><div id="tkkd" role="radiogroup" aria-label="סוג המשימה" style="margin:4px 0">${KD.map(k=>`<button type="button" role="radio" aria-checked="${TKN.kind===k[0]}" class="opt ${TKN.kind===k[0]?'on':''}" data-a="tkKind" data-v="${k[0]}" style="${TKN.kind===k[0]?'border-color:var(--acc)':''}"><span>${TKN.kind===k[0]?'● ':'○ '}${k[1]}<small>${k[2]}</small></span></button>`).join('')}</div></div>
- <div class="f"><span>דרוש תמונה מהעובד בסיום</span><div class="chips" id="tknp" style="margin:4px 0">${[0,1,2,3].map(n=>`<button type="button" class="chip ${TKN.np===n?'on':''}" data-a="tkNp" data-v="${n}">${n}</button>`).join('')}</div></div>`}
+ return {mi,who:`<div class="f"><span>עובדים</span><div class="chips" id="tkrc" style="margin:4px 0"><button type="button" class="chip ${sel.size===S.length?'on':''}" data-a="tkSel" data-v="*">כל העובדים</button>${S.map(x=>`<button type="button" class="chip ${sel.has(x.uid)?'on':''}" data-a="tkSel" data-v="${esc(x.uid)}">${esc(x.name)}</button>`).join('')}</div></div>
+ <div class="f"><span>סוג המשימה (בחירה אחת)</span><div id="tkkd" role="radiogroup" aria-label="סוג המשימה" style="margin:4px 0">${KD.map(k=>`<button type="button" role="radio" aria-checked="${TKN.kind===k[0]}" class="opt ${TKN.kind===k[0]?'on':''}" data-a="tkKind" data-v="${k[0]}" style="${TKN.kind===k[0]?'border-color:var(--acc)':''}"><span>${TKN.kind===k[0]?'● ':'○ '}${k[1]}<small>${k[2]}</small></span></button>`).join('')}</div></div>`,np:`<div class="f"><span>מספר תמונות שהעובד צריך לצלם בסיום</span><div class="chips" id="tknp" style="margin:4px 0">${[0,1,2,3].map(n=>`<button type="button" class="chip ${TKN.np===n?'on':''}" data-a="tkNp" data-v="${n}">${n?n:'לא נדרש'}</button>`).join('')}</div></div>`}}
 const tkMiHtml=()=>TKN.imgs.map((u,i)=>`<span style="position:relative;display:inline-block"><img src="${esc(u)}" alt="תמונה ${i+1}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button type="button" class="btn r" data-a="tkMiDel" data-i="${i}" aria-label="הסר תמונה" style="position:absolute;top:-6px;inset-inline-start:-6px;min-height:0;padding:0 6px;line-height:20px">✕</button></span>`).join('');
 const tkMiPaint=()=>{const e=$('#tkmi');if(e)e.innerHTML=tkMiHtml()};
 ACT.tkStaffRetry=()=>{TKST.t=0;tkStaffLoad()};
@@ -6629,7 +6663,7 @@ ACT.ptDone=el=>{const p=ptGet(el.dataset.id);if(!p)return;const now=Date.now();t
 ACT.ptOpen=el=>{const p=ptGet(el.dataset.id);if(p)tkDo(()=>docPatch('ptk',p.id,{st:'open',sub:0,late:''}),'המשימה חזרה לפתוחות')};
 ACT.ptDel=el=>{const p=ptGet(el.dataset.id);if(p)ask('למחוק את המשימה הפרטית?',()=>tkDo(()=>docDel('ptk',p.id),'המשימה נמחקה'),'מחק')};
 CHG.tkPrv=()=>tkPrvSync();
-function tkPrvSync(){const c=document.querySelector('form[data-f=tkAdd] input[name=prv]'),x=document.getElementById('tkx');if(x)x.hidden=!!(c&&c.checked)}
+function tkPrvSync(){const c=document.querySelector('form[data-f=tkAdd] input[name=prv]'),x=document.getElementById('tkx');if(x)x.hidden=!!(c&&c.checked);document.querySelectorAll('[data-tkx]').forEach(e=>e.hidden=!!(c&&c.checked))}
 /* ---- משימות קבועות (מנהל) ---- */
 const RC={L:null,b:0,t:0,err:''},RCD=['א׳','ב׳','ג׳','ד׳','ה׳','ו׳'],rcP2=n=>String(n).padStart(2,'0');
 let RCF=null;
