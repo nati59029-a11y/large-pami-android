@@ -198,6 +198,22 @@ async function tzlEntries(ctx, list) {
   return (Array.isArray(j.enteres) ? j.enteres : []).map((e) => String((e && e.phone) || '')).filter(Boolean);
 }
 
+// (משימה 2026-11-23) יומן הרשימה החינמית (getLogList, post/65034 – קריאה בלבד): מערך האירועים כמו שימות מחזיר ({ Phone, PhoneAction, Date, Time, TypeOperation, ... }).
+async function tzlLog(ctx, list) {
+  const j = await yemotCall(ctx, 'TzintukimListManagement', { action: 'getLogList', TzintukimList: String(list) });
+  if (!Array.isArray(j.events)) throw new YemotError('no-events', true);
+  return j.events;
+}
+
+// (משימה 2026-11-23) קובץ ymgr של הקו כטבלה (RenderYMGRFile, post/84092 – קריאה בלבד). בתיעוד שם הפרמטר הוא wath (כך במקור).
+// מחזיר את data כמו שימות מחזיר (מערך אובייקטים). בלי data ← no-data. timeoutMs (רשות) – לקובץ גדול.
+async function renderYmgr(ctx, path, timeoutMs) {
+  const c = timeoutMs ? Object.assign({}, ctx, { timeoutMs }) : ctx;
+  const j = await yemotCall(c, 'RenderYMGRFile', { wath: path, convertType: 'json', notLoadLang: 1 });
+  if (!Array.isArray(j.data)) throw new YemotError('no-data', true);
+  return j.data;
+}
+
 // צינתוק למערך מפורש של מספרים (בתשלום: 0.1 יחידה למספר, לפי התיעוד). לא מקבל tpl:/tzl: – רק מספרים תקינים, עד 500 בקריאה.
 async function runTzintukPhones(ctx, phones) {
   if (!Array.isArray(phones) || !phones.length || phones.length > 500 || !phones.every((p) => PHONE_RE.test(String(p)))) throw new YemotError('bad-phones', false);
@@ -206,4 +222,4 @@ async function runTzintukPhones(ctx, phones) {
 }
 
 module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, readText, uploadText, uploadBinary, deleteFiles,
-  getTemplates, createTemplate, getTemplateEntries, setEntryBlocked, uploadPhoneList, tzlEntries, runTzintukPhones };
+  getTemplates, createTemplate, getTemplateEntries, setEntryBlocked, uploadPhoneList, tzlEntries, tzlLog, renderYmgr, runTzintukPhones };

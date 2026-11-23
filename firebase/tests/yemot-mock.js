@@ -11,8 +11,8 @@ const state = { requests: [], files: new Map(), dirs: {}, modes: {}, templates: 
 const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tts': 'עדכון ותיק' }, '4': { '000.tts': 'שעות ותיקות' }, '': { 'M1000.wav': 'פתיחה מוקלטת', 'ext.ini': 'type=menu' } };
 function reset(files, dirs) {
   state.requests = [];
-  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok', templates: 'ok', create: 'ok', entries: 'ok', phonelist: 'ok', tzl: 'ok', update: 'ok' };
-  state.templates = []; state.tzl = {}; state.nextTpl = 1001; state.headerRow = false;
+  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok', templates: 'ok', create: 'ok', entries: 'ok', phonelist: 'ok', tzl: 'ok', update: 'ok', tzlog: 'ok', ymgr: 'ok' };
+  state.templates = []; state.tzl = {}; state.tzlLog = {}; state.ymgr = {}; state.nextTpl = 1001; state.headerRow = false;
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
@@ -51,7 +51,7 @@ function start(port) {
       const auth = req.headers.authorization || '';
       state.requests.push({ cmd, auth, url: req.url, body, at: Date.now() });
       const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download', GetTextFile: 'text',
-        GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: 'tzl', UpdateTemplateEntry: 'update' }[cmd];
+        GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: body.action === 'getLogList' ? 'tzlog' : 'tzl', UpdateTemplateEntry: 'update', RenderYMGRFile: 'ymgr' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       // tzphones (משימה 2026-11-17): מצב נפרד ל-RunTzintuk עם מערך מספרים (צינתוק ללקוחות משוב). לא הוגדר = כמו tzintuk
       // מערך מצבים (שליחה בקבוצות): מצב לכל קריאת מערך לפי הסדר; אחרי סוף המערך – 'ok'
@@ -155,9 +155,17 @@ function start(port) {
         return reply(res, 200, OK({ message: 'ok', templateId: t.templateId, totalParsed, rejectedRecords, totalInserted, totalUpdated, totalRemoved }));
       }
       if (cmd === 'TzintukimListManagement') {
+        // 23.11.2026: getLogList – state.tzlLog[רשימה] = מערך אירועים (ברירת מחדל ריק)
+        if (body.action === 'getLogList') return reply(res, 200, OK({ events: state.tzlLog[String(body.TzintukimList)] || [] }));
         if (body.action !== 'getlistEnteres') return reply(res, 200, { responseStatus: 'ERROR', message: 'action not supported in mock' });
         const list = state.tzl[String(body.TzintukimList)] || [];
         return reply(res, 200, OK({ listName: String(body.TzintukimList), countSubscribers: list.length, enteres: list.map((phone) => ({ phone, name: '' })) }));
+      }
+      // 23.11.2026: RenderYMGRFile – state.ymgr[נתיב] = מערך שורות; קובץ שלא קיים ← ERROR
+      if (cmd === 'RenderYMGRFile') {
+        const rows = state.ymgr[String(body.wath)];
+        if (!rows || body.convertType !== 'json') return reply(res, 200, { responseStatus: 'ERROR', message: 'file not found' });
+        return reply(res, 200, OK({ data: rows }));
       }
       // RunTzintuk
       return reply(res, 200, OK({ callerId: '0000000000', callsCount: 3, bilingPerCall: 0, biling: 0, errors: {}, verifyCode: '' }));

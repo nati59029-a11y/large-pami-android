@@ -22,6 +22,7 @@ const { inputObject } = roles;
 const { YemotError, apiBase, yemotCall, getTemplateEntries, tzlEntries } = require('./lib/yemot-client');
 const Y = require('./yemot').shared;
 const { normPhone } = require('./yemot-fblist')._core;
+const { optOut } = require('./yemot-optout');
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
@@ -37,19 +38,22 @@ const RECENT_MS = 60 * 60 * 1000;
 const RESUMABLE = ['partial', 'failed'];
 const bad = () => new HttpsError('invalid-argument', 'קלט לא תקין', { reason: 'bad-input' });
 
-// כמה יקבלו: free = מספרים ברשימה החינמית (רק ב-all), paid = לקוחות משוב לא חסומים (ב-all – פחות מי שברשימה החינמית)
-async function counts(ctx, cfg, fbs, target) {
+// כמה יקבלו: free = מספרים ברשימה החינמית (רק ב-all), paid = לקוחות משוב לא חסומים (ב-all – פחות מי שברשימה החינמית).
+// (משימה 2026-11-23) skipped = לקוחות משוב שיצאו מהרשימה החינמית (בעצמם או ע"י מנהל) – לא מקבלים בתשלום, בשני הסוגים.
+async function counts(ctx, cfg, fbs, target, db) {
   const tplId = fbs.templateId;
   const fb = Number.isInteger(tplId) && tplId > 0
     ? [...new Set((await getTemplateEntries(ctx, tplId)).filter((e) => !e.blocked).map((e) => normPhone(e.phone)).filter(Boolean))] : [];
-  let free = 0, paid = fb.length;
+  const raw = await tzlEntries(ctx, cfg.list);
+  const gone = (await optOut(db, ctx, cfg.list, [...new Set(raw.map((p) => normPhone(p)).filter(Boolean))])).out;
+  const fbOk = fb.filter((p) => !gone.has(p));
+  let free = 0, paid = fbOk.length;
   if (target === 'all') {
-    const raw = await tzlEntries(ctx, cfg.list);
     const subs = new Set(raw.map((p) => normPhone(p) || p));
     free = subs.size;
-    paid = fb.filter((p) => !subs.has(p)).length;
+    paid = fbOk.filter((p) => !subs.has(p)).length;
   }
-  return { free, paid, total: free + paid, cost: cost(paid), max: cfg.fbTzMax, capped: paid > cfg.fbTzMax, listReady: Number.isInteger(tplId) && tplId > 0 };
+  return { free, paid, total: free + paid, cost: cost(paid), skipped: fb.length - fbOk.length, max: cfg.fbTzMax, capped: paid > cfg.fbTzMax, listReady: Number.isInteger(tplId) && tplId > 0 };
 }
 
 // "ודאי שלא יצא" – כמו בצינתוק ללקוחות משוב במבצע: שגיאה בלי sent, ובשגיאת רשת רק כשלא נוצר חיבור
@@ -79,12 +83,13 @@ async function run(request, key, base) {
   const fbs = (await db.doc(Y.FBLIST).get()).data() || {};
   const readFail = (e) => {
     logger.warn('yemot-tz: read failed', { reason: 'read-failed', code: e instanceof YemotError ? e.code : 'internal' });
+    if (e instanceof YemotError && e.code === 'optout-unknown') return new HttpsError('unavailable', 'לא הצלחנו לבדוק בימות מי הסיר את עצמו מהצינתוקים. לא נשלח צינתוק. נסו שוב מאוחר יותר.', { reason: 'optout-unknown' });
     return new HttpsError('unavailable', 'לא הצלחנו לקרוא את הרשימות מימות. לא נשלח צינתוק. נסו שוב מאוחר יותר.', { reason: 'read-failed' });
   };
 
   if (input.action === 'preview') {
     let c;
-    try { c = await counts(ctx, cfg, fbs, target); } catch (e) { throw readFail(e); }
+    try { c = await counts(ctx, cfg, fbs, target, db); } catch (e) { throw readFail(e); }
     // שליחה מהשעה האחרונה שהגיעה למישהו (ליידע לפני שליחה חדשה לכולם)
     let recent = null;
     try {
@@ -138,7 +143,7 @@ async function run(request, key, base) {
   // 1. בדיקה מקדימה: כמה, ומכסה. מעל המכסה – לא שולחים כלום (גם לא את החינמי), ומזהירים.
   const P = got.cont; // השלמה: הרשומה הקודמת (מה כבר נשלח)
   let pre;
-  try { pre = await counts(ctx, cfg, fbs, target); } catch (e) {
+  try { pre = await counts(ctx, cfg, fbs, target, db); } catch (e) {
     // בהשלמה – מחזירים את המצב הקודם (לא 'not-sent', כדי שניסיון הבא לא ישלח שוב לכולם)
     if (P) await finish(P.status, P.result);
     else await finish('not-sent', { sent: 0, failed: 0, uncertain: 0, warnings: ['read-failed'], message: 'לא הצלחנו לקרוא את הרשימות מימות. לא נשלח צינתוק.' });
