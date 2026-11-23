@@ -67,7 +67,7 @@ async function mergeRemote(day){/* מכשיר אחר באותו יום: מאחד
   (Array.isArray(f.s)?f.s:[]).forEach(o=>{if(o&&!ks.has(+o.a)&&D.s.length<MAXS)D.s.push({a:+o.a,b:+o.b})});
   (Array.isArray(f.v)?f.v:[]).forEach(o=>{if(o&&!kv.has(o.k+'|'+o.a)&&D.v.length<MAXV)D.v.push({k:String(o.k),l:String(o.l),a:+o.a,b:+o.b})});
   D.s.sort((x,y)=>x.a-y.a);D.v.sort((x,y)=>x.a-y.a);D.rev++}
- catch(e){if(e&&e.code!==404){if(!fail(e))throw e}}D.m=1}
+ catch(e){/* 404 = אין עדיין; 403 = עובד לא רשאי לקרוא את היומן (הכללים) – ממשיכים לכתוב בלי איחוד */if(e&&e.code!==404&&e.code!==403)throw e}D.m=1}
 async function flush(){if(ST.busy||!isWk()||ST.dis||!ST.cfg&&!Object.keys(ST.D).some(k=>ST.D[k].rev!==ST.D[k].sent))return;ST.busy=1;ST.tFlush=Date.now();
  try{for(const day of Object.keys(ST.D)){const D=ST.D[day];if(D.rev===D.sent)continue;if(!D.s.length&&!D.v.length){D.sent=D.rev;continue}
    await mergeRemote(day);const rv=D.rev;const n=await myName();
