@@ -172,6 +172,7 @@ async function lineNumbers(ctx, ext) {
 const israelMonth = () => israelDay().slice(0, 7);
 const FB_TZ_PART = 500;
 const NO_CONNECT = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+// out.skipped = לקוחות משוב שלא נשלח להם כי יצאו מהרשימה החינמית (משימה 2026-11-23).
 // opts (רשות, משימה 2026-11-18 – sendLineTzintuk ב-yemot-tz.js): { keepFree: true } = לא מורידים את מי שברשימה החינמית (צינתוק "רק ללקוחות המשוב").
 // sendPromo לא מעביר opts – ההתנהגות שלו לא משתנה. out.free = כמה ברשימה החינמית (רק כשנקראה).
 async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText, opts) {
@@ -187,9 +188,13 @@ async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText, opts) {
     if (!Number.isInteger(tplId) || tplId <= 0) return out; // הרשימה עוד לא נוצרה
     const all = [...new Set((await getTemplateEntries(ctx, tplId)).filter((e) => !e.blocked).map((e) => normPhone(e.phone)).filter(Boolean))];
     if (!all.length) return out;
-    const subs = keepFree ? new Set() : new Set((await tzlEntries(ctx, cfg.list)).map(normPhone).filter(Boolean));
+    // (משימה 2026-11-23) מי שיצא מהרשימה החינמית (בעצמו או ע"י מנהל) – לא מקבל צינתוק בתשלום. לא ידוע מי יצא ← זורק (לא נשלח כלום בתשלום).
+    const freeNow = [...new Set((await tzlEntries(ctx, cfg.list)).map(normPhone).filter(Boolean))];
+    const gone = (await require('./yemot-optout').optOut(db, ctx, cfg.list, freeNow)).out;
+    const subs = keepFree ? new Set() : new Set(freeNow);
     if (!keepFree) out.free = subs.size;
-    const phones = all.filter((p) => !subs.has(p));
+    out.skipped = all.filter((p) => gone.has(p)).length;
+    const phones = all.filter((p) => !subs.has(p) && !gone.has(p));
     out.total = phones.length;
     if (!phones.length) return out;
     if (phones.length > cfg.fbTzMax) { out.st = 'capped'; return out; }
