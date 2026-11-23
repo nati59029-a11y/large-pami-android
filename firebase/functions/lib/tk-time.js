@@ -1,5 +1,6 @@
 'use strict';
 // משימות קבועות (12.11.2026): חישובי זמן בשעון ישראל, בלי תלות באזור הזמן של השרת.
+//   tkDl(t)         – היעד בפועל של משימה (22.11.2026). זהה ל-tkDl באפליקציה (index.html): dl>0 – יעד שנקבע; dl===0 – בלי יעד (Infinity); אחרת due.
 //   tkBiz(ymd)      – יום עסקים? (ראשון–חמישי, בלי יום טוב, חול המועד, ערבי חג, פורים ותשעה באב). זהה ל-tkBiz באפליקציה.
 //   tkDue(t)        – 72 שעות של ימי עסקים מרגע t. זהה ל-tkDue באפליקציה (index.html) כשהטלפון בשעון ישראל.
 //   decide(rule, now) – פונקציה טהורה: האם כלל קבוע צריך לפתוח משימה עכשיו, ומה מפתח היום.
@@ -99,6 +100,19 @@ function tkDue(t) {
   return x;
 }
 
+// היעד בפועל של משימה – העתק מדויק של tkDl באפליקציה: const tkDl=t=>t.dl>0?t.dl:t.dl===0?Infinity:t.due
+// dl נקבע במפורש (כולל "שנה תאריך יעד"); dl === 0 = "בלי יעד" (לעולם לא באיחור); בלי dl (או -1) – due (72 שעות ימי עסקים).
+// הערך יכול להיות undefined/לא מספר (משימה ישנה בלי due) – הקורא בודק Number.isFinite.
+function tkDl(t) {
+  const x = t || {};
+  return x.dl > 0 ? x.dl : x.dl === 0 ? Infinity : x.due;
+}
+// משימה פתוחה שהיעד שלה עבר – כמו tkLateNow באפליקציה (st === 'open' && now > tkDl(t)). יעד שאינו מספר – לא באיחור.
+function tkLateAt(t, now) {
+  const d = +tkDl(t);
+  return !!t && t.st === 'open' && Number.isFinite(d) && d > 0 && now > d;
+}
+
 const daysIn = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 
 // האם היום מתאים לכלל (לפי התדירות ו-hol), בלי קשר לשעה
@@ -141,4 +155,4 @@ function nextAt(rule, from) {
   return 0;
 }
 
-module.exports = { TZ, TK_OFF, QUIET_FROM_H, QUIET_TO_H, isRest, quietAt, wall, zoned, tkBiz, isHoliday, tkDue, dayMatches, decide, nextAt, dayStr, ymdOf };
+module.exports = { TZ, TK_OFF, tkDl, tkLateAt, QUIET_FROM_H, QUIET_TO_H, isRest, quietAt, wall, zoned, tkBiz, isHoliday, tkDue, dayMatches, decide, nextAt, dayStr, ymdOf };

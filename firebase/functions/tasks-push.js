@@ -18,6 +18,7 @@
 // ההתראה: בלי כפתורים (fcmPayload בלי act), private במסך נעול, data: { k: 'tk', id }, tag tkn_<id> (פרטית: ptk_<id>).
 // הקשה על ההתראה פותחת את המשימות כמו היום (אין שינוי באפליקציה).
 // אזור: europe-west1 בלבד, בלי ניסיון חוזר (כדי לא לשלוח פעמיים). שגיאה נרשמת ביומן ולא נזרקת.
+// משימה שבאיחור (22.11.2026): התראה מאוגדת לעובד, פעם אחת לכל משימה – לא כאן אלא בפונקציה המתוזמנת recurringTasks (recurring.js, lib/tk-late.js).
 const { onDocumentWrittenWithAuthContext, onDocumentCreated } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const { NEW_REGION } = require('./lib/region');

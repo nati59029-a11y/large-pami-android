@@ -1251,7 +1251,7 @@ async function toInbox(x){const lid=lidOf(x.id),L=secL();let it=S.inbox.find(i=>
  let du='';try{du=await ivFile(x)}catch(e){}if(du){try{await fput('i'+lid,du)}catch(e){du=''}}
  const f=x.f||{},s=ivSub(x),ok=subOk(s),srcN='מהמזכירה – '+ivSrc(x)+(x.ns?' · שולח חדש – לבדוק':'');let d;
  if(x.k==='chk')d={kind:'check',amt:Math.max(0,+f.amt||0),date:'',cdate:f.cdate||'',no:String(f.no||'').replace(/\D/g,'').slice(0,20),bank:String(f.bank||'').slice(0,60),payee:String(f.payee||'').slice(0,80),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};
- else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};
+ else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};/* 23.11 (בעל העסק): קבלה – במסך הבדיקה סוג המסמך "קבלה" (אפשר לשנות); rel = החשבונית שהקבלה משלמת */if(x.k==='rcpt'){d.rcp=true;d.rno=String(f.num||'').slice(0,40);d.rel=String(f.rel||'').slice(0,40);d.inv=''}
  if(x.br&&brAll().some(b=>b.id===x.br))d.br=x.br;
  it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};if((x.src||[]).some(q=>q&&q.ch==='mail'))it.secM=1;if(ivFrom(x))it.secF=ivFrom(x);if(x.noStock||x.hist)it.noStock=1;
  S.inbox.push(it);L[x.id]={s:'in',ns:x.ns||''};save();return it}
@@ -1317,8 +1317,8 @@ function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act=''
    act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">${mineIn||x.mine?'המשך':'בדיקה ואישור'}</button>${view}${no}</div>`}
   else if(x.k==='rcpt'){const t=rcptOf(x);
    if(t)sug.push(`<div class="secivsug"><small>נמצאה חשבונית פתוחה: ${esc(t.inv||'')} · ${esc(ils(bal(t)))} לתשלום (${esc(dfmt(t.date))}). זו קבלה – לא הוצאה חדשה.</small><button class="btn w" style="margin-top:6px" data-a="secIvPay" data-id="${id}" data-t="${esc(t.id)}">סמן כשולם</button></div>`);
-   else sug.push('<div class="secivsug"><small><b>קבלה בלי חשבונית – מה לעשות?</b> לא נמצאה חשבונית פתוחה מתאימה. אפשר לרשום כהוצאה (רק אם אין עליה חשבונית), או לדחות.</small></div>');
-   act=`<div class="secrow">${t?'':`<button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כהוצאה</button>`}${view}${no}</div>`}
+   else sug.push('<div class="secivsug"><small><b>קבלה בלי חשבונית – מה לעשות?</b> לא נמצאה חשבונית פתוחה מתאימה. ב"בדיקה ואישור" אפשר לבחור: ממתינה לחשבונית כנגד, הוצאה חדשה בלי חשבונית, או לדחות.</small></div>');
+   act=`<div class="secrow"><button class="btn${t?' g':''}" data-a="secIvEd" data-id="${id}" style="flex:1">בדיקה ואישור</button>${view}${no}</div>`}
   else if(x.k==='dn')act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כתעודת משלוח</button>${view}${no}</div>`;
   else if(x.k==='chk')act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">שיוך לחשבונית</button>${view}${no}</div>`;
   else act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">פתיחה והזנה</button>${view}${no}</div>`;
