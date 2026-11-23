@@ -27,6 +27,8 @@ const T = require('./lib/tenant');
 const ST = require('./lib/sec-tools');
 const K = require('./lib/sec-know');
 const R = require('./lib/sec-remind');
+// מפתחות התראה (notifyMgrs) שמקורם במייל – ראו secretary-google.js
+const MAIL_KEYS = new Set(['gmailon', 'mailover', 'maillag', 'mailgap', 'mailskip', 'mailerr', 'mailheld', 'draftcap', 'mailask', 'ordre', 'ordauto', 'ordautono', 'ordauto-sent', 'clean', 'histcap']);
 const C = require('./secretary')._core;
 const { gate, logData, bad, pre, wrap } = C;
 
@@ -499,6 +501,13 @@ async function secNotes(request) {
       // 17.11.2026: "המזכירה שואלת לגבי מייל" – מזהה המייל, כדי לענות לה ולטפל במייל מתוך ההתראה עצמה
       const mk = /^mailask\|(g[0-9a-f]{40})$/.exec(String(x.key || ''));
       if (mk) o.mail = mk[1];
+      // 23.11.2026: התראות מייל ו-Google נשמרות עם typ 'wa' (notifyMgrs) – המקור לפי תחילית המפתח, לסימון נכון ולכפתור "חיבור מחדש"
+      const sk = /^([a-z-]+)\|/.exec(String(x.key || ''));
+      if (sk && x.typ === 'wa') {
+        if (sk[1] === 'gexp') { o.src = /^הסנכרון עם יומן Google/.test(String(x.body || '')) ? 'cal' : 'mail'; o.gx = 1; }
+        else if (sk[1] === 'gcalon') o.src = 'cal';
+        else if (MAIL_KEYS.has(sk[1])) o.src = 'mail';
+      }
       return o;
     });
     return { ok: true, notes: L, unseen: L.filter((x) => !x.seen).length, types: Object.fromEntries(Object.entries(R.TYPES).map(([k, v]) => [k, v.l])) };

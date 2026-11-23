@@ -555,7 +555,9 @@ ACT.secSnzT=el=>{const id=el.dataset.id;X.snz=X.snz===id?'':id;rerender()};
 FRM.secSnzF=f=>{const id=f.dataset.id,at=new Date(String(f.at.value||'')).getTime();
  if(!Number.isFinite(at)||at<Date.now()+60e3||at>Date.now()+60*864e5)return toast('אפשר לבחור זמן מעכשיו ועד 60 יום קדימה');
  return snzDo(id,{at},f.querySelector('button:not([type=button])'))};
-const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
+/* 23.11.2026: התראות מייל ו-Google נשמרות בשרת כסוג ווצאפ – המקור (src) מגיע מהשרת */
+const SRCL={mail:'מייל',cal:'יומן Google'};
+const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(n.k==='wa'&&SRCL[n.src]?SRCL[n.src]:(KIND[n.k]||''));
 function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
@@ -659,6 +661,7 @@ function nAct(n){const typ=n.k==='emp'?'emp':n.k==='rem'?n.typ:'';const has=v=>t
  if(typ==='cal')return{p:{l:'פתח ביומן',k:'cal',v:nCalDay(n)},s:[]};
  if(typ==='inv')return{p:{l:'פתיחת החשבוניות שהתקבלו',k:'tab',v:'inv'},s:[]};
  if(typ==='win')return{p:{l:'פתיחת השיחה כדי לענות',k:'wa',v:nWaOf(n)},s:[]};
+ if(n.k==='wa'&&n.gx&&n.st!=='gone')return{p:{l:'חיבור מחדש',k:'gset'},s:[]};
  return null}
 const nBtnH=(n,x,cls,st)=>`<button type="button" class="${cls}" data-a="${x.a||'secNA'}" data-id="${esc(x.ref||n.id)}"${x.ref?'':` data-n="${esc(n.id)}"`}${x.k?` data-k="${x.k}"`:''}${x.v?` data-v="${esc(x.v)}"`:''}${x.g?` data-g="${esc(x.g)}" data-d="${esc(x.d)}"`:''}${x.pick?' data-pick="1"':''} style="${st}">${esc(x.l)}</button>`;
 /* li=1: שבב בשורה ברשימה (רק הראשית; לדוח כבר יש "פתיחת הדוח" בשורה). li=0: בראש חלון הפרטים – הראשית בולטת, המשניות מתחתיה */
@@ -679,6 +682,7 @@ ACT.secNA=el=>{const k=el.dataset.k,v=el.dataset.v||'',id=el.dataset.n||el.datas
  if(k==='tk'){closeDlg();try{TKT='late'}catch(e){}go('tk');return}
  if(k==='bk'){closeDlg();el.disabled=true;Promise.resolve(bkCloud(true)).then(r=>{if(r)nAuto(id,'✓ הגיבוי הושלם – ההתראה סומנה כטופלה',1800)}).catch(()=>{});return}
  if(k==='tab')return nTab(v);
+ if(k==='gset'){closeDlg();X.edit=0;X.mrv=0;X.rp=null;ACT.secSet();if(cur().v!=='sec')go('sec');let i=0;const f=()=>{const e=document.getElementById('secGSet');if(e)e.scrollIntoView({block:'start'});else if(++i<20)setTimeout(f,150)};setTimeout(f,50);return}
  if(k==='cal')return nTab('cal',()=>{if(/^\d{4}-\d{2}-\d{2}$/.test(v)){X.cd=v;X.cm=v.slice(0,7)}});
  if(k==='wa')return nTab('wa',()=>{if(v&&X.wa){X.wa.cur=v;X.wa.card=null}})};
 /* סגירת קופה מתוך ההתראה: סניף ותאריך ממולאים מראש (רק כשאין סגירה שהתחלת למלא – היא לא נדרסת). כמה סניפים – בוחרים. */

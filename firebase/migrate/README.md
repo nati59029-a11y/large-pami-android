@@ -1,14 +1,14 @@
 # כלי העברת הנתונים של לארג' פעמי (ריבוי עסקים, שלב 4)
 
 הכלי מעתיק את הנתונים של לארג' פעמי מהשורש (`admins`, `staff`, `cfg`, `inbox` וכו') אל העסק הראשון במבנה החדש: `b/largpeami/...`.
-**המקור לא נמחק ולא משתנה.** הוא נשאר כגיבוי עד שהמשתמש יאשר אחרת.
+**המקור לא נמחק ולא משתנה**, חוץ מהפקודה `purge-root` (שלב 8 למטה), שמוחקת את העותק הישן בשורש אחרי המעבר, באישור נפרד ומפורש.
 
 > **אזהרה:** הכלי נבדק רק באמולטור, עם נתוני דמה. הרצה על פרויקט אמיתי (גם על `largpeami-test-f4691`) רק באישור מפורש של המשתמש. הדרך המומלצת: התהליך הידני ב-GitHub (`.github/workflows/migrate-largpeami.yml`), שבו כל הפעולות זמינות, כולל החזרה. הרצה מהמחשב אפשרית רק לפי הסעיף "הרצה מהמחשב" למטה.
 
 ## מה יש כאן
 | קובץ | מה הוא עושה |
 |---|---|
-| `migrate.js` | הכלי. פקודות: `backup`, `dry-run`, `copy`, `copy-docs`, `verify`, `compare-backup`, `report-since`, `set-dataroot` |
+| `migrate.js` | הכלי. פקודות: `backup`, `dry-run`, `copy`, `copy-docs`, `verify`, `compare-backup`, `report-since`, `set-dataroot`, `purge-root` |
 | `fsrest.js` | גישה ל-Firestore דרך REST, עם ההגנות על הכתיבה (ראו למטה) |
 | `guard.js` | בדיקת השומר לפני הרצה על פרויקט אמיתי |
 | `ROLLBACK.md` | מסמך חזרה, צעד אחר צעד |
@@ -35,6 +35,25 @@
    - לא נוגע בקובץ המצב. לכן `report-since` יראה את המסמכים האלה כ"חדשים ב-b" – זה צפוי.
    - בתהליך ב-GitHub: `action=copy-docs`, `doc_paths`, ו-`write_confirm`. הנתיבים נבדקים לפני הכול, אחר כך נשמר גיבוי (כמו בכל פעולה שכותבת), ורק אז ההעתקה.
 
+8. **מחיקת העותק הישן בשורש** (`purge-root`), נוסף ב-23.11.2026 בבקשת הבעלים. **אחרי המחיקה אי אפשר לחזור ל-`legacy`** (ראו `ROLLBACK.md`).
+   - בלי `--mode write`: **ספירה בלבד**. מציג לכל אוסף כמה מסמכים יימחקו וכמה יישארו כי אין להם עותק ב-`b`. לא מוחק כלום.
+   - עם `--mode write`, כל התנאים חייבים להתקיים, אחרת לא נמחק כלום:
+     - העסק הוא `largpeami`, מסמך העסק נוצר על ידי הכלי (`createdBy: migrate`, `migrationTarget: true`), ו-`dataRoot` הוא `b`.
+     - אישור מחיקה נפרד: `MIGRATE_PURGE_CONFIRM=delete-root-copy-of-largpeami-in-<מזהה>` (בתהליך ב-GitHub: בשדה `doc_paths`), בנוסף ל-`write-to-<מזהה>`.
+     - גיבוי טרי: `--backup /tmp/lp-migrate/backup.json` (מ-6 השעות האחרונות), ו-`--backup-gcs migrate_backups/.../backup.json` – אותו קובץ, שנשמר ב-bucket (הכלי בודק שהוא קיים, ושהגודל וה-md5 זהים לקובץ המקומי).
+   - **תחום:** רק אוספים שב-`COPY`. **לא נוגעים לעולם** ב: אוספי האתר (`DEFERRED`), הטבלאות המשותפות (`SHARED`), `users`, `superadmins`, `b`, כל אוסף שלא ב-`COPY` (למשל `pact`, `push_dev`, `dev_cur`), ואוספי הזהות וההרשאות `admins`, `staff`, `private` (`PURGE_KEEP`) – הם עדיין נקראים בשורש (כללי Firestore ו-Storage, `resolveMember` בשרת כשאין `users/{uid}`, הטריגרים `syncLegacy*`, ואתר ההזמנות). גם `grp` נשאר: כלל Storage של `grpv/{gid}/{mid}` בשורש קורא את `grp/{gid}` בשורש. בנוסף, שכבת המחיקה ב-`fsrest.js` טוענת בעצמה את הרשימות מ-`migrate.js` וחוסמת כל אוסף שלא ב-`COPY` או שנמצא ב-`DEFERRED`, `SHARED`, `NEW_ROOT` או `PURGE_KEEP`.
+   - **לכל מסמך בנפרד** (כולל מסמכים בתתי-אוספים): נמחק רק אם אותו נתיב קיים ב-`b/largpeami/` (התוכן ב-`b` יכול להיות שונה – הוא חדש יותר), רק אם הוא נמצא בגיבוי הטרי עם אותו גיבוב (כלומר אפשר לשחזר אותו), ורק אם לא השתנה מאז שנקרא (תנאי `updateTime` על המחיקה).
+   - מסמך שאין לו עותק ב-`b` (למשל דף משוב `fb` חדש ממכשיר ישן) **לא נמחק**, מדווח "חסר ב-b", והפקודה יוצאת עם קוד 1. מעבירים אותו ב-`copy-docs` ומריצים שוב.
+   - מסמך שהשתנה מאז הגיבוי, או בזמן הריצה – לא נמחק, מדווח, קוד 1.
+   - **השורש חדש מ-b:** מסמך שהתוכן שלו שונה מ-b **וגם** נכתב בשורש אחרי הכתיבה האחרונה ל-b – לא נמחק, מדווח בנפרד (גם בספירה), קוד 1. הספירה מציגה גם כמה מסמכים שונים מ-b בכלל (בדרך כלל b חדש יותר, וזה תקין).
+   - **אב לא נמחק אם צאצא שלו נשאר בשורש** (חסר ב-b, השורש חדש, השתנה, או מחיקה שנכשלה) – כדי לא להשאיר "יתום". המחיקה מהעמוק לרדוד.
+   - **סימון:** לפני המחיקה נרשמים במסמך העסק `rootPurgedAt` ו-`rootPurgeRun` (מספר ההרצה). מאותו רגע `set-dataroot --to legacy` (וגם `rollback-to-legacy`) ו-`copy` מסרבים. `copy-docs` ו-`set-dataroot --to b` עדיין מותרים.
+   - בספירה אין גיבוי, ולכן "יימחקו" הוא מספר מקסימלי: במחיקה עצמה מדלגים גם על מה שהשתנה מאז הגיבוי.
+   - מחיקה בקבוצות של 200, עם הפסקה קצרה ביניהן.
+   - **Storage לא נמחק:** הדוח מציג כמה קבצים ובתים יש ב-`app_backups/` בשורש, וכמה מהם זהים (md5 וגודל) ב-`b/largpeami/app_backups/`. הסיבה: בגיבוי ב-bucket נשמרת רק רשימת הקבצים, לא התוכן, וכללי `app_backups/` בשורש עדיין מאפשרים כתיבה ממכשירים ישנים.
+   - הדוח בעברית: ספירה לכל אוסף (נמחקו / נשארו כי חסרים ב-b / דולגו / נכשלו), נתיב הגיבוי, ונתיבי המסמכים שלא נמחקו. אף פעם לא תוכן המסמכים.
+   - בתהליך ב-GitHub: `action=purge-root-dry-run` (ספירה) או `action=purge-root` עם `write_confirm`, `doc_paths` = אישור המחיקה, ו-`upload_backup=true`. ההרצה בודקת את האישור, שומרת גיבוי ב-bucket, ועוצרת אם הגיבוי לא נשמר. רק אחר כך מוחקת.
+
 ## אילו אוספים
 הרשימה המלאה והמדויקת: `COPY`, `DEFERRED` ו-`SHARED` בראש `migrate.js`.
 - **מועתקים (`COPY`):** `admins`, `staff`, `cfg`, `bk`, `chunks`, `inbox`, `app_backup_status`, `shelf`, `fb`, `tasks` (+`c`), `supinv` (+`p`), `appreq` (+`p`), `closings` (+`p`), `cashout`, `deposits` (+`p`), `zlast`, `yemot_*`, `voice_usage`, `scan_usage`, `audit_log`, `table_bases`, הזמנות (`ord`, `prod`, `stockLog`, `ordcfg`, `ordpay`, `private`), סריקת חנות (`s3*`, `smap`, `sround`, `srun`), ומאז 15.11.2026 גם:
@@ -56,7 +75,7 @@
 - **אין דריסה:** כל כתיבה עם תנאי מוקדם.
   - יצירה רק אם המסמך לא קיים.
   - עדכון רק אם מסמך היעד לא השתנה מאז שנקרא.
-  - אין בקוד מחיקה.
+  - אין בקוד מחיקה, חוץ מנקודה אחת: `deleteDocs` ב-`fsrest.js`, שפועלת רק אחרי `enablePurge` (רק `purge-root` קורא לה), רק במצב `write`, רק לאוספי השורש שבתחום (אף פעם לא `b`, `users`, `superadmins`, `admins`, `staff`, `private`), ותמיד עם תנאי `updateTime`.
 - **Storage:** קובץ מועתק רק אם הוא לא קיים ביעד. בענן נוסף גם התנאי `ifGenerationMatch: 0`. באמולטור התנאי הזה לא נאכף, ולכן הכלי בודק קודם שהקובץ לא קיים.
 - **אמולטור:** חובה שגם `FIREBASE_STORAGE_EMULATOR_HOST` יהיה מוגדר (או להוסיף `--no-storage`). ה-bucket חייב להיות של פרויקט ה-`demo-`. בלי זה, Storage היה פונה לענן.
 - **פרויקט אמיתי:** הכלי מסרב לרוץ אם השומר (`guard.js`) לא עבר. השומר בודק גם שה-bucket שייך לאותו פרויקט: השם חייב להתחיל ב-`<project>.`.
@@ -81,9 +100,9 @@ Actions ← "Migrate largpeami data" ← Run workflow. העסק קבוע: `largp
 | קלט | משמעות |
 |---|---|
 | `project_id`, `project_id_confirm` | מזהה הפרויקט המלא, פעמיים |
-| `action` | `check` (ברירת מחדל: גיבוי, ספירה ואימות, קריאה בלבד), `copy` (העתקה/השלמה), `copy-docs` (מסמכים בודדים, גם אחרי המעבר), `report-since`, `compare-backup`, `switch-to-b`, `rollback-to-legacy` |
-| `write_confirm` | בפעולות שכותבות (`copy`, `copy-docs`, `switch-to-b`, `rollback-to-legacy`): `write-to-<מזהה>` |
-| `doc_paths` | ל-`copy-docs` בלבד: נתיבי מסמכים בשורש, מופרדים בפסיק (למשל `cashout/abc,tasks/xyz`), עד 50 |
+| `action` | `check` (ברירת מחדל: גיבוי, ספירה ואימות, קריאה בלבד), `copy` (העתקה/השלמה), `copy-docs` (מסמכים בודדים, גם אחרי המעבר), `report-since`, `compare-backup`, `switch-to-b`, `rollback-to-legacy`, `purge-root-dry-run` (ספירה, קריאה בלבד), `purge-root` (מחיקת העותק הישן בשורש) |
+| `write_confirm` | בפעולות שכותבות (`copy`, `copy-docs`, `switch-to-b`, `rollback-to-legacy`, `purge-root`): `write-to-<מזהה>` |
+| `doc_paths` | ל-`copy-docs`: נתיבי מסמכים בשורש, מופרדים בפסיק (למשל `cashout/abc,tasks/xyz`), עד 50. ל-`purge-root`: אישור המחיקה, `delete-root-copy-of-largpeami-in-<מזהה>` (אותו שדה, כי בתהליך ידני מותרים עד 10 קלטים) |
 | `allow_test_project` | מזהה שמכיל `test` דורש `true`. לפרויקט כזה נדרש הסוד `FIREBASE_SERVICE_ACCOUNT_TEST` (חשבון שירות של פרויקט הבדיקה). השומר בודק שחשבון השירות שייך לפרויקט שהוקלד |
 | `state_run_id` | ל-`copy` (השלמה) ול-`report-since`: מספר ההרצה **האחרונה עם `action=copy`**. הרצת `check` לא יוצרת קובץ מצב. בלי קובץ מצב, כל שינוי במקור ידווח כהתנגשות ולא יועתק |
 | `backup_path` | ל-`compare-backup` ול-`rollback-to-legacy`: הנתיב `migrate_backups/.../backup.json` שמופיע בסיכום ההרצה שיצרה את הגיבוי |
@@ -101,6 +120,7 @@ Actions ← "Migrate largpeami data" ← Run workflow. העסק קבוע: `largp
 | `MIGRATE_MODE` | `write` לפקודות שכותבות. אחרת לא מגדירים |
 | `MIGRATE_WRITE_CONFIRM` | `write-to-<מזהה>`, רק לפקודות שכותבות |
 | `MIGRATE_ALLOW_TEST_PROJECT` | `true`, רק לפרויקט שמזהה שלו מכיל `test` |
+| `MIGRATE_PURGE_CONFIRM` | רק ל-`purge-root --mode write`: `delete-root-copy-of-largpeami-in-<מזהה>` |
 | `MIGRATE_BUCKET` (או `--bucket`) | ה-bucket של אותו פרויקט, למשל `largpeami.firebasestorage.app` |
 
 דוגמה (קריאה בלבד, הקבצים ב-`/tmp/lp-migrate/`, מחוץ למאגר):

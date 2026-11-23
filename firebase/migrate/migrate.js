@@ -5,7 +5,7 @@
 //
 // עקרונות:
 //  - ברירת המחדל: קריאה בלבד (readonly). כתיבה רק עם --mode write.
-//  - המקור (האוספים בשורש) לא נמחק ולא מתעדכן לעולם. הכתיבה רק ליעד b/<bizId>/..., למסמך העסק b/<bizId>,
+//  - המקור (האוספים בשורש) לא נמחק ולא מתעדכן, חוץ מהפקודה purge-root (מחיקת העותק הישן אחרי המעבר, באישור נפרד). הכתיבה רק ליעד b/<bizId>/..., למסמך העסק b/<bizId>,
 //    וליצירה (בלבד) של users/<uid> חדשים. ראו ההגנות ב-fsrest.js.
 //  - מסמך יעד שכבר קיים לא נדרס. שינוי בשני הצדדים = "התנגשות", מדווח ולא נכתב.
 //  - בלי אמולטור (FIRESTORE_EMULATOR_HOST), חובה לעבור את בדיקת השומר (guard.js) באמצעות משתני סביבה.
@@ -19,12 +19,14 @@
 //   report-since    דוח: מה נכתב ב-b/<bizId> מאז ההעתקה האחרונה (לפי קובץ המצב). לא כותב
 //   set-dataroot    שינוי b/<bizId>.dataRoot ל-legacy או b (חזרה / מעבר). דורש --mode write
 //   copy-docs       העתקה ממוקדת של מסמכים בודדים מהשורש (--paths a/1,b/2), גם אחרי המעבר. יצירה בלבד. דורש --mode write, --backup
+//   purge-root      מחיקת העותק הישן בשורש אחרי המעבר (dataRoot=b). בלי --mode write: רק ספירה. עם --mode write: דורש
+//                   --backup + --backup-gcs (גיבוי טרי שנשמר ב-bucket) ו-MIGRATE_PURGE_CONFIRM. מוחק רק מסמך שקיים גם ב-b/<bizId>
 
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createRequire } = require('node:module');
-const { FsRest, scanTree, hashFields, MISSING, pmap } = require('./fsrest');
+const { FsRest, scanTree, hashFields, MISSING, pmap, normTs } = require('./fsrest');
 const { checkGuard, fromEnv, bucketBelongs } = require('./guard');
 
 // firebase-admin שכבר מותקן בפונקציות השרת (בלי להוסיף תלות)
@@ -66,6 +68,8 @@ const COPY = [
   'possale', 'pospay', 'posret', 'posshift', 'posz', 'posdev', 'poscfg', 'promo', 'clubcfg', 'clublog', 'poslog', 'poserr', 'posconf',
   'posbk', 'posgift', 'posgiftlog', 'posclock', 'posimp', 'pos_income_daily', 'posreq', 'poscfglog', 'pospark', 'poscpn', 'pospin',
   'posalert', 'poslbl', 'poscnt', 'posbc', 'posbr', 'poscard', // poscard: גל 3 (19.11.2026) – חיובי אשראי במסוף מחובר
+  'dr', 'drcfg', // main (#186–188, 23.11.2026): כללים רק תחת b/{bizId}, נוספו אחרי ההעברה – אין להם עותק בשורש
+  'lblp', // מוצרים שהוקלדו ידנית במסך הדפסת המדבקות (main, 1d5a0bc): כלל ב-b/{bizId} וגם בשורש – נוסף 23.11.2026 כדי שבדיקה 13 תכסה אותו
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
@@ -299,7 +303,8 @@ function assertMigrationTarget(ctx, bizDoc, needLegacy) {
   if (!(f.migrationTarget && f.migrationTarget.booleanValue === true) || sv('createdBy') !== 'migrate') {
     throw new Error(`מסמך העסק b/${ctx.bizId} קיים ולא נוצר על ידי כלי ההעברה (חסר migrationTarget:true או createdBy:migrate). לא נוגעים בו`);
   }
-  if (needLegacy && sv('dataRoot') !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${sv('dataRoot')}", לא legacy. העתקה/השלמה רק לפני המעבר (ראו ROLLBACK.md)`);
+  if (f.rootPurgedAt && needLegacy) throw new Error(`העותק בשורש נמחק (purge-root, rootPurgedAt=${f.rootPurgedAt.timestampValue || ''}). אין חזרה ל-legacy ואין העתקה מהשורש – שחזור רק מהגיבוי ב-bucket (ראו ROLLBACK.md)`);
+  if (needLegacy === true && sv('dataRoot') !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${sv('dataRoot')}", לא legacy. העתקה/השלמה רק לפני המעבר (ראו ROLLBACK.md)`);
 }
 
 // מה צריך להיות ב-users/{uid} לכל חבר, באותו מבנה ש-syncLegacyMember (שרת, business.js) כותב:
@@ -632,7 +637,7 @@ async function cmdSetDataRoot(ctx) {
   if (ctx.mode !== 'write') throw new Error('set-dataroot דורש --mode write');
   const cur = await ctx.fsr.getDoc('b/' + ctx.bizId);
   if (!cur) throw new Error('מסמך העסק b/' + ctx.bizId + ' לא קיים');
-  assertMigrationTarget(ctx, cur, false);
+  assertMigrationTarget(ctx, cur, to === 'legacy' ? 'to-legacy' : false);
   const before = cur.fields.dataRoot && cur.fields.dataRoot.stringValue;
   const [r] = await ctx.fsr.writeDocs([{ path: 'b/' + ctx.bizId, kind: 'setField', fieldPaths: ['dataRoot'], fields: { dataRoot: { stringValue: to } } }]);
   if (!r.ok) throw new Error('הכתיבה נכשלה: ' + r.error);
@@ -717,7 +722,146 @@ async function cmdCopyDocs(ctx) {
   return { ok, dataRoot, ...sum, subDocWarnings: withSubs.length, docs: rows };
 }
 
-const COMMANDS = { backup: cmdBackup, 'dry-run': cmdDryRun, copy: cmdCopy, 'copy-docs': cmdCopyDocs, verify: cmdVerify, 'compare-backup': cmdCompareBackup, 'report-since': cmdReportSince, 'set-dataroot': cmdSetDataRoot };
+// ---- מחיקת העותק הישן בשורש אחרי המעבר (23.11.2026, בבקשת הבעלים) ----
+// תחום: רק אוספים שב-COPY, חוץ מאוספי הזהות וההרשאות (PURGE_KEEP) שעדיין נקראים בשורש: כללי Firestore ו-Storage
+// (isManager / isActiveEmployee), resolveMember בשרת (כשאין users/{uid}), syncLegacy*, ואתר ההזמנות (detectRole).
+// לא נוגעים לעולם ב: DEFERRED (האתר), SHARED, users, superadmins, b, ואוסף שלא ב-COPY.
+// לכל מסמך בשורש (כולל תתי-אוספים, כל מסמך בנפרד): נמחק רק אם אותו נתיב קיים ב-b/<bizId> (התוכן יכול להיות שונה – b חדש יותר),
+// רק אם הוא בגיבוי הטרי עם אותו גיבוב (כלומר ניתן לשחזור), ורק אם לא השתנה מאז שנקרא (תנאי updateTime).
+// Storage (app_backups/) לא נמחק – רק דוח. הסיבה: בגיבוי ב-bucket יש רק רשימת הקבצים, לא התוכן, וכללי app_backups/ בשורש
+// עדיין פתוחים לכתיבה ממכשירים ישנים.
+// grp: כלל Storage של grpv/{gid}/{mid} בשורש קורא את grp/{gid} בשורש (mem), והנתיב vp בהודעות שהועתקו נשאר שורשי
+const PURGE_KEEP = ['admins', 'staff', 'private', 'grp'];
+const PURGE_BACKUP_MAX_AGE_MS = 6 * 3600 * 1000;
+const purgeConfirmText = ctx => `delete-root-copy-of-${ctx.bizId}-in-${ctx.project}`;
+function purgeScope(colls) {
+  return colls.filter(c => classify(c) === 'copy' && !PURGE_KEEP.includes(c));
+}
+
+async function purgeBackup(ctx) {
+  if (!ctx.args.backup || ctx.args.backup === 'true' || !fs.existsSync(ctx.args.backup)) throw new Error('purge-root במצב כתיבה דורש --backup עם קובץ גיבוי טרי (מריצים backup --upload קודם)');
+  const raw = fs.readFileSync(ctx.args.backup);
+  const bk = JSON.parse(raw.toString('utf8'));
+  if (bk.kind !== 'lp-migrate-backup' || bk.project !== ctx.project) throw new Error('קובץ הגיבוי לא שייך לפרויקט הזה');
+  const age = Date.now() - Date.parse(bk.takenAt);
+  if (!(age >= 0 && age <= PURGE_BACKUP_MAX_AGE_MS)) throw new Error('קובץ הגיבוי לא טרי (נדרש גיבוי מהשעות האחרונות, באותה הרצה): ' + bk.takenAt);
+  // הגיבוי חייב להיות שמור ב-bucket הפרטי של הפרויקט, זהה לקובץ המקומי
+  const g = String(ctx.args['backup-gcs'] || '').replace(/^gs:\/\/[^/]+\//, '');
+  if (!g || g === 'true' || !g.startsWith(BACKUP_PREFIX) || g.includes('..')) throw new Error('purge-root במצב כתיבה דורש --backup-gcs: נתיב הגיבוי שנשמר ב-' + BACKUP_PREFIX + ' (backup --upload)');
+  const f = bucket(ctx).file(g);
+  const [exists] = await f.exists();
+  if (!exists) throw new Error('קובץ הגיבוי לא נמצא ב-bucket: ' + g);
+  const [m] = await f.getMetadata();
+  const md5 = crypto.createHash('md5').update(raw).digest('base64');
+  if (Number(m.size) !== raw.length || (m.md5Hash && m.md5Hash !== md5)) throw new Error('קובץ הגיבוי ב-bucket לא זהה לקובץ המקומי');
+  return { bk, gcs: 'gs://' + ctx.bucketName + '/' + g };
+}
+
+async function cmdPurgeRoot(ctx) {
+  const write = ctx.mode === 'write';
+  if (ctx.bizId !== MIGRATION_BIZ) throw new Error(`purge-root מותר רק לעסק ההעברה "${MIGRATION_BIZ}", לא ל-"${ctx.bizId}"`);
+  const bizDoc = await ctx.fsr.getDoc('b/' + ctx.bizId);
+  if (!bizDoc) throw new Error(`מסמך העסק b/${ctx.bizId} לא קיים. אין מה למחוק`);
+  assertMigrationTarget(ctx, bizDoc, false);
+  const dataRoot = (bizDoc.fields.dataRoot || {}).stringValue || '';
+  if (dataRoot !== 'b') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${dataRoot}", לא b. מוחקים את העותק בשורש רק אחרי המעבר`);
+  let backup = null;
+  if (write) {
+    const want = purgeConfirmText(ctx);
+    if (String(process.env.MIGRATE_PURGE_CONFIRM || '').trim() !== want) throw new Error('חסר אישור מחיקה: MIGRATE_PURGE_CONFIRM חייב להיות בדיוק ' + want);
+    backup = await purgeBackup(ctx);
+  }
+  const all = await rootCollections(ctx);
+  const scope = purgeScope(all);
+  const src = await scanTree(ctx.fsr, '', scope);
+  const dst = await scanTree(ctx.fsr, 'b/' + ctx.bizId, scope);
+  const C = {};
+  const row = c => C[c] || (C[c] = { candidates: 0, deleted: 0, missingInB: 0, rootNewer: 0, keptHasChildren: 0, changedSinceBackup: 0, failed: 0, differsFromB: 0 });
+  for (const c of scope) row(c);
+  const pre = [], missing = [], changed = [], newer = [], parents = [];
+  const staying = new Set(); // מסמכים שנשארים בשורש (כדי לא למחוק את האב שלהם)
+  for (const [rel, d] of [...src].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (d.missing) continue; // אב "ריק" של תת-אוסף: נעלם לבד כשהתת-אוסף ריק
+    const c = topColl(rel);
+    const t = dst.get(rel);
+    if (!t || t.missing) { row(c).missingInB++; missing.push(rel); staying.add(rel); continue; }
+    if (d.hash !== t.hash) {
+      row(c).differsFromB++;
+      // השורש השתנה אחרי הכתיבה האחרונה ל-b: השינוי לא הגיע ל-b – לא מוחקים
+      if (normTs(d.updateTime) > normTs(t.updateTime)) { row(c).rootNewer++; newer.push(rel); staying.add(rel); continue; }
+    }
+    if (backup) {
+      const b = backup.bk.docs[rel];
+      if (!b || b.missing || b.hash !== d.hash) { row(c).changedSinceBackup++; changed.push(rel); staying.add(rel); continue; }
+    }
+    pre.push({ path: rel, updateTime: d.updateTime });
+  }
+  // אב שיש לו צאצא שנשאר בשורש – לא נמחק (לא משאירים "יתום" בשורש)
+  const hasStayingChild = p => { for (const x of staying) if (x.startsWith(p + '/')) return true; return false; };
+  const del = [];
+  for (const x of pre) {
+    if (hasStayingChild(x.path)) { row(topColl(x.path)).keptHasChildren++; parents.push(x.path); }
+    else { row(topColl(x.path)).candidates++; del.push(x); }
+  }
+  const failed = [];
+  let mark = null;
+  if (write && del.length) {
+    // סימון במסמך העסק לפני המחיקה: אחרי זה set-dataroot --to legacy ו-copy מסרבים
+    mark = { at: new Date().toISOString(), run: String(ctx.args['run-tag'] || process.env.GITHUB_RUN_ID || 'local').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'local' };
+    const [mr] = await ctx.fsr.writeDocs([{ path: 'b/' + ctx.bizId, kind: 'setField', fieldPaths: ['rootPurgedAt', 'rootPurgeRun'], fields: { rootPurgedAt: { timestampValue: mark.at }, rootPurgeRun: { stringValue: mark.run } } }]);
+    if (!mr.ok) throw new Error('רישום rootPurgedAt במסמך העסק נכשל, לא נמחק כלום: ' + mr.error);
+    ctx.fsr.enablePurge(scope);
+    // מהעמוק לרדוד: אם מחיקת צאצא נכשלה, האב שלו לא נמחק
+    const depth = p => p.split('/').length;
+    const levels = [...new Set(del.map(x => depth(x.path)))].sort((a, b) => b - a);
+    for (const lv of levels) {
+      const batch = [];
+      for (const x of del.filter(y => depth(y.path) === lv)) {
+        if (hasStayingChild(x.path)) { row(topColl(x.path)).candidates--; row(topColl(x.path)).keptHasChildren++; parents.push(x.path); } else batch.push(x);
+      }
+      const res = batch.length ? await ctx.fsr.deleteDocs(batch) : [];
+      res.forEach(r => {
+        if (r.ok) row(topColl(r.path)).deleted++;
+        else { row(topColl(r.path)).failed++; failed.push({ rel: r.path, error: r.error }); staying.add(r.path); }
+      });
+    }
+  }
+  // Storage: דוח בלבד
+  let storage = null;
+  if (!ctx.args['no-storage']) {
+    const s = await listStorage(ctx, STORAGE_PREFIX);
+    const t = new Map((await listStorage(ctx, 'b/' + ctx.bizId + '/' + STORAGE_PREFIX)).map(f => [f.name, f]));
+    const same = s.filter(f => { const x = t.get('b/' + ctx.bizId + '/' + f.name); return x && x.md5 === f.md5 && x.size === f.size; });
+    const sum = l => l.reduce((n, f) => n + f.size, 0);
+    storage = { rootFiles: s.length, rootBytes: sum(s), sameInB: same.length, sameInBBytes: sum(same), notInB: s.length - same.length, notInBBytes: sum(s) - sum(same) };
+  }
+  const outOfScope = all.filter(c => !scope.includes(c)).map(c => ({ coll: c, why: PURGE_KEEP.includes(c) ? 'זהות והרשאות – נשאר בשורש' : ({ deferred: 'אתר ההזמנות', shared: 'טבלה משותפת לכל העסקים', new: 'אוסף חדש של ריבוי העסקים' })[classify(c)] || 'לא ברשימת האוספים שהועתקו' }));
+  // דוח בעברית: ספירות ונתיבים בלבד, אף פעם לא תוכן
+  log(`${write ? 'מחיקת העותק הישן בשורש' : 'ספירה בלבד (לא נמחק כלום)'}: עסק ${ctx.bizId}, פרויקט ${ctx.project}, dataRoot=${dataRoot}`);
+  if (backup) log('גיבוי טרי לפני המחיקה: ' + backup.gcs + ' (נלקח ' + backup.bk.takenAt + ')');
+  for (const c of scope) {
+    const x = C[c];
+    if (!x.candidates && !x.missingInB && !x.rootNewer && !x.keptHasChildren && !x.changedSinceBackup && !x.failed) continue;
+    log(`  ${c}: ${write ? 'נמחקו ' + x.deleted : 'יימחקו ' + x.candidates} | נשארו (חסרים ב-b) ${x.missingInB} | נשארו (השורש חדש מ-b) ${x.rootNewer} | נשארו (אב של מסמך שנשאר) ${x.keptHasChildren} | תוכן שונה מ-b ${x.differsFromB}${write ? ' | דולגו (השתנו מאז הגיבוי) ' + x.changedSinceBackup + ' | נכשלו ' + x.failed : ''}`);
+  }
+  for (const o of outOfScope) log(`  לא נוגעים: ${o.coll} (${o.why})`);
+  for (const r of missing.slice(0, 50)) log('  חסר ב-b, לא נמחק: ' + r);
+  if (missing.length > 50) log(`  ... ועוד ${missing.length - 50} חסרים ב-b (הרשימה המלאה בדוח)`);
+  for (const r of newer.slice(0, 50)) log('  השורש חדש מ-b (שונה ונכתב אחרי b), לא נמחק: ' + r);
+  for (const r of parents.slice(0, 50)) log('  אב של מסמך שנשאר בשורש, לא נמחק: ' + r);
+  for (const r of changed.slice(0, 50)) log('  השתנה מאז הגיבוי (או לא בגיבוי), לא נמחק: ' + r);
+  for (const f of failed.slice(0, 50)) log('  לא נמחק (השתנה בזמן הריצה או שגיאה): ' + f.rel + ' – ' + f.error);
+  if (storage) log(`  Storage (${STORAGE_PREFIX} בשורש, לא נמחק): ${storage.rootFiles} קבצים / ${storage.rootBytes} בתים. זהים ב-b: ${storage.sameInB} / ${storage.sameInBBytes} בתים. חסרים או שונים ב-b: ${storage.notInB} / ${storage.notInBBytes} בתים`);
+  const tot = k => Object.values(C).reduce((n, x) => n + x[k], 0);
+  const sum = { candidates: tot('candidates'), deleted: tot('deleted'), missingInB: tot('missingInB'), rootNewer: tot('rootNewer'), keptHasChildren: tot('keptHasChildren'), differsFromB: tot('differsFromB'), changedSinceBackup: tot('changedSinceBackup'), failed: tot('failed') };
+  const ok = !sum.missingInB && !sum.rootNewer && !sum.keptHasChildren && !sum.changedSinceBackup && !sum.failed;
+  if (mark) log(`סומן במסמך העסק: rootPurgedAt=${mark.at}, rootPurgeRun=${mark.run} (מעכשיו set-dataroot --to legacy ו-copy מסרבים)`);
+  log(`סיכום: ${write ? 'נמחקו ' + sum.deleted + ' מתוך ' + sum.candidates : 'יימחקו ' + sum.candidates + ' (לכל היותר – במחיקה עצמה מדלגים גם על מה שהשתנה מאז הגיבוי)'} | נשארו כי חסרים ב-b ${sum.missingInB} | השורש חדש מ-b ${sum.rootNewer} | אב של מסמך שנשאר ${sum.keptHasChildren} | תוכן שונה מ-b (b חדש יותר) ${sum.differsFromB}${write ? ' | דולגו ' + sum.changedSinceBackup + ' | נכשלו ' + sum.failed : ''}`);
+  if (!ok) log('יש מסמכים שלא נמחקו – דורש בדיקה (למשל העברה ב-copy-docs, ואז הרצה חוזרת). שום מסמך שאין לו עותק ב-b לא נמחק.');
+  return { ok, write, dataRoot, backup: backup ? backup.gcs : null, ...sum, collections: C, missingInBPaths: missing, rootNewerPaths: newer, keptParentPaths: parents, changedPaths: changed, failedPaths: failed, purgeMark: mark, outOfScope, storage, scope };
+}
+
+const COMMANDS = { 'purge-root': cmdPurgeRoot, backup: cmdBackup, 'dry-run': cmdDryRun, copy: cmdCopy, 'copy-docs': cmdCopyDocs, verify: cmdVerify, 'compare-backup': cmdCompareBackup, 'report-since': cmdReportSince, 'set-dataroot': cmdSetDataRoot };
 
 async function main(argv) {
   const args = parseArgs(argv);
@@ -730,7 +874,7 @@ async function main(argv) {
   log(`== ${cmd} | פרויקט ${ctx.project} | עסק ${ctx.bizId} | מצב ${ctx.mode} | ${ctx.emu ? 'אמולטור ' + ctx.emu : 'פרויקט אמיתי'}`);
   const r = await COMMANDS[cmd](ctx);
   if (args.report) writeJsonAtomic(args.report, { cmd, at: new Date().toISOString(), project: ctx.project, bizId: ctx.bizId, mode: ctx.mode, reads: ctx.fsr.stats.reads, ...r });
-  log(`קריאות: ${ctx.fsr.stats.reads}, כתיבות: ${ctx.fsr.stats.writes}`);
+  log(`קריאות: ${ctx.fsr.stats.reads}, כתיבות: ${ctx.fsr.stats.writes}${ctx.fsr.stats.deletes ? ', מחיקות: ' + ctx.fsr.stats.deletes : ''}`);
   return r.ok ? 0 : 1;
 }
 
@@ -738,4 +882,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).then(code => { process.exitCode = code; }, e => { console.error('שגיאה: ' + (e && e.message ? e.message : e)); process.exitCode = 1; });
 }
 
-module.exports = { main, COPY, DEFERRED, SHARED, FEATURES, classify, parseDocPaths, DOC_PATHS_MAX };
+module.exports = { main, COPY, DEFERRED, SHARED, NEW_ROOT, PURGE_KEEP, purgeScope, FEATURES, classify, parseDocPaths, DOC_PATHS_MAX };
