@@ -157,6 +157,17 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
     check('נפתח מסך הסריקה הרגיל (openAdd, step=scan, התמונה ב-pg[0], scanGo) והכרטיס "אושר"', a.step === 'scan' && /^data:image\/jpeg/.test(a.pg) && a.hi === 1 && a.sg === 1 && a.done === 'ok', a);
     check('התמונה שוחררה מהזיכרון אחרי האישור', await page.evaluate(() => !window.__sec.media.img1));
     await page.evaluate(() => { if (typeof sheetClose === 'function') sheetClose(); });
+    // --- מסמך PDF (23.11.2026, גיטי סבב 2): כפתור "📄 מסמך" באותה שורה; נשלח כמו שהוא, בלי scan ---
+    o.R.see = { ok: true, id: 'pdf1', reply: 'זה מסמך של ספק החלב.', cards: [], pct: 13, saving: false };
+    const PDF = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n');
+    check('כפתור "📄 מסמך" בשורת המדיה', /📄 מסמך/.test(await txt(page, '#secMedia')) && !!(await page.$('#secMedia [data-c=secPdfF]')));
+    await page.setInputFiles('[data-c=secPdfF]', { name: 'doc.pdf', mimeType: 'application/pdf', buffer: PDF }); await H.settle(page, 1500);
+    see = last(o.bodies, 'secMedia', (b) => b.op === 'see');
+    check('PDF: see עם kind=pdf והקובץ כמו שהוא (base64), בלי נתיב', see && see[1].kind === 'pdf' && Buffer.from(see[1].b64, 'base64').toString('latin1').startsWith('%PDF-') && !see[1].path, see && see[1].kind);
+    check('PDF: בועת משתמש עם 📄 ותשובת המזכירה', /📄 מסמך/.test(await txt(page, '#secChat')) && /זה מסמך של ספק החלב/.test(await txt(page, '#secChat')));
+    const nPdf = all(o.bodies, 'secMedia', (b) => b.op === 'see').length;
+    await page.setInputFiles('[data-c=secPdfF]', { name: 'x.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') }); await H.settle(page, 800);
+    check('קובץ שאינו PDF – הודעה בלי שליחה', all(o.bodies, 'secMedia', (b) => b.op === 'see').length === nPdf && /אינו מסמך PDF/.test(await txt(page, '#secChat') + await toasts(page)));
     // --- תמונה: דוח Z ---
     o.R.see = { ok: true, id: 'img2', reply: 'זה דוח Z.', cards: [{ id: 'sc2', k: 'scan', doc: 'z' }], pct: 12, saving: false };
     await page.setInputFiles('[data-c=secImgF]', { name: 'z.png', mimeType: 'image/png', buffer: PNG }); await H.settle(page, 1500);

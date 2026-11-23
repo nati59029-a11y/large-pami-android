@@ -13,7 +13,8 @@ const DECL = {
   getBusinessFacts: { description: 'מידע על העסק שהמנהל אישר: שעות, כתובות, סניפים, ספקים, עובדים (תפקידים), מטרות, כללי תשובה, ומחירון. לשאלות על העסק עצמו.', parameters: S({ topic: { type: 'string', enum: Object.keys(K.TOPICS).concat(['price', 'all']), description: 'נושא (לא חובה)' }, query: str('מילת חיפוש (לא חובה), למשל שם ספק או פריט') }) },
   proposeFact: { description: 'להציע למנהל לשמור עובדה קבועה על העסק שעלתה בשיחה. לא נשמר – נוצר כרטיס, והמנהל מאשר או מבטל. אסור להציע כך מידע על בריאות, היריון, משפחה או מידע אישי רגיש אחר על עובד – אותו המנהל שומר במסך המידע הרגיש.', parameters: S({ topic: { type: 'string', enum: Object.keys(K.TOPICS) }, text: str('העובדה במשפט אחד'), expires: str('תאריך תפוגה YYYY-MM-DD, רק אם העובדה זמנית') }, ['topic', 'text']) },
   getCalendar: { description: 'אירועים ביומן: היומן האישי של המנהל ואירועי העסק המשותפים.', parameters: S({ from: str('מתאריך YYYY-MM-DD (ברירת מחדל: היום)'), to: str('עד תאריך YYYY-MM-DD (ברירת מחדל: עוד 30 יום)') }) },
-  proposeCalendarEvent: { description: 'להציע אירוע ביומן. לא נוצר – נוצר כרטיס, והמנהל מאשר או מבטל.', parameters: S({ title: str('כותרת קצרה'), date: str('YYYY-MM-DD'), time: str('HH:MM (לא חובה)'), note: str('הערה (לא חובה)'), forBusiness: { type: 'boolean', description: 'אירוע של העסק (כל המנהלים רואים). ברירת מחדל: אישי' }, reminder: { type: 'boolean', description: 'תזכורת – כשהמנהל ביקש "תזכירי לי". התראה בשעה שנקבעה (בלי שעה – בבוקר)' } }, ['title', 'date']) },
+  // תיקון סבב 2 (ליקוי 3): "תזכירי לי" – רק proposeTask (kind:'reminder'). כאן אירועי יומן בלבד; כרטיסי תזכורת ישנים (rem) שכבר נשמרו – עדיין מאושרים כרגיל ב-secCal
+  proposeCalendarEvent: { description: 'להציע אירוע ביומן (פגישה, אירוע של העסק). לא לתזכורת: "תזכירי לי…" – רק proposeTask עם kind "reminder". לא נוצר – נוצר כרטיס, והמנהל מאשר או מבטל.', parameters: S({ title: str('כותרת קצרה'), date: str('YYYY-MM-DD'), time: str('HH:MM (לא חובה)'), note: str('הערה (לא חובה)'), forBusiness: { type: 'boolean', description: 'אירוע של העסק (כל המנהלים רואים). ברירת מחדל: אישי' } }, ['title', 'date']) },
   getSensitiveInfo: { description: 'מידע רגיש ששמר המנהל על עובד מסוים (למשל בריאות או משפחה). רק להסבר נתונים, לעולם לא כבסיס להמלצה לפגוע בעובד.', parameters: S({ employee: str('שם העובד') }, ['employee']) },
 };
 const NAMES = Object.keys(DECL);
@@ -83,6 +84,7 @@ async function run(name, a, ctx) {
       return { from, to, count: L.length, events: L.map((e) => Object.assign({ date: e.d, title: e.title, whose: e.biz ? 'של העסק' : 'אישי' }, e.tm ? { time: e.tm } : {})), _at: ctx.now };
     }
     case 'proposeCalendarEvent': {
+      if (a.reminder === true) return { error: 'use-proposeTask', note: 'תזכורת מציעים רק עם proposeTask (kind: "reminder"). לא נוצר כרטיס.' };
       const ev = K.cleanEvent({ title: a.title, d: a.date, tm: a.time || '', note: a.note || '' });
       if (!ev) return { error: 'bad-input', note: 'חסרה כותרת או שהתאריך/השעה לא תקינים (YYYY-MM-DD, HH:MM)' };
       if (ev.d < today) return { error: 'past', note: 'התאריך כבר עבר' };
@@ -90,10 +92,9 @@ async function run(name, a, ctx) {
       if (pend.size >= K.CAL_PROP_MAX) return { error: 'too-many', note: 'יש כבר הרבה הצעות שממתינות לאישור ביומן.' };
       const to = a.forBusiness === true ? 'biz' : 'me';
       const ref = db.collection('sec_cal').doc();
-      const rem = a.reminder === true; // 15.11.2026: "תזכירי לי…" – תזכורת (rem), שמופיעה גם ב"מול העיניים" בצ'אט
-      await ref.set(Object.assign({ uid: ctx.uid, to, st: 'prop', src: 'sec', by: ctx.uid, t: ctx.now }, ev, rem ? { rem: true } : {}));
+      await ref.set(Object.assign({ uid: ctx.uid, to, st: 'prop', src: 'sec', by: ctx.uid, t: ctx.now }, ev));
       const off = K.offKind(ev.d);
-      const card = Object.assign({ k: 'cal', id: ref.id, to }, ev, rem ? { rem: true } : {});
+      const card = Object.assign({ k: 'cal', id: ref.id, to }, ev);
       // שישי/שבת/חג (72): לפי הגדרת המנהל – להזהיר ולהציע יום אחר (ברירת מחדל) או לקבל בלי הערה
       if (off && ctx.we !== 'accept') card.warn = { kind: off, next: K.nextBizDay(ev.d) };
       ctx.cards.push(card);
