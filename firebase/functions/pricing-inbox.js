@@ -57,7 +57,7 @@ function eligible(doc) {
   try { d = JSON.parse(typeof doc.data === 'string' ? doc.data : ''); } catch (e) { return { r: 'bad-data' }; }
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { r: 'bad-data' };
   if (d.repl) return { r: 'repl' };
-  // הוצאה מקופה – נבדקת אחר כך מול כרטיס הספק (subs[].prR, 23.11.2026)
+  // הוצאה מקופה (reg) נכנסת לתמחור כמו חשבונית רגילה, אלא אם הספק כבוי לתמחור (subs[].prOff, 23.11.2026)
   if (d.kind === 'check' || doc.k === 'check') return { r: 'check' };
   if (!(num(d.amt) > 0)) return { r: 'amt' };
   const np = Number(doc.parts);
@@ -159,7 +159,8 @@ async function onInbox(bizId, id, doc, opts) {
   try { const j = JSON.parse(cfg.exists ? cfg.get('data') || '{}' : '{}'); cats = j && Array.isArray(j.cats) ? j.cats : []; } catch (e) { cats = []; }
   const c = cats.find((z) => z && z.id === d.cat);
   if (!c || c.beh !== 'sup') return skip('not-sup');
-  if (d.reg) { const sb = (Array.isArray(c.subs) ? c.subs : []).find((z) => z && z.id === d.sub); if (!sb || !sb.prR) return skip('reg'); }
+  // מתג בכרטיס ספק (23.11.2026): כבוי (prOff) – אף חשבונית של הספק לא נכנסת; דלוק (ברירת מחדל) – גם הוצאה מקופה נכנסת
+  { const sb = (Array.isArray(c.subs) ? c.subs : []).find((z) => z && z.id === d.sub); if (sb && sb.prOff) return skip('sup-off'); }
   if (fr.r) return skip(fr.r);
   const P0 = fr.f ? pagesOf(fr.f) : [];
   if (!P0.length) return skip('no-photo');

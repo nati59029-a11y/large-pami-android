@@ -44,7 +44,7 @@ PI.img=id=>{const m=rd(IK)||{};return m[id]||''};
 /* הוצאה של המנהל שנשמרה עם קובץ סרוק */
 function fromTx(t,fid){try{if(!t||!fid||t.noStock)return;const c=cat(t.cat);if(!c||c.beh!=='sup')return;
  if((t.kind||'inv')!=='inv'||!(num(t.amt)>0))return;
- const s=t.sub?subById(t.sub):null;
+ const s=t.sub?subById(t.sub):null;if(s&&s.prOff)return;/* ספק שכבוי לתמחור */
  add({t:'c',rq:rqOf(fid),fid,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||'')||(t.dn?String(t.note||'').replace(/^ת\. משלוח\s*/,''):''),date:DATE_OK(t.date)?t.date:''})}catch(e){}}
 const fromNew=(n0,fid)=>{try{if(!fid)return;for(const t of S.tx.slice(n0))if(t&&t.file===fid)fromTx(t,fid)}catch(e){}};
 
@@ -80,7 +80,7 @@ if(typeof inbDrop==='function'){const o=inbDrop;inbDrop=function(id){let it=null
    כך שחשבונית שכבר בתמחור לא תיכנס פעמיים (השרת מחזיר dup). הצילום נקרא מהטלפון */
 PI.send=id=>{try{const t=S.tx.find(x=>x.id===id);if(!t||!t.file)return toast('אין צילום להוצאה הזו');const c=cat(t.cat);if(!c||c.beh!=='sup')return toast('רק הוצאה של ספק');
  if(!on())return toast('תמחור לא פעיל בעסק');const rq=ID_OK(t.src)?rqOf('o'+t.src):rqOf(t.file);/* הוצאה של עובד: אותו מזהה כמו בשרת */if(done().includes(rq)||qGet().some(x=>x.rq===rq&&x.t==='c'))return toast('ההוצאה כבר נשלחה לתמחור');
- const s=t.sub?subById(t.sub):null;
+ const s=t.sub?subById(t.sub):null;if(s&&s.prOff)return toast('הספק מסומן "לא נכנס לתמחור" בכרטיס הספק');
  add({t:'c',rq,fid:t.file,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||''),date:DATE_OK(t.date)?t.date:''});closeDlg();toast('נשלח לתמחור – יופיע ברשימה בעוד דקה-שתיים')}catch(e){toast('השליחה נכשלה')}};
 ACT.piSend=el=>PI.send(el.dataset.id);
 if(typeof txDlg==='function'){const o=txDlg;txDlg=function(id){const r=o.apply(this,arguments);try{const t=S.tx.find(x=>x.id===id),c=t&&cat(t.cat);
