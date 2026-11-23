@@ -94,7 +94,7 @@ V.sec=()=>{const T='המזכירה';
  if(!S.ok)return{t:T,h:`<div class="card"><p class="note" style="margin:0">${esc(DENY[S.reason]||S.msg||'לא ניתן לפתוח את המזכירה כרגע.')}</p>${DENY[S.reason]?'':'<button class="btn g w" data-a="secRe" style="margin-top:10px">נסה שוב</button>'}</div>`};
  if(!S.consented)return{t:T,h:consentH(S)};
  if(!S.setupDone||X.edit)return{t:S.name||T,h:wizH(S)};
- if(X.set){if(!X.log||Date.now()-X.logAt>60000)logLoad();return{t:S.name||T,s:'הגדרות המזכירה',h:setH(S)}}
+ if(X.set){return{t:S.name||T,s:'הגדרות המזכירה',h:setH(S)}}
  const tab=X.tab||'chat';
  if(tab==='facts')return{t:S.name||T,s:'מידע על העסק',h:tabsH()+factsH(S)};
  if(tab==='cal')return{t:S.name||T,s:'יומן',h:tabsH()+calH()};
@@ -257,7 +257,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  ${gSetH()}
  ${ntH(S)}
  <button class="btn g w" data-a="secEdit" style="margin-top:10px">שינוי שם ואופן פנייה</button><button class="btn g w" data-a="secSetX" style="margin-top:8px">חזרה לשיחה</button>
- <div class="sec"><h3>יומן פעולות</h3></div>${logH()}`}
+ <div class="sec"><h3>יומן פעולות</h3></div><div class="card"><p class="note" style="margin:0 0 8px">היומן המלא: חיפוש, סינון לפי סוג ותאריך, ופירוט לכל פעולה.</p><button class="btn w" data-a="hubLog" style="min-height:44px">פתיחת יומן הפעולות המלא</button></div>`}
 ACT.secSet=()=>{X.set=1;rerender()};
 CHG.secWe=async el=>{const v=el.value;try{await fnCall('secPrefs',{op:'calWe',v});X.st.we=v;toast('נשמר')}catch(e){err(e);rerender()}};
 ACT.secSetX=()=>{X.set=0;rerender()};
@@ -1508,7 +1508,7 @@ const css10=document.createElement('style');
 css10.textContent='.secey{margin:0 0 8px}.secey .secli{padding:8px 0}.secey .secli p{margin:0 0 2px}.secey .secrow .chip{min-height:44px}.secey .eyh{display:flex;justify-content:space-between;align-items:center;gap:8px}'
 +'.secey .secday{margin:10px 0 2px}.secdone b{color:var(--acc)}#secPrev .secday{text-align:center;font-size:.85rem}';
 document.head.appendChild(css10);
-TABS.splice(1,0,['eyes','מול העיניים'],['prev',"צ'אט קודם"]);/* 15.11.2026: "מול העיניים" עבר ללשונית משלו – הצ'אט נפתח ריק בכל כניסה */
+TABS.splice(1,0,['eyes','מרכז שליטה'],['prev',"צ'אט קודם"]);/* 23.11.2026: "מול העיניים" הפך ל"מרכז שליטה" (sec-hub.js מוסיף חיבורים, פעולות מהירות ופריטי תשומת לב; כל יכולות "מול העיניים" נשארו כאן) *//* 15.11.2026: "מול העיניים" עבר ללשונית משלו – הצ'אט נפתח ריק בכל כניסה */
 const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'מסך "לטיפול" באפליקציה',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'לשונית "מול העיניים"'};
 const rtL=c=>'מעכשיו '+(RKL[c.kind]||'פריטים')+' ← '+(RDL[c.dest]||'');
 /* ---------- "מול העיניים" ---------- */
@@ -1526,12 +1526,13 @@ function eyRow(x,dn){const a=x.act,id=a&&esc(a.id);
  const tag=x.k==='rem'&&/^ביומן/.test(x.title)?'יומן':EYK[x.k]||'';
  return `<div class="secli" data-ey="${esc(x.id)}"><button type="button" class="secnb" data-a="secEyGo"${eyGoA(x)} aria-label="פתיחה: ${esc(x.title)}"><p><b>${esc(x.title)}</b> <span class="sectags">${esc(tag)}</span></p>${x.sub?`<small class="note secclamp" style="display:block">${esc(x.sub)}</small>`:''}${x.t&&!x.soon?`<small class="note" style="display:block">${esc(tm(x.t))}</small>`:''}</button>
  <div class="secrow">${acts}${dn?'':`<button class="chip" data-a="secEyGo"${eyGoA(x)}>פתיחה</button>`}${x.r?mrBtnH(x.r.k,x.r.id):''}</div></div>`}
-function eyH(){const R=X.ey,hd='<div class="eyh"><b>מול העיניים</b>';
+const hubTop=()=>{try{return window.__secHub?window.__secHub.top():''}catch(e){return ''}},hubAtt=O=>{try{return window.__secHub?window.__secHub.att(O):''}catch(e){return ''}};/* sec-hub.js */
+function eyH(){const R=X.ey,hd='<div class="eyh"><b>מה דורש את תשומת הלב שלך</b>';
  if(!R){if(!X.eyb){const v=!!X.eyV;X.eyV=0;eyLoad(v)}return `<div class="card secey" id="secEyes">${hd}</div><p class="note" style="margin:4px 0 0">טוען…</p></div>`}
  if(R.err)return `<div class="card secey" id="secEyes">${hd}</div><p class="note" style="margin:4px 0">${esc(R.err)}</p><button class="chip" data-a="secEyRe" style="min-height:44px">נסה שוב</button></div>`;
  const O=R.open||[],D=R.did||[],on=X.eyAll?O.length:Math.min(O.length,EYN),dn=X.didAll?D.length:Math.min(D.length,EYD),H=R.hold||[];
  return `<div class="card secey" id="secEyes">${hd}${O.length?`<span class="secbadge">${esc(String(R.openN||O.length))}</span>`:''}</div>
- <div id="secEyOpen">${O.length?O.slice(0,on).map(x=>eyRow(x)).join(''):'<p class="note" style="margin:4px 0">אין כרגע משהו פתוח ✓</p>'}</div>
+ <div id="secEyOpen">${O.length?O.slice(0,on).map(x=>eyRow(x)).join(''):'<p class="note" style="margin:4px 0">אין כרגע משהו פתוח ✓</p>'}</div>${hubAtt(O)}
  ${O.length>EYN?`<button class="chip" data-a="secEyMore" data-v="o" style="min-height:44px">${X.eyAll?'פחות':'עוד ('+(O.length-EYN)+')'}</button>`:''}
  ${H.length?`<button class="chip" data-a="go" data-v="todo" style="min-height:44px;margin-inline-start:6px">במסך "לטיפול" (${H.length})</button>`:''}
  <div class="secday">מה עשיתי מאז הכניסה הקודמת<small class="note">${esc(tm(R.since))}</small></div>
@@ -1596,14 +1597,16 @@ function chatEnter(){if(X.sending)return;X.msgs=[];X.media={};X.msgErr='';X.ey=n
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='prev'){const S0=X.st;
   return{t:S0.name||'המזכירה',s:"צ'אט קודם",h:stopH()+tabsH()+prevH()}}
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='eyes'){const S0=X.st;
-  return{t:S0.name||'המזכירה',s:'מול העיניים',h:stopH()+tabsH()+eyH()}}
+  return{t:S0.name||'המזכירה',s:'מרכז שליטה',h:stopH()+tabsH()+hubTop()+eyH()}}
+ /* 23.11.2026: מרכז אישורים ויומן פעולות מלא (sec-hub.js) */
+ try{const HX=window.__secHub&&window.__secHub.tabs&&window.__secHub.tabs[X.tab];if(HX&&elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv){if(!X.ey&&!X.eyb)eyLoad(false);return{t:X.st.name||'המזכירה',s:HX.s,h:stopH()+tabsH()+HX.h()}}}catch(e){}
  /* 22.11.2026: "התראות מהטלפון" – המסך ב-sec-notif.js (הלשונית נוספת שם ל-TABS) */
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='notif'&&typeof window.__secNotifH==='function'){const S0=X.st;
   return{t:S0.name||'המזכירה',s:'התראות מהטלפון',h:stopH()+tabsH()+window.__secNotifH()}}
  /* מספר הפריטים הפתוחים ללשונית – נטען ברקע (בלי לסמן "ביקור") */
  try{if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.ey&&!X.eyb)eyLoad(false)}catch(e){}
  return r10()}}
-window.__secEy=()=>X.ey;window.__secTd=TD;
+window.__secEy=()=>X.ey;window.__secTd=TD;window.__secEyRow=eyRow;window.__secActs=ACTS;
 
 /* =====================================================================================
    SEC:11 – קול, תמונה וסרטון בצ'אט (15.11.2026). הכול דרך secMedia בשרת (op: stt | see | mark). שום קובץ לא נשמר במכשיר.
