@@ -142,7 +142,9 @@ function qState(doc, s) {
   if (!Q.h) return { R: null, hid: false };
   return { R: Q.tb ? qRowsOf(Q.tb) : [], hid: !!Q.hid };
 }
-const qRowsOf = (tb) => all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map((r) => Array.from(r.querySelectorAll('td')).map((td) => own(td)));
+// 0.1.18 (תקלה 23.11, 03:02): בכספית האמיתית שורת קובץ בתור בנויה כך: <th>שם הקובץ</th><th>סוג</th><td>פעולות</td>. לכן התאים = th ו-td לפי הסדר
+const qCells = (r) => Array.from(r.querySelectorAll('th,td')).map((x) => own(x));
+const qRowsOf = (tb) => all(tb, 'tr').filter((r) => visible(r) && r.querySelectorAll('td').length && !qHead(r)).map(qCells);
 // 0.1.17 (תקלה 22.11, 14:59 ו-19:19 – import-queue-not-empty כשהתור ריק): כשהכותרת "ממתין לטעינה" גלויה בלי טבלה משלה (תור ריק / רשימה שאינה
 // טבלה), "הטבלה הראשונה אחרי הכותרת" הייתה "טעינות קודמות" – והשורות שלה (קבצים שכבר נטענו) נספרו כקבצים בתור. עכשיו (תיקון בודק, סבב 1):
 // (1) טבלה היא "טעינות קודמות" רק אם היא אחרי כותרת "טעינות קודמות" גלויה (כותרת – לא לשונית / קישור / כפתור / תפריט), ואין ביניהן כותרת
@@ -187,12 +189,13 @@ function qTable(doc, s) {
   return { h, tb, hid };
 }
 // 0.1.16 (תקלה 22.11, 15:02): בכספית האמיתית שורת הכותרת "שם | סוג קובץ | פעולות" נספרה כשורת קובץ, ולכן "שלנו + עוד שורה" → עצירה.
-// שורת כותרת = בתוך thead, או עם תאי th, או ששני התאים הראשונים הם בדיוק "שם" ו"סוג קובץ" (שם קובץ אמיתי לא נראה כך)
+// שורת כותרת = בתוך thead, או כולה תאי th (בלי td), או ששני התאים הראשונים (th / td) הם בדיוק "שם" ו"סוג קובץ" (שם קובץ אמיתי לא נראה כך).
+// 0.1.18: שורה עם th וגם td אינה כותרת בגלל ה-th – בכספית שורת הקובץ עצמה כזו, ובגלל זה הקובץ שנכנס לתור לא נראה והרובוט ניסה שוב ושוב
 function qHead(r) {
   if (r.closest && r.closest('thead')) return true;
-  if (r.querySelector && r.querySelector('th')) return true;
-  const td = Array.from(r.querySelectorAll('td')).map((x) => own(x));
-  return td[0] === 'שם' && td[1] === 'סוג קובץ';
+  if (!r.querySelector('td')) return true;
+  const c = qCells(r);
+  return c[0] === 'שם' && c[1] === 'סוג קובץ';
 }
 // 0.1.16: פירוט קצר לעצירה בגלל התור (בלי לשנות את ההחלטה): כמה שורות, ולכל שורה – כמה תאים והאם השם / הסוג תואמים. שורה שאינה שלנו –
 // תחילת שני התאים הראשונים (עד 30 תווים, שם קובץ שלנו מוחלף ב-{file}); הסינון (scrub) נעשה ב-sw לפני היציאה
