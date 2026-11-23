@@ -195,3 +195,116 @@ describe('משימות קבועות – הגדרת הפונקציה', () => {
     assert.equal(typeof require(path.join(FN, 'recurring.js'))._core.runAll, 'function');
   });
 });
+
+// ---------- 22.11.2026: היעד בפועל (tkDl) ותזכורת איחור לעובד ----------
+const LT = require(path.join(FN, 'lib', 'tk-late.js'));
+const SR = require(path.join(FN, 'lib', 'sec-remind.js'));
+// tkDl ו-tkLateNow מהאפליקציה (index.html), כמו שהם
+function appDl() {
+  const src = fs.readFileSync(HTML, 'utf8');
+  const a = src.match(/const tkDl=t=>[^;]+;/), b = src.match(/const tkLateNow=t=>[^;]+;/);
+  assert.ok(a && b, 'tkDl / tkLateNow לא נמצאו באפליקציה');
+  // eslint-disable-next-line no-new-func
+  return new Function('NOW', a[0] + b[0].replace('Date.now()', 'NOW()') + 'return { tkDl, tkLateNow };');
+}
+
+describe('tkDl בשרת = tkDl באפליקציה; איחור לפי dl', () => {
+  const N = Date.UTC(2026, 10, 22, 10, 0);
+  const H1 = 3600000;
+  const CASES = [
+    { st: 'open', due: N - H1 }, { st: 'open', due: N + H1 }, { st: 'open', due: N - H1, dl: 0 }, { st: 'open', due: N - H1, dl: N + H1 },
+    { st: 'open', due: N + H1, dl: N - H1 }, { st: 'open', due: N - H1, dl: -1 }, { st: 'open', due: N + H1, dl: -1 }, { st: 'open' },
+    { st: 'open', dl: N - H1 }, { st: 'open', dl: 0 }, { st: 'wait', due: N - H1 }, { st: 'done', dl: N - H1 }, { st: 'open', due: N - 40 * 864e5 },
+  ];
+  it('אותו יעד ואותו "באיחור עכשיו" כמו באפליקציה, בכל המקרים', () => {
+    const app = appDl()(() => N);
+    for (const t of CASES) {
+      assert.deepEqual(TK.tkDl(t), app.tkDl(t), JSON.stringify(t));
+      assert.equal(TK.tkLateAt(t, N), app.tkLateNow(t), JSON.stringify(t));
+    }
+  });
+  it('תזכורת המזכירה (taskCands): dl שנדחה – לא באיחור; dl=0 – לא; dl שעבר (due עתידי) – כן', () => {
+    const ts = [
+      { txt: 'דחוי', st: 'open', due: N - H1, dl: N + H1 },
+      { txt: 'בלי יעד', st: 'open', due: N - H1, dl: 0 },
+      { txt: 'יעד שעבר', st: 'open', due: N + H1, dl: N - H1 },
+      { txt: 'ישן', st: 'open', due: N - H1 },
+      { txt: 'בהמתנה', st: 'wait', due: N - H1 },
+    ];
+    const c = SR.taskCands(ts, {}, N, '2026-11-22');
+    assert.equal(c.length, 1);
+    assert.match(c[0].title, /^2 משימות/);
+    assert.ok(c[0].body.includes('יעד שעבר') && c[0].body.includes('ישן') && !c[0].body.includes('דחוי') && !c[0].body.includes('בלי יעד'));
+    assert.deepEqual(SR.taskCands([ts[0], ts[1]], {}, N, '2026-11-22'), []);
+  });
+});
+
+describe('התראת איחור לעובד – lib/tk-late.js', () => {
+  const at = (y, m, d, hh, mm) => TK.zoned(y, m - 1, d, hh, mm);
+  const N = at(2026, 11, 22, 10, 0); // ראשון 10:00 שעון ישראל
+  const H1 = 3600000, D1 = 864e5;
+  const tk = (id, o) => Object.assign({ id, txt: 'משימה ' + id, st: 'open', due: N - H1, ow: 'u1' }, o);
+
+  it('שקט: שבת וערב שבת אחרי 13:00, לילה 22:00–07:00; יום חול 10:00 – לא שקט', () => {
+    assert.equal(LT.quiet(N), false);
+    assert.equal(LT.quiet(at(2026, 11, 22, 6, 59)), true);
+    assert.equal(LT.quiet(at(2026, 11, 22, 7, 0)), false);
+    assert.equal(LT.quiet(at(2026, 11, 22, 21, 59)), false);
+    assert.equal(LT.quiet(at(2026, 11, 22, 22, 0)), true);
+    assert.equal(LT.quiet(at(2026, 11, 21, 12, 0)), true);  // שבת
+    assert.equal(LT.quiet(at(2026, 11, 20, 14, 0)), true);  // שישי אחרי 13:00
+    assert.equal(LT.quiet(at(2026, 11, 20, 10, 0)), false); // שישי בבוקר
+  });
+
+  it('מועמדות: רק פתוחה ובאיחור לפי tkDl, עד 30 יום, ועם ow או to', () => {
+    assert.ok(LT.lateDl(tk('a'), N));
+    assert.equal(LT.lateDl(tk('a', { dl: 0 }), N), 0);
+    assert.equal(LT.lateDl(tk('a', { dl: N + H1 }), N), 0);
+    assert.equal(LT.lateDl(tk('a', { due: N + H1, dl: N - H1 }), N), N - H1);
+    assert.equal(LT.lateDl(tk('a', { st: 'wait' }), N), 0);
+    assert.equal(LT.lateDl(tk('a', { due: N - 31 * D1 }), N), 0);
+    assert.ok(LT.lateDl(tk('a', { due: N - 29 * D1 }), N));
+    assert.equal(LT.lateDl(tk('a', { ow: '' }), N), 0);
+    assert.ok(LT.lateDl(tk('a', { ow: '', to: ['u2', 'u3'] }), N));
+    assert.deepEqual(LT.recips(tk('a', { ow: '', to: ['u2', 'u2', 'bad/id', 'u3'] })), ['u2', 'u3']);
+    assert.deepEqual(LT.recips(tk('a', { to: ['u2'] })), ['u1']);
+  });
+
+  it('איגוד: התראה אחת לכל עובד, הישנה ראשונה; סימון לכל משימה; מי שכבר קיבל / לא פעיל – לא', () => {
+    const ts = [tk('t1', { due: N - 2 * H1 }), tk('t2', { due: N - 5 * H1 }), tk('t3', { ow: '', to: ['u1', 'u2', 'off'] }), tk('t4', { ow: 'u3' }), tk('t5', { dl: 0 })];
+    const marks = new Map([['t4', new Set(['u3'])]]);
+    const P = LT.pick(ts, marks, N, (u) => u !== 'off');
+    assert.deepEqual(P.users.map((x) => [x.uid, x.tasks.map((t) => t.id)]), [['u1', ['t2', 't1', 't3']], ['u2', ['t3']]]);
+    assert.deepEqual(P.marks.sort((a, b) => (a.id < b.id ? -1 : 1)), [{ id: 't1', u: ['u1'] }, { id: 't2', u: ['u1'] }, { id: 't3', u: ['u1', 'u2'] }]);
+    // ריצה שנייה עם הסימונים – כלום
+    const M2 = new Map(P.marks.map((m) => [m.id, new Set(m.u)]));
+    M2.set('t4', new Set(['u3']));
+    assert.deepEqual(LT.pick(ts, M2, N + 15 * 60000, (u) => u !== 'off').users, []);
+  });
+
+  it('תקרה: עד 20 עובדים בריצה; השאר לא מסומנים (יקבלו בריצה הבאה)', () => {
+    const ts = Array.from({ length: 25 }, (_, i) => tk('t' + i, { ow: 'w' + i, due: N - (30 - i) * H1 }));
+    const P = LT.pick(ts, new Map(), N, () => true);
+    assert.equal(P.users.length, LT.MAX_USERS);
+    assert.equal(P.marks.length, 20);
+    assert.deepEqual(P.users[0].uid, 'w0');
+    const M = new Map(P.marks.map((m) => [m.id, new Set(m.u)]));
+    assert.deepEqual(LT.pick(ts, M, N, () => true).users.map((x) => x.uid), ['w20', 'w21', 'w22', 'w23', 'w24']);
+  });
+
+  it('הטקסט: אחת – "יש לך משימה באיחור" + הטקסט; כמה – "יש לך N משימות באיחור"', () => {
+    assert.deepEqual(LT.msgOf([{ id: 'a', txt: 'לנקות את המקרר' }]), { title: 'יש לך משימה באיחור', body: 'לנקות את המקרר' });
+    const m = LT.msgOf([{ txt: 'א' }, { txt: 'ב' }, { txt: 'ג' }, { txt: 'ד' }]);
+    assert.equal(m.title, 'יש לך 4 משימות באיחור');
+    assert.equal(m.body, 'א · ב · ג ועוד 1');
+    assert.equal(LT.msgOf([{ txt: '' }]).body, 'פרטים באפליקציה');
+  });
+
+  it('recurringTasks: בדיקת האיחור רצה בריצה אחת מכל 3 (פעם ב-15 דקות)', () => {
+    const R = require(path.join(FN, 'recurring.js'))._core;
+    let n = 0;
+    for (let t = N; t < N + 3600000; t += 300000) if (R.lateSlot(t + 2000)) n++;
+    assert.equal(n, 4);
+    assert.equal(typeof R.lateAll, 'function');
+  });
+});

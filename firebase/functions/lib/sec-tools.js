@@ -8,6 +8,7 @@
 const T = require('./tenant');
 const { guideFor } = require('./sec-methods');
 const KT = require('./sec-know-tools'); // שלב 3: מידע על העסק, מידע רגיש, יומן
+const TKT = require('./tk-time');        // tkDl / tkLateAt – היעד בפועל של משימה, כמו באפליקציה (22.11.2026)
 const fs = require('fs');
 const path = require('path');
 
@@ -308,13 +309,13 @@ async function runTool(name, args, ctx) {
       let L = snap.docs.map((d) => d.data()).filter((t) => (+t.cr || 0) >= since);
       const who = (t) => names[t.ow] || names[t.owner] || clean(t.owN || t.doneBy || '', 60) || '—';
       if (a.employee) L = L.filter((t) => match(who(t), a.employee));
-      const isLate = (t) => t.late === '1' || (t.st === 'open' && +t.due && +t.due < now);
+      const isLate = (t) => t.late === '1' || TKT.tkLateAt(t, now);
       const sel = a.status === 'open' ? L.filter((t) => t.st === 'open') : a.status === 'done' ? L.filter((t) => t.st === 'done') : a.status === 'late' ? L.filter(isLate) : L;
       const by = {};
       L.forEach((t) => { const k = who(t); by[k] = by[k] || [0, 0, 0]; by[k][0]++; if (t.st === 'done') by[k][1]++; if (isLate(t)) by[k][2]++; });
       return { days, total: L.length, open: L.filter((t) => t.st === 'open').length, waiting: L.filter((t) => t.st === 'wait').length, done: L.filter((t) => t.st === 'done').length, late: L.filter(isLate).length,
         byEmployee: Object.entries(by).slice(0, 20).map(([n, v]) => ({ name: n, total: v[0], done: v[1], late: v[2] })),
-        items: sel.slice(0, 15).map((t) => ({ task: clean(t.txt, 60), status: t.st, due: +t.due ? dayOf(+t.due) : '', employee: who(t), late: isLate(t) })) };
+        items: sel.slice(0, 15).map((t) => ({ task: clean(t.txt, 60), status: t.st, due: Number.isFinite(+TKT.tkDl(t)) && +TKT.tkDl(t) > 0 ? dayOf(+TKT.tkDl(t)) : '', employee: who(t), late: isLate(t) })) };
     }
     case 'getCashClosings': {
       const db = T.tdb();
@@ -380,7 +381,7 @@ async function runTool(name, args, ctx) {
         db.collection('inbox').where('owner', '==', uid).limit(200).get(),
       ]);
       const tk = ts.docs.map((d) => d.data()).filter((t) => (+t.cr || 0) >= since && (t.ow === uid || t.owner === uid));
-      const lateT = tk.filter((t) => t.late === '1' || (t.st === 'open' && +t.due && +t.due < now));
+      const lateT = tk.filter((t) => t.late === '1' || TKT.tkLateAt(t, now));
       const cl = cs.docs.map((d) => d.data()).filter((c) => (+c.t || 0) >= since);
       const inb = ib.docs.map((d) => d.data()).filter((x) => (+x.t || Date.parse(x.created) || 0) >= since);
       return { employee: names[uid], days, tasks: { total: tk.length, done: tk.filter((t) => t.st === 'done').length, late: lateT.length, open: tk.filter((t) => t.st === 'open').length },
