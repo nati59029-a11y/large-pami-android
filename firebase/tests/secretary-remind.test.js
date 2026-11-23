@@ -685,3 +685,27 @@ describe('17.11.2026: "המזכירה שואלת לגבי מייל" – מזהה
     assert.equal(by.n1.key, undefined, 'המפתח הפנימי לא נחשף');
   });
 });
+
+describe('23.11.2026: מקור התראות מייל ו-Google (src) ברשימת ההתראות', () => {
+  it('gexp של תיבה – src mail + gx; gexp של יומן – src cal + gx; gcalon – cal; mailerr – mail; ווצאפ רגיל – בלי src', async () => {
+    await seed({});
+    const now = Date.now() - 60000;
+    const base = { k: 'wa', typ: 'wa', title: 'x', t: now, at: now, pend: false, n: 1, rep: 0, st: 'open', seen: false };
+    await prep(async (d) => {
+      await d.doc(`b/${A}/sec_note/${M1}/n/g1`).set(Object.assign({}, base, { key: 'gexp|box1', body: 'קליטת המייל מהתיבה נעצרה. אפשר לחבר מחדש בהגדרות המזכירה.' }));
+      await d.doc(`b/${A}/sec_note/${M1}/n/g2`).set(Object.assign({}, base, { key: 'gexp|' + M1, body: 'הסנכרון עם יומן Google נעצר. אפשר לחבר מחדש בהגדרות המזכירה.' }));
+      await d.doc(`b/${A}/sec_note/${M1}/n/g3`).set(Object.assign({}, base, { key: 'gcalon|' + M1 + '|1', body: 'b' }));
+      await d.doc(`b/${A}/sec_note/${M1}/n/g4`).set(Object.assign({}, base, { key: 'mailerr|box1|1', body: 'b' }));
+      await d.doc(`b/${A}/sec_note/${M1}/n/g5`).set(Object.assign({}, base, { key: 'stop|1', body: 'b' }));
+    });
+    const r = await call('secNotes', M1, { op: 'list' });
+    assert.equal(r.status, 'OK');
+    const by = Object.fromEntries(r.result.notes.map((x) => [x.id, x]));
+    assert.equal(by.g1.src, 'mail'); assert.equal(by.g1.gx, 1);
+    assert.equal(by.g2.src, 'cal'); assert.equal(by.g2.gx, 1);
+    assert.equal(by.g3.src, 'cal'); assert.equal(by.g3.gx, undefined);
+    assert.equal(by.g4.src, 'mail'); assert.equal(by.g4.gx, undefined);
+    assert.equal(by.g5.src, undefined);
+    assert.equal(by.g1.key, undefined, 'המפתח הפנימי לא נחשף');
+  });
+});
