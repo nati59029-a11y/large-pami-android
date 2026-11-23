@@ -176,7 +176,7 @@ describe('גיטי – הצעת משימה / תזכורת: כרטיס, ביצו�
     const card = (await get(`b/${A}/sec_chat/${M1}/m/${mid}`)).cards.find((x) => x.id === c1.id);
     assert.equal(card.st, 'ok'); assert.equal(card.ref, 'sec' + c1.id);
     const lg = (await coll(`b/${A}/sec_log`)).filter((l) => l.act === 'tkpOk');
-    assert.equal(lg.length, 1); assert.equal(lg[0].tgt, 'sec' + c1.id); assert.equal(lg[0].by, M1); assert.equal(lg[0].who, 'mgr'); assert.equal(lg[0].res, 'ok');
+    assert.equal(lg.length, 1); assert.equal(lg[0].tgt, 'sec' + c1.id); assert.equal(lg[0].by, M1); assert.equal(lg[0].who, 'mgr'); assert.equal(lg[0].res, undefined, 'תיקון סבב 2: לא נספר כשליחה בסיכום');
     // משימה עם אותו מזהה שמנהל אחר פתח – לא נחשבת
     await prep((d) => d.doc(`b/${A}/tasks/sec${c2.id}`).set(taskOf(M2)));
     assert.equal((await call('secPrefs', M1, { op: 'tkCard', mid, cid: c2.id, st: 'ok', kind: 'task' })).reason, 'not-done');
@@ -186,21 +186,43 @@ describe('גיטי – הצעת משימה / תזכורת: כרטיס, ביצו�
     assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${mid}`)).cards.find((x) => x.id === c2.id).st, 'no');
     assert.equal((await coll(`b/${A}/sec_log`)).filter((l) => l.act === 'tkpNo').length, 1);
   });
-  it('אישור תזכורת: דרך secCal (add, rem) – רק תזכורת של המנהל עצמו', async () => {
+  it('אישור תזכורת: דרך secCal (add, rem, cid) – מזהה קבוע sec<cid>; רק התזכורת של הכרטיס הזה, של המנהל עצמו; אישור חוזר לא יוצר שנייה', async () => {
     await seed();
     GM.state.sec = model([{ name: 'proposeTask', args: { kind: 'reminder', text: 'להתקשר לספק', date: BIZD } }], () => 'לקבוע?');
     const r = await call('secChat', M1, { text: 'תזכירי לי להתקשר לספק' });
     const mid = r.result.id, c = r.result.cards[0];
     const other = await call('secCal', M2, { op: 'add', title: 'של מנהל אחר', d: BIZD, rem: true });
     assert.equal(other.status, 'OK', other.text);
-    assert.equal((await call('secPrefs', M1, { op: 'tkCard', mid, cid: c.id, st: 'ok', kind: 'rem', ref: other.result.id })).reason, 'not-done');
-    const ev = await call('secCal', M1, { op: 'add', title: c.txt, d: c.d, rem: true });
-    assert.equal(ev.status, 'OK', ev.text);
-    const ok = await call('secPrefs', M1, { op: 'tkCard', mid, cid: c.id, st: 'ok', kind: 'rem', ref: ev.result.id });
-    assert.equal(ok.status, 'OK', ok.text);
-    const cal = await get(`b/${A}/sec_cal/${ev.result.id}`);
+    // תזכורת אחרת (גם של המנהל עצמו) – לא מאשרת את הכרטיס (הערת אבטחה 1)
+    const mine = await call('secCal', M1, { op: 'add', title: 'תזכורת אחרת', d: BIZD, rem: true });
+    assert.equal((await call('secPrefs', M1, { op: 'tkCard', mid, cid: c.id, st: 'ok', kind: 'rem', ref: mine.result.id })).reason, 'not-done');
+    assert.equal((await call('secCal', M1, { op: 'add', title: 'x', d: BIZD, rem: true, cid: 'bad' })).reason, 'bad-cid');
+    assert.equal((await call('secCal', M1, { op: 'add', title: 'x', d: BIZD, cid: c.id })).reason, 'bad-cid', 'cid רק לתזכורת');
+    const ev = await call('secCal', M1, { op: 'add', title: c.txt, d: c.d, rem: true, cid: c.id });
+    assert.equal(ev.status, 'OK', ev.text); assert.equal(ev.result.id, 'sec' + c.id);
+    // ליקוי 4: הסימון נכשל והאפליקציה נפתחה מחדש – "אישור" שוב מחזיר את אותה תזכורת
+    const again = await call('secCal', M1, { op: 'add', title: c.txt, d: c.d, rem: true, cid: c.id });
+    assert.equal(again.status, 'OK', again.text); assert.equal(again.result.id, 'sec' + c.id); assert.equal(again.result.already, true);
+    assert.equal((await call('secCal', M2, { op: 'add', title: c.txt, d: c.d, rem: true, cid: c.id })).reason, 'exists');
+    const ok = await call('secPrefs', M1, { op: 'tkCard', mid, cid: c.id, st: 'ok', kind: 'rem' });
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(ok.result.ref, 'sec' + c.id);
+    const cal = await get(`b/${A}/sec_cal/sec${c.id}`);
     assert.equal(cal.rem, true); assert.equal(cal.uid, M1); assert.equal(cal.st, 'ok');
     const lg = await coll(`b/${A}/sec_log`);
-    assert.ok(lg.some((l) => l.act === 'calAdd' && l.tgt === ev.result.id)); assert.ok(lg.some((l) => l.act === 'tkpOk' && l.tgt === ev.result.id && l.note === 'rem'));
+    assert.equal(lg.filter((l) => l.act === 'calAdd' && l.tgt === 'sec' + c.id).length, 1, 'נוצרה פעם אחת');
+    assert.ok(lg.some((l) => l.act === 'tkpOk' && l.tgt === 'sec' + c.id && l.note === 'rem'));
+  });
+  it('תזכורת – מסלול אחד (ליקוי 3): proposeCalendarEvent עם reminder לא יוצר כרטיס; כרטיס תזכורת זהה פעמיים באותה תשובה – כרטיס אחד', async () => {
+    await seed();
+    GM.state.sec = model([
+      { name: 'proposeCalendarEvent', args: { title: 'להתקשר לספק', date: BIZD, time: '10:00', reminder: true } },
+      { name: 'proposeTask', args: { kind: 'reminder', text: 'להתקשר לספק', date: BIZD, time: '10:00' } },
+      { name: 'proposeTask', args: { kind: 'reminder', text: 'להתקשר לספק', date: BIZD, time: '10:00' } },
+    ], () => 'לקבוע?');
+    const r = await call('secChat', M1, { text: 'תזכירי לי מחר ב-10 להתקשר לספק' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.cards.length, 1); assert.equal(r.result.cards[0].k, 'tkp'); assert.equal(r.result.cards[0].kind, 'rem');
+    assert.equal(lastRes().proposeCalendarEvent.error, 'use-proposeTask');
+    assert.equal((await coll(`b/${A}/sec_cal`)).length, 0, 'לא נוצרה הצעה ביומן');
   });
 });

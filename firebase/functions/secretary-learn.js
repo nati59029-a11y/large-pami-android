@@ -101,8 +101,10 @@ async function afterSend(db, rule, o) {
     const s = await tx.get(ref);
     const h = s.exists ? (Number(s.get('hits')) || 0) : (Number(rule.hits) || 0);
     if (s.exists) tx.update(ref, { hits: h + 1, fails: 0, lastAt: now });
-    tx.set(db.collection('sec_mlog').doc(), { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'sent', why: [] });
-    tx.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', 'mrSend', { tgt: o.tgt, note: rule.id }), { ch: o.ch }));
+    // תיקון סבב 2 (ליקוי 1): ml = מזהה שורת sec_mlog – יומן הפעולות באפליקציה מציג את השליחה פעם אחת
+    const ml = db.collection('sec_mlog').doc();
+    tx.set(ml, { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'sent', why: [] });
+    tx.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', 'mrSend', { tgt: o.tgt, note: rule.id }), { ch: o.ch, ml: ml.id }));
     return h;
   });
   // שלוש השליחות הראשונות של כל כלל – התראה לבעל הכלל (החלטה 5)
@@ -118,8 +120,9 @@ async function afterFail(db, rule, o) {
     const n = L.failNext(s.exists ? s.data() : rule);
     const off = n.off && s.exists && s.get('auto') === true; // כובים פעם אחת (מי שהגיע ל-3 ראשון); אחרי כן רק נרשם הכשלון
     if (s.exists) tx.update(ref, Object.assign({ fails: n.fails, lastAt: now }, off ? { auto: false, offWhy: 'fail', autoOffAt: now } : {}));
-    tx.set(db.collection('sec_mlog').doc(), { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'fail', why: ['fail'] });
-    tx.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', off ? 'mrOff' : 'mrFail', { tgt: o.tgt, note: rule.id }), { ch: o.ch }));
+    const ml = db.collection('sec_mlog').doc();
+    tx.set(ml, { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'fail', why: ['fail'] });
+    tx.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', off ? 'mrOff' : 'mrFail', { tgt: o.tgt, note: rule.id }), { ch: o.ch, ml: ml.id }));
     return { fails: n.fails, off };
   });
   await require('./secretary-wa')._core.notifyMgrs(db, (nx.off ? 'mroff|' : 'mrfail|') + rule.id + '|' + now, nx.off ? 'כלל הפסיק לשלוח לבד' : 'שליחה לבד נכשלה',

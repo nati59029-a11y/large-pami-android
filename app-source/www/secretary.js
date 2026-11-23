@@ -2007,7 +2007,7 @@ function tpSync(c,box){const v=f=>box.querySelector(`[data-c=secTpF][data-f=${f}
  if((e=v('tm')))c.tm=/^([01]\d|2[0-3]):[0-5]\d$/.test(e.value)?e.value:'';
  if((e=v('pri')))c.pri=e.checked?'h':''}
 async function tpRem(c,mid,force){c.busy=1;cxRe();
- try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true};if(c.tm)d.tm=c.tm;if(force)d.force=true;
+ try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true,cid:c.id};if(c.tm)d.tm=c.tm;/* cid – מזהה קבוע (sec<cid>): אישור חוזר לא יוצר תזכורת שנייה */if(force)d.force=true;
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){const w=r.warn;c.busy=0;cxRe();return ask('התאריך נופל ב'+w.kind+'. לקבוע את התזכורת בכל זאת? (אפשר גם לבחור בכרטיס תאריך אחר, למשל '+dShort(w.next)+')',()=>tpRem(c,mid,true),'כן, לקבוע')}
    c.ref=r&&r.id||''}

@@ -66,13 +66,21 @@ const whoL=w=>WHO[w]||'המערכת';
 /* תוצאה (סבב 2): res 'ok'|'fail' מהשרת; רשומה ישנה / פעולה בלי תוצאה – '' */
 const resOf=x=>x&&(x.res==='ok'||x.res==='fail')?x.res:'';
 const WHY={retries:'לא עובדה אחרי כמה ניסיונות',limit:'הגיע למגבלת ההודעות',send:'השליחה נכשלה','send-off':'השליחה נכשלה שוב – הכלל עבר לאישור ידני',watch:'מעקב המייל לא הופעל',
- 'google-error':'תקלה בחיבור ל-Google',stuck:'הזיהוי נתקע',error:'תקלה',exchange:'Google לא אישרה את החיבור','no-refresh':'Google לא נתנה הרשאה קבועה'};
+ 'google-error':'תקלה בחיבור ל-Google',stuck:'הזיהוי נתקע',error:'תקלה',exchange:'Google לא אישרה את החיבור','no-refresh':'Google לא נתנה הרשאה קבועה',
+ /* תיקון סבב 2: סיבות נפוצות נוספות (חשבוניות, ווצאפ, Google) – בלי "קוד: …" באנגלית */
+ file:'הקובץ לא נקרא',quota:'הגיע למגבלת השימוש בבינה המלאכותית',ai:'הזיהוי האוטומטי נכשל','resource-exhausted':'הגיע למגבלת שימוש',
+ unavailable:'השירות לא זמין כרגע',internal:'תקלה בשרת','deadline-exceeded':'עבר הזמן המוקצב','permission-denied':'אין הרשאה',unauthenticated:'נדרשת התחברות מחדש',
+ 'not-connected':'החשבון לא מחובר','maybe-sent':'לא ברור אם נשלח – כדאי לבדוק','no-tpl':'אין תבנית ווצאפ מאושרת','bad-to':'מספר או כתובת לא תקינים',
+ 'no-wa':'ווצאפ לא מחובר','no-wa-token':'ווצאפ לא מחובר',stopped:'השליחה האוטומטית עצורה','bad-link':'קישור למסמך לא תקין','bad-doc-link':'קישור למסמך לא תקין',
+ 'google-expired':'החיבור ל-Google פג','google-scope':'חסרה הרשאה ב-Google','google-not-configured':'Google לא הוגדר','no-google-key':'Google לא הוגדר'};
 const whyL=w=>{w=String(w||'');return !w?'':WHY[w]||'קוד: '+w};
 function resL(x){const r=resOf(x);if(r==='ok')return 'הצליח';if(r==='fail'){const w=Array.isArray(x.why)?x.why.join(', '):whyL(x.why);return 'נכשל'+(w?' – '+w:'')}return ''}
 /* sec_mlog דרך השרת (secLearn op:'log': {id,t,ch,st,to,ri,by,mine,whyL[]}) ← שורות יומן */
 function mlogRows(items){return (Array.isArray(items)?items:[]).filter(x=>x&&x.id&&x.t).map(x=>({id:'ml'+x.id,t:+x.t,act:'ml:'+(x.st||''),who:'auto',src:'mlog',
  title:(x.st==='fail'?'שליחה לבד נכשלה':'נשלח לבד')+' ב'+(x.ch==='mail'?'מייל':'ווצאפ')+(x.to?' ל'+x.to:''),note:(x.ri?'לפי הכלל: '+x.ri:'')+(x.by?' · בעל הכלל: '+x.by:''),
  res:x.st==='sent'?'ok':x.st==='fail'?'fail':'',why:Array.isArray(x.whyL)?x.whyL.filter(w=>typeof w==='string'):[]}))}
+/* תיקון סבב 2 (ליקוי 1): שליחה לבד לפי כלל נרשמת גם ב-sec_log (mrSend/mrFail עם ml = מזהה שורת sec_mlog) – שורת ה-mlog שכבר מופיעה לא מוצגת שוב */
+function mlDedup(srv,ml){const has=new Set((Array.isArray(srv)?srv:[]).filter(x=>x&&x.ml).map(x=>'ml'+x.ml));return (Array.isArray(ml)?ml:[]).filter(x=>!has.has(x.id))}
 function logFilter(L,f){f=f||{};const q=String(f.q||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
  return (Array.isArray(L)?L:[]).filter(x=>{
   if(f.type&&logType(x.act)!==f.type)return false;
@@ -89,7 +97,7 @@ function logQuery(o){o=o||{};const F=[],ff=(op,v)=>({fieldFilter:{field:{fieldPa
  const q={from:[{collectionId:'sec_log'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:o.n||50};
  if(F.length===1)q.where=F[0];else if(F.length>1)q.where={compositeFilter:{op:'AND',filters:F}};
  return q}
-const Core={ST,connOf,mergeAttention,logType,logTypes,logFilter,logQuery,whoL,resOf,resL,whyL,mlogRows};
+const Core={ST,connOf,mergeAttention,logType,logTypes,logFilter,logQuery,whoL,resOf,resL,whyL,mlogRows,mlDedup};
 if(typeof module==='object'&&module&&module.exports){module.exports=Core;return}
 root.SecHubCore=Core;
 
@@ -216,7 +224,7 @@ function nfLocal(){try{const o=JSON.parse(localStorage.getItem('lp-ntf-'+(SY&&SY
  return G.filter(g=>g&&g.t).map(g=>({id:'nf'+g.t,t:+g.t,act:'nf:'+(g.act||''),title:'התראה מ'+(g.s||'שולח')+(g.a?' ('+g.a+')':'')+' – '+(g.act==='ign'?'סומנה "התעלם"':g.act==='cap'?'ממתינה לאישור (הגעתי לתקרה)':'נפתחה משימה'+(g.un?' ל'+g.un:'')),who:'auto',note:'',src:'nf'}))}catch(e){return []}}
 function lgView(){const G=LG(),F={q:G.q,type:G.type,res:G.res,from:dayMs(G.from,0),to:dayMs(G.to,1)};
  const oldest=G.L.length&&G.more?G.L[G.L.length-1].t:0;
- const loc=Core.logFilter(nfLocal().concat(G.ml||[]).filter(x=>!oldest||x.t>=oldest),F);
+ const loc=Core.logFilter(nfLocal().concat(Core.mlDedup(G.L,G.ml)).filter(x=>!oldest||x.t>=oldest),F);
  const srv=Core.logFilter(G.L,F);
  return srv.concat(loc).sort((a,b)=>b.t-a.t)}
 function hlogH(){const G=LG();

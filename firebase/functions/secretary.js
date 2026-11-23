@@ -106,7 +106,9 @@ function mediaOf(snap) {
 // 23.11.2026 (גיטי, סבב 2): תוצאה ביומן – res: 'ok'|'fail', why: סיבה קצרה (קוד, עד 60 תווים) – רק בפעולות שליחה / חשבוניות / ניסיונות חוזרים.
 // נגזר כאן משם הפעולה (כל הקבצים כותבים דרך logData), או נשלח במפורש ב-extra.res / extra.why. רשומות ישנות – בלי השדות (האפליקציה מציגה "לא נרשמה").
 const LOG_FAIL = new Set(['sendFail', 'waFail', 'waErr', 'invErr', 'mailErr', 'mailWorkErr', 'autoFail', 'watchFail', 'gConnectFail', 'mrFail', 'mrOff', 'outLimit']);
-const LOG_OK = new Set(['send', 'autoSend', 'mailSend', 'mailAuto', 'mailMrAuto', 'ordSend', 'ordCfm', 'mrSend', 'waMrAuto', 'ordAuto', 'invOk', 'invAuto']);
+// תיקון סבב 2 (ליקוי 1): שליחה לבד לפי כלל אישי נרשמת גם כ-mailMrAuto/waMrAuto וגם כ-mrSend/mrFail (secretary-learn.js, באותה טרנזקציה עם sec_mlog).
+// התוצאה רק על mrSend/mrFail/mrOff, כדי שכל שליחה תיספר פעם אחת. arSend – שליחת מסמך ללקוח (lib/ar-send.js)
+const LOG_OK = new Set(['send', 'autoSend', 'mailSend', 'mailAuto', 'ordSend', 'ordCfm', 'mrSend', 'ordAuto', 'invOk', 'invAuto', 'arSend']);
 const LOG_WHY = { waFail: 'retries', mrFail: 'send', mrOff: 'send-off', outLimit: 'limit', watchFail: 'watch' };
 function logRes(act, extra) {
   const x = extra || {};
@@ -390,29 +392,36 @@ async function secPrefs(request) {
     const mid = typeof input.mid === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(input.mid) ? input.mid : null;
     const cid = typeof input.cid === 'string' && /^tp[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
     if (!mid || !cid || !['ok', 'no'].includes(input.st)) throw bad('bad-input', 'ערך לא תקין');
-    const ms = await db.doc(`sec_chat/${who.uid}/m/${mid}`).get();
-    const c = ms.exists && Array.isArray(ms.get('cards')) ? ms.get('cards').find((x) => x && x.k === 'tkp' && x.id === cid) : null;
-    if (!c) throw pre('not-found', 'הכרטיס לא נמצא');
-    if (c.st) return { ok: true, st: c.st, already: true };
-    let ref = '';
-    if (input.st === 'ok') {
-      const kind = input.kind === 'rem' ? 'rem' : 'task';
-      if (kind === 'task') {
+    // תיקון סבב 2 (הערות אבטחה 1–2): גם התזכורת חייבת להיות זו שנוצרה מהכרטיס הזה (sec<cid>, secCal add עם cid) – לא כל תזכורת של המנהל.
+    // הסוג – מה שהמנהל בחר בכרטיס (אפשר לשנות בעריכה), ונבדק מול מה שבאמת קיים במזהה של הכרטיס.
+    // הקריאה, הסימון והרישום ביומן – בטרנזקציה אחת (שתי לחיצות בו-זמנית לא רושמות שורה כפולה)
+    const mRef = db.doc(`sec_chat/${who.uid}/m/${mid}`);
+    const r = await db.runTransaction(async (tx) => {
+      const ms = await tx.get(mRef);
+      const cards = ms.exists && Array.isArray(ms.get('cards')) ? ms.get('cards') : [];
+      const c = cards.find((x) => x && x.k === 'tkp' && x.id === cid);
+      if (!c) throw pre('not-found', 'הכרטיס לא נמצא');
+      if (c.st) return { st: c.st, already: true };
+      const kind = input.st === 'ok' ? (input.kind === 'rem' ? 'rem' : 'task') : c.kind === 'rem' ? 'rem' : 'task';
+      let ref = '', patch;
+      if (input.st === 'ok') {
         ref = 'sec' + cid;
-        const ts = await db.doc('tasks/' + ref).get();
-        if (!ts.exists || ts.get('owner') !== who.uid) throw pre('not-done', 'המשימה לא נמצאה');
-      } else {
-        ref = typeof input.ref === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(input.ref) ? input.ref : '';
-        const cs = ref ? await db.doc('sec_cal/' + ref).get() : null;
-        if (!cs || !cs.exists || cs.get('by') !== who.uid || cs.get('rem') !== true) throw pre('not-done', 'התזכורת לא נמצאה');
-      }
-      await cardMark(db, b, who.uid, mid, cid, { st: 'ok', ref, kind });
-      b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'tkpOk', { tgt: ref, note: kind, res: 'ok' }));
-    } else {
-      await cardMark(db, b, who.uid, mid, cid, { st: 'no' });
-      b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'tkpNo', { tgt: mid, note: c.kind === 'rem' ? 'rem' : 'task' }));
-    }
-    out = { st: input.st, ref };
+        if (kind === 'task') {
+          const ts = await tx.get(db.doc('tasks/' + ref));
+          if (!ts.exists || ts.get('owner') !== who.uid) throw pre('not-done', 'המשימה לא נמצאה');
+        } else {
+          const cs = await tx.get(db.doc('sec_cal/' + ref));
+          if (!cs.exists || cs.get('by') !== who.uid || cs.get('rem') !== true) throw pre('not-done', 'התזכורת לא נמצאה');
+        }
+        patch = { st: 'ok', ref, kind };
+      } else patch = { st: 'no' };
+      let hit = false;
+      tx.update(mRef, { cards: cards.map((x) => (x && x.id === cid && !x.st && !hit ? ((hit = true), Object.assign({}, x, patch, { stAt: Date.now() })) : x)) });
+      tx.set(db.collection('sec_log').doc(), input.st === 'ok' ? logData(who.uid, 'mgr', 'tkpOk', { tgt: ref, note: kind }) : logData(who.uid, 'mgr', 'tkpNo', { tgt: mid, note: kind }));
+      return { st: input.st, ref };
+    });
+    if (r.already) return { ok: true, st: r.st, already: true };
+    out = { st: r.st, ref: r.ref };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);

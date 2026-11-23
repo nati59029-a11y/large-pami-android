@@ -744,11 +744,16 @@ describe('גיטי סבב 2: סיכום בוקר / ערב', () => {
       await d.doc(`b/${A}/sec_log/f1`).set({ t: IL(D + 'T11:00'), act: 'sendFail', who: 'auto', res: 'fail', why: 'x' });
       await d.doc(`b/${A}/sec_log/o1`).set({ t: IL(D + 'T11:05'), act: 'autoSend', who: 'auto', res: 'ok' });
       await d.doc(`b/${A}/sec_log/old`).set({ t: IL('2026-12-01T11:00'), act: 'sendFail', who: 'auto', res: 'fail' });
+      // תיקון סבב 2 (ליקוי 1): מייל אחד לפי כלל אישי (mailMrAuto + mrSend) ואישור כרטיס משימה (tkpOk) – לא מוסיפים ל"הצליחו"
+      const LD = require('../functions/secretary.js')._core.logData, at = (x, t) => Object.assign(x, { t: IL(D + t) });
+      await d.doc(`b/${A}/sec_log/r1`).set(at(LD('', 'auto', 'mailMrAuto', { tgt: 'i1', note: 'r1:b' }), 'T11:10'));
+      await d.doc(`b/${A}/sec_log/r2`).set(at(LD(M1, 'auto', 'mrSend', { tgt: 'i1', note: 'r1' }), 'T11:10'));
+      await d.doc(`b/${A}/sec_log/k1`).set(at(LD(M1, 'mgr', 'tkpOk', { tgt: 'sectp1', note: 'task' }), 'T11:20'));
     });
     await run(D + 'T18:05'); await run(D + 'T18:20');
     const pm = byKey(await notes(M1), /^pm:/);
     assert.equal(pm.length, 1);
-    assert.match(pm[0].body, /מה נעשה היום: 1 משימות בוצעו; פעולות שליחה וחשבוניות: 1 הצליחו, 1 נכשלו/);
+    assert.match(pm[0].body, /מה נעשה היום: 1 משימות בוצעו; פעולות שליחה וחשבוניות: 2 הצליחו, 1 נכשלו/, 'autoSend + מייל אחד לפי כלל (פעם אחת); tkpOk לא נספר');
     assert.ok((await coll(`b/${A}/sec_log`)).some((l) => l.act === 'daySum'), 'נרשם ביומן');
     await run('2026-12-04T08:10'); // שישי
     assert.equal(byKey(await notes(M1), /^am:2026-12-04/).length, 0, 'שישי – לא');

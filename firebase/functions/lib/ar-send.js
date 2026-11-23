@@ -35,7 +35,8 @@ const TEXT_MAX = 4000;
 
 const reasonOf = (e) => String((e && e.details && e.details.reason) || (e && typeof e.code === 'string' && e.code) || 'error').slice(0, 40);
 const rec = (ch, to, at, ok, extra) => Object.assign({ ch, to: String(to || '').slice(0, 254), at, ok }, extra || {});
-const logW = (by, act, extra) => Object.assign({ t: Date.now(), by: String(by || ''), who: 'ar', act, ch: 'wa' }, extra || {});
+// תיקון סבב 2 (ליקוי 2): תוצאה ביומן (res/why) כמו בשאר הפעולות – דרך logRes של secretary.js (נטען בעת הצורך, בלי תלות מעגלית)
+const logW = (by, act, extra) => Object.assign({ t: Date.now(), by: String(by || ''), who: 'ar', act, ch: 'wa' }, extra || {}, require('../secretary')._core.logRes(act, extra) || {});
 
 // מונה היציאות היומי של העסק – אותו מסמך ואותם שדות כמו countOut ב-secretary-wa.js
 async function countOut(db, now) {
