@@ -308,3 +308,23 @@ describe('התראת איחור לעובד – lib/tk-late.js', () => {
     assert.equal(typeof R.lateAll, 'function');
   });
 });
+
+describe('התראת איחור – מגבלת זמן וסדר מסתובב (recurring.js)', () => {
+  const R = require(path.join(FN, 'recurring.js'))._core;
+  const N = TK.zoned(2026, 10, 22, 10, 0); // ראשון 10:00 – לא שקט
+  it('rotate: כל עסק מקבל תור להיות ראשון, אף אחד לא נשמט', () => {
+    assert.deepEqual(R.rotate(['a', 'b', 'c'], 0), ['a', 'b', 'c']);
+    assert.deepEqual(R.rotate(['a', 'b', 'c'], 1), ['b', 'c', 'a']);
+    assert.deepEqual(R.rotate(['a', 'b', 'c'], 5), ['c', 'a', 'b']);
+    assert.deepEqual(R.rotate([], 3), []);
+    const firsts = new Set([0, 1, 2].map((k) => R.rotate(['a', 'b', 'c'], k)[0]));
+    assert.equal(firsts.size, 3);
+  });
+  it('lateAll: פחות מ-25 שניות לסוף הריצה – נעצר לפני כל קריאה/סימון/שליחה', async () => {
+    assert.equal(R.LATE_STOP, 25000);
+    let sent = 0;
+    const out = await R.lateAll({ now: N, deadline: 1000 + 24000, clock: () => 1000, send: async () => { sent++; return []; } });
+    assert.deepEqual(out, { timeout: true });
+    assert.equal(sent, 0);
+  });
+});

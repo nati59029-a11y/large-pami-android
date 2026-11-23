@@ -95,6 +95,7 @@ async function runAll(opts) {
 
 // ---------- התראה לעובד על משימה שבאיחור (22.11.2026) ----------
 const LATE_EVERY = 3; // ריצה אחת מכל 3 (הפונקציה רצה כל 5 דקות) = פעם ב-15 דקות
+const LATE_STOP = 25000; // עוצרים כשנשארו פחות מ-25 שניות לריצה
 const lateSlot = (now) => Math.floor(now / 300000) % LATE_EVERY === 0;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -112,7 +113,9 @@ async function getMany(db, paths) {
 }
 
 // עסק אחד: משימות פתוחות ← מועמדות ← סימונים ← עובדים פעילים ← סימון ← שליחה. מחזיר { late, users, sent }
-async function lateBiz(db, biz, sup, now, send) {
+// left() – כמה זמן (ms) נשאר לריצה; פחות מ-LATE_STOP – עוצרים בלי לסמן ולשלוח עוד (מה שלא סומן יישלח בריצה הבאה)
+async function lateBiz(db, biz, sup, now, send, left) {
+  const tl = typeof left === 'function' ? left : () => Infinity;
   const prefix = T.bizPrefix(biz);
   const snap = await db.collection(prefix + 'tasks').where('st', '==', 'open').get();
   const cand = snap.docs.map((d) => Object.assign({}, d.data() || {}, { id: d.id })).filter((t) => LT.lateDl(t, now));
@@ -124,18 +127,18 @@ async function lateBiz(db, biz, sup, now, send) {
   const live = new Set(uids.filter((u, i) => ss[i].exists && ss[i].get('active') === true));
   const P = LT.pick(cand, marks, now, (u) => live.has(u));
   if (!P.users.length) return { late: cand.length, users: 0, sent: 0 };
-  // סימון לפני השליחה: "פעם אחת" גובר על "בטוח הגיע" (כשל שליחה לא ישלח שוב). arrayUnion – בטוח גם בריצה כפולה
-  for (let i = 0; i < P.marks.length; i += 400) {
-    const b = db.batch();
-    for (const m of P.marks.slice(i, i + 400)) b.set(db.doc(prefix + 'fn_rate/' + LT.markId(m.id)), { t: now, u: FieldValue.arrayUnion(...m.u) }, { merge: true });
-    await b.commit();
-  }
   const RM = require('./secretary-remind')._core;
-  let sent = 0;
+  let sent = 0, done = 0, stop = false;
   await T.runInBiz({ bizId: biz.bizId, prefix }, async () => {
     const tdb = T.tdb();
     for (const { uid, tasks } of P.users) {
+      if (tl() < LATE_STOP) { stop = true; break; }
       try {
+        // סימון לכל עובד ממש לפני השליחה אליו: "פעם אחת" גובר על "בטוח הגיע" (כשל שליחה לא ישלח שוב). arrayUnion – בטוח גם בריצה כפולה
+        const b = db.batch();
+        for (const t of tasks) b.set(db.doc(prefix + 'fn_rate/' + LT.markId(t.id)), { t: now, u: FieldValue.arrayUnion(uid) }, { merge: true });
+        await b.commit();
+        done++;
         const toks = await RM.tokensOf(tdb, uid);
         if (!toks.length) continue;
         if (!send) { sent++; continue; } // אמולטור בלי שליחה מדומה – רק ספירה
@@ -147,22 +150,36 @@ async function lateBiz(db, biz, sup, now, send) {
       }
     }
   });
-  return { late: cand.length, users: P.users.length, sent };
+  return Object.assign({ late: cand.length, users: done, sent }, stop ? { stop: 1 } : {});
 }
 
-// כל העסקים עם תוספת tasks (ולארג' פעמי במצב legacy – בשורש). opts.now / opts.send – לבדיקות. מחזיר { quiet } או { [bizId]: {...} }
+// סדר מסתובב: מתחילים מאינדקס לפי מונה הריצה (k), כדי שעסק בסוף הרשימה לא יידחה תמיד כשהזמן נגמר
+function rotate(arr, k) {
+  const n = arr.length;
+  if (!n) return [];
+  const i = ((Math.floor(+k || 0) % n) + n) % n;
+  return arr.slice(i).concat(arr.slice(0, i));
+}
+
+// כל העסקים עם תוספת tasks (ולארג' פעמי במצב legacy – בשורש). opts.now / opts.send – לבדיקות;
+// opts.deadline – הרגע (ms, לפי opts.clock || Date.now) שבו הריצה חייבת להסתיים: כשנשארו פחות מ-LATE_STOP – עוצרים.
+// מחזיר { quiet } / { timeout } או { [bizId]: {...} } (עסק שלא הגענו אליו – { stop: 1 })
 async function lateAll(opts) {
   const o = opts || {};
   const now = o.now || Date.now();
+  const clock = typeof o.clock === 'function' ? o.clock : Date.now;
+  const left = () => (Number.isFinite(o.deadline) ? o.deadline - clock() : Infinity);
   if (LT.quiet(now)) return { quiet: true };
+  if (left() < LATE_STOP) return { timeout: true };
   const db = getFirestore();
   const send = o.send || (process.env.FUNCTIONS_EMULATOR === 'true' ? null : fcmLate);
   const sa = await db.collection('superadmins').get();
   const sup = new Set(sa.docs.map((d) => d.id).filter((u) => ID_RE.test(u))); // מנהל־על לא מקבל התראה כעובד (כמו tasks-push.js)
   const out = {};
-  for (const biz of await T.bizzesWith('tasks')) {
+  for (const biz of rotate(await T.bizzesWith('tasks'), Math.floor(now / 900000))) { // מונה הריצה = מספר הרבע־שעה
     if (biz.status !== 'active' || !biz.features.tasks) { out[biz.bizId] = { skipped: 'inactive' }; continue; }
-    try { out[biz.bizId] = await lateBiz(db, biz, sup, now, send); } catch (e) {
+    if (left() < LATE_STOP) { out[biz.bizId] = { stop: 1 }; continue; }
+    try { out[biz.bizId] = await lateBiz(db, biz, sup, now, send, left); } catch (e) {
       logger.error('recurringTasks: late biz failed', { biz: biz.bizId, name: e && e.name, code: e && e.code });
       out[biz.bizId] = { error: 1 };
     }
@@ -170,17 +187,18 @@ async function lateAll(opts) {
   return out;
 }
 
-exports.recurringTasks = onSchedule({ region: LEGACY_REGION, schedule: 'every 5 minutes', timeZone: TK.TZ, timeoutSeconds: 120, memory: '256MiB' }, async () => {
+const TIMEOUT_S = 120;
+exports.recurringTasks = onSchedule({ region: LEGACY_REGION, schedule: 'every 5 minutes', timeZone: TK.TZ, timeoutSeconds: TIMEOUT_S, memory: '256MiB' }, async () => {
+  const t0 = Date.now(); // runAll ו-lateAll חולקים את מגבלת הזמן של הריצה
   const out = await runAll();
   if (Object.values(out).some((r) => r.created || r.error)) logger.info('recurringTasks', out);
   // 22.11.2026: התראות איחור לעובדים – פעם ב-15 דקות. כשל כאן לא משפיע על פתיחת המשימות הקבועות
-  const now = Date.now();
-  if (!lateSlot(now)) return;
+  if (!lateSlot(t0)) return;
   try {
-    const lt = await lateAll({ now });
-    if (Object.values(lt).some((r) => r && (r.sent || r.error))) logger.info('recurringTasks: late', lt);
+    const lt = await lateAll({ now: Date.now(), deadline: t0 + TIMEOUT_S * 1000 });
+    if (lt.timeout || Object.values(lt).some((r) => r && (r.sent || r.error || r.stop))) logger.info('recurringTasks: late', lt);
   } catch (e) { logger.error('recurringTasks: late failed', { name: e && e.name, code: e && e.code }); }
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { runAll, runRule, taskDoc, lateAll, lateBiz, lateSlot, LATE_EVERY } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { runAll, runRule, taskDoc, lateAll, lateBiz, lateSlot, LATE_EVERY, LATE_STOP, rotate } });
