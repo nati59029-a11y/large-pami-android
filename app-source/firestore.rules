@@ -80,10 +80,18 @@ service cloud.firestore {
         && request.resource.data.get('by', '') is string && request.resource.data.get('by', '').size() <= 100
         && request.resource.data.get('at', 0) is int;
     }
+    // 23.11.2026: cfg/act = מתג יומן השימוש { on (bool), by? (שם המנהל, עד 100), at? (זמן) }. קריאה (get) – הצוות (כמו cfg/main), כתיבה – מנהל.
+    function actCfgOk() {
+      return request.resource.data.keys().hasAll(['on'])
+        && request.resource.data.keys().hasOnly(['on', 'by', 'at'])
+        && request.resource.data.on is bool
+        && request.resource.data.get('by', '') is string && request.resource.data.get('by', '').size() <= 100
+        && request.resource.data.get('at', 0) is int;
+    }
     match /cfg/{docId} {
       allow get: if isStaff() && (docId != 'zc' || isManager());
       allow list: if isManager();
-      allow create, update: if lpW() && (isManager()) && (docId != 'zc' || zcCfgOk());
+      allow create, update: if lpW() && (isManager()) && (docId != 'zc' || zcCfgOk()) && (docId != 'act' || actCfgOk());
       allow delete: if lpW() && (isManager());
     }
 
@@ -816,6 +824,9 @@ service cloud.firestore {
       }
 
       // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
+      // 23.11.2026 (וי קריאה, ביטול השתקה): קריאה – כל מי שרשאי לקרוא את הקבוצה (גם חבר אחר, בשביל ✓✓). mu מותר רק false
+      // (ההשתקה בוטלה; האפליקציה מחזירה mu=true ל-false). חדשים (רשות): d (התקבל עד, ms, עד עכשיו + 2 דק'), u (זמן הכתיבה, זמן אמת),
+      // n (השם, isMyName, עד 100). ההערות למטה על "רק הבעלים והמנהל" ועל mu ב-ao – היסטוריה (עד 22.11).
       // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
       // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
       // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
@@ -826,14 +837,59 @@ service cloud.firestore {
             && (isManager() || (isActiveEmployee() && request.auth.uid in g().mem));
         }
         function rOk(d) {
-          return d.keys().hasOnly(['t', 'mu'])
+          return d.keys().hasOnly(['t', 'mu', 'd', 'u', 'n'])
             && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
-            && (!d.keys().hasAny(['mu']) || d.mu is bool);
+            && (!d.keys().hasAny(['mu']) || d.mu == false)
+            && (!d.keys().hasAny(['d']) || (d.d is int && d.d >= 0 && d.d <= request.time.toMillis() + 120000))
+            && (!d.keys().hasAny(['u']) || nowOk(d.u))
+            && (!d.keys().hasAny(['n']) || (d.n is string && d.n.size() <= 100 && isMyName(d.n)));
         }
-        allow read: if (canRead() && (isSelf(uid) || isManager()));
+        allow read: if (canRead());
         allow create, update: if lpW() && (isSelf(uid) && canRead() && rOk(nw()));
         allow delete: if lpW() && (isManager());
       }
+    }
+
+    // ---------- נוכחות (pres) ויומן שימוש (act) – 23.11.2026 ----------
+    // pres/{uid}: { on (bool), t (זמן אמת), n? (שם אמיתי: staff/{uid}.name, או isMyName – מנהל בלי staff), e? (תחילית המייל, isMyName) }.
+    // קריאה – הצוות. כתיבה – רק הבעלים, אם הוא עובד פעיל או מנהל. מחיקה – אף אחד. מחובר = on && t לפני פחות מ-5 דקות (באפליקציה).
+    match /pres/{uid} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function nmOk(n) {
+        return n is string && n.size() <= 100
+          && (isMyName(n) || (exists(/databases/$(database)/documents/staff/$(uid)) && get(/databases/$(database)/documents/staff/$(uid)).data.get('name', '') == n));
+      }
+      function presOk(d) {
+        return d.keys().hasAll(['on', 't']) && d.keys().hasOnly(['on', 't', 'n', 'e'])
+          && d.on is bool && nowOk(d.t)
+          && (!d.keys().hasAny(['n']) || nmOk(d.n))
+          && (!d.keys().hasAny(['e']) || isMyName(d.e));
+      }
+      allow read: if isStaff();
+      allow create, update: if lpW() && (isSelf(uid) && isStaff() && presOk(nw()));
+      allow delete: if false;
+    }
+
+    // act/{uid}_{YYYY-MM-DD}: { uid, n (השם, עד 100), day, s (כניסות-יציאות, עד 300), v (מסכים, עד 3000), t (זמן אמת) }.
+    // כתיבה – רק עובד פעיל שאינו מנהל, רק המסמך שלו (המזהה = uid + '_' + day). קריאה (get + list) – מנהל בלבד. מחיקה – אף אחד (שמירה לתמיד).
+    // הפריטים שבתוך s ו-v לא נבדקים אחד-אחד (בלי לולאות בכללים) – רק סוג וגודל הרשימה. המתג cfg/act נאכף באפליקציה, לא כאן.
+    match /act/{aid} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function actOk(d) {
+        return d.keys().hasAll(['uid', 'n', 'day', 's', 'v', 't']) && d.keys().hasOnly(['uid', 'n', 'day', 's', 'v', 't'])
+          && d.uid == request.auth.uid
+          && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && aid == d.uid + '_' + d.day
+          && d.n is string && d.n.size() <= 100
+          && d.s is list && d.s.size() <= 300
+          && d.v is list && d.v.size() <= 3000
+          && nowOk(d.t);
+      }
+      allow get, list: if isManager();
+      allow create, update: if lpW() && (isActiveEmployee() && !isManager() && actOk(nw()));
+      allow delete: if false;
     }
 
     // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 ----------
@@ -1926,7 +1982,7 @@ service cloud.firestore {
       match /cfg/{docId} {
         allow get: if bStaff() && (docId != 'zc' || bMgr());
         allow list: if bMgr();
-        allow create, update: if bMgr() && (docId != 'zc' || zcCfgOk());
+        allow create, update: if bMgr() && (docId != 'zc' || zcCfgOk()) && (docId != 'act' || actCfgOk());
         allow delete: if bMgr();
       }
 
@@ -2601,6 +2657,9 @@ service cloud.firestore {
         }
 
         // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
+        // 23.11.2026 (וי קריאה, ביטול השתקה): קריאה – כל מי שרשאי לקרוא את הקבוצה (גם חבר אחר, בשביל ✓✓). mu מותר רק false
+        // (ההשתקה בוטלה; האפליקציה מחזירה mu=true ל-false). חדשים (רשות): d (התקבל עד, ms, עד עכשיו + 2 דק'), u (זמן הכתיבה, זמן אמת),
+        // n (השם, isMyName, עד 100). ההערות למטה על "רק הבעלים והמנהל" ועל mu ב-ao – היסטוריה (עד 22.11).
         // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
         // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
         // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
@@ -2611,14 +2670,59 @@ service cloud.firestore {
               && (bMgr() || (bEmp() && request.auth.uid in g().mem));
           }
           function rOk(d) {
-            return d.keys().hasOnly(['t', 'mu'])
+            return d.keys().hasOnly(['t', 'mu', 'd', 'u', 'n'])
               && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
-              && (!d.keys().hasAny(['mu']) || d.mu is bool);
+              && (!d.keys().hasAny(['mu']) || d.mu == false)
+              && (!d.keys().hasAny(['d']) || (d.d is int && d.d >= 0 && d.d <= request.time.toMillis() + 120000))
+              && (!d.keys().hasAny(['u']) || nowOk(d.u))
+              && (!d.keys().hasAny(['n']) || (d.n is string && d.n.size() <= 100 && isMyName(d.n)));
           }
-          allow read: if feat('groups') && (canRead() && (isSelf(uid) || bMgr()));
+          allow read: if feat('groups') && (canRead());
           allow create, update: if feat('groups') && (isSelf(uid) && canRead() && rOk(nw()));
           allow delete: if feat('groups') && (bMgr());
         }
+      }
+
+      // ---------- נוכחות (pres) ויומן שימוש (act) – 23.11.2026 – העתק של הכלל בשורש (בלי מתג תוספת), עם התפקידים של העסק ----------
+      // pres/{uid}: { on (bool), t (זמן אמת), n? (שם אמיתי: staff/{uid}.name, או isMyName – מנהל בלי staff), e? (תחילית המייל, isMyName) }.
+      // קריאה – הצוות. כתיבה – רק הבעלים, אם הוא עובד פעיל או מנהל. מחיקה – אף אחד. מחובר = on && t לפני פחות מ-5 דקות (באפליקציה).
+      match /pres/{uid} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function nmOk(n) {
+          return n is string && n.size() <= 100
+            && (isMyName(n) || (exists(/databases/$(database)/documents/b/$(bizId)/staff/$(uid)) && get(/databases/$(database)/documents/b/$(bizId)/staff/$(uid)).data.get('name', '') == n));
+        }
+        function presOk(d) {
+          return d.keys().hasAll(['on', 't']) && d.keys().hasOnly(['on', 't', 'n', 'e'])
+            && d.on is bool && nowOk(d.t)
+            && (!d.keys().hasAny(['n']) || nmOk(d.n))
+            && (!d.keys().hasAny(['e']) || isMyName(d.e));
+        }
+        allow read: if bStaff();
+        allow create, update: if (isSelf(uid) && bStaff() && presOk(nw()));
+        allow delete: if false;
+      }
+
+      // act/{uid}_{YYYY-MM-DD}: { uid, n (השם, עד 100), day, s (כניסות-יציאות, עד 300), v (מסכים, עד 3000), t (זמן אמת) }.
+      // כתיבה – רק עובד פעיל שאינו מנהל, רק המסמך שלו (המזהה = uid + '_' + day). קריאה (get + list) – מנהל בלבד. מחיקה – אף אחד (שמירה לתמיד).
+      // הפריטים שבתוך s ו-v לא נבדקים אחד-אחד (בלי לולאות בכללים) – רק סוג וגודל הרשימה. המתג cfg/act נאכף באפליקציה, לא כאן.
+      match /act/{aid} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function actOk(d) {
+          return d.keys().hasAll(['uid', 'n', 'day', 's', 'v', 't']) && d.keys().hasOnly(['uid', 'n', 'day', 's', 'v', 't'])
+            && d.uid == request.auth.uid
+            && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && aid == d.uid + '_' + d.day
+            && d.n is string && d.n.size() <= 100
+            && d.s is list && d.s.size() <= 300
+            && d.v is list && d.v.size() <= 3000
+            && nowOk(d.t);
+        }
+        allow get, list: if bMgr();
+        allow create, update: if (bEmp() && !bMgr() && actOk(nw()));
+        allow delete: if false;
       }
 
       // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 – העתק של הכלל בשורש (תוספת 'suppliers'), עם התפקידים של העסק ----------

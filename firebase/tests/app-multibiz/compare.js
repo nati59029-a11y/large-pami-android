@@ -24,8 +24,21 @@ if (mode === 'legacy') {
   const tkT = (r) => r.method === 'GET' && /\/documents\/(b\/[^/]+\/)?tkt$/.test(new URL(r.url).pathname);
   /* סבב 3 (קבוצות, #122): אחרי שנכנס ל-main גם main שולח את שאילתת grp של העובד – מסננים משני הצדדים (18.11.2026); בענף נבדקת בחריג הצר למטה */
   const grT = (r) => r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && /"collectionId":"grp"/.test(r.body || '');
-  const A = A0.filter((r) => !ident(r) && !zcT(r) && !tkT(r) && !grT(r));
-  const idn = B.filter(ident); let B2 = B.filter((r) => !ident(r));
+  /* יומן פעילות ונוכחות (act-log.js) וקבוצות (groups.js), 23.11.2026: בקשות חדשות ומכוונות, מסוננות משני הצדדים בדיוק כמו קריאות הזיהוי:
+     GET של pres/{uid} ו-pres (רשימה), act/{uid}_{day}, cfg/act, staff/{uid} (שם עצמי) ו-staff (רשימת NM אצל מנהל); וכל שיטה על grp/{gid}/r (קריאה/כתיבה).
+     כתיבת :commit מסוננת רק אם כל המסמכים בגוף הם pres/act/cfg/act/grp/.../r. נתיבים אחרים (למשל staff אחר, grp עצמו) לא מסוננים */
+  const NMP = '(b/[^/]+/)?';
+  const nmGet = new RegExp('/documents/' + NMP + '(pres(/[^/]+)?|act/[^/]+|cfg/act|staff(/[^/]+)?)$');
+  const nmAny = new RegExp('/documents/' + NMP + 'grp/[^/]+/r(/[^/]+)?$');
+  const nmDoc = new RegExp('/documents/' + NMP + '(pres/[^/]+|act/[^/]+|cfg/act|grp/[^/]+/r/[^/]+)$');
+  const nmT = (r) => { const p = new URL(r.url).pathname;
+    if (r.method === 'GET') return nmGet.test(p) || nmAny.test(p);
+    if (r.method === 'POST' && /:commit$/.test(p)) { try { const names = JSON.stringify(JSON.parse(r.body)).match(/projects\/[^"]*?\/documents\/[^"]*/g) || []; return names.length > 0 && names.every((x) => nmDoc.test(x)); } catch (e) { return false; } }
+    return nmAny.test(p) || (['PATCH', 'PUT', 'DELETE'].includes(r.method) && nmDoc.test(p)); };
+  const nmA = A0.filter(nmT).length, nmB = B.filter(nmT).length;
+  console.log(`יומן פעילות/נוכחות/קבוצות (מסוננות משני הצדדים): main ${nmA}, ענף ${nmB}`);
+  const A = A0.filter((r) => !ident(r) && !zcT(r) && !tkT(r) && !grT(r) && !nmT(r));
+  const idn = B.filter(ident); let B2 = B.filter((r) => !ident(r) && !nmT(r));
   /* סבב 2 (17.11.2026): סף פער מזומן משותף – המנהל קורא את cfg/zc (GET בלבד). חריג צר: רק GET של המסמך הזה, לכל היותר פעם אחת למשתמש, ורק אצל מנהל */
   const zcR = B2.filter(zcT); B2 = B2.filter((r) => !zcT(r));
   if (zcR.some((r) => r.who !== 'm@x.co') || new Set(zcR.map((r) => r.who + '|' + r.step)).size !== zcR.length) { console.log('נכשל: קריאת cfg/zc לא צפויה', zcR.map((r) => r.who + '|' + r.step)); fail++; }

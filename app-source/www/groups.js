@@ -1,10 +1,11 @@
 /* קבוצות התכתבות (17.11.2026, סבב 3, חבילה ב'). נטען אחרי index.html. הכול מאחורי bzF('groups'); בלי הקובץ הזה האפליקציה נשארת כמו קודם.
    נתונים (חוזה): grp/{gid} {name,mem[],ao,md,by,t,last{txt,byN,t,k}}, grp/{gid}/m/{mid} {by,byN,t,k:t|img|vid,txt,vp,vs,vb},
-   תמונה grp/{gid}/m/{mid}/p/1 {img,t,uid} (אותה דחיסה ואותו דפוס כמו תמונות בבקשות), מצב קריאה grp/{gid}/r/{uid} {t,mu}.
+   תמונה grp/{gid}/m/{mid}/p/1 {img,t,uid} (אותה דחיסה ואותו דפוס כמו תמונות בבקשות), מצב קריאה grp/{gid}/r/{uid} {t,d,u,n,mu}: t=נקרא עד, d=התקבל עד, u=זמן כתיבה, n=תחילית מייל, mu רק false (השתקה בוטלה). נוכחות pres/{uid} {on,t,n,e}.
    סרטון: Storage grpv/{gid}/{mid} (בעסק b: b/{bizId}/grpv/...), עד 60 שניות ו-30MB; נמחק בשרת אחרי 90 יום (ההודעה נשארת).
    ה-last וההתראות נכתבים בשרת (עובד לא יכול לכתוב ל-grp/{gid}). 403 ברשימה = שרת ישן ← "הקבוצות יופעלו בקרוב".
    תוספת 19.11: הודעה יכולה לכלול re {mid,txt,byN,k} (תשובה) ו-fw (הועברה). סימונים (אימוג'י): grp/{gid}/x/{mid}_{uid} {mid,uid,byN,e,t}, e='' = בוטל.
    תפריט ⋯ לכל הודעה (לכולם): סימון, תשובה, שיתוף מחוץ לאפליקציה, העברה לקבוצה אחרת, שמירה בגלריה; למנהל גם הצמדה ומחיקה.
+   וי (23.11): ✓ נשמר, ✓✓ אפור כולם d>=t ההודעה, ✓✓ כחול כולם t>=t ההודעה; 403 בכתיבה/קריאה של r = חוזרים ל-t בלבד / ✓ בלבד.
    מסכים: V.gr (רשימה), V.grc (שיחה), V.grs (הגדרות מנהל). אין כאן שום דבר שנשמר במכשיר: הכול בזיכרון. */
 (function(){'use strict';
 if(typeof V==='undefined'||typeof fsx!=='function'||typeof bzF!=='function')return;
@@ -21,7 +22,7 @@ const dur=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(
 const qrun=async(parent,sq)=>{const r=await fsx((parent||'')+':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>x.document)};
 const tF=(op,v)=>({fieldFilter:{field:{fieldPath:'t'},op,value:iv(v)}});
 const pOf=p=>p&&typeof p==='object'&&idOk(String(p.mid||''))?{mid:String(p.mid),txt:String(p.txt||'').slice(0,120),byN:String(p.byN||''),t:+p.t||0,k:String(p.k||'t')}:null;
-const gOf=d=>{const f=fvj({mapValue:d})||{},l=f.last&&typeof f.last==='object'?f.last:null;return{id:idOf(d),name:String(f.name||'').slice(0,60),mem:Array.isArray(f.mem)?f.mem.map(String):[],ao:f.ao===true,md:f.md===true,t:+f.t||0,last:l?{txt:String(l.txt||''),byN:String(l.byN||''),t:+l.t||0,k:String(l.k||'t')}:null,rt:0,mu:false,n:0,np:false,pin:pOf(f.pin)}};
+const gOf=d=>{const f=fvj({mapValue:d})||{},l=f.last&&typeof f.last==='object'?f.last:null;return{id:idOf(d),name:String(f.name||'').slice(0,60),mem:Array.isArray(f.mem)?f.mem.map(String):[],ao:f.ao===true,md:f.md===true,t:+f.t||0,last:l?{txt:String(l.txt||''),byN:String(l.byN||''),t:+l.t||0,k:String(l.k||'t')}:null,rt:0,rd:0,muw:false,n:0,np:false,pin:pOf(f.pin)}};
 const reOf=r=>r&&typeof r==='object'&&idOk(String(r.mid||''))?{mid:String(r.mid),txt:String(r.txt||'').slice(0,120),byN:String(r.byN||'').slice(0,100),k:r.k==='img'||r.k==='vid'?r.k:'t'}:null;
 const mOf=d=>{const f=fvj({mapValue:d})||{};return{id:idOf(d),by:String(f.by||''),byN:String(f.byN||''),t:+f.t||0,k:f.k==='img'||f.k==='vid'?f.k:'t',txt:String(f.txt||''),vp:String(f.vp||''),vs:+f.vs||0,vb:+f.vb||0,re:reOf(f.re),fw:f.fw===true}};
 /* סימונים: רשימה קבועה (זהה לכללי השרת) */
@@ -30,8 +31,11 @@ const mSum=m=>m.k==='img'?'📷 תמונה'+(m.txt?' '+m.txt:''):m.k==='vid'?'�
 const cut120=t=>String(t||'').replace(/\s+/g,' ').trim().slice(0,120);
 const canSend=g=>!!g&&(fbAdmin()||!g.ao);
 const gGet=id=>(GR.L||[]).find(g=>g.id===id)||(GR.c&&GR.c.g&&GR.c.g.id===id?GR.c.g:null);
-const lastTx=g=>{const l=g.last;if(!l)return'אין הודעות עדיין';const t=l.k==='img'?'📷 תמונה':l.k==='vid'?'🎬 סרטון':l.txt;return(l.byN?l.byN+': ':'')+t};
-const recount=()=>{GR.n=(GR.L||[]).reduce((a,g)=>a+(g.mu?0:g.n),0)};
+const lastTx=g=>{const l=g.last;if(!l)return'אין הודעות עדיין';const t=l.k==='img'?'📷 תמונה':l.k==='vid'?'🎬 סרטון':l.txt;return(l.byN?nmP(l.byN)+': ':'')+t};
+const recount=()=>{GR.n=(GR.L||[]).reduce((a,g)=>a+g.n,0)};
+/* שם אמיתי לתצוגה בלבד (NM מ-act-log.js); בלי NM – הערך השמור */
+const nm=(uid,byN)=>{try{return (window.NM&&(NM.byUid(uid)||NM.byPfx(byN)))||byN||''}catch(e){return byN||''}};
+const nmP=byN=>nm('',byN);
 
 /* ---- עיצוב: רק משתני ערכת הנושא ---- */
 const st=document.createElement('style');st.textContent=`
@@ -79,10 +83,20 @@ body.grc .bar,body.grc .wbar{display:none!important}body.grc main{padding-bottom
 .gr-sr mark{background:var(--acc2);color:var(--ink);border-radius:3px}
 .gr-sth{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;display:inline-flex;align-items:center;justify-content:center;background:var(--line);font-size:1.2rem}
 .gr-circ.rec{background:var(--neg,#c0392b);color:#fff;border:0;animation:grpls 1.2s infinite}@keyframes grpls{50%{opacity:.6}}
+.gr-b{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:transform .15s}
+.gr-tk{display:inline-block;min-height:0;min-width:0;height:auto;padding:0 0 0 4px;margin-inline-start:4px;border:0;background:none;color:var(--mut);font-size:.78rem;font-weight:800;cursor:pointer;vertical-align:baseline}.gr-tk.s3{color:#3aa8ff}
+.gr-pr{display:flex;gap:8px;overflow-x:auto;margin-bottom:8px;padding-bottom:2px;-webkit-overflow-scrolling:touch}.gr-pr:empty{display:none}
+.gr-pc{flex:none;display:inline-flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:3px 10px;font-size:.78rem;white-space:nowrap;color:var(--ink)}.gr-pc small{color:var(--mut);font-size:.7rem}
+.gr-pc i{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none}.gr-pc i.on{background:#2ecc71}
+.gr-emp{position:fixed;z-index:60;display:flex;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.45)}
+.gr-emp button{min-height:0;min-width:0;width:38px;height:38px;font-size:1.4rem;background:none;border:0;padding:0;cursor:pointer;border-radius:50%}
 .gr-rebar{display:flex;align-items:center;gap:8px;margin-bottom:6px}.gr-rebar .gr-q{flex:1;margin:0;cursor:default}
 `;document.head.appendChild(st);
 
 /* ---- רשימה: קבוצות, מצב קריאה ומונה לא-נקרא (שאילתה מוגבלת, רק לקבוצה שההודעה האחרונה שלה חדשה מהקריאה) ---- */
+/* התקבל עד: כותבים d,u,n (ו-mu:false אם היה true) בלי GET נוסף; 403 = שרת ישן, ממשיכים בלי */
+function rdPut(g,uid){const fl={d:iv(Math.max(g.rd||0,g.rt||0,g.last?g.last.t:0)),u:iv(Date.now()),n:sv(fbBy().slice(0,100))};if(g.muw)fl.mu=bv(false);
+ fsx('/grp/'+g.id+'/r/'+uid+'?'+Object.keys(fl).map(k=>'updateMask.fieldPaths='+k).join('&'),{method:'PATCH',body:JSON.stringify({fields:fl})}).then(()=>{g.rd=+fl.d.integerValue;g.muw=false}).catch(e=>{if(e&&e.code===403)GR.rdOff=1})}
 async function grLoad(){
  if(GR.busy||!on())return;GR.busy=1;GR.err='';const uid=SY.uid;let ch=0;
  try{
@@ -91,7 +105,8 @@ async function grLoad(){
   else docs=await qrun('',{from:[{collectionId:'grp'}],where:{fieldFilter:{field:{fieldPath:'mem'},op:'ARRAY_CONTAINS',value:sv(uid)}},limit:100});
   const L=docs.map(gOf).filter(g=>idOk(g.id));
   await Promise.all(L.map(async g=>{
-   try{const r=await fsx('/grp/'+g.id+'/r/'+uid),f=fvj({mapValue:r})||{};g.rt=+f.t||0;g.mu=f.mu===true}catch(e){if(e.code===403)throw e}
+   try{const r=await fsx('/grp/'+g.id+'/r/'+uid),f=fvj({mapValue:r})||{};g.rt=+f.t||0;g.rd=+f.d||0;g.muw=f.mu===true}catch(e){if(e.code===403)throw e}
+   if(!GR.rdOff&&g.mem.includes(uid)&&((g.last&&g.last.t>g.rd)||g.muw))rdPut(g,uid);
    const lt=g.last?g.last.t:g.t;
    if(g.last&&lt>g.rt){try{const q=await qrun('/grp/'+g.id,{from:[{collectionId:'m'}],select:{fields:[{fieldPath:'by'}]},where:tF('GREATER_THAN',g.rt),limit:CNTMAX});g.n=q.filter(d=>gv(d,'by')!==uid).length;g.np=q.length>=CNTMAX}catch(e){if(e.code===403)throw e}}}));
   L.sort((a,b)=>((b.last?b.last.t:b.t)-(a.last?a.last.t:a.t)));
@@ -102,7 +117,7 @@ async function grLoad(){
 function grTick(){if(on()&&!GR.busy&&Date.now()-GR.at>60000)grLoad()}
 const grAvatar=n=>`<span class="gr-av" aria-hidden="true">${esc((String(n||'?').trim()[0]||'?'))}</span>`;
 function rowH(g){const n=g.n,lt=g.last?g.last.t:0;
- return `<button class="li gr-row" data-a="grOpen" data-id="${esc(g.id)}">${grAvatar(g.name)}<div class="t"><b>${esc(g.name)}</b><span>${esc(lastTx(g))}</span></div><div class="m"><span>${esc(lTime(lt))}</span>${n?`<span class="gr-cnt${g.mu?' mu':''}">${g.np?(CNTMAX-1)+'+':n>99?'99+':n}</span>`:''}</div></button>`}
+ return `<button class="li gr-row" data-a="grOpen" data-id="${esc(g.id)}">${grAvatar(g.name)}<div class="t"><b>${esc(g.name)}</b><span>${esc(lastTx(g))}</span></div><div class="m"><span>${esc(lTime(lt))}</span>${n?`<span class="gr-cnt">${g.np?(CNTMAX-1)+'+':n>99?'99+':n}</span>`:''}</div></button>`}
 V.gr=()=>{
  if(!on())return{t:'קבוצות',s:'',h:'<div class="card"><p class="note">המסך הזה לא זמין.</p></div>'};
  if(!GR.busy&&(GR.L===null||Date.now()-GR.at>20000))grLoad();
@@ -111,10 +126,10 @@ V.gr=()=>{
  if(GR.L===null)return{t:'קבוצות',s:'',h:`${top}<p class="note">${GR.err?esc(GR.err):'טוען…'}</p>`};
  return{t:'קבוצות',s:GR.n?GR.n+' הודעות שלא נקראו':'',h:`${top}${GR.L.length?GR.L.map(rowH).join(''):`<p class="note">${adm?'עוד אין קבוצות. אפשר ליצור קבוצה חדשה.':'אתה עוד לא חבר באף קבוצה.'}</p>`}${GR.err?`<p class="note">${esc(GR.err)}</p>`:''}<button class="btn g w" data-a="grRefresh" style="margin-top:8px">רענן</button>`}};
 ACT.grRefresh=()=>{GR.at=0;grLoad();toast('מרענן...')};
-ACT.grOpen=el=>{const id=el.dataset.id;if(!idOk(id))return;const g=gGet(id);if(!g)return;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null};go('grc',id)};
+ACT.grOpen=el=>{const id=el.dataset.id;if(!idOk(id))return;const g=gGet(id);if(!g)return;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,dS:0,muw:0,rd:new Map(),rdOk:0,rdOff:0,ru:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null};go('grc',id)};
 /* לחיצה על התראה (data.k='grp', data.id=gid): פותח את שיחת הקבוצה */
 async function grOpenId(id){if(!on()||!idOk(String(id||'')))return;
- try{const g=gOf(await fsx('/grp/'+id));if(!g.id)throw 0;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null};go('grc',id)}
+ try{const g=gOf(await fsx('/grp/'+id));if(!g.id)throw 0;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,dS:0,muw:0,rd:new Map(),rdOk:0,rdOff:0,ru:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null};go('grc',id)}
  catch(e){toast('הקבוצה לא זמינה')}}
 window.GRP={n:()=>on()?GR.n:0,tick:grTick,off:()=>GR.off,open:grOpenId};
 
@@ -124,8 +139,8 @@ function msgH(m,c){
  const me=mineId(m);let b='';
  if(m.k==='img'){const du=GR.img[c.gid+'/'+m.id];b=`<button class="gr-pic" data-a="grImg" data-id="${esc(m.id)}" aria-label="תמונה">${du?`<img src="${esc(du)}" alt="תמונה">`:`<span class="ph" data-gimg="${esc(m.id)}">${GR.img['x'+c.gid+'/'+m.id]?'התמונה לא נטענה. לחץ לנסות שוב':'טוען תמונה…'}</span>`}</button>`}
  else if(m.k==='vid'){const old=Date.now()-m.t>90*DAY;b=old||m.gone?`<div class="gr-pic" style="cursor:default"><span class="ph">🎬 הסרטון נמחק אחרי 90 יום</span></div>`:`<button class="gr-pic" data-a="grVid" data-id="${esc(m.id)}" aria-label="סרטון"><span class="ph" style="min-height:110px;background:var(--bg)"></span><span class="play">▶</span><span class="dr">${dur(m.vs)}</span></button>`}
- const q=m.re?`<button class="gr-q" data-a="grJump" data-id="${esc(m.re.mid)}"><b>${esc(m.re.byN||'')}</b><span>${esc(m.re.k==='img'?'📷 '+(m.re.txt||'תמונה'):m.re.k==='vid'?'🎬 '+(m.re.txt||'סרטון'):m.re.txt)}</span></button>`:'';
- return `<div class="gr-b${me?' me':''}" data-mid="${esc(m.id)}"><button class="dl" data-a="grMenu" data-id="${esc(m.id)}" aria-label="אפשרויות הודעה">⋯</button>${me?'':`<div class="who">${esc(m.byN||'')}</div>`}${m.fw?'<div class="gr-fw">↪ הועברה</div>':''}${q}${b}${m.txt?`<div class="tx">${esc(m.txt)}</div>`:''}${rxH(m,c)}<div class="tm">${hm(m.t)}</div></div>`}
+ const q=m.re?`<button class="gr-q" data-a="grJump" data-id="${esc(m.re.mid)}"><b>${esc(nmP(m.re.byN))}</b><span>${esc(m.re.k==='img'?'📷 '+(m.re.txt||'תמונה'):m.re.k==='vid'?'🎬 '+(m.re.txt||'סרטון'):m.re.txt)}</span></button>`:'';
+ return `<div class="gr-b${me?' me':''}" data-mid="${esc(m.id)}"><button class="dl" data-a="grMenu" data-id="${esc(m.id)}" aria-label="אפשרויות הודעה">⋯</button>${me?'':`<div class="who">${esc(nm(m.by,m.byN))}</div>`}${m.fw?'<div class="gr-fw">↪ הועברה</div>':''}${q}${b}${m.txt?`<div class="tx">${esc(m.txt)}</div>`:''}${rxH(m,c)}<div class="tm">${hm(m.t)}${tkH(c,m)}</div></div>`}
 function rxH(m,c){const r=c.rx&&c.rx.get(m.id);if(!r)return '';const cnt={};let mine='';r.forEach((x,u)=>{if(!x.e)return;cnt[x.e]=(cnt[x.e]||0)+1;if(u===SY.uid)mine=x.e});
  const ks=EMO.filter(e=>cnt[e]);if(!ks.length)return '';return `<button class="gr-rx${mine?' me':''}" data-a="grRxWho" data-id="${esc(m.id)}" aria-label="מי סימן">${ks.map(e=>e+(cnt[e]>1?' '+cnt[e]:'')).join(' ')}</button>`}
 function msgsH(c){
@@ -140,14 +155,12 @@ function pinH(c){const p=c.g.pin;return p?`<button class="gr-pin" data-a="grPinG
 function grPinPaint(){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)return;const e=$('#grpin');if(e)e.innerHTML=pinH(c)}
 function compH(c){const g=c.g;
  if(!fbAdmin()&&g.ao)return '<div class="gr-lock">🔒 רק המנהל יכול לשלוח הודעות בקבוצה הזו</div>';
- const dis=c.sending?' disabled':'',re=c.re?`<div class="gr-rebar"><div class="gr-q"><b>↩ תשובה ל${esc(c.re.byN||'')}</b><span>${esc(c.re.k==='img'?'📷 '+(c.re.txt||'תמונה'):c.re.k==='vid'?'🎬 '+(c.re.txt||'סרטון'):c.re.txt)}</span></div><button class="gr-circ" data-a="grReX" aria-label="בטל תשובה" style="width:36px;height:36px">✕</button></div>`:'';
+ const dis=c.sending?' disabled':'',re=c.re?`<div class="gr-rebar"><div class="gr-q"><b>↩ תשובה ל${esc(nmP(c.re.byN))}</b><span>${esc(c.re.k==='img'?'📷 '+(c.re.txt||'תמונה'):c.re.k==='vid'?'🎬 '+(c.re.txt||'סרטון'):c.re.txt)}</span></div><button class="gr-circ" data-a="grReX" aria-label="בטל תשובה" style="width:36px;height:36px">✕</button></div>`:'';
  return `${re}<div class="gr-comp">${g.md?`<label class="gr-circ" aria-label="צרף תמונה או סרטון" style="${c.sending?'opacity:.5':''}">📎<input type="file" accept="image/*,video/*" data-c="grFile" hidden${dis}></label>`:''}<textarea id="grtx" data-i="grDraft" rows="1" maxlength="2000" placeholder="${DT.on?'מדברים… המילים נכתבות כאן':'כתוב הודעה…'}" aria-label="הודעה"${dis}${DT.on?' readonly':''}>${esc(c.draft)}</textarea>${isNat()?`<button class="gr-circ${DT.on?' rec':''}" data-a="grMic" aria-label="${DT.on?'עצור הקלטה':'הקלט והקלד'}"${dis}>${DT.on?'⏹':'🎤'}</button>`:''}<button class="gr-circ go" data-a="grSend" aria-label="שלח"${dis}>➤</button></div>${c.sending?`<p class="note" style="margin:6px 0 0">${esc(c.sending)}</p>`:DT.on?'<p class="note" style="margin:6px 0 0">🎤 מקליט – המילים נכתבות בתיבה. לחצו ⏹ לסיום, ואז אפשר לערוך ולשלוח.</p>':''}`}
 function topH(c){const g=c.g;
  const sb='<button class="chip" data-a="grSr" aria-label="חיפוש בקבוצה">🔍 חיפוש</button>';
- if(fbAdmin())return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px"><span class="note" style="margin:0">${g.mem.length} חברים${g.ao?' · רק המנהל שולח':''}</span><span style="display:flex;gap:6px">${sb}<button class="chip" data-a="grSet" data-id="${esc(g.id)}">⚙ הגדרות</button></span></div>`;
- const sr=`<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${sb}</div>`;
- if(g.ao)return sr;
- return sr+`<label class="opt" style="min-height:48px;margin-bottom:8px"><span>השתק התראות</span><input type="checkbox" data-c="grMute"${g.mu?' checked':''}></label>`}
+ if(fbAdmin())return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px"><span class="note" style="margin:0">${g.mem.length} חברים${g.ao?' · רק המנהל שולח':''}</span><span style="display:flex;gap:6px">${sb}<button class="chip" data-a="grSet" data-id="${esc(g.id)}">⚙ הגדרות</button></span></div><div id="grpr" class="gr-pr">${prH(c)}</div>`;
+ return `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${sb}</div><div id="grpr" class="gr-pr">${prH(c)}</div>`}
 V.grc=gid=>{
  const c=GR.c;if(!on()||!c||c.gid!==gid)return{t:'קבוצה',s:'',h:'<div class="card"><p class="note">הקבוצה לא זמינה.</p></div>'};
  if(!c.started){c.started=1;grEnter(c)}
@@ -162,7 +175,7 @@ function grComp(){const c=GR.c;if(!c||cur().v!=='grc')return;const e=$('#grcomp'
 function grScrollInit(){const u=document.getElementById('grunr');if(u)u.scrollIntoView({block:'start'});else window.scrollTo(0,document.documentElement.scrollHeight)}
 async function grEnter(c){
  try{
-  try{const r=await fsx('/grp/'+c.gid+'/r/'+SY.uid),f=fvj({mapValue:r})||{};c.rt=+f.t||0;c.g.mu=f.mu===true}catch(e){if(e.code!==404)throw e}
+  try{const r=await fsx('/grp/'+c.gid+'/r/'+SY.uid),f=fvj({mapValue:r})||{};c.rt=+f.t||0;c.dS=+f.d||0;c.muw=f.mu===true}catch(e){if(e.code!==404)throw e}
   c.rtSaved=c.rt;grPinGet(c);
   const d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:PAGE});
   c.msgs=d.map(mOf).filter(m=>idOk(m.id)).reverse();c.more=d.length>=PAGE;
@@ -171,15 +184,53 @@ async function grEnter(c){
  if(GR.c!==c||cur().v!=='grc')return;
  const m=$('#grmsgs');if(m){m.innerHTML=msgsH(c);grScrollInit();grImgs()}
  const t=$('#grtop');if(t)t.innerHTML=topH(c);
- grMark();grPoll(c)}
+ grMark();grPoll(c);grRdLoad(c,true);grPres(c);grSact()}
 async function grPinGet(c){try{const d=await fsx('/grp/'+c.gid),p=pOf((fvj({mapValue:d})||{}).pin);if(GR.c!==c)return;if(JSON.stringify(p)!==JSON.stringify(c.g.pin||null)){c.g.pin=p;grPinPaint()}}catch(e){}}
 /* סימון "נקרא עד" – הודעה אחרונה שנטענה (לא קודם ממה שכבר נשמר) */
 function grMark(){const c=GR.c;if(!c||!c.ready)return;const nt=c.msgs.reduce((a,m)=>Math.max(a,m.t),c.rtSaved);if(nt<=c.rtSaved)return;c.rtSaved=nt;
- fsx('/grp/'+c.gid+'/r/'+SY.uid+'?updateMask.fieldPaths=t',{method:'PATCH',body:JSON.stringify({fields:{t:iv(nt)}})}).catch(()=>{});
+ rWr(c,nt);
  const g=gGet(c.gid);if(g&&g!==c.g){g.rt=nt}c.g.rt=nt;c.g.n=0;c.g.np=false;recount();try{wbUp()}catch(e){}}
+/* כותב t,d=max(d,t),u,n (ו-mu:false אם היה true) בבקשה אחת; 403 = שרת ישן ← t בלבד */
+async function rWr(c,t){const p='/grp/'+c.gid+'/r/'+SY.uid,q=o=>'?'+Object.keys(o).map(k=>'updateMask.fieldPaths='+k).join('&');
+ if(!GR.rdOff){const d=Math.max(c.dS||0,t),fl={t:iv(t),d:iv(d),u:iv(Date.now()),n:sv(fbBy().slice(0,100))};if(c.muw)fl.mu=bv(false);
+  try{await fsx(p+q(fl),{method:'PATCH',body:JSON.stringify({fields:fl})});c.dS=d;c.muw=0;return}catch(e){if(!e||e.code!==403)return;GR.rdOff=1}}
+ try{await fsx(p+'?updateMask.fieldPaths=t',{method:'PATCH',body:JSON.stringify({fields:{t:iv(t)}})})}catch(e){}}
+/* ---- וי: רשימת r של הקבוצה (בכניסה), רענון בשאילתה u>maxU-130000 ---- */
+const memOf=(c,m)=>{const sa=GR.sact;return(c.g.mem||[]).filter(u=>u!==m.by&&!(fbAdmin()&&sa&&sa[u]===false))};
+function tkS(c,m){if(c.rdOff||!c.rdOk)return 1;const M=memOf(c,m);if(!M.length)return 1;let r=1,d=1;
+ M.forEach(u=>{const x=c.rd.get(u),t=x?x.t:0,dd=x?Math.max(x.d,x.t):0;if(t<m.t)r=0;if(dd<m.t)d=0});return r?3:d?2:1}
+function tkH(c,m){if(!(mineId(m)||fbAdmin()))return '';const s=tkS(c,m);return `<button class="gr-tk s${s}" data-a="grInfo" data-id="${esc(m.id)}" aria-label="פרטי הודעה">${s>1?'✓✓':'✓'}</button>`}
+const tkPend=c=>!c.rdOff&&c.msgs.some(m=>(mineId(m)||fbAdmin())&&tkS(c,m)<3);
+async function grRdLoad(c,full){if(c.rdOff)return;
+ try{let d;
+  if(full)d=((await fsx('/grp/'+c.gid+'/r?pageSize=300')||{}).documents)||[];
+  else d=await qrun('/grp/'+c.gid,{from:[{collectionId:'r'}],where:{fieldFilter:{field:{fieldPath:'u'},op:'GREATER_THAN',value:iv(Math.max(0,c.ru-130000))}},limit:300});
+  let ch=false;
+  d.forEach(doc=>{const f=fvj({mapValue:doc})||{},id=idOf(doc);if(!idOk(id))return;const t=+f.t||0,dd=+f.d||0,u=+f.u||0,n=String(f.n||'').slice(0,100);if(u>c.ru)c.ru=u;
+   const o=c.rd.get(id);if(o&&o.t===t&&o.d===dd)return;c.rd.set(id,{t,d:dd,u,n});ch=true});
+  const first=!c.rdOk;c.rdOk=1;if((ch||first)&&GR.c===c&&cur().v==='grc'&&!c.sr)grPaint()}
+ catch(e){if(e&&e.code===403){c.rdOff=1;if(GR.c===c&&cur().v==='grc'&&!c.sr)grPaint()}}}
+/* רשימת עובדים פעילים (מנהל בלבד): עובד לא פעיל לא נספר בחישוב הוי */
+async function grSact(){if(!fbAdmin()||GR.sact!==undefined)return;GR.sact=null;
+ try{const j=await fsx('/staff?pageSize=300'),o={};((j&&j.documents)||[]).forEach(d=>{const f=fvj({mapValue:d})||{};o[idOf(d)]=f.active===true});GR.sact=o;const c=GR.c;if(c&&cur().v==='grc'&&!c.sr)grPaint()}catch(e){GR.sact=undefined}}
+/* "פרטי הודעה": קראו / קיבלו / עוד לא */
+ACT.grInfo=el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||!(mineId(m)||fbAdmin()))return;closeDlg();
+ if(c.rdOff||!c.rdOk)return dlg('<h3>פרטי הודעה</h3><p class="note">'+(c.rdOff?'פרטי הקריאה יהיו זמינים בקרוב.':'טוען…')+'</p><button class="btn g w" data-a="closeDlg">סגור</button>');
+ const R=[],D=[],N=[];memOf(c,m).forEach(u=>{const x=c.rd.get(u),t=x?x.t:0,d=x?Math.max(x.d,x.t):0,n=nm(u,x&&x.n)||'חבר';(t>=m.t?R:d>=m.t?D:N).push(n)});
+ const sec=(h,L)=>L.length?`<b>${h} (${L.length})</b><div class="card" style="padding:2px 12px;margin:4px 0 10px">${L.sort((a,b)=>a.localeCompare(b,'he')).map(n=>`<div class="gr-mem"><span>${esc(n)}</span></div>`).join('')}</div>`:'';
+ dlg(`<h3>פרטי הודעה</h3>${sec('<span style="color:#3aa8ff">✓✓</span> קראו',R)}${sec('✓✓ קיבלו',D)}${sec('עוד לא',N)}${R.length+D.length+N.length?'':'<p class="note">אין חברים נוספים בקבוצה.</p>'}<button class="btn g w" data-a="closeDlg">סגור</button>`)};
+/* ---- נוכחות בראש השיחה: pres/{uid}; 403 = מוסתרת ---- */
+function prH(c){if(c.prOff||!c.pr)return '';const now=Date.now();
+ return(c.g.mem||[]).filter(u=>u!==SY.uid).map(u=>{const x=c.pr[u],n=nm(u,x&&x.e)||(x&&x.n)||'חבר';
+  const on=!!(x&&x.on&&now-x.t<300000),sub=on?'':x&&x.t?'נראה '+(dk(x.t)===dk(now)?'ב-'+hm(x.t):dk(x.t)===dk(now-DAY)?'אתמול':dLbl(x.t)):'';
+  return `<span class="gr-pc"><i class="${on?'on':''}"></i>${esc(n)}${sub?`<small>${esc(sub)}</small>`:''}</span>`}).join('')}
+async function grPres(c){if(c.prOff)return;
+ try{const j=await fsx('/pres?pageSize=300'),o={};((j&&j.documents)||[]).forEach(d=>{const f=fvj({mapValue:d})||{};o[idOf(d)]={on:f.on===true,t:+f.t||0,n:String(f.n||'').slice(0,100),e:String(f.e||'').slice(0,100)}});c.pr=o}
+ catch(e){if(e&&e.code===403)c.prOff=1;else return}
+ if(GR.c===c&&cur().v==='grc'&&!c.sr){const e=$('#grpr');if(e)e.innerHTML=prH(c)}}
 function grPoll(c){clearTimeout(c.tm);c.tm=setTimeout(async()=>{
  if(GR.c!==c||cur().v!=='grc'||cur().a!==c.gid)return;
- c.pt=(c.pt||0)+1;if(c.pt%4===0)grPinGet(c);if(c.pt%2===0&&await grRxLoad(c,false)&&GR.c===c)grPaint();
+ c.pt=(c.pt||0)+1;if(c.pt%4===0){grPinGet(c);if(tkPend(c))grRdLoad(c,false)}if(c.pt%8===0)grPres(c);if(c.pt%2===0&&await grRxLoad(c,false)&&GR.c===c)grPaint();
  try{const nw=c.msgs.reduce((a,m)=>Math.max(a,m.t),0),d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],where:tF('GREATER_THAN',nw),orderBy:[{field:{fieldPath:'t'},direction:'ASCENDING'}],limit:PAGE});
   const add=d.map(mOf).filter(m=>idOk(m.id)&&!c.msgs.some(x=>x.id===m.id));if(add.length&&GR.c===c){c.msgs=c.msgs.concat(add);grPaint();grMark()}}catch(e){}
  grPoll(c)},8000)}
@@ -258,16 +309,12 @@ async function grVideo(c,f){
   c.sending='שולח…';grComp();
   await grPost(c,'vid',String(c.draft||'').trim().slice(0,2000),{mid,vp:name,vs:Math.min(VSEC,Math.max(1,Math.ceil(d))),vb:f.size,re:c.re});c.draft='';sendDone(c)}
  catch(e){c.sending='';grComp();toast(e&&e.code===403&&e.message?e.message:e&&e.offline?e.message:e&&e.code?tkErr(e):(e&&e.message)||'השליחה נכשלה')}}
-/* השתקה (עובד, לא בקבוצה עם ao) */
-CHG.grMute=async el=>{const c=GR.c;if(!c)return;const v=el.checked;
- try{await fsx('/grp/'+c.gid+'/r/'+SY.uid+'?updateMask.fieldPaths=mu',{method:'PATCH',body:JSON.stringify({fields:{mu:bv(v)}})});c.g.mu=v;recount();toast(v?'הקבוצה הושתקה':'ההשתקה בוטלה')}
- catch(e){el.checked=!v;toast(tkErr(e))}};
 /* ⋯ של הודעה (כולם): סימון, תשובה, שיתוף, העברה, שמירה בגלריה; מנהל: גם הצמדה ומחיקה */
 ACT.grMenu=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;const adm=fbAdmin(),pd=c.g.pin&&c.g.pin.mid===id;
  const r=c.rx&&c.rx.get(id),mine=r&&r.get(SY.uid)?r.get(SY.uid).e:'',I=`data-id="${esc(id)}"`,B=(a,t,cl)=>`<button class="btn ${cl||'g'} w" data-a="${a}" ${I} style="margin-bottom:8px">${t}</button>`;
  const media=m.k==='img'||(m.k==='vid'&&!m.gone&&Date.now()-m.t<=90*DAY);
  dlg(`<h3>אפשרויות הודעה</h3>${c.xoff?'':`<div class="gr-emo">${EMO.map(e=>`<button class="${e===mine?'on':''}" data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`}`
-  +(canSend(c.g)?B('grRe','↩ השב'):'')+B('grShare','📤 שיתוף')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):'')
+  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+B('grShare','📤 שיתוף')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):'')
   +(adm?B('grPin',pd?'בטל הצמדה':'📌 הצמד')+B('grDel','🗑 מחק הודעה','r'):'')+'<button class="btn g w" data-a="closeDlg">ביטול</button>')};
 /* הצמדה: עדכון חלקי של השדה pin בלבד; שרת ישן (403) = הודעה ברורה */
 ACT.grPin=async el=>{const c=GR.c;if(!c||!fbAdmin())return;closeDlg();const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
@@ -312,7 +359,7 @@ ACT.grReact=async el=>{const c=GR.c;if(!c)return;closeDlg();if(c.xoff)return toa
  catch(x){if(old)r.set(SY.uid,old);else r.delete(SY.uid);grPaint();toast(x&&x.code===403?'לא הצלחנו לשמור את הסימון (ייתכן שהשרת עוד לא עודכן)':tkErr(x))}};
 ACT.grRxWho=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,r=c.rx.get(id);if(!r)return;
  const L=[...r.entries()].filter(x=>x[1].e).sort((a,b)=>a[1].t-b[1].t);if(!L.length)return;const mine=r.get(SY.uid);
- dlg(`<h3>סימונים</h3><div class="card" style="padding:2px 12px;margin-bottom:10px">${L.map(([u,x])=>`<div class="gr-mem"><span style="font-size:1.3rem">${esc(x.e)}</span><span>${u===SY.uid?'אני':esc(x.byN||'')}</span></div>`).join('')}</div>${mine&&mine.e?`<button class="btn g w" data-a="grReact" data-id="${esc(id)}" data-e="${esc(mine.e)}" style="margin-bottom:8px">הסר את הסימון שלי</button>`:''}<button class="btn g w" data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>סימונים</h3><div class="card" style="padding:2px 12px;margin-bottom:10px">${L.map(([u,x])=>`<div class="gr-mem"><span style="font-size:1.3rem">${esc(x.e)}</span><span>${u===SY.uid?'אני':esc(nm(u,x.byN))}</span></div>`).join('')}</div>${mine&&mine.e?`<button class="btn g w" data-a="grReact" data-id="${esc(id)}" data-e="${esc(mine.e)}" style="margin-bottom:8px">הסר את הסימון שלי</button>`:''}<button class="btn g w" data-a="closeDlg">סגור</button>`)};
 
 /* ---- תשובה להודעה: ציטוט קצר נשמר בהודעה החדשה (re) ---- */
 ACT.grRe=el=>{const c=GR.c;if(!c)return;closeDlg();const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||!canSend(c.g))return;
@@ -417,12 +464,12 @@ function hlTx(t,q){t=String(t||'');q=String(q||'').trim();const n=nrm(t),k=nrm(q
 function srRowH(m,c){const s=c.sr,du=m.k==='img'?GR.img[c.gid+'/'+m.id]:'';
  const ic=m.k==='img'?(du?`<img src="${esc(du)}" alt="" class="gr-sth">`:`<span class="gr-sth" data-simg="${esc(m.id)}">📷</span>`):m.k==='vid'?'<span class="gr-sth">🎬</span>':'';
  const tx=m.txt?hlTx(m.txt,s.q):(m.k==='img'?'תמונה':m.k==='vid'?'סרטון ('+dur(m.vs)+')':'');
- return `<button class="li gr-sr" data-a="grSrGo" data-id="${esc(m.id)}">${ic}<div class="t"><b>${mineId(m)?'אני':esc(m.byN||'')}</b><span>${tx}</span></div><div class="m"><span>${esc(dLbl(m.t))}</span><span>${hm(m.t)}</span></div></button>`}
+ return `<button class="li gr-sr" data-a="grSrGo" data-id="${esc(m.id)}">${ic}<div class="t"><b>${mineId(m)?'אני':esc(nm(m.by,m.byN))}</b><span>${tx}</span></div><div class="m"><span>${esc(dLbl(m.t))}</span><span>${hm(m.t)}</span></div></button>`}
 function srListH(c){const L=srRes(c),s=c.sr,any=s.q.trim()||s.by||s.k;
  const more=c.more?`<button class="btn g w" data-a="grSrMore" style="margin-top:8px"${c.loading?' disabled':''}>${c.loading?'טוען…':'חפש גם בהודעות ישנות יותר'}</button>`:'';
  if(!any)return `<p class="note">כתבו מילה לחיפוש, או בחרו שולח או סוג.</p>`;
  return `<p class="note" style="margin:0 0 6px">${L.length?L.length+' תוצאות':'לא נמצאו הודעות'}${c.more?' (בהודעות שנטענו)':''}</p>${L.slice(0,200).map(m=>srRowH(m,c)).join('')}${L.length>200?'<p class="note">מוצגות 200 התוצאות החדשות. אפשר לצמצם את החיפוש.</p>':''}${more}`}
-function srH(c){const s=c.sr,who=new Map();c.msgs.forEach(m=>{if(!who.has(m.by))who.set(m.by,mineId(m)?'אני':(m.byN||'ללא שם'))});
+function srH(c){const s=c.sr,who=new Map();c.msgs.forEach(m=>{if(!who.has(m.by))who.set(m.by,mineId(m)?'אני':(nm(m.by,m.byN)||'ללא שם'))});
  const ws=[...who.entries()].sort((a,b)=>a[1].localeCompare(b[1],'he')),K=[['','הכול'],['t','טקסט'],['img','📷 תמונות'],['vid','🎬 סרטונים']];
  return `<div class="gr-srbar"><input id="grsq" data-i="grSq" type="search" maxlength="60" placeholder="חיפוש בקבוצה…" aria-label="חיפוש" value="${esc(s.q)}" autocomplete="off" enterkeyhint="search"><button class="chip" data-a="grSrX">סגור</button></div>
  <label class="f" style="margin:8px 0"><span>שולח</span><select data-c="grSby"><option value="">כל השולחים</option>${ws.map(([u,n])=>`<option value="${esc(u)}"${u===s.by?' selected':''}>${esc(n)}</option>`).join('')}</select></label>
@@ -468,4 +515,25 @@ ACT.grDelG=()=>{const s=GR.s;if(!s||!s.gid||!fbAdmin())return;
  ask('למחוק את הקבוצה "'+s.name+'" עם כל ההודעות? אי אפשר לשחזר.',async()=>{
   try{await fsx('/grp/'+s.gid,{method:'DELETE'});GR.at=0;GR.L=null;GR.c=null;GR.s=null;toast('הקבוצה נמחקה');NAV=NAV.filter(x=>x.v!=='grc'&&x.v!=='grs');if(!NAV.length)NAV=[{v:'home'}];render(-1)}
   catch(e){toast(tkErr(e))}},'מחק קבוצה')};
+/* ---- החלקה ימינה = תשובה; לחיצה ארוכה = שורת אימוג'י. החלקה שמאלה (חזרה, index.html) לא מושפעת ---- */
+(function(){let g=null,sup=0,pop=null;
+ const emoOff=()=>{if(pop){pop.remove();pop=null}};
+ const emoOn=(b,mid)=>{emoOff();const c=GR.c;if(!c||c.xoff)return;const r=b.getBoundingClientRect(),w=EMO.length*40+16;
+  pop=document.createElement('div');pop.className='gr-emp';pop.innerHTML=EMO.map(e=>`<button data-a="grReact" data-id="${esc(mid)}" data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('');
+  pop.style.top=Math.max(70,r.top-48)+'px';pop.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';document.body.append(pop)};
+ const ok=e=>{const b=e.target.closest&&e.target.closest('#grmsgs .gr-b');return b&&!e.target.closest('.gr-emp')?b:null};
+ document.addEventListener('touchstart',e=>{if(!e.target.closest||!e.target.closest('.gr-emp'))emoOff();
+  const b=GR.c&&cur().v==='grc'&&e.touches.length===1?ok(e):null;if(g){clearTimeout(g.tm);if(g.b)g.b.style.transform=''}g=null;if(!b)return;const t=e.touches[0];
+  g={b,x:t.clientX,y:t.clientY,mid:b.dataset.mid,lp:0,mv:0,tm:setTimeout(()=>{if(g&&!g.mv){g.lp=1;emoOn(g.b,g.mid)}},500)}},{passive:true});
+ document.addEventListener('touchmove',e=>{if(!g)return;const t=e.touches[0],dx=t.clientX-g.x,dy=t.clientY-g.y;
+  if(Math.abs(dx)>10||Math.abs(dy)>10){g.mv=1;clearTimeout(g.tm)}
+  if(dx>10&&Math.abs(dy)<dx/2&&!g.lp){g.b.style.transition='none';g.b.style.transform='translateX('+Math.min(dx,80)+'px)'}},{passive:true});
+ document.addEventListener('touchend',e=>{if(!g)return;const t=e.changedTouches[0],dx=t.clientX-g.x,dy=t.clientY-g.y,o=g;g=null;clearTimeout(o.tm);o.b.style.transition='';o.b.style.transform='';
+  if(o.lp)sup=Date.now()+500;
+  else if(dx>60&&Math.abs(dy)<Math.abs(dx)/2&&Math.abs(dy)<40){sup=Date.now()+500;if(GR.c)ACT.grRe({dataset:{id:o.mid}})}},{passive:true});
+ document.addEventListener('touchcancel',()=>{if(g){clearTimeout(g.tm);g.b.style.transform='';g=null}},{passive:true});
+ window.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('.gr-emp')){setTimeout(emoOff,0);return}
+  if(Date.now()<sup&&e.target.closest&&e.target.closest('#grmsgs')){e.stopPropagation();e.preventDefault();return}emoOff()},true);
+ document.addEventListener('contextmenu',e=>{if(e.target.closest&&e.target.closest('#grmsgs .gr-b'))e.preventDefault()},true);
+ window.addEventListener('scroll',emoOff,{passive:true})})();
 })();

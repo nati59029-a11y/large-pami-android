@@ -225,11 +225,21 @@ for (const E of ENVS) {
       await assertSucceeds(fs(E.mgr).doc(R('grp/g1/m/mi/p/1')).delete());
     });
 
-    it('r: כל משתמש כותב רק את שלו (t, mu); של משתמש אחר – נחסם; קריאה – רק הבעלים והמנהל', async () => {
+    it('r: כל משתמש כותב רק את שלו (t, mu=false, d, u, n); של משתמש אחר – נחסם; קריאה – כל מי שרשאי לקרוא את הקבוצה (23.11)', async () => {
       const now = Date.now();
-      await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).set({ t: now, mu: true }));
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).set({ t: now, mu: false }));
       await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ t: now + 1000 }));
-      await assertSucceeds(fs(E.e1).doc(R('grp/gao/r/' + E.e1)).set({ t: now, mu: true }), 'מותר לשמור, השרת מתעלם ב-ao');
+      await assertSucceeds(fs(E.e1).doc(R('grp/gao/r/' + E.e1)).set({ t: now, mu: false }));
+      // 23.11: ההשתקה בוטלה – mu=true נחסם (גם בעדכון); d / u / n חדשים
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).set({ t: now, mu: true }), 'mu=true');
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ mu: true }), 'mu=true בעדכון');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).set({ t: now, mu: false, d: now, u: now, n: E.e1 }));
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ d: now + 1000, u: now }));
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ d: now + 3600000 }), 'd עתידי');
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ d: 'x' }), 'd לא מספר');
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ u: now - 3600000 }), 'u לא זמן אמת');
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ n: E.e2 }), 'n של אחר');
+      await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ n: E.e1 + 'x'.repeat(100) }), 'n ארוך');
       await assertSucceeds(fs(E.mgr).doc(R('grp/g2/r/' + E.mgr)).set({ t: now }));
       await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.off)).set({ t: now }), 'r של משתמש אחר');
       await assertFails(fs(E.mgr).doc(R('grp/g1/r/' + E.e1)).set({ t: now, mu: false }), 'גם מנהל לא כותב r של אחר');
@@ -242,14 +252,16 @@ for (const E of ENVS) {
       await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).get());
       await assertSucceeds(fs(E.mgr).doc(R('grp/g1/r/' + E.e1)).get());
       await assertFails(fs(E.e2).doc(R('grp/g1/r/' + E.e1)).get());
-      // החלטת המתאם 17.11: חבר בקבוצה לא קורא את r של חבר אחר (ולא את כל האוסף)
+      // 23.11 (וי קריאה): חבר בקבוצה קורא את r של חבר אחר ואת כל האוסף (עד 22.11 – נחסם)
       await prep(async (d) => {
         await d.doc(R('grp/g3')).set(grp({ mem: [E.e1, E.e2] }));
         await d.doc(R('grp/g3/r/' + E.e2)).set({ t: 1, mu: true });
         await d.doc(R('grp/g3/r/' + E.e1)).set({ t: 1 });
       });
-      await assertFails(fs(E.e1).doc(R('grp/g3/r/' + E.e2)).get(), 'r של חבר אחר');
-      await assertFails(fs(E.e1).collection(R('grp/g3/r')).get(), 'list של r');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g3/r/' + E.e2)).get(), 'r של חבר אחר');
+      await assertSucceeds(fs(E.e1).collection(R('grp/g3/r')).get(), 'list של r');
+      await assertFails(fs(E.e1).collection(R('grp/g2/r')).get(), 'list של r – לא חבר');
+      await assertFails(fs(E.off).doc(R('grp/g3/r/' + E.e2)).get(), 'מושבת');
       await assertSucceeds(fs(E.e1).doc(R('grp/g3/r/' + E.e1)).get());
       await assertSucceeds(fs(E.e2).doc(R('grp/g3/r/' + E.e2)).get());
       await assertSucceeds(fs(E.mgr).doc(R('grp/g3/r/' + E.e2)).get());
@@ -631,7 +643,8 @@ describe('קבוצות – הקריאות של האפליקציה (REST, groups.
       // r/{uid}: GET (404 כשאין), PATCH t ו-mu עם updateMask (שורות 68, 139, 221)
       assert.equal((await x(E.e1, '/grp/g1/r/' + E.e1)).status, 404);
       assert.equal((await x(E.e1, '/grp/g1/r/' + E.e1 + '?updateMask.fieldPaths=t', patch({ fields: { t: iv(Date.now() - 5000) } }))).status, 200);
-      assert.equal((await x(E.e1, '/grp/g1/r/' + E.e1 + '?updateMask.fieldPaths=mu', patch({ fields: { mu: bv(true) } }))).status, 200);
+      assert.equal((await x(E.e1, '/grp/g1/r/' + E.e1 + '?updateMask.fieldPaths=mu', patch({ fields: { mu: bv(true) } }))).status, 403, 'mu=true – ההשתקה בוטלה (23.11)');
+      assert.equal((await x(E.e1, '/grp/g1/r/' + E.e1 + '?updateMask.fieldPaths=mu', patch({ fields: { mu: bv(false) } }))).status, 200);
       assert.equal((await x(E.e1, '/grp/g2/r/' + E.e1 + '?updateMask.fieldPaths=t', patch({ fields: { t: iv(1) } }))).status, 403);
       assert.equal((await x(E.e1, '/grp/g1/r/' + E.e2 + '?updateMask.fieldPaths=mu', patch({ fields: { mu: bv(true) } }))).status, 403);
       // grPost (שורות 176–178): POST ?documentId, txt נשלח גם בתמונה/סרטון (ריק), byN = fbBy().slice(0,60)
