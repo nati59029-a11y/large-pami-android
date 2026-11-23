@@ -3,10 +3,10 @@
 const path = require("path");
 const FN0 = path.resolve(process.argv[2]);
 const rq = require("module").createRequire(FN0 + "/index.js");
-const admin = rq("firebase-admin");
+const { initializeApp, cert } = rq("firebase-admin/app");
 
 const FN = FN0;
-admin.initializeApp({ credential: admin.credential.cert(require(process.env.SA)) });
+initializeApp({ credential: cert(require(process.env.SA)) });
 const { getFirestore } = rq("firebase-admin/firestore");
 const fs = getFirestore();
 const PIM = require(FN + '/pricing-inbox.js')._core;
