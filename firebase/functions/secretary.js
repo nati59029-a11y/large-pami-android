@@ -8,7 +8,7 @@
 //   sec_cfg/cap    { capCents, upd, updBy }                             – תקרה חודשית (82). מנהל־על בלבד (83: מנהל העסק רואה רק אחוז)
 //   sec_cfg/media  { aud: שניות|0, img: bool, vid: שניות|0, upd, updBy } – 15.11.2026 (קול, תמונה וסרטון למזכירה, secretary-media.js): הגבלות לכל עסק.
 //                    0 = כבוי. אין מסמך = ברירת מחדל (MEDIA_DEF). מנהל־על בלבד כותב (secAdminSetCfg media); secState מחזיר למנהל רק את הערכים
-//   sec_log/{id}   { t, by, who: 'mgr'|'sa'|'sec'|'auto', act, ch, tgt?, note? } – הוספה בלבד (10.7)
+//   sec_log/{id}   { t, by, who: 'mgr'|'sa'|'sec'|'auto', act, ch, tgt?, note?, res?: 'ok'|'fail', why? } – הוספה בלבד (10.7). res/why – מ-23.11.2026 (logRes)
 //   sec_chat/{uid}/m/{id} { t, role: 'u'|'a', text, src?, asOf?, mode?, deep? } – שלב 2: נכתב רק כאן (secChat); נקרא דרך secChatLoad / secAdminReadChat
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
 //   sec_cfg/use    { m, mc, d, dmc, w80, w100, r: { <uid>: { h, n, d, dn } }, mp: { h, n } } – מונה עלות במילי־סנט + קצב. מנהל־על בלבד (83)
@@ -103,10 +103,29 @@ function mediaOf(snap) {
   return { aud: sec(d.aud, MEDIA_MAX.aud, MEDIA_DEF.aud), img: typeof d.img === 'boolean' ? d.img : MEDIA_DEF.img, vid: sec(d.vid, MEDIA_MAX.vid, MEDIA_DEF.vid) };
 }
 
+// 23.11.2026 (גיטי, סבב 2): תוצאה ביומן – res: 'ok'|'fail', why: סיבה קצרה (קוד, עד 60 תווים) – רק בפעולות שליחה / חשבוניות / ניסיונות חוזרים.
+// נגזר כאן משם הפעולה (כל הקבצים כותבים דרך logData), או נשלח במפורש ב-extra.res / extra.why. רשומות ישנות – בלי השדות (האפליקציה מציגה "לא נרשמה").
+const LOG_FAIL = new Set(['sendFail', 'waFail', 'waErr', 'invErr', 'mailErr', 'mailWorkErr', 'autoFail', 'watchFail', 'gConnectFail', 'mrFail', 'mrOff', 'outLimit']);
+const LOG_OK = new Set(['send', 'autoSend', 'mailSend', 'mailAuto', 'mailMrAuto', 'ordSend', 'ordCfm', 'mrSend', 'waMrAuto', 'ordAuto', 'invOk', 'invAuto']);
+const LOG_WHY = { waFail: 'retries', mrFail: 'send', mrOff: 'send-off', outLimit: 'limit', watchFail: 'watch' };
+function logRes(act, extra) {
+  const x = extra || {};
+  const res = x.res === 'ok' || x.res === 'fail' ? x.res : LOG_FAIL.has(act) ? 'fail' : LOG_OK.has(act) ? 'ok' : '';
+  if (!res) return null;
+  let why = '';
+  if (res === 'fail') {
+    if (typeof x.why === 'string') why = x.why;
+    else if (LOG_WHY[act]) why = LOG_WHY[act];
+    else { const n = String(x.note || ''); why = n.includes(':') ? n.slice(n.lastIndexOf(':') + 1) : n; }
+  }
+  return { res, why: why.replace(/[^\w.+-]/g, '').slice(0, 60) };
+}
 function logData(by, who, act, extra) {
   const o = { t: Date.now(), by: String(by || ''), who, act: String(act).slice(0, 40), ch: 'app' };
   if (extra && extra.tgt) o.tgt = String(extra.tgt).slice(0, 128);
   if (extra && extra.note) o.note = String(extra.note).slice(0, 300);
+  const r = logRes(o.act, extra);
+  if (r) { o.res = r.res; if (r.why) o.why = r.why; }
   return o;
 }
 
@@ -364,6 +383,36 @@ async function secPrefs(request) {
     b.set(main, { mgr: { [who.uid]: { nt } }, upd: t }, { merge: true });
     b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'notify', { note: 'wd=' + nt.wd + ',wh=' + nt.wh + ',mh=' + nt.mh + ',dg=' + (nt.dg ? 1 : 0) + ',q=' + (nt.q.on ? nt.q.f + '-' + nt.q.t : 'off') + ',reps=' + nt.reps }));
     out = { nt, warn: RM.wkWarn(nt.wd) };
+  } else if (input.op === 'tkCard') {
+    // 23.11.2026 (גיטי, החלטה 3): כרטיס "משימה / תזכורת" מהשיחה (proposeTask, k:'tkp') הוכרע. היצירה עצמה נעשתה במנגנון הקיים –
+    // משימה: האפליקציה כותבת ל-tasks/sec<cid> לפי החוקים; תזכורת: secCal op:'add' rem:true. כאן רק בודקים שהיא באמת נוצרה ע"י המנהל הזה,
+    // מסמנים את הכרטיס בהודעה ורושמים ביומן. ביטול – סימון ורישום בלבד
+    const mid = typeof input.mid === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(input.mid) ? input.mid : null;
+    const cid = typeof input.cid === 'string' && /^tp[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
+    if (!mid || !cid || !['ok', 'no'].includes(input.st)) throw bad('bad-input', 'ערך לא תקין');
+    const ms = await db.doc(`sec_chat/${who.uid}/m/${mid}`).get();
+    const c = ms.exists && Array.isArray(ms.get('cards')) ? ms.get('cards').find((x) => x && x.k === 'tkp' && x.id === cid) : null;
+    if (!c) throw pre('not-found', 'הכרטיס לא נמצא');
+    if (c.st) return { ok: true, st: c.st, already: true };
+    let ref = '';
+    if (input.st === 'ok') {
+      const kind = input.kind === 'rem' ? 'rem' : 'task';
+      if (kind === 'task') {
+        ref = 'sec' + cid;
+        const ts = await db.doc('tasks/' + ref).get();
+        if (!ts.exists || ts.get('owner') !== who.uid) throw pre('not-done', 'המשימה לא נמצאה');
+      } else {
+        ref = typeof input.ref === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(input.ref) ? input.ref : '';
+        const cs = ref ? await db.doc('sec_cal/' + ref).get() : null;
+        if (!cs || !cs.exists || cs.get('by') !== who.uid || cs.get('rem') !== true) throw pre('not-done', 'התזכורת לא נמצאה');
+      }
+      await cardMark(db, b, who.uid, mid, cid, { st: 'ok', ref, kind });
+      b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'tkpOk', { tgt: ref, note: kind, res: 'ok' }));
+    } else {
+      await cardMark(db, b, who.uid, mid, cid, { st: 'no' });
+      b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'tkpNo', { tgt: mid, note: c.kind === 'rem' ? 'rem' : 'task' }));
+    }
+    out = { st: input.st, ref };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);
@@ -497,7 +546,7 @@ async function secChat(request) {
   }
   if (reply === null) {
     offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn, notes: !!notes });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes };
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {} }; // feat: תוספות העסק (sec-biz-tools בודק בהפעלה)
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
       const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);
@@ -571,7 +620,7 @@ async function secChat(request) {
     const v = ST.verify(pp.text, pool, text);
     srcs = v.srcs; nums = v.nums; unverified = v.unverified;
     // שלב 3: תשובה מתוך "מידע על העסק", מידע רגיש או יומן – המקור מוצג גם כשאין בה מספרים
-    for (const r of results) if (['getBusinessFacts', 'getSensitiveInfo', 'getCalendar', 'getEmployeeNotes'].includes(r.name) && !r.data.error && !srcs.some((x) => x.k === r.src.k && x.l === r.src.l)) srcs.push(r.src);
+    for (const r of results) if (['getBusinessFacts', 'getSensitiveInfo', 'getCalendar', 'getEmployeeNotes', 'getStaffRequests', 'getPendingQueue', 'getShifts', 'getStock'].includes(r.name) && !r.data.error && !srcs.some((x) => x.k === r.src.k && x.l === r.src.l)) srcs.push(r.src);
     reply = v.text + (pp.notes.length ? '\n\n' + pp.notes.join('\n') : '');
     const usedFin = results.some((r) => ST.FIN_TOOLS.includes(r.name) || r.name === 'getPayroll');
     if (stale && usedFin) reply += '\n\nשימו לב: נתוני הכספים נכונים ל-' + ST.fmtAt(mirrorAt) + ' – לפני יותר מ-3 ימים. כדאי לפתוח את האפליקציה במכשיר שבו נשמרים הנתונים כדי לעדכן.';
@@ -959,7 +1008,7 @@ Object.defineProperty(exports, '_core', { enumerable: false, value: {
   CONSENT, CONSENT_VER, SEC_COLLS, SEC_ROOT_COLLS, SEC_SUBS, BACKUP_KEEP_DAYS, cfgOf, runSecBackup, restoreSecBackup, pruneSecBackups, enc, dec, dayKey,
   usageOf, capOf, DEFAULT_CAP_CENTS, reserveOf, MEDIA_DEF, MEDIA_MAX, mediaOf, msgOut, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
   // לשלב 3 (secretary-know.js): אותו שער הרשאה ואותו יומן
-  gate, logData, hourKey, bad, deny, pre, wrap,
+  gate, logData, logRes, hourKey, bad, deny, pre, wrap,
   // 15.11.2026 (צ'אט נקי): מצב כרטיס אישור בהודעה
   cardMark,
   // שלב 5 (secretary-wa.js): אותו מונה עלות (11.3) לעיבוד הודעות ווצאפ ולתמלול

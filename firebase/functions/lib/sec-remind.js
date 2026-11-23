@@ -53,7 +53,8 @@ const TYPES = Object.freeze({
 });
 // משימות וחשבוניות שמחכות – הודעה מקובצת אחת ביום (7.3), כך שחזרה מיותרת; התראה על עובד וחלון 24 השעות – פעם אחת (אחרי החלון אין למה לחזור)
 const NO_REPEAT = ['task', 'emp', 'inv', 'win'];
-const DEF = Object.freeze({ wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3 });
+// 23.11.2026 (גיטי, סבב 2): סיכום בוקר (sm, בשעה smh) וסיכום ערב (se, בשעה seh) – כבויים כברירת מחדל (כמו התקציר היומי), מנתונים בלבד (בלי AI)
+const DEF = Object.freeze({ wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, sm: false, smh: 8, se: false, seh: 18, q: { on: true, f: '22:00', t: '07:00' }, reps: 3 });
 function ntOf(me) {
   const x = me && me.nt && typeof me.nt === 'object' ? me.nt : {};
   const int = (v, lo, hi, d) => (Number.isInteger(v) && v >= lo && v <= hi ? v : d);
@@ -63,6 +64,7 @@ function ntOf(me) {
   return {
     wd: int(x.wd, 0, 6, DEF.wd), wh: int(x.wh, 0, 23, DEF.wh), md: int(x.md, 0, 31, DEF.md), mh: int(x.mh, 0, 23, DEF.mh),
     dg: x.dg === true, dh: int(x.dh, 0, 23, DEF.dh),
+    sm: x.sm === true, smh: int(x.smh, 0, 23, DEF.smh), se: x.se === true, seh: int(x.seh, 0, 23, DEF.seh),
     q: { on: typeof q.on === 'boolean' ? q.on : DEF.q.on, f: HM_RE.test(q.f) ? q.f : DEF.q.f, t: HM_RE.test(q.t) ? q.t : DEF.q.t },
     reps: int(x.reps, 0, 3, DEF.reps), rt,
   };
@@ -73,8 +75,8 @@ function readNt(input, cur) {
   const bad = (m) => { const e = new Error(m); e.badNt = true; throw e; };
   const int = (k, lo, hi) => { if (input[k] === undefined) return; if (!Number.isInteger(input[k]) || input[k] < lo || input[k] > hi) bad(k); o[k] = input[k]; };
   int('wd', 0, 6); int('wh', 0, 23); int('md', 0, 31); // md: יום בחודש לדוח החודשי (0 = יום העסקים הראשון)
-  int('mh', 0, 23); int('dh', 0, 23); int('reps', 0, 3);
-  if (input.dg !== undefined) { if (typeof input.dg !== 'boolean') bad('dg'); o.dg = input.dg; }
+  int('mh', 0, 23); int('dh', 0, 23); int('reps', 0, 3); int('smh', 0, 23); int('seh', 0, 23);
+  for (const k of ['dg', 'sm', 'se']) if (input[k] !== undefined) { if (typeof input[k] !== 'boolean') bad(k); o[k] = input[k]; }
   if (input.q !== undefined) {
     const q = input.q;
     if (!q || typeof q !== 'object' || Array.isArray(q) || typeof q.on !== 'boolean' || !HM_RE.test(q.f) || !HM_RE.test(q.t) || q.f === q.t) bad('q');
@@ -309,6 +311,37 @@ function buildReport(o) {
   return { kind: 'm', title: 'הדוח החודשי', secs, ideas, src, why: o.why || '' };
 }
 
+// ---------- סיכום בוקר / ערב (23.11.2026, גיטי סבב 2) – מנתונים בלבד, בלי AI ----------
+// מתי: ביום עסקים, מהשעה שנקבעה ועד 6 שעות אחריה (כך שהדלקה מאוחרת לא שולחת "סיכום בוקר" בערב). פעם ביום – מזהה קבוע (dayKey) בהתראה.
+const SUM_WIN_H = 6;
+function sumDue(hm, h) { const a = String(h).padStart(2, '0') + ':00', b = String(Math.min(24, h + SUM_WIN_H)).padStart(2, '0') + ':00'; return hm >= a && hm < b; }
+// o: { kind:'am'|'pm', today, now, dayStart, fin (או null), tasks, cal: [{title, tm}] (היום, של המנהל), calNext: מספר אירועים מחר (ערב),
+//      wait: { tk, inv, draft, prop } (ממתינים לאישור), acts: { ok, fail } (פעולות המזכירה היום, מ-sec_log; ערב) }
+function daySum(o) {
+  const L = [], fin = o.fin, tasks = o.tasks || [];
+  const open = tasks.filter((t) => t.st === 'open'), late = open.filter((t) => TKT.tkLateAt(t, o.now));
+  const cal = (o.cal || []).slice().sort((a, b) => String(a.tm || '').localeCompare(String(b.tm || '')));
+  if (o.kind === 'am') {
+    L.push('ביומן היום: ' + (cal.length ? cal.length + ' – ' + cal.slice(0, 4).map((e) => (e.tm ? e.tm + ' ' : '') + String(e.title || '').slice(0, 40)).join(', ') + (cal.length > 4 ? '…' : '') : 'אין'));
+  } else {
+    const done = tasks.filter((t) => t.st === 'done' && Math.max(+t.ok || 0, +t.sub || 0) >= o.dayStart).length;
+    const a = o.acts || { ok: 0, fail: 0 };
+    L.push('מה נעשה היום: ' + done + ' משימות בוצעו' + (a.ok || a.fail ? '; פעולות שליחה וחשבוניות: ' + a.ok + ' הצליחו' + (a.fail ? ', ' + a.fail + ' נכשלו (פירוט ביומן הפעולות)' : '') : ''));
+  }
+  L.push('משימות פתוחות: ' + open.length + (late.length ? ', מהן ' + late.length + ' באיחור' : ''));
+  late.slice(0, 3).forEach((t) => L.push('• ' + String(t.txt || '').replace(/\s+/g, ' ').slice(0, 60)));
+  if (fin) {
+    const end = o.kind === 'am' ? o.today : K.addDays(o.today, 1);
+    const due = (fin.open || []).filter((r) => r[3] && r[3] <= end && r[3] >= o.today && r[5] > 0.004);
+    L.push('חשבוניות לתשלום ' + (o.kind === 'am' ? 'היום' : 'היום ומחר') + ': ' + (due.length ? due.length + ', סך ' + ils(sum(due, (r) => r[5])) : 'אין'));
+    if (fin.late && fin.late.n) L.push('חשבוניות באיחור: ' + fin.late.n + ', סך ' + ils(fin.late.sum));
+  } else L.push('חשבוניות לתשלום: אין נתוני כספים (מראה הכספים כבוי או שלא עודכן)');
+  const w = o.wait || {}, wl = [[w.tk, 'משימות'], [w.inv, 'חשבוניות שהתקבלו'], [w.draft, 'טיוטות תשובה'], [w.prop, 'הצעות של המזכירה']].filter((x) => x[0] > 0);
+  L.push('ממתין לאישור שלך: ' + (wl.length ? wl.map((x) => x[0] + ' ' + x[1]).join(', ') : 'אין'));
+  if (o.kind === 'pm') L.push('מחר ביומן: ' + (o.calNext || 'אין'));
+  return { title: (o.kind === 'am' ? 'סיכום בוקר – ' : 'סיכום ערב – ') + dayHm(o.today), body: L.join('\n') };
+}
+
 // ---------- "תזכירי לי שוב" (15.11.2026, סעיף 7) ----------
 // תצוגת יום ושעה: "יום ראשון 15.11, 12:00" (קבוע – גם כשקוראים את ההתראה מחר). במכשיר: היום/מחר בזמן הציור
 const WD_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -361,5 +394,6 @@ function snoozeOf(text, now) {
 module.exports = {
   TZ, MORNING, TYPES, NO_REPEAT, DEF, EMP_MIN, il, ilMs, wdOf, bizOnOrAfter, prevBizDay, nextBizMorning, ntOf, readNt, wkWarn, inQuiet, pushAtOf,
   cashDiff, finItems, notRej, monthlyOf, finCands, invCands, winCand, winOpen, WIN_MS, WIN_LEAD, INV_WAIT, taskCands, closeCands, REG, backupCands, factCands, calAt, weeklyDue, monthlyDue, buildReport, ils, prevMon,
+  daySum, sumDue, SUM_WIN_H,
   dayHm, whenL, snoozeOf, snzOk, snzMorning, SNZ_MAX, SNZ_MIN,
 };

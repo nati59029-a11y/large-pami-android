@@ -96,3 +96,42 @@ describe('sec-hub: יומן פעולות', () => {
     assert.ok(JSON.stringify(q2).split('fieldPath').every((x, i) => i === 0 || /^":"t"/.test(x)));
   });
 });
+
+// 23.11.2026 (גיטי, סבב 2): תוצאה ביומן, סינון "נכשל", "נשלח לבד" דרך השרת, מצב כספית
+describe('sec-hub סבב 2: תוצאה, נשלח לבד, כספית', () => {
+  const L = [
+    { id: 'a', t: 1, act: 'sendFail', res: 'fail', why: 'retries', who: 'auto' },
+    { id: 'b', t: 2, act: 'autoSend', res: 'ok', who: 'auto' },
+    { id: 'c', t: 3, act: 'factOk', who: 'mgr' }, // רשומה ישנה / בלי תוצאה
+  ];
+  it('סינון לפי תוצאה; רשומה בלי השדה לא נחשבת "נכשל" ולא "הצליח"', () => {
+    assert.deepEqual(C.logFilter(L, { res: 'fail' }).map((x) => x.id), ['a']);
+    assert.deepEqual(C.logFilter(L, { res: 'ok' }).map((x) => x.id), ['b']);
+    assert.equal(C.logFilter(L, {}).length, 3);
+    assert.equal(C.resOf(L[2]), '');
+    assert.equal(C.resL(L[0]), 'נכשל – לא עובדה אחרי כמה ניסיונות');
+    assert.equal(C.resL({ res: 'fail', why: 'zz9' }), 'נכשל – קוד: zz9');
+    assert.equal(C.resL({ res: 'fail' }), 'נכשל');
+    assert.equal(C.resL(L[1]), 'הצליח'); assert.equal(C.resL(L[2]), '');
+  });
+  it('mlogRows: נשלח / נכשל, סוג "ml", בלי פריטים לא תקינים', () => {
+    const R = C.mlogRows([{ id: 'x1', t: 10, ch: 'wa', st: 'sent', to: '050***12', ri: 'לענות על שעות', by: 'אני' }, { id: 'x2', t: 11, ch: 'mail', st: 'fail', whyL: ['השליחה נכשלה'] }, { t: 5 }, null]);
+    assert.equal(R.length, 2);
+    assert.equal(R[0].res, 'ok'); assert.match(R[0].title, /נשלח לבד בווצאפ ל050\*\*\*12/);
+    assert.equal(R[1].res, 'fail'); assert.equal(C.resL(R[1]), 'נכשל – השליחה נכשלה');
+    assert.equal(C.logType(R[0].act), 'ml');
+    assert.deepEqual(C.logFilter(R, { res: 'fail' }).map((x) => x.id), ['mlx2']);
+    assert.deepEqual(C.mlogRows(undefined), []);
+  });
+  it('כספית: אין מקור – אין שורה; כל מצב לפי תשובת השרת בלבד', () => {
+    assert.equal(by(C.connOf({}), 'cx'), undefined);
+    const x = (cx) => by(C.connOf({ cx }), 'cx').s;
+    assert.equal(x({ err: 'x' }), 'unk');
+    assert.equal(x({ dev: null }), 'off');
+    assert.equal(x({ dev: { id: 'd' }, lr: null }), 'unk');
+    assert.equal(x({ dev: { id: 'd' }, lr: { st: 'ok', at: 5 } }), 'ok');
+    assert.equal(x({ dev: { id: 'd' }, lr: { st: 'needs-login', at: 5 } }), 'perm');
+    assert.equal(x({ dev: { id: 'd' }, lr: { st: 'fail', at: 5 } }), 'off');
+    assert.equal(x({ dev: { id: 'd' }, lr: { st: 'run', at: 5 } }), 'unk');
+  });
+});

@@ -75,6 +75,7 @@ async function open(browser, www, o) {
     if (n === 'secState') return ok(st);
     if (n === 'secGoogle') return ok({ ok: true, configured: true, max: 3, boxes: [{ id: 'b1', addr: 'a@b.co', st: 'ok', clean: false }], cal: { connected: false } });
     if (n === 'secWaCfg') return ok({ ok: true, connected: false });
+    if (n === 'cxBotTok') return ok({ dev: { id: 'd1', at: now - 600e3 }, lr: { st: 'needs-login', at: now - 3600e3 }, runs: [] }); // 23.11.2026 (סבב 2): מצב כספית
     if (n === 'secChatLoad') return ok(body.before ? { ok: true, msgs: page2, more: false } : { ok: true, msgs: page1, more: true });
     if (n === 'secChat') return ok({ ok: true, id: 'a9', reply: 'לקבוע תזכורת?', mode: 'ok', src: [], cards: [{ k: 'cal', id: 'k7', title: 'להתקשר לספק', d: DAY, tm: '09:00', to: 'me', rem: true }], pct: 11, saving: false });
     if (n === 'secCal') return ok(body.op === 'list' ? { ok: true, events: [], we: 'warn', today: '2026-11-03' } : { ok: true, id: body.id });
@@ -89,7 +90,7 @@ async function open(browser, www, o) {
     }
     return ok(n === 'getBackupKey' ? { key: Buffer.alloc(32, 7).toString('base64') } : {});
   });
-  const LOGN = 120; const logDoc = (i) => ({ name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/sec_log/L' + i, fields: { t: { integerValue: String(now - i * 60000) }, by: { stringValue: 'm' }, who: { stringValue: i % 10 === 0 ? 'sa' : 'mgr' }, act: { stringValue: i % 3 === 0 ? 'factOk' : i % 3 === 1 ? 'calAdd' : 'report' }, ch: { stringValue: 'app' }, note: { stringValue: i === 7 ? 'סימון-חיפוש' : '' } } });
+  const LOGN = 120; const logDoc = (i) => ({ name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/sec_log/L' + i, fields: { t: { integerValue: String(now - i * 60000) }, by: { stringValue: 'm' }, who: { stringValue: i % 10 === 0 ? 'sa' : 'mgr' }, act: { stringValue: i % 3 === 0 ? 'factOk' : i % 3 === 1 ? 'calAdd' : 'report' }, ch: { stringValue: 'app' }, note: { stringValue: i === 7 ? 'סימון-חיפוש' : '' }, ...(i === 7 ? { res: { stringValue: 'fail' }, why: { stringValue: 'retries' } } : i === 8 ? { res: { stringValue: 'ok' } } : {}) } });
   await ctx.route(/:runQuery$/, async (route) => {
     let q = null; try { q = JSON.parse(route.request().postData() || '{}').structuredQuery; } catch (e) { /* */ }
     if (!q || !q.from || q.from[0].collectionId !== 'sec_log') return route.fallback();
@@ -125,7 +126,8 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     check('מרכז שליטה: כותרת הלשונית וכותרת גיטי', /גיטי – המנהלת העסקית הדיגיטלית/.test(hub) && /מרכז שליטה/.test(await txt(page, '#secTabs')) && !/מול העיניים/.test(await txt(page, '#secTabs')));
     check('מרכז שליטה: זמן עדכון אחרון וכפתור הגדרות', /עודכן לאחרונה/.test(hub) && !!(await page.$('#secHub [data-a=secSet]')));
     const conn = await txt(page, '#secHubConn');
-    check('חיבורים: 5 שורות', (await page.$$('#secHubConn .secli')).length === 5, conn);
+    check('חיבורים: 6 שורות (כולל כספית – למנהל עם סנכרון כספית)', (await page.$$('#secHubConn .secli')).length === 6, conn);
+    check('חיבורים (סבב 2): כספית לפי cxBotTok info – "דורש הרשאה" כשצריך להתחבר, עם כפתור למסך הסנכרון', /כספית[\s\S]*?דורש הרשאה/.test(conn) && !!(await page.$('#secHubConn [data-a=hubCx]')), conn);
     check('חיבורים: Gmail פעיל (מ-secGoogle status), ווצאפ מנותק (secWaCfg), יומן Google מנותק', /Gmail[\s\S]*?פעיל/.test(conn) && /ווצאפ[\s\S]*?מנותק/.test(conn) && /יומן Google[\s\S]*?מנותק/.test(conn), conn);
     check('חיבורים: התראות מהטלפון "טרם נבדק" (לא באפליקציה), נתוני הכספים בלי חותמת – "טרם נבדק"', /התראות מהטלפון[\s\S]*?טרם נבדק/.test(conn) && /נתוני הכספים[\s\S]*?טרם נבדק/.test(conn), conn);
     await page.evaluate(() => { window.__sec.st.mirrorAt = Date.now(); rerender(); }); await H.settle(page, 200);
@@ -169,6 +171,13 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     await page.click('[data-a=hubLgClr]'); await H.settle(page, 300);
     await page.selectOption('#secHubLgF [name=type]', 'facts'); await page.click('#secHubLgF button.chip.on'); await H.settle(page, 500);
     check('סינון לפי סוג "מידע על העסק": רק פעולות עובדה (שליש מ-120)', (await page.$$('#secHubLg .li')).length === 40, (await page.$$('#secHubLg .li')).length);
+    await page.click('[data-a=hubLgClr]'); await H.settle(page, 300);
+    // סבב 2 (23.11.2026): תוצאה בשורה וסינון "נכשל" (רשומות ישנות בלי res – לא נחשבות)
+    await page.selectOption('#secHubLgF [name=res]', 'fail'); await page.click('#secHubLgF button.chip.on'); await H.settle(page, 500);
+    check('סינון "נכשל": שורה אחת, עם "נכשל" בשורה', (await page.$$('#secHubLg .li')).length === 1 && /נכשל/.test(await txt(page, '#secHubLg')), (await page.$$('#secHubLg .li')).length);
+    await page.click('#secHubLg .li'); await H.settle(page, 300);
+    check('פירוט שורה שנכשלה: תוצאה "נכשל" עם הסיבה בעברית', /תוצאה:\s*נכשל – לא עובדה אחרי כמה ניסיונות/.test(await page.evaluate(() => document.getElementById('dlg').innerText)));
+    await page.evaluate(() => closeDlg());
     await page.click('[data-a=hubLgClr]'); await H.settle(page, 300);
     await page.evaluate(() => { const d = new Date(window.__sec ? Date.now() : 0); });
     const day = await page.evaluate(() => new Date(Date.UTC(2026, 10, 3, 9, 0, 0)).toISOString().slice(0, 10));

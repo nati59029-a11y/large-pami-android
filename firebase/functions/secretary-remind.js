@@ -200,6 +200,20 @@ async function remindBiz(opts) {
   const tasksGet = () => tasksP || (tasksP = db.collection('tasks').orderBy('cr', 'desc').limit(400).get().then((s) => s.docs.map((d) => d.data())));
   const closGet = () => closP || (closP = db.collection('closings').orderBy('t', 'desc').limit(300).get().then((s) => s.docs.map((d) => Object.assign({ id: d.id }, d.data()))));
   const logs = [];
+  // 23.11.2026: נתונים לסיכום בוקר / ערב – נטענים רק כשיש סיכום לשלוח, פעם אחת בריצה
+  let sumP = null;
+  const sumGet = () => sumP || (sumP = (async () => {
+    const dayStart = R.ilMs(today, '00:00'), q = (p) => p.get().then((s) => s.docs.map((d) => d.data())).catch(() => []);
+    const [F, tasks, cal, calNext, inv, dr, facts, prop, lg] = await Promise.all([finGet(), tasksGet(),
+      q(db.collection('sec_cal').where('d', '==', today).limit(200)), q(db.collection('sec_cal').where('d', '==', K.addDays(today, 1)).limit(200)),
+      db.collection('sec_inv').where('st', 'in', R.INV_WAIT).count().get().then((s) => s.data().count).catch(() => 0),
+      q(db.collection('sec_draft').where('st', '==', 'pend').limit(50)),
+      db.collection('sec_facts').where('st', '==', 'prop').count().get().then((s) => s.data().count).catch(() => 0),
+      q(db.collection('sec_cal').where('st', '==', 'prop').limit(50)),
+      q(db.collection('sec_log').where('t', '>=', dayStart).limit(1000))]);
+    const acts = { ok: lg.filter((l) => l.res === 'ok').length, fail: lg.filter((l) => l.res === 'fail').length };
+    return { dayStart, F, tasks, cal, calNext, inv, draft: dr.filter((x) => x.auto !== true).length, facts, prop, acts };
+  })());
 
   // 0. שלב 5: הודעות ווצאפ שלא עובדו (טריגר שנכשל / נקטע) – חוזרות לתור, ואחרי 3 ניסיונות – סימון והתראה. תקלה כאן לא עוצרת את התזכורות
   try { const q = await require('./secretary-wa')._core.requeue(db, scope.bizId, now); if (q.requeued || q.failed) Object.assign(out, { waq: q.requeued, waFail: q.failed }); } catch (e) { logger.warn('secretary: wa requeue failed', { bizId: scope.bizId, code: e && e.code }); }
@@ -341,6 +355,18 @@ async function remindBiz(opts) {
       const ev = (await db.collection('sec_cal').where('d', '==', today).limit(200).get()).docs.filter((d) => d.get('st') === 'ok' && (!d.get('uid') || d.get('uid') === m.uid)).length;
       const op = (await db.collection(`sec_note/${m.uid}/n`).where('st', '==', 'open').limit(500).get()).docs.filter((d) => d.get('k') === 'rem').length;
       await addNote(db, m, { k: 'dig', typ: 'dig', key: 'dig:' + today, title: 'תקציר יומי', body: 'ביומן היום: ' + ev + '\nתזכורות פתוחות: ' + op + (F ? '\nחשבוניות לתשלום היום: ' + dueToday : '') }, now, true);
+    }
+    // 23.11.2026 (גיטי, סבב 2): סיכום בוקר / ערב – רק אם המנהל הדליק, פעם ביום (מזהה קבוע), מנתונים בלבד (בלי AI). קריאות משותפות לכל המנהלים בריצה
+    for (const [kind, on, h] of [['am', m.nt.sm, m.nt.smh], ['pm', m.nt.se, m.nt.seh]]) {
+      if (!on || !R.sumDue(P.hm, h)) continue;
+      const key = kind + ':' + today;
+      if ((await db.doc(`sec_note/${m.uid}/n/${nid(m.uid, key)}`).get()).exists) continue;
+      const S = await sumGet();
+      const mine = (e) => e.st === 'ok' && (!e.uid || e.uid === m.uid);
+      const sm = R.daySum({ kind, today, now, dayStart: S.dayStart, fin: S.F && S.F.fin, tasks: S.tasks,
+        cal: S.cal.filter(mine), calNext: S.calNext.filter(mine).length,
+        wait: { tk: S.tasks.filter((t) => t.st === 'wait').length, inv: S.inv, draft: S.draft, prop: S.facts + S.prop.filter((e) => e.uid === m.uid).length }, acts: S.acts });
+      if (await addNote(db, m, { k: 'dig', typ: kind, key, title: sm.title, body: sm.body }, now, true)) logs.push(logData('', 'auto', 'daySum', { tgt: m.uid, note: kind + ' ' + today }));
     }
   }
 

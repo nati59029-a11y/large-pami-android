@@ -709,3 +709,54 @@ describe('23.11.2026: מקור התראות מייל ו-Google (src) ברשימ�
     assert.equal(by.g1.key, undefined, 'המפתח הפנימי לא נחשף');
   });
 });
+
+// ---------------------------------------------------------------------------------
+// 23.11.2026 (גיטי, סבב 2): סיכום בוקר וסיכום ערב בתוך secRemind – כבויים כברירת מחדל, פעם ביום, מנתונים בלבד (בלי AI)
+describe('גיטי סבב 2: סיכום בוקר / ערב', () => {
+  it('כבוי כברירת מחדל; הודלק – בוקר אחד ביום (גם בריצה כפולה), ערב עם מה שנעשה וכשלים; בלי סיכום ביום שאינו יום עסקים', async () => {
+    await seed({});
+    const D = '2026-12-02', now = IL(D + 'T08:10');
+    await prep(async (d) => {
+      await d.doc(`b/${A}/sec_mirror/fin`).set({ v: 1, data: finOf({ open: [['ספק החלב', '501', '2026-11-01', D, 1200, 1200]], late: { sum: 700, gross: 700, n: 2 } }), at: now - 3600e3 });
+      await d.doc(`b/${A}/tasks/t1`).set({ txt: 'לנקות את המקרר', st: 'open', due: now - 864e5, cr: now - 3 * 864e5, ow: E1 });
+      await d.doc(`b/${A}/tasks/t2`).set({ txt: 'לסדר מדף', st: 'wait', due: now + 864e5, cr: now - 864e5, ow: E1 });
+      await d.doc(`b/${A}/tasks/t3`).set({ txt: 'בוצעה היום', st: 'done', due: now + 864e5, cr: now - 864e5, ok: IL(D + 'T12:00'), ow: E1 });
+      await d.doc(`b/${A}/sec_cal/c1`).set({ d: D, tm: '10:00', title: 'פגישה עם רואה החשבון', st: 'ok', uid: '' });
+      await d.doc(`b/${A}/sec_inv/i1`).set({ st: 'new', t: now - 3600e3 });
+    });
+    await run(D + 'T08:10');
+    assert.equal(byKey(await notes(M1), /^(am|pm):/).length, 0, 'כבוי כברירת מחדל');
+    assert.equal((await call('secPrefs', M1, { op: 'notify', nt: { sm: true, smh: 8, se: true, seh: 18 } })).status, 'OK');
+    assert.equal((await call('secPrefs', M1, { op: 'notify', nt: { smh: 24 } })).reason, 'bad-input');
+    assert.equal((await call('secPrefs', M1, { op: 'notify', nt: { se: 'yes' } })).reason, 'bad-input');
+    await run(D + 'T07:40');
+    assert.equal(byKey(await notes(M1), /^am:/).length, 0, 'לפני השעה – לא');
+    await run(D + 'T08:10'); await run(D + 'T08:25');
+    const am = byKey(await notes(M1), /^am:/);
+    assert.equal(am.length, 1, 'פעם אחת ביום');
+    assert.match(am[0].title, /סיכום בוקר/);
+    assert.match(am[0].body, /ביומן היום: 1 – 10:00 פגישה עם רואה החשבון/);
+    assert.match(am[0].body, /משימות פתוחות: 1, מהן 1 באיחור/);
+    assert.match(am[0].body, /חשבוניות לתשלום היום: 1, סך 1,200/); assert.match(am[0].body, /חשבוניות באיחור: 2/);
+    assert.match(am[0].body, /ממתין לאישור שלך: 1 משימות, 1 חשבוניות שהתקבלו/);
+    assert.equal(byKey(await notes(M2), /^am:/).length, 0, 'מנהל אחר שלא הדליק – לא');
+    await prep(async (d) => {
+      await d.doc(`b/${A}/sec_log/f1`).set({ t: IL(D + 'T11:00'), act: 'sendFail', who: 'auto', res: 'fail', why: 'x' });
+      await d.doc(`b/${A}/sec_log/o1`).set({ t: IL(D + 'T11:05'), act: 'autoSend', who: 'auto', res: 'ok' });
+      await d.doc(`b/${A}/sec_log/old`).set({ t: IL('2026-12-01T11:00'), act: 'sendFail', who: 'auto', res: 'fail' });
+    });
+    await run(D + 'T18:05'); await run(D + 'T18:20');
+    const pm = byKey(await notes(M1), /^pm:/);
+    assert.equal(pm.length, 1);
+    assert.match(pm[0].body, /מה נעשה היום: 1 משימות בוצעו; פעולות שליחה וחשבוניות: 1 הצליחו, 1 נכשלו/);
+    assert.ok((await coll(`b/${A}/sec_log`)).some((l) => l.act === 'daySum'), 'נרשם ביומן');
+    await run('2026-12-04T08:10'); // שישי
+    assert.equal(byKey(await notes(M1), /^am:2026-12-04/).length, 0, 'שישי – לא');
+  });
+  it('daySum / sumDue (טהור): חלון של 6 שעות; בלי מראה – "אין נתוני כספים"', () => {
+    assert.equal(R.sumDue('08:00', 8), true); assert.equal(R.sumDue('13:59', 8), true); assert.equal(R.sumDue('14:00', 8), false); assert.equal(R.sumDue('07:59', 8), false);
+    assert.equal(R.sumDue('23:45', 18), true);
+    const s = R.daySum({ kind: 'pm', today: '2026-12-02', now: IL('2026-12-02T18:00'), dayStart: IL('2026-12-02T00:00'), fin: null, tasks: [], cal: [], calNext: 2, wait: {}, acts: { ok: 0, fail: 0 } });
+    assert.match(s.title, /סיכום ערב/); assert.match(s.body, /אין נתוני כספים/); assert.match(s.body, /מחר ביומן: 2/); assert.match(s.body, /ממתין לאישור שלך: אין/);
+  });
+});

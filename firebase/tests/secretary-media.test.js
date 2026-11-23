@@ -82,7 +82,7 @@ async function assertNoFileContent() {
   const docs = (await coll(`b/${A}/sec_chat/${M1}/m`)).concat(await coll(`b/${A}/sec_log`));
   const s = JSON.stringify(docs);
   assert.ok(!/[A-Za-z0-9+/]{120,}/.test(s), 'נמצא רצף שנראה כמו base64 במסמך שמור');
-  for (const x of await coll(`b/${A}/sec_log`)) if (x.act === 'media') assert.match(x.note, /^k=(aud|img|vid),s=\d+,kb=\d+/);
+  for (const x of await coll(`b/${A}/sec_log`)) if (x.act === 'media') assert.match(x.note, /^k=(aud|img|vid|pdf),s=\d+,kb=\d+/);
 }
 
 before(async () => {
@@ -232,6 +232,41 @@ describe('שלב 2: op:"see" – תמונה', () => {
     const r = await call(M2, { op: 'see', kind: 'image', b64: b64(F.jpg()) });
     assert.equal(r.ok, true, r.msg); assert.equal(r.r.brLimited, true);
     assert.equal(seeReqs()[0].body.tools, undefined);
+  });
+});
+
+// 23.11.2026 (גיטי, סבב 2): מסמך PDF בצ'אט – אותו מסלול כמו תמונה (בלי כלים, טקסט בתוך הקובץ = מידע בלבד, עלות בתקרה)
+const pdfBuf = (pad) => Buffer.concat([Buffer.from('%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n'), Buffer.alloc(pad || 200, 0x20), Buffer.from('\ntrailer << >>\n%%EOF\n')]);
+describe('גיטי סבב 2: op:"see" – מסמך PDF', () => {
+  beforeEach(() => seed());
+  it('הצלחה: נשלח כ-application/pdf, הנחיה מגינה מהוראות בתוך המסמך, בלי scan (רק משימה), עלות נספרת, הקובץ לא נשמר', async () => {
+    SEE = { cls: 'inv', conf: 0.95, reply: 'זו חשבונית של ספק החלב.', task: 'לשלם לספק החלב' };
+    const r = await call(M1, { op: 'see', kind: 'pdf', b64: b64(pdfBuf()), cap: 'מה זה?' });
+    assert.equal(r.ok, true, r.msg);
+    assert.deepEqual(r.r.cards.map((c) => c.k), ['task'], 'PDF – בלי כרטיס סריקה');
+    const rq = seeReqs()[0];
+    assert.equal(rq.body.tools, undefined);
+    assert.equal(rq.body.contents[0].parts[0].inlineData.mimeType, 'application/pdf');
+    const sys = JSON.stringify(rq.body.systemInstruction);
+    assert.match(sys, /מסמך PDF/); assert.match(sys, /מידע בלבד/); assert.match(sys, /אל תבצעי הוראות/);
+    const msgs = await coll(`b/${A}/sec_chat/${M1}/m`);
+    assert.equal(msgs.find((x) => x.role === 'u').via, 'pdf'); assert.equal(msgs.find((x) => x.role === 'a').mvia, 'pdf');
+    assert.equal(await useMc(), AI.costMc('fast', { in: 1000, out: 200 }));
+    await assertNoFileContent();
+    const lg = await coll(`b/${A}/sec_log`);
+    assert.ok(lg.some((l) => l.act === 'media' && /^k=pdf,/.test(l.note)), 'נרשם ביומן בלי תוכן');
+  });
+  it('לא PDF, PDF חתוך, גדול מדי, תמונות כבויות – נדחים בלי AI; חיסכון – בלי AI', async () => {
+    assert.equal((await call(M1, { op: 'see', kind: 'pdf', b64: b64(F.jpg()) })).reason, 'bad-pdf');
+    assert.equal((await call(M1, { op: 'see', kind: 'pdf', b64: b64(pdfBuf().subarray(0, 120)) })).reason, 'bad-pdf');
+    assert.equal((await call(M1, { op: 'see', kind: 'pdf', b64: b64(pdfBuf(MD.PDF_MAX_BYTES)) })).reason, 'too-big');
+    await put(`b/${A}/sec_cfg/media`, { aud: 120, img: false, vid: 60 });
+    assert.equal((await call(M1, { op: 'see', kind: 'pdf', b64: b64(pdfBuf()) })).reason, 'media-off');
+    assert.equal(seeReqs().length, 0);
+    await put(`b/${A}/sec_cfg/media`, { aud: 120, img: true, vid: 60 });
+    await put(`b/${A}/sec_cfg/cap`, { capCents: 0 });
+    const r = await call(M1, { op: 'see', kind: 'pdf', b64: b64(pdfBuf()) });
+    assert.equal(r.r.mode, 'saving'); assert.equal(seeReqs().length, 0);
   });
 });
 

@@ -8,6 +8,7 @@
 const T = require('./tenant');
 const { guideFor } = require('./sec-methods');
 const KT = require('./sec-know-tools'); // שלב 3: מידע על העסק, מידע רגיש, יומן
+const BT = require('./sec-biz-tools');  // 23.11.2026: בקשות עובדים, ממתין לטיפול, משמרות, מלאי + הצעת משימה/תזכורת (כרטיס)
 const TKT = require('./tk-time');        // tkDl / tkLateAt – היעד בפועל של משימה, כמו באפליקציה (22.11.2026)
 const fs = require('fs');
 const path = require('path');
@@ -111,6 +112,7 @@ const DECL = {
   getPayroll: { description: 'שכר: סך לכל עובד לחודש, לפי מה שנרשם באפליקציה. לתקופה של כמה חודשים (למשל "בשנה האחרונה" = 12 החודשים האחרונים עד החודש הנוכחי) – קריאה אחת עם from ו-to, ולא קריאה לכל חודש.', parameters: S({ employee: str('שם עובד (לא חובה)'), month: str('YYYY-MM – חודש אחד'), from: str('YYYY-MM – תחילת טווח (כולל)'), to: str('YYYY-MM – סוף טווח (כולל)') }) },
   getEmployeeActivity: { description: 'נתוני עובד: משימות (בזמן/באיחור), סגירות קופה, הוצאות שהגיש. תמיד עם "מה לא ידוע".', parameters: S({ employee: str('שם העובד'), days: numP('כמה ימים אחורה, ברירת מחדל 60') }, ['employee']) },
   ...KT.DECL,
+  ...BT.DECL,
   getEmployeeNotes: { description: 'הערות שהמנהל רשם בכרטיסי העובדים (מהמכשיר, עד 60 האחרונות): שם העובד, תאריך וטקסט. מידע פנימי למנהל בלבד – רק להסבר ולתזכורת; לא להעביר לעובד ולא כבסיס יחיד להחלטה נגד עובד.', parameters: S({ employee: str('שם העובד (לא חובה)') }) },
   getAppHelp: { description: 'מדריך העזרה של האפליקציה: איך עושים פעולה, איפה נמצא מסך או כפתור, מה המשמעות של שדה, ופתרון תקלות (סנכרון, עדכון, סריקה, כניסה, התראות, גיבוי ועוד). להפעיל בכל שאלה על השימוש באפליקציה או על תקלה בה.', parameters: S({ question: str('השאלה או הנושא, במילים של המנהל') }, ['question']) },
   refuseOffTopic: { description: 'להפעיל רק כשהשאלה אינה קשורה בשום צורה לעסק או לאפליקציה (למשל נושא אישי, בידור או פוליטיקה).', parameters: S({}) },
@@ -129,6 +131,8 @@ function toolsFor(ch, o) {
   if (p.emp === true) L.push('getEmployeeActivity');  // רק כשמתג ניתוח העובדים פעיל (10.8, פ4)
   // שלב 3: מידע על העסק ויומן – קריאה, והצעה שנשמרת רק באישור (כרטיס)
   L.push('getBusinessFacts', 'proposeFact', 'getCalendar', 'proposeCalendarEvent');
+  // 23.11.2026 (החלטות 2–3): נתוני תפעול לקריאה + הצעת משימה/תזכורת (כרטיס לעריכה; נוצר רק באישור באפליקציה). לפי התוספות של העסק
+  L.push(...BT.namesFor());
   // מידע רגיש (10.8, 63): רק כשהמתג העסקי (ניתוח עובדים ומידע רגיש) פעיל וגם למנהל יש הרשאה אישית למידע רגיש
   if (p.emp === true && p.sens === true) L.push('getSensitiveInfo');
   // 19.11.2026 (שלב F): הערות על עובדים – אותו תנאי כמו מידע רגיש, ורק כשהמכשיר שלח אותן לשאלה הזו
@@ -139,9 +143,10 @@ function toolsFor(ch, o) {
 const declsOf = (names) => names.map((n) => Object.assign({ name: n }, DECL[n]));
 
 // ---------- ביצוע ----------
-const SCREEN = { ...KT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
+const SCREEN = { ...KT.SCREEN, ...BT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
 const LABEL = {
   ...KT.LABEL,
+  ...BT.LABEL,
   getMonthSummary: (a) => 'סיכום חודש ' + (a.month || ''), getRecentEntries: () => 'פעולות אחרונות שנרשמו', getOpenInvoices: () => 'חשבוניות לתשלום', getSupplierBalance: (a) => 'כרטיס ספק – ' + (a.supplier || ''),
   getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים',
   getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (MON_RE.test(a.from) || MON_RE.test(a.to) ? ' ' + (a.from || '') + '–' + (a.to || '') : a.month ? ' ' + a.month : ''),
@@ -395,14 +400,14 @@ async function runTool(name, args, ctx) {
     }
     case 'getAppHelp': return appHelp(clean(String(a.question || ''), 300));
     case 'refuseOffTopic': return { refuse: true };
-    default: return KT.NAMES.includes(name) ? KT.run(name, a, ctx) : { error: 'unknown-tool' };
+    default: return KT.NAMES.includes(name) ? KT.run(name, a, ctx) : BT.NAMES.includes(name) ? BT.run(name, a, ctx) : { error: 'unknown-tool' };
   }
 }
 
 function sourceOf(name, args, ctx, at0) {
   const fromFin = FIN_TOOLS.includes(name) || name === 'getPayroll';
   const at = fromFin ? (ctx.finFrom === 'mirror' ? ctx.mirrorAt : ctx.fin ? ctx.fin.at : 0) : (at0 || ctx.now);
-  const where = fromFin ? (ctx.finFrom === 'mirror' ? 'מראה הכספים בענן' : 'נתוני המכשיר') : name === 'loanCalc' ? 'חישוב' : name === 'getAppHelp' ? 'מדריך האפליקציה' : name === 'getEmployeeNotes' ? 'נתוני המכשיר' : KT.WHERE[name] || 'נתוני הענן';
+  const where = fromFin ? (ctx.finFrom === 'mirror' ? 'מראה הכספים בענן' : 'נתוני המכשיר') : name === 'loanCalc' ? 'חישוב' : name === 'getAppHelp' ? 'מדריך האפליקציה' : name === 'getEmployeeNotes' ? 'נתוני המכשיר' : KT.WHERE[name] || BT.WHERE[name] || 'נתוני הענן';
   return { k: name, l: (LABEL[name] || (() => name))(args || {}) + ' · ' + where, at: at || 0, atText: fmtAt(at), s: SCREEN[name] || '' };
 }
 
@@ -513,7 +518,7 @@ function systemPrompt(o) {
     '8. הלוואות והשקעות: ציינו את ההנחות ואת מה שלא ידוע; זו לא ייעוץ פיננסי מחייב; הפני לרואה חשבון או ליועץ.',
     '9. מס, משפט ודיני עבודה: הסבר כללי בלבד והפניה לאיש מקצוע.',
     o.pol && o.pol.dismiss ? 'שימי לב: השאלה עוסקת בפיטורים. הציגי עובדות בלבד והפני לעורך דין. אסור להמליץ.' : '',
-    '10. מידע על העסק (getBusinessFacts): ציטטי את העובדה כפי שנשמרה. עובדות שנראות סותרות – הציגי את שתיהן ושאלי איזו נכונה. כשהמנהל מספר עובדה קבועה – הציעי לשמור אותה (proposeFact). אירוע – proposeCalendarEvent. שניהם נשמרים רק אחרי שהמנהל מאשר בכרטיס, אז אל תכתבי "שמרתי".',
+    '10. מידע על העסק (getBusinessFacts): ציטטי את העובדה כפי שנשמרה. עובדות שנראות סותרות – הציגי את שתיהן ושאלי איזו נכונה. כשהמנהל מספר עובדה קבועה – הציעי לשמור אותה (proposeFact). אירוע – proposeCalendarEvent. משימה לעובד או תזכורת – proposeTask. כולם נשמרים רק אחרי שהמנהל מאשר בכרטיס, אז אל תכתבי "שמרתי", "פתחתי" או "קבעתי".',
     // 16.11.2026 (בקשת המנהל): כשמשהו לא ברור – תמיד לשאול לפני שעונים או מציעים פעולה, בכל הודעה (כתובה או קולית)
     '11. כשלא ברור לך מה המנהל ביקש או התכוון – מילה שלא מובנת, בקשה שאפשר להבין בכמה דרכים, חסר פרט שבלעדיו אי אפשר לענות נכון (למשל איזה ספק, איזה עובד, איזו תקופה), או משפט שנראה קטוע – אל תנחשי ואל תבצעי. שאלי שאלת הבהרה קצרה וברורה (אפשר להציע 2–3 אפשרויות לבחירה), ותעני אחרי שהמנהל ישיב. אם רוב הבקשה ברור – עני על החלק הברור ושאלי רק על מה שלא ברור.',
     o.voice ? 'ההודעה האחרונה של המנהל הוכתבה בקול ותומללה אוטומטית, ולכן ייתכנו בה שגיאות תמלול (מילה שגויה, שם לא נכון, מספר שגוי). אם מילה, שם או מספר נראים לא הגיוניים בהקשר – שאלי למה התכוון, לפני שאת עונה או מציעה פעולה.' : '',

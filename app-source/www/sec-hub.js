@@ -4,16 +4,18 @@
       "מה דורש את תשומת הלב שלך" (פריטי "מול העיניים" + משימות/בקשות/חשבוניות מכרטיס "דורש טיפול" בבית, בלי כפילויות לפי מזהה), פעולות מהירות.
    2. מרכז אישורים מאוחד (לשונית appr): מציג את אותן שורות של "מול העיניים" שממתינות לאישור, עם אותם כפתורים (אותן פעולות), ומשימות שממתינות לאישור (tkOk).
    3. יומן פעולות מלא (לשונית hlog): sec_log בדפים, חיפוש, סינון לפי סוג ותאריך, פירוט בלחיצה, ויומן "מה עשיתי לבד" של התראות הטלפון (מקומי במכשיר).
-      sec_mlog אסור לקריאה מהאפליקציה לפי firestore.rules (allow read: if false) – לא נקרא.
+      sec_mlog אסור לקריאה ישירה מהאפליקציה לפי firestore.rules – נקרא דרך השרת (secLearn op:'log', אותו מקור כמו במסך "כללים אישיים"; רק כשהכללים האישיים פעילים).
+   סבב 2 (23.11.2026): תוצאה בכל שורה ביומן (res/why מהשרת – רשומות ישנות: "לא נרשמה"), סינון "נכשל"/"הצליח", ומצב חיבור כספית (cxBotTok op:'info' – רק למנהל שיש לו "סנכרון כספית").
    4. אזהרת משימה כפולה (task-dup.js) לפני יצירת משימה בטופס המשימות, בכרטיס "פתח משימה" בצ'אט ובאישור משימה מתמונה. אזהרה בלבד – לא חוסם ולא מוחק.
    Core (טהור, בלי DOM) נבדק ב-node: firebase/tests/sec-hub.unit.test.js. עיצוב: רק משתני הערכה (--acc, --card, --line, --ink, --bad). */
 (function(root){
 'use strict';
 /* ===================== Core (טהור) ===================== */
 const ST={ok:'פעיל',off:'מנותק',perm:'דורש הרשאה',unk:'טרם נבדק'};
-/* מצב חיבור לפי מקור אמיתי בלבד. src: {gs: תשובת secGoogle status, wc: תשובת secWaCfg get, nf: {native,plug,on,en,err}, st: תשובת secState}. אין מקור ← unk */
+/* מצב חיבור לפי מקור אמיתי בלבד. src: {gs: תשובת secGoogle status, wc: תשובת secWaCfg get, nf: {native,plug,on,en,err}, st: תשובת secState,
+   cx: תשובת cxBotTok info (או {err}); בלי cx – אין שורת כספית (עסק בלי סנכרון כספית / לא מנהל)}. אין מקור ← unk */
 function connOf(src){
- src=src||{};const o=[],gs=src.gs,wc=src.wc,nf=src.nf,st=src.st;
+ src=src||{};const o=[],gs=src.gs,wc=src.wc,nf=src.nf,st=src.st,cx=src.cx;
  const c=(k,l,s,n,a)=>o.push({k,l,s,sl:ST[s],n:n||'',a:a||''});
  if(!gs||gs.err)c('gmail','Gmail','unk',gs&&gs.err?'לא נטען':'');
  else if(!gs.configured)c('gmail','Gmail','off','החיבור ל-Google עוד לא הוגדר בשרת','set');
@@ -39,6 +41,14 @@ function connOf(src){
  else if(st.mirror===false)c('biz','מערכות העסק (נתוני הכספים)','off','מראה הכספים כבוי בהגדרות','set');
  else if(Number.isFinite(st.mirrorAt)&&st.mirrorAt>0)c('biz','מערכות העסק (נתוני הכספים)','ok','נכון ל-'+(root.__hubFmt?root.__hubFmt(st.mirrorAt):''));
  else c('biz','מערכות העסק (נתוני הכספים)','unk','עוד לא נשלחו נתונים');
+ if(cx){const L='כספית (רובוט מחשב החנות)',lr=cx.lr,at=lr&&lr.at&&root.__hubFmt?root.__hubFmt(lr.at):'';
+  if(cx.err)c('cx',L,'unk','לא נטען');
+  else if(!cx.dev)c('cx',L,'off','אין מחשב מחובר','cx');
+  else if(!lr)c('cx',L,'unk','עוד לא סונכרן','cx');
+  else if(lr.st==='ok')c('cx',L,'ok','סונכרן '+at,'cx');
+  else if(lr.st==='needs-login')c('cx',L,'perm','צריך להתחבר לכספית במחשב החנות','cx');
+  else if(lr.st==='fail')c('cx',L,'off','הסנכרון האחרון נכשל'+(at?' ('+at+')':''),'cx');
+  else c('cx',L,'unk','סנכרון בתהליך או ממתין לניסיון חוזר','cx')}
  return o}
 /* איחוד פריטי תשומת לב: eyes ראשונים; פריט נוסף שמזהה שלו (או הפניה) כבר קיים – לא מוצג שוב */
 const keysOf=x=>[x&&x.id,x&&x.ref,x&&x.go&&x.go.id,x&&x.act&&x.act.tid].filter(v=>typeof v==='string'&&v);
@@ -47,15 +57,26 @@ function mergeAttention(eyes,extra){
  const out=[];(Array.isArray(extra)?extra:[]).forEach(x=>{const ks=keysOf(x);if(!ks.length||ks.some(k=>seen.has(k)))return;ks.forEach(k=>seen.add(k));out.push(x)});
  return out}
 /* יומן: סוג לפי שם הפעולה */
-const LT=[['facts','מידע על העסק',/^(fact|fixed|price|sens|rule|bank|import)/],['cal','יומן ותזכורות',/^(cal|rem)/],['rep','דוחות והתראות',/^(report|insight|notify|empAlert)/],
- ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/]];
+const LT=[['facts','מידע על העסק',/^(fact|fixed|price|sens|rule|bank|import)/],['cal','יומן ותזכורות',/^(cal|rem)/],['rep','דוחות והתראות',/^(report|insight|notify|empAlert|daySum)/],
+ ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
 const logType=a=>{a=String(a||'');const m=LT.find(x=>x[2].test(a));return m?m[0]:'other'};
 const logTypes=()=>LT.map(x=>[x[0],x[1]]).concat([['other','אחר']]);
 const WHO={mgr:'מנהל העסק',sa:'מנהל המערכת',auto:'פעולה אוטומטית',sec:'המזכירה'};
 const whoL=w=>WHO[w]||'המערכת';
+/* תוצאה (סבב 2): res 'ok'|'fail' מהשרת; רשומה ישנה / פעולה בלי תוצאה – '' */
+const resOf=x=>x&&(x.res==='ok'||x.res==='fail')?x.res:'';
+const WHY={retries:'לא עובדה אחרי כמה ניסיונות',limit:'הגיע למגבלת ההודעות',send:'השליחה נכשלה','send-off':'השליחה נכשלה שוב – הכלל עבר לאישור ידני',watch:'מעקב המייל לא הופעל',
+ 'google-error':'תקלה בחיבור ל-Google',stuck:'הזיהוי נתקע',error:'תקלה',exchange:'Google לא אישרה את החיבור','no-refresh':'Google לא נתנה הרשאה קבועה'};
+const whyL=w=>{w=String(w||'');return !w?'':WHY[w]||'קוד: '+w};
+function resL(x){const r=resOf(x);if(r==='ok')return 'הצליח';if(r==='fail'){const w=Array.isArray(x.why)?x.why.join(', '):whyL(x.why);return 'נכשל'+(w?' – '+w:'')}return ''}
+/* sec_mlog דרך השרת (secLearn op:'log': {id,t,ch,st,to,ri,by,mine,whyL[]}) ← שורות יומן */
+function mlogRows(items){return (Array.isArray(items)?items:[]).filter(x=>x&&x.id&&x.t).map(x=>({id:'ml'+x.id,t:+x.t,act:'ml:'+(x.st||''),who:'auto',src:'mlog',
+ title:(x.st==='fail'?'שליחה לבד נכשלה':'נשלח לבד')+' ב'+(x.ch==='mail'?'מייל':'ווצאפ')+(x.to?' ל'+x.to:''),note:(x.ri?'לפי הכלל: '+x.ri:'')+(x.by?' · בעל הכלל: '+x.by:''),
+ res:x.st==='sent'?'ok':x.st==='fail'?'fail':'',why:Array.isArray(x.whyL)?x.whyL.filter(w=>typeof w==='string'):[]}))}
 function logFilter(L,f){f=f||{};const q=String(f.q||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
  return (Array.isArray(L)?L:[]).filter(x=>{
   if(f.type&&logType(x.act)!==f.type)return false;
+  if(f.res&&resOf(x)!==f.res)return false;
   if(f.from&&!(x.t>=f.from))return false;
   if(f.to&&!(x.t<=f.to))return false;
   if(q.length){const h=(String(x.title||'')+' '+String(x.note||'')+' '+whoL(x.who)+' '+String(x.act||'')).toLowerCase();if(!q.every(w=>h.includes(w)))return false}
@@ -68,7 +89,7 @@ function logQuery(o){o=o||{};const F=[],ff=(op,v)=>({fieldFilter:{field:{fieldPa
  const q={from:[{collectionId:'sec_log'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:o.n||50};
  if(F.length===1)q.where=F[0];else if(F.length>1)q.where={compositeFilter:{op:'AND',filters:F}};
  return q}
-const Core={ST,connOf,mergeAttention,logType,logTypes,logFilter,logQuery,whoL};
+const Core={ST,connOf,mergeAttention,logType,logTypes,logFilter,logQuery,whoL,resOf,resL,whyL,mlogRows};
 if(typeof module==='object'&&module&&module.exports){module.exports=Core;return}
 root.SecHubCore=Core;
 
@@ -78,7 +99,7 @@ const X=window.__sec,TABS=window.__secTabs;if(!X||!Array.isArray(TABS)||typeof w
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const tmF=t=>{if(!t)return '';try{const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
 root.__hubFmt=tmF;
-const H={at:0,b:0,gs:null,wc:null,nf:null,all:0,lg:null};
+const H={at:0,b:0,gs:null,wc:null,nf:null,cx:null,all:0,lg:null};
 const re=()=>{try{if(cur().v==='sec'&&!(typeof typing==='function'&&typing()))rerender()}catch(e){}};
 const adm=()=>{try{return typeof fbAdmin==='function'&&fbAdmin()&&bzF('tasks')}catch(e){return false}};
 /* מקומות בטאבים: אחרי "מרכז שליטה" (eyes) */
@@ -92,15 +113,18 @@ async function hubLoad(force){
  const em=e=>({err:e&&e.message||'לא נטען'});
  try{
   const C=cap(),P=native()&&C.Plugins&&C.Plugins.LpNotif||null;
-  const [gs,wc,nf]=await Promise.all([
+  /* כספית: רק מנהל שיש לו מסך "סנכרון כספית" – אחרת אין שורה (לא "מנותק" מומצא) */
+  const cxOk=typeof isA==='function'&&isA()&&typeof V.cxSync==='function'&&typeof window.oxImpOk==='function'&&window.oxImpOk();
+  const [gs,wc,nf,cx]=await Promise.all([
    fnCall('secGoogle',{op:'status'}).then(r=>r&&r.ok?r:{err:'לא נטען'}).catch(em),
    fnCall('secWaCfg',{op:'get'}).then(r=>r&&r.ok?r:{err:'לא נטען'}).catch(em),
    (async()=>{if(!native())return{native:false};if(!P)return{native:true,plug:false};
-    try{const c=await P.getConfig(),e=await P.isEnabled();return{native:true,plug:true,on:!!(c&&c.on)&&String(c&&c.u||'')===String(SY&&SY.uid||''),en:!!(e&&e.on)}}catch(e){return{native:true,plug:true,err:1}}})()]);
-  H.gs=gs;H.wc=wc;H.nf=nf;H.at=Date.now()}
+    try{const c=await P.getConfig(),e=await P.isEnabled();return{native:true,plug:true,on:!!(c&&c.on)&&String(c&&c.u||'')===String(SY&&SY.uid||''),en:!!(e&&e.on)}}catch(e){return{native:true,plug:true,err:1}}})(),
+   cxOk?fnCall('cxBotTok',{op:'info'}).then(r=>r&&typeof r==='object'&&'dev' in r?r:{err:'לא נטען'}).catch(em):Promise.resolve(null)]);
+  H.gs=gs;H.wc=wc;H.nf=nf;H.cx=cx;H.at=Date.now()}
  finally{H.b=0;re()}}
-const connsH=()=>{const L=Core.connOf({gs:H.gs,wc:H.wc,nf:H.nf,st:X.st});
- return L.map(c=>`<div class="secli"><div class="eyh"><div><b>${esc(c.l)}</b><small class="note" style="display:block">${esc(c.n)}</small></div><span class="sectags${c.s==='ok'?' g':c.s==='unk'?'':' w'}">${esc(c.sl)}</span></div>${c.a&&c.s!=='ok'?`<div class="secrow">${c.a==='notif'?'<button class="chip" data-a="secTab" data-v="notif" style="min-height:44px">פתיחה</button>':'<button class="chip" data-a="secSet" style="min-height:44px">הגדרות</button>'}</div>`:''}</div>`).join('')};
+const connsH=()=>{const L=Core.connOf({gs:H.gs,wc:H.wc,nf:H.nf,st:X.st,cx:H.cx});
+ return L.map(c=>`<div class="secli"><div class="eyh"><div><b>${esc(c.l)}</b><small class="note" style="display:block">${esc(c.n)}</small></div><span class="sectags${c.s==='ok'?' g':c.s==='unk'?'':' w'}">${esc(c.sl)}</span></div>${c.a&&c.s!=='ok'?`<div class="secrow">${c.a==='notif'?'<button class="chip" data-a="secTab" data-v="notif" style="min-height:44px">פתיחה</button>':c.a==='cx'?'<button class="chip" data-a="hubCx" style="min-height:44px">סנכרון כספית</button>':'<button class="chip" data-a="secSet" style="min-height:44px">הגדרות</button>'}</div>`:''}</div>`).join('')};
 
 /* ---------- תשומת לב: משימות / בקשות / חשבוניות מהכרטיס "דורש טיפול" בבית ---------- */
 const clip=(s,n)=>{s=String(s||'').replace(/\s+/g,' ').trim();return s.length>n?s.slice(0,n)+'…':s};
@@ -146,6 +170,7 @@ function top(){if(!H.at&&!H.b)hubLoad(false);else if(H.at&&Date.now()-H.at>60000
  <h3 style="margin:10px 0 2px;font-size:1rem">מצב חיבורים</h3><div id="secHubConn">${connsH()}</div>
  <h3 style="margin:10px 0 6px;font-size:1rem">פעולות מהירות</h3>${quickH()}</div>
  <h3 style="margin:12px 0 4px;font-size:1rem">אישורים וטיפול</h3><div class="secrow" style="margin:0 0 8px"><button class="chip" data-a="secTab" data-v="appr" style="min-height:44px">מרכז אישורים</button><button class="chip" data-a="secTab" data-v="hlog" style="min-height:44px">יומן פעולות מלא</button></div>`}
+ACT.hubCx=()=>{try{if(typeof window.cxBotReset==='function')window.cxBotReset();go('cxSync')}catch(e){}};
 ACT.hubRe=()=>{H.at=0;hubLoad(true);try{ACT.secEyRe()}catch(e){}};
 
 /* ---------- מרכז אישורים ---------- */
@@ -164,7 +189,12 @@ function apprH(){const R=X.ey;
 
 /* ---------- יומן פעולות מלא ---------- */
 const PG=50;
-const LG=()=>H.lg||(H.lg={L:[],cur:0,more:true,b:0,err:'',q:'',type:'',from:'',to:'',seen:new Set(),ld:0,key:''});
+const LG=()=>H.lg||(H.lg={L:[],cur:0,more:true,b:0,err:'',q:'',type:'',res:'',from:'',to:'',seen:new Set(),ld:0,key:'',ml:null,mlb:0});
+/* "נשלח לבד" (sec_mlog) – 100 האחרונות, דרך השרת. כללים אישיים כבויים / אין הרשאה – אין שורות (ml=[]), עם הערה */
+async function mlLoad(){const G=LG();if(G.mlb||G.ml)return;G.mlb=1;
+ try{const r=await fnCall('secLearn',{op:'log'});G.ml=Core.mlogRows(r&&r.items);G.mlErr=''}
+ catch(e){G.ml=[];G.mlErr=e&&e.reason==='learn-off'?'off':'err'}
+ finally{G.mlb=0;re()}}
 const dayMs=(s,end)=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');if(!m)return 0;const d=new Date(+m[1],+m[2]-1,+m[3],end?23:0,end?59:0,end?59:0,end?999:0);return d.getTime()};
 const actL=a=>{const A=window.__secActs||{};return A[a]||a||'פעולה'};
 function norm1(doc){const f=Object.fromEntries(Object.entries(doc.fields||{}).map(([k,v])=>[k,fvj(v)]));f.id=String(doc.name||'').split('/').pop();
@@ -184,34 +214,42 @@ async function lgLoad(more){const G=LG();if(G.b)return;
 /* יומן מקומי של "התראות מהטלפון" (מה עשיתי לבד): נשמר במכשיר, בלי טקסט הודעות */
 function nfLocal(){try{const o=JSON.parse(localStorage.getItem('lp-ntf-'+(SY&&SY.bizId||'')+'|'+(SY&&SY.uid||'')));const G=o&&Array.isArray(o.G)?o.G:[];
  return G.filter(g=>g&&g.t).map(g=>({id:'nf'+g.t,t:+g.t,act:'nf:'+(g.act||''),title:'התראה מ'+(g.s||'שולח')+(g.a?' ('+g.a+')':'')+' – '+(g.act==='ign'?'סומנה "התעלם"':g.act==='cap'?'ממתינה לאישור (הגעתי לתקרה)':'נפתחה משימה'+(g.un?' ל'+g.un:'')),who:'auto',note:'',src:'nf'}))}catch(e){return []}}
-function lgView(){const G=LG(),F={q:G.q,type:G.type,from:dayMs(G.from,0),to:dayMs(G.to,1)};
+function lgView(){const G=LG(),F={q:G.q,type:G.type,res:G.res,from:dayMs(G.from,0),to:dayMs(G.to,1)};
  const oldest=G.L.length&&G.more?G.L[G.L.length-1].t:0;
- const loc=Core.logFilter(nfLocal().filter(x=>!oldest||x.t>=oldest),F);
+ const loc=Core.logFilter(nfLocal().concat(G.ml||[]).filter(x=>!oldest||x.t>=oldest),F);
  const srv=Core.logFilter(G.L,F);
  return srv.concat(loc).sort((a,b)=>b.t-a.t)}
 function hlogH(){const G=LG();
  if(!G.ld&&!G.b)lgLoad(false);
+ if(!G.ml&&!G.mlb)mlLoad();
  const opt=Core.logTypes().map(([k,l])=>`<option value="${k}"${G.type===k?' selected':''}>${esc(l)}</option>`).join('');
  const L=G.ld?lgView():[];
  const fil=`<form class="card" data-f="hubLgF" id="secHubLgF"><b>יומן פעולות</b>
   <label class="f"><span>חיפוש</span><input name="q" value="${esc(G.q)}" maxlength="60" placeholder="מילה מהפעולה או מההערה"></label>
-  <div class="row" style="gap:8px"><label class="f grow"><span>סוג</span><select name="type"><option value="">הכול</option>${opt}</select></label><label class="f grow"><span>מתאריך</span><input type="date" name="from" value="${esc(G.from)}"></label><label class="f grow"><span>עד תאריך</span><input type="date" name="to" value="${esc(G.to)}"></label></div>
+  <div class="row" style="gap:8px"><label class="f grow"><span>סוג</span><select name="type"><option value="">הכול</option>${opt}</select></label><label class="f grow"><span>תוצאה</span><select name="res"><option value="">הכול</option><option value="fail"${G.res==='fail'?' selected':''}>נכשל</option><option value="ok"${G.res==='ok'?' selected':''}>הצליח</option></select></label><label class="f grow"><span>מתאריך</span><input type="date" name="from" value="${esc(G.from)}"></label><label class="f grow"><span>עד תאריך</span><input type="date" name="to" value="${esc(G.to)}"></label></div>
   <div class="secrow"><button class="chip on" style="min-height:44px">סינון</button><button type="button" class="chip" data-a="hubLgClr" style="min-height:44px">נקה</button></div></form>`;
  let list;
  if(!G.ld)list='<div class="empty">טוען…</div>';
  else if(G.err&&!G.L.length)list=`<div class="card"><p class="note">${esc(G.err)}</p><button class="btn g w" data-a="hubLgMore" data-r="1">נסה שוב</button></div>`;
- else list=L.length?`<div class="card" id="secHubLg">${L.map(x=>`<div class="li" role="button" tabindex="0" data-a="hubLgOpen" data-id="${esc(x.id)}" style="cursor:pointer"><div class="m"><b>${esc(x.title)}</b><small>${esc(tmF(x.t))} · ${esc(Core.whoL(x.who))}${x.src==='nf'?' · במכשיר':''}</small></div></div>`).join('')}</div>`:'<div class="empty">לא נמצאו פעולות לפי הסינון</div>';
- const foot=G.ld?`<p class="note" style="margin:6px 0">נטענו ${G.L.length} פעולות מהשרת${(G.q||G.type)?' · החיפוש והסוג פועלים על מה שנטען (אפשר לטעון עוד)':''}.</p>${G.more?`<button class="btn g w" data-a="hubLgMore" style="min-height:44px"${G.b?' disabled':''}>${G.b?'טוען…':'טען עוד'}</button>`:'<p class="note">זה כל היומן.</p>'}`:'';
- return fil+list+foot+'<p class="note" style="margin:8px 0 0">פעולות שנכשלו בשליחה אוטומטית (sec_mlog) אינן נקראות מהאפליקציה לפי כללי האבטחה.</p>'}
-FRM.hubLgF=f=>{const x=fd(f),G=LG();G.q=String(x.q||'').slice(0,60);G.type=x.type||'';const ch=G.from!==(x.from||'')||G.to!==(x.to||'');G.from=x.from||'';G.to=x.to||'';if(ch)lgLoad(false);else rerender()};
-ACT.hubLgClr=()=>{const G=LG(),ch=G.from||G.to;G.q='';G.type='';G.from='';G.to='';if(ch)lgLoad(false);else rerender()};
+ else list=L.length?`<div class="card" id="secHubLg">${L.map(x=>`<div class="li" role="button" tabindex="0" data-a="hubLgOpen" data-id="${esc(x.id)}" style="cursor:pointer"><div class="m"><b>${esc(x.title)}</b><small>${esc(tmF(x.t))} · ${esc(Core.whoL(x.who))}${x.src==='nf'?' · במכשיר':''}${Core.resOf(x)==='fail'?' · <b style="color:var(--bad)">נכשל</b>':Core.resOf(x)==='ok'?' · הצליח':''}</small></div></div>`).join('')}</div>`:'<div class="empty">לא נמצאו פעולות לפי הסינון</div>';
+ const foot=G.ld?`<p class="note" style="margin:6px 0">נטענו ${G.L.length} פעולות מהשרת${(G.q||G.type||G.res)?' · החיפוש, הסוג והתוצאה פועלים על מה שנטען (אפשר לטעון עוד)':''}.</p>${G.more?`<button class="btn g w" data-a="hubLgMore" style="min-height:44px"${G.b?' disabled':''}>${G.b?'טוען…':'טען עוד'}</button>`:'<p class="note">זה כל היומן.</p>'}`:'';
+ return fil+list+foot+'<p class="note" style="margin:8px 0 0">'+(G.mlErr==='off'?'"נשלח לבד" לא מוצג: הכללים האישיים כבויים בעסק.':G.mlErr?'"נשלח לבד" לא נטען.':'כולל "נשלח לבד" לפי כללים אישיים (100 האחרונות).')+' תוצאה מוצגת לשליחות, לחשבוניות ולניסיונות חוזרים מ-23.11.2026; ברשומות ישנות היא לא נרשמה.</p>'}
+FRM.hubLgF=f=>{const x=fd(f),G=LG();G.q=String(x.q||'').slice(0,60);G.type=x.type||'';G.res=x.res==='ok'||x.res==='fail'?x.res:'';const ch=G.from!==(x.from||'')||G.to!==(x.to||'');G.from=x.from||'';G.to=x.to||'';if(ch)lgLoad(false);else rerender()};
+ACT.hubLgClr=()=>{const G=LG(),ch=G.from||G.to;G.q='';G.type='';G.res='';G.from='';G.to='';if(ch)lgLoad(false);else rerender()};
 ACT.hubLgMore=el=>{lgLoad(!(el&&el.dataset.r==='1'))};
-ACT.hubLgOpen=el=>{const G=LG(),x=G.L.concat(nfLocal()).find(z=>z.id===el.dataset.id);if(!x)return;
+ACT.hubLgOpen=el=>{const G=LG(),x=G.L.concat(nfLocal(),G.ml||[]).find(z=>z.id===el.dataset.id);if(!x)return;
  const ts=new Date(x.t),full=ts.toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+' '+ts.toLocaleTimeString('he-IL');
- const res=x.src==='nf'?(x.act==='nf:ign'?'סומנה "התעלם"':x.act==='nf:cap'?'ממתינה לאישורך':'נפתחה משימה'):'בוצעה ונרשמה ביומן';
+ const res=x.src==='nf'?(x.act==='nf:ign'?'סומנה "התעלם"':x.act==='nf:cap'?'ממתינה לאישורך':'נפתחה משימה'):Core.resL(x)||'נרשמה ביומן (תוצאה לא נרשמה לפעולה הזו)';
  const mine=x.by&&x.by===SY.uid?'אתה':(x.by?'מנהל אחר':'');
- dlg(`<h3>פירוט פעולה</h3><div class="card"><p><b>מה:</b> ${esc(x.title)}</p><p><b>מתי:</b> ${esc(full)}</p><p><b>מקור:</b> ${x.src==='nf'?'התראות מהטלפון (נשמר רק במכשיר הזה)':esc(Core.whoL(x.who))+(x.ch==='app'?' · מהאפליקציה':x.ch?' · '+esc(x.ch):'')}</p>${mine?`<p><b>מבצע:</b> ${mine}</p>`:''}<p><b>תוצאה:</b> ${esc(res)}</p>${x.note?`<p><b>הערה:</b> ${esc(x.note)}</p>`:''}${x.src==='sec_log'?`<small class="note">קוד פעולה: <bdi dir="ltr">${esc(x.act||'')}</bdi></small>`:''}</div><button class="btn g w" data-a="closeDlg">סגור</button>`)};
+ dlg(`<h3>פירוט פעולה</h3><div class="card"><p><b>מה:</b> ${esc(x.title)}</p><p><b>מתי:</b> ${esc(full)}</p><p><b>מקור:</b> ${x.src==='nf'?'התראות מהטלפון (נשמר רק במכשיר הזה)':x.src==='mlog'?'נשלח לבד לפי כלל אישי':esc(Core.whoL(x.who))+(x.ch==='app'?' · מהאפליקציה':x.ch?' · '+esc(x.ch):'')}</p>${mine?`<p><b>מבצע:</b> ${mine}</p>`:''}<p><b>תוצאה:</b> ${Core.resOf(x)==='fail'?'<b style="color:var(--bad)">'+esc(res)+'</b>':esc(res)}</p>${x.note?`<p><b>הערה:</b> ${esc(x.note)}</p>`:''}${x.src==='sec_log'?`<small class="note">קוד פעולה: <bdi dir="ltr">${esc(x.act||'')}</bdi></small>`:''}</div><button class="btn g w" data-a="closeDlg">סגור</button>`)};
 ACT.hubLog=()=>{X.set=0;X.edit=0;X.mrv=0;X.tab='hlog';H.lg=null;rerender()};
+/* שמות לפעולות שאין להן שם ב-ACTS של secretary.js (שליחה, חשבוניות, כשלים, סיכומים) – רק להצגה */
+{const A=window.__secActs;if(A&&typeof A==='object'){const add={send:'נשלחה תשובה בווצאפ',autoSend:'נשלחה הודעה אוטומטית בווצאפ',mailSend:'נשלח מייל',mailAuto:'נשלח מייל לבד לפי תשובה מוכנה',mailMrAuto:'נשלח מייל לבד לפי כלל אישי',
+ ordSend:'נשלחה הצעת הזמנה ללקוח',ordCfm:'נשלח אישור הזמנה',mrSend:'נשלח לבד לפי כלל אישי',waMrAuto:'נשלח בווצאפ לבד לפי כלל אישי',ordAuto:'הזמנה נוצרה לבד',invOk:'חשבונית אושרה',invAuto:'חשבונית נקלטה לבד',
+ sendFail:'שליחה נכשלה',waFail:'הודעת ווצאפ לא עובדה',waErr:'תקלה בעיבוד הודעת ווצאפ',invErr:'תקלה בקליטת חשבונית',mailErr:'תקלה בקריאת המייל',mailWorkErr:'תקלה בעיבוד מייל',autoFail:'שליחה אוטומטית נכשלה',
+ watchFail:'מעקב המייל לא הופעל',gConnectFail:'החיבור ל-Google נכשל',mrFail:'שליחה לבד לפי כלל נכשלה',mrOff:'כלל אישי הפסיק לשלוח לבד אחרי כשלים',outLimit:'שליחה נעצרה – מגבלת הודעות',
+ waRequeue:'הודעות ווצאפ חזרו לתור לניסיון נוסף',media:'נשלח קובץ למזכירה',daySum:'נוצר סיכום בוקר / ערב'};
+ Object.keys(add).forEach(k=>{if(!A[k])A[k]=add[k]})}}
 
 /* ---------- רישום המסכים ל-secretary.js ---------- */
 window.__secHub={top,att:attH,tabs:{appr:{s:'מרכז אישורים',h:apprH},hlog:{s:'יומן פעולות',h:hlogH}}};

@@ -84,7 +84,7 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  factAdd:'נשמרה עובדה',factOk:'אושרה עובדה שהמזכירה הציעה',factNo:'בוטלה הצעה לעובדה',factEdit:'עובדה נערכה',factDel:'עובדה נמחקה',fixed:'עודכנו פרטים קבועים',price:'הועלה מחירון',priceDel:'המחירון נמחק',
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
- calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
+ tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
  notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',remSnooze:'נקבע "תזכירי לי שוב" להתראה',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
@@ -222,11 +222,11 @@ document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
 /* 22.11.2026: קיצורי משימות (מנהל, תוספת משימות פעילה) – מטופלים בתוך האפליקציה (cxTry), בלי AI */
 const QT=['משימה חדשה לעובד','מה באיחור?','ממתין לאישור'];const qsL=()=>{try{return cxOn()?QS.concat(QT):QS}catch(e){return QS}};
-const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
+const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',rq:'rq',mq:'mq',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 /* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
 const mdLite=t=>t.split('\n').map(l=>{if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))return null;const h=/^\s*#{1,6}\s+(.*)$/.exec(l);if(h)return '<b>'+h[1].replace(/\*\*/g,'')+'</b>';return l.replace(/^(\s*)[-*•]\s+/,'$1• ')}).filter(l=>l!==null).join('\n').replace(/\*\*([^*\n]+?)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+?)__/g,'<b>$1</b>').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'');
-function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${m.via==='voice'?'🎤 ':m.via==='image'?'📷 ':m.via==='video'?'🎬 ':''}${esc(m.text)}</div>`;
+function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${m.via==='voice'?'🎤 ':m.via==='image'?'📷 ':m.via==='video'?'🎬 ':m.via==='pdf'?'📄 ':''}${esc(m.text)}</div>`;
  const tx=mdLite(esc(m.text)).replace(/\[(\d{1,2})\]/g,'<sup>$1</sup>');
  const src=(m.src||[]).map((s,k)=>`<li><b>${k+1}.</b> לפי ${esc(s.l||'')}${s.at?', נכון ל-'+esc(fmtAt(s.at)):''}${SCR[s.s]&&(SCR[s.s][0]==='@'||V[SCR[s.s]])?` <button class="chip" data-a="secGo" data-v="${SCR[s.s]}" style="min-height:32px">למסך</button>`:''}</li>`).join('');
  const ideas=(m.ideas||[]).filter(x=>!(X.nr||{})[x.key]).map(x=>`<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(x.seen||'')}</small><button class="chip" data-a="secNr" data-k="${esc(x.key)}" style="min-height:40px;margin-top:4px">לא רלוונטי – לא להציע 90 יום</button></div>`).join('');
@@ -311,11 +311,12 @@ const todayS=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMont
 X.done=X.done||{};
 /* SEC:10: כרטיס שהוכרע – "אושר ✓" / "בוטל" בלי כפתורים, גם אחרי טעינה מחדש (המצב נשמר בהודעה בשרת: c.st) */
 const CST={ok:'אושר ✓',no:'בוטל',gone:'כבר טופל'};
-function cardSum(c){if(c.k==='cal')return (c.rem?'תזכורת: ':'')+c.title+' · '+wkD(c.okD||c.d)+' '+dShort(c.okD||c.d)+(c.tm?' '+c.tm:'');if(c.k==='fact')return c.text||'';if(c.k==='route')return rtL(c);if(c.k==='scan')return SCL[c.doc]||'מסמך';if(c.k==='task')return c.txt||'';return ''}
+function cardSum(c){if(c.k==='cal')return (c.rem?'תזכורת: ':'')+c.title+' · '+wkD(c.okD||c.d)+' '+dShort(c.okD||c.d)+(c.tm?' '+c.tm:'');if(c.k==='fact')return c.text||'';if(c.k==='route')return rtL(c);if(c.k==='scan')return SCL[c.doc]||'מסמך';if(c.k==='task')return c.txt||'';if(c.k==='tkp')return ((c.kind==='rem'?'תזכורת: ':'משימה: ')+(c.txt||''));return ''}
 function cardDone(c){const d=X.done[c.id]||(c.st?{st:c.st}:null);if(!d)return '';const st=CST[d.st]?d.st:'gone';
- const det=st==='ok'?(c.k==='fact'?'נשמר במידע על העסק.':c.k==='cal'?(c.rem?'התזכורת נקבעה – תופיע ב"מול העיניים" ותישלח התראה בזמן.':'נקבע ביומן'+(c.okD&&c.okD!==c.d?' ל-'+dShort(c.okD):'')+'.'):c.k==='route'?'הכלל נשמר ב"הכללים שלי".':c.k==='scan'?'נפתח מסך הסריקה.':c.k==='task'?'המשימה נפתחה.':''):st==='no'?(c.k==='fact'?'לא נשמר.':c.k==='cal'?'לא נקבע.':'לא נשמר כלל.'):'';
+ const det=st==='ok'?(c.k==='fact'?'נשמר במידע על העסק.':c.k==='cal'?(c.rem?'התזכורת נקבעה – תופיע ב"מול העיניים" ותישלח התראה בזמן.':'נקבע ביומן'+(c.okD&&c.okD!==c.d?' ל-'+dShort(c.okD):'')+'.'):c.k==='route'?'הכלל נשמר ב"הכללים שלי".':c.k==='scan'?'נפתח מסך הסריקה.':c.k==='task'?'המשימה נפתחה.':c.k==='tkp'?(c.kind==='rem'?'התזכורת נקבעה – תופיע ביומן ובתזכורות.':'המשימה נפתחה במסך המשימות.'):''):st==='no'?(c.k==='fact'?'לא נשמר.':c.k==='cal'?'לא נקבע.':c.k==='tkp'?'לא נוצר דבר.':'לא נשמר כלל.'):'';
  return `<div class="card secdone" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}" data-st="${st}"><b>${CST[st]}</b> <small class="note">${esc(cardSum(c))}</small>${det?`<small class="note" style="display:block">${esc(det)}</small>`:''}</div>`}
 function cardH(c,mid){if(c.loc)return cxCardH(c,mid);if(X.done[c.id]||c.st)return cardDone(c);
+ if(c.k==='tkp')return tpCardH(c,mid);
  if(c.k==='route')return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>כלל ניתוב</b><p style="margin:4px 0">${esc(rtL(c))}</p><div class="secrow"><button class="chip" data-a="secRtOk" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">אשר</button><button class="chip" data-a="secRtNo" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">בטל</button></div></div>`;
  if(c.k==='fact'){const cf=(c.conflict||[]).map(x=>`<li>${esc(x.text)}</li>`).join('');
   return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>לשמור במידע על העסק?</b><p style="margin:4px 0">${esc(c.text)}${c.exp?` <span class="sectags">עד ${esc(dShort(c.exp))}</span>`:''}</p>
@@ -743,6 +744,9 @@ function ntH(S){const n=S.nt||{q:{}},T=S.types||{},rt=n.rt||{};
  <div class="row"><label class="f grow"><span>דוח חודשי – יום בחודש</span><select name="md" aria-label="יום בחודש"><option value="0"${!n.md?' selected':''}>יום העסקים הראשון</option>${Array.from({length:31},(_,i)=>`<option value="${i+1}"${n.md===i+1?' selected':''}>${i+1}</option>`).join('')}</select></label><label class="f grow"><span>שעה</span>${hours(n.mh,'mh')}</label></div>
  <p class="note" style="margin:0 0 6px">יום שנופל בשישי, בשבת או בחג – הדוח יופיע ביום העסקים הבא. יום שלא קיים בחודש (למשל 31) – ביום האחרון בחודש.</p>
  <div class="row"><label class="chip" style="min-height:44px;flex:1;justify-content:flex-start"><input type="checkbox" name="dg" value="1"${n.dg?' checked':''}> תקציר יומי</label><label class="f grow"><span>בשעה</span>${hours(n.dh,'dh')}</label></div>
+ ${'smh' in n?`<div class="row"><label class="chip" style="min-height:44px;flex:1;justify-content:flex-start"><input type="checkbox" name="sm" value="1"${n.sm?' checked':''}> סיכום בוקר</label><label class="f grow"><span>בשעה</span>${hours(n.smh,'smh')}</label></div>
+ <div class="row"><label class="chip" style="min-height:44px;flex:1;justify-content:flex-start"><input type="checkbox" name="se" value="1"${n.se?' checked':''}> סיכום ערב</label><label class="f grow"><span>בשעה</span>${hours(n.seh,'seh')}</label></div>
+ <p class="note" style="margin:0 0 6px">בימי עסקים: מה ביומן, משימות פתוחות ובאיחור, חשבוניות לתשלום ומה ממתין לאישור שלך. בערב – גם מה נעשה היום. בלי עלות AI.</p>`:''}
  <b style="display:block;margin-top:8px">שעות שקטות</b><small class="note">התראת טלפון שנופלת בהן מחכה לסופן.</small>
  <div class="row"><label class="chip" style="min-height:44px;justify-content:flex-start"><input type="checkbox" name="qon" value="1"${n.q&&n.q.on?' checked':''}> פעיל</label><label class="f grow"><span>מ-</span><input type="time" name="qf" dir="ltr" value="${esc((n.q||{}).f||'22:00')}"></label><label class="f grow"><span>עד</span><input type="time" name="qt" dir="ltr" value="${esc((n.q||{}).t||'07:00')}"></label></div>
  <b style="display:block;margin-top:8px">תזכורות</b>${Object.keys(T).map(k=>`<label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="rt_${esc(k)}" value="1"${rt[k]?' checked':''}> ${esc(T[k])}${k==='emp'&&!S.emp?' (פועל רק כשניתוח העובדים פעיל)':''}</label>`).join('')}
@@ -752,7 +756,7 @@ function ntH(S){const n=S.nt||{q:{}},T=S.types||{},rt=n.rt||{};
 CHG.secNtWd=el=>{const w=document.getElementById('secWdWarn');if(w)w.textContent=(+el.value===5||+el.value===6)?'הדוח יופיע ביום העסקים הבא':''};
 FRM.secNtF=async f=>{const x=fd(f),T=(X.st&&X.st.types)||{},rt={};for(const k of Object.keys(T))rt[k]=x['rt_'+k]==='1';
  const hm=/^([01]\d|2[0-3]):[0-5]\d$/;if(!hm.test(x.qf||'')||!hm.test(x.qt||'')||x.qf===x.qt)return toast('שעות שקטות: שעת התחלה וסיום שונות');
- const nt={wd:+x.wd,wh:+x.wh,md:+x.md,mh:+x.mh,dg:x.dg==='1',dh:+x.dh,q:{on:x.qon==='1',f:x.qf,t:x.qt},rt,reps:+x.reps};
+ const nt=Object.assign({wd:+x.wd,wh:+x.wh,md:+x.md,mh:+x.mh,dg:x.dg==='1',dh:+x.dh,q:{on:x.qon==='1',f:x.qf,t:x.qt},rt,reps:+x.reps},'smh' in x?{sm:x.sm==='1',smh:+x.smh,se:x.se==='1',seh:+x.seh}:{});
  const b=f.querySelector('button.btn');b.disabled=true;try{const r=await fnCall('secPrefs',{op:'notify',nt});X.st.nt=r.nt||nt;toast(r.warn?'נשמר. '+r.warn:'נשמר')}catch(e){err(e)}finally{b.disabled=false}};
 ACT.secHistDel=()=>{ask('למחוק את כל ההיסטוריה שלך במזכירה (שיחה, התראות ודוחות)?',async()=>{
  try{const r=await fnCall('secHistory',{op:'ask'});const c=r.counts||{};X.hd=r.token;
@@ -1715,15 +1719,15 @@ ACT.secMrMic=()=>{if(RC.on)micStop();else micStart('mr')};
 ACT.secMicX=()=>micCancel();
 function mediaH(){const l=mlim();if(!l||(l.aud<=0&&!l.img&&l.vid<=0))return '';
  const dis=mBusy()||RC.on,off=dis?' disabled':'',lb='class="chip" style="min-height:44px;cursor:pointer'+(dis?';opacity:.5':'')+'"';
- return `<div class="secrow" id="secMedia" style="margin-top:8px">${l.aud>0?`<button type="button" class="chip" data-a="secMic" style="min-height:44px"${RC.on?'':mBusy()?' disabled':''}>${micLbl()}</button>`:''}${RC.on&&RC.tgt==='chat'?'<button type="button" class="chip" data-a="secMicX" style="min-height:44px">ביטול</button>':''}${l.img?`<label ${lb}>📷 תמונה<input type="file" accept="image/*" data-c="secImgF" hidden${off}></label>`:''}${l.vid>0?`<label ${lb}>🎬 סרטון<input type="file" accept="video/*" data-c="secVidF" hidden${off}></label>`:''}</div><p class="note" style="margin:4px 0 0">${PRIV}</p>`}
+ return `<div class="secrow" id="secMedia" style="margin-top:8px">${l.aud>0?`<button type="button" class="chip" data-a="secMic" style="min-height:44px"${RC.on?'':mBusy()?' disabled':''}>${micLbl()}</button>`:''}${RC.on&&RC.tgt==='chat'?'<button type="button" class="chip" data-a="secMicX" style="min-height:44px">ביטול</button>':''}${l.img?`<label ${lb}>📷 תמונה<input type="file" accept="image/*" data-c="secImgF" hidden${off}></label><label ${lb}>📄 מסמך<input type="file" accept="application/pdf,.pdf" data-c="secPdfF" hidden${off}></label>`:''}${l.vid>0?`<label ${lb}>🎬 סרטון<input type="file" accept="video/*" data-c="secVidF" hidden${off}></label>`:''}</div><p class="note" style="margin:4px 0 0">${PRIV}</p>`}
 /* ---------- תמונה וסרטון ---------- */
 async function mediaSend(via,prep){
  if(mBusy()||RC.on)return;keepDraft();
  const f=document.getElementById('secForm'),cap=String(f&&f.q?f.q.value:X.draft||'').trim().slice(0,300);
- X.msgs=X.msgs||[];X.mst=via==='image'?'מכינה את התמונה…':'בודקת את הסרטון…';rerender();scrollEnd();
+ X.msgs=X.msgs||[];X.mst=via==='image'?'מכינה את התמונה…':via==='pdf'?'מכינה את המסמך…':'בודקת את הסרטון…';rerender();scrollEnd();
  let p=null;
  try{p=await prep()}catch(e){X.mst='';rerender();return toast(e&&e.message||'לא הצלחנו להכין את הקובץ')}
- X.draft='';X.msgs.push({role:'u',text:cap||(via==='image'?'תמונה':'סרטון'),via,t:Date.now()});X.mst=via==='image'?'מתארת את התמונה…':'מעבדת את הסרטון…';rerender();scrollEnd();
+ X.draft='';X.msgs.push({role:'u',text:cap||(via==='image'?'תמונה':via==='pdf'?'מסמך':'סרטון'),via,t:Date.now()});X.mst=via==='image'?'מתארת את התמונה…':via==='pdf'?'קוראת את המסמך…':'מעבדת את הסרטון…';rerender();scrollEnd();
  try{const d=Object.assign({},p.call);if(cap)d.cap=cap;const r=await fnCall('secMedia',d);
   const cards=r.cards||[];X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:[],th:null,cards,stale:false,mvia:via,t:Date.now()});
   if(via==='image'&&p.du&&r.id&&cards.some(c=>c.k==='scan'||c.k==='task')){X.media=X.media||{};X.media[r.id]=p.du}
@@ -1736,6 +1740,11 @@ CHG.secImgF=el=>{const f=el.files&&el.files[0];el.value='';const l=mlim();if(!f|
  mediaSend('image',async()=>{if(f.type&&!/^image\//.test(f.type))throw new Error('הקובץ אינו תמונה');
   const du=await fbShrink(await rdU(f));if(du.length>1400000)throw new Error('התמונה גדולה מדי');
   return{du,call:{op:'see',kind:'image',mime:'image/jpeg',b64:du.slice(du.indexOf(',')+1)}}})};
+/* 23.11.2026 (גיטי סבב 2): מסמך PDF – עד 4MB, נשלח כמו שהוא (השרת בודק שזה PDF; תוכן המסמך = מידע בלבד). פועל כשהתמונות מופעלות */
+CHG.secPdfF=el=>{const f=el.files&&el.files[0];el.value='';const l=mlim();if(!f||!l||!l.img)return;
+ mediaSend('pdf',async()=>{if(!(f.type==='application/pdf'||/\.pdf$/i.test(f.name||'')))throw new Error('הקובץ אינו מסמך PDF');
+  if(f.size>4*1024*1024)throw new Error('המסמך גדול מדי (עד 4MB)');
+  const du=await rdU(f);return{call:{op:'see',kind:'pdf',b64:String(du).slice(String(du).indexOf(',')+1)}}})};
 CHG.secVidF=el=>{const f=el.files&&el.files[0];el.value='';const l=mlim();if(!f||!l||l.vid<=0)return;mediaSend('video',()=>vidPrep(f,l.vid))};
 const rnd12=()=>Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(16).padStart(2,'0')).join('');
 async function vidPrep(f,max){
@@ -1797,7 +1806,7 @@ ACT.secScOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||
  run()};
 ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id);
  if(!c)return toast(AGAIN);const du=(X.media||{})[mid]||'',txt=String(c.txt||'').trim().slice(0,500);
- if(!du&&!(m&&m.mvia==='video')&&c.eyVia!=='video')return toast(AGAIN);
+ if(!du&&!(m&&(m.mvia==='video'||m.mvia==='pdf'))&&c.eyVia!=='video'&&c.eyVia!=='pdf')return toast(AGAIN);
  if(!txt||typeof fsx!=='function'||typeof tkDue!=='function'||!isA())return toast('אי אפשר לפתוח משימה כאן');
  /* מזהה המשימה נגזר מהכרטיס: אישור חוזר (למשל אחרי שהסימון בשרת נכשל) לא יוצר משימה שנייה – הקיימת מזוהה (409) */
  el.disabled=true;const now=Date.now(),tid='sec'+String(id).replace(/[^A-Za-z0-9]/g,''),nm=fbBy();let dup=0;
@@ -1956,6 +1965,73 @@ function cxCardH(c,mid){const box=(h,x)=>`<div class="card${x?' secdone':''}" st
   const q=(v,l)=>`<button class="chip${dk===v?' on':''}" style="min-height:44px" data-a="secCxDue" data-id="${esc(c.id)}" data-v="${v}" aria-pressed="${dk===v}">${l}</button>`;
   return box(`<b>לפתוח משימה?</b><p style="margin:4px 0"><b>מה:</b> ${esc(c.txt)}</p><p style="margin:4px 0"><b>למי:</b> ${esc(cxNames(c))}${c.to.length>1?' <small class="note">(מי שלוקח ראשון)</small>':''}</p><p style="margin:4px 0"><b>יעד:</b> ${esc(cxDueL(c))}</p><p style="margin:4px 0"><b>עדיפות:</b> ${c.pri==='h'&&rv?'דחוף':'רגילה'}</p>${!rv&&(c.due||c.pri)?'<p class="note" style="margin:4px 0">יעד מדויק ועדיפות יופעלו אחרי עדכון השרת. בינתיים המשימה תיפתח עם יעד של 3 ימי עסקים ובעדיפות רגילה.</p>':''}${rv?`<div class="secrow" role="group" aria-label="שינוי יעד">${q('td','היום')}${q('tm','מחר')}${q('b3','3 ימי עסקים')}</div>`:''}<div class="secrow">${cxB('secCxOk',c.id,'אשר ופתח')}${cxB('secCxNo',c.id,'בטל')}</div>`)}
  return ''}
+
+/* =====================================================================================
+   23.11.2026 (גיטי, החלטה 3): כרטיס "משימה / תזכורת" שהמזכירה הציעה בשיחה (proposeTask בשרת, k:'tkp'). השרת לא יוצר כלום –
+   כאן עורכים (סוג, טקסט, עובדים, תאריך, שעה, דחוף) ומאשרים. הביצוע במנגנון הקיים: משימה – cxCreate (כמו כרטיס "לפתוח משימה?" של
+   פקודות הצ'אט: אותם שדות, אותם חוקים, מזהה tasks/sec<cid> – אישור חוזר = 409 ולא משימה שנייה); תזכורת – secCal op:'add' rem:true.
+   אחר כך secPrefs op:'tkCard': השרת בודק שהמשימה/התזכורת באמת נוצרה, מסמן את הכרטיס בהודעה ורושם ביומן הפעולות.
+   משימה כפולה (task-dup.js) – אזהרה בכרטיס בלבד, בלי חסימה.
+   ===================================================================================== */
+const tpC=id=>allCards().find(c=>c&&c.k==='tkp'&&c.id===id)||null;
+const tpDue=c=>{if(!c.d)return null;const[y,m,d]=c.d.split('-').map(Number),[h,n]=(c.tm||'23:59').split(':').map(Number);return {y,m:m-1,d,h,n}};
+function tpDup(c){try{if(c.kind==='rem'||!window.TaskDup||!c.txt)return [];const L=((typeof TK!=='undefined'&&TK&&TK.L)||[]).filter(t=>t&&(t.st==='open'||t.st==='wait')&&!t.prv),du=tpDue(c);
+ return window.TaskDup.find({txt:c.txt,uids:c.all?[]:(c.to||[]).map(z=>z.uid),dl:du?cxMs(du):0},L)}catch(e){return []}}
+function tpCardH(c,mid){const rem=c.kind==='rem',can=cxOn(),id=esc(c.id),m=esc(mid||'');
+ if(can&&!X.tpLd){X.tpLd=1;Promise.all([cxStaff(),cxTasks(),cxRvNow().then(v=>{X.tpRv=v})]).then(()=>{if(cur().v==='sec'&&!typing())rerender()}).catch(()=>{})}
+ const S=typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L.slice(0,30):[],sel=new Set((c.to||[]).map(z=>z.uid));
+ const F=(f,x)=>`data-c="secTpF" data-id="${id}" data-f="${f}"${x||''}`;
+ const kindH=can?`<label class="note" style="display:block;margin:4px 0">סוג <select ${F('kind')} style="min-height:40px"><option value="task"${rem?'':' selected'}>משימה לעובד</option><option value="rem"${rem?' selected':''}>תזכורת לי</option></select></label>`:'';
+ const whoH=rem?'':`<fieldset style="border:0;padding:0;margin:4px 0"><legend class="note">למי</legend><div class="secrow" style="flex-wrap:wrap"><label class="chip" style="min-height:40px"><input type="checkbox" ${F('all')}${c.all?' checked':''}> כל העובדים</label>${S.map(z=>`<label class="chip" style="min-height:40px"><input type="checkbox" ${F('to',` data-u="${esc(z.uid)}"`)}${sel.has(z.uid)?' checked':''}${c.all?' disabled':''}> ${esc(z.name)}</label>`).join('')}${!S.length&&(c.to||[]).length?`<span class="sectags">${esc(c.to.map(z=>z.name).join(', '))}</span>`:''}</div>${(c.unk||[]).length?`<p class="note" style="margin:2px 0">לא זוהו בוודאות: ${esc(c.unk.join(', '))} – סמנו את העובד הנכון.</p>`:''}</fieldset>`;
+ const D=tpDup(c),dupH=D.length?`<div class="note" role="alert" style="margin:4px 0"><b>שימו לב: נראה שכבר יש משימה דומה</b> (אזהרה בלבד – אפשר לאשר בכל זאת):<ul style="margin:2px 0;padding-inline-start:18px">${D.map(x=>`<li>${esc(String(x.task&&x.task.txt||'').slice(0,100))}${x.why&&x.why.length?' · '+esc(x.why.join(', ')):''}</li>`).join('')}</ul></div>`:'';
+ const rvN=!rem&&X.tpRv===false&&(c.d||c.pri)?'<p class="note" style="margin:4px 0">יעד מדויק ועדיפות יופעלו אחרי עדכון השרת. בינתיים המשימה תיפתח עם יעד של 3 ימי עסקים ובעדיפות רגילה.</p>':'';
+ const dis=c.busy?' disabled':'';
+ return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${id}"><b>${rem?'לקבוע תזכורת?':'לפתוח משימה?'}</b> <small class="note">אפשר לערוך לפני האישור</small>${kindH}
+ <label class="note" style="display:block;margin:4px 0">${rem?'על מה להזכיר':'מה לעשות'}<textarea ${F('txt')} maxlength="${rem?120:500}" rows="2" style="width:100%;box-sizing:border-box">${esc(c.txt||'')}</textarea></label>${whoH}
+ <div class="secrow" style="flex-wrap:wrap"><label class="note">${rem?'תאריך':'יעד'} <input type="date" ${F('d')} min="${todayS()}" value="${esc(c.d||'')}" style="min-height:40px"></label><label class="note">שעה <input type="time" ${F('tm')} value="${esc(c.tm||'')}" style="min-height:40px"></label>${rem?'':`<label class="chip" style="min-height:40px"><input type="checkbox" ${F('pri')}${c.pri==='h'?' checked':''}> דחוף</label>`}</div>
+ ${!rem&&!c.d?'<p class="note" style="margin:2px 0">בלי יעד – 3 ימי עסקים.</p>':''}${rvN}${dupH}${c.ref?'<p class="note" style="margin:2px 0">התזכורת נקבעה, אבל הסימון נכשל. לחצו "אישור" שוב.</p>':''}
+ <div class="secrow"><button class="chip" style="min-height:44px" data-a="secTpOk" data-id="${id}" data-mid="${m}"${dis}>אישור</button><button class="chip" style="min-height:44px" data-a="secTpNo" data-id="${id}" data-mid="${m}"${dis}>בטל</button></div></div>`}
+/* שינוי שדה: נשמר בכרטיס. טקסט/תאריך/שעה – בלי ציור מחדש (כדי שלחיצה על "אישור" מיד אחרי הקלדה לא תאבד) */
+CHG.secTpF=el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const f=el.dataset.f;
+ if(f==='txt')c.txt=String(el.value||'').trim().slice(0,c.kind==='rem'?120:500);
+ else if(f==='d')c.d=/^\d{4}-\d{2}-\d{2}$/.test(el.value)?el.value:'';
+ else if(f==='tm')c.tm=/^([01]\d|2[0-3]):[0-5]\d$/.test(el.value)?el.value:'';
+ else if(f==='pri')c.pri=el.checked?'h':'';
+ else if(f==='to'){const u=el.dataset.u,z=(typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L:[]).find(x=>x.uid===u);c.to=(c.to||[]).filter(x=>x.uid!==u);if(el.checked&&z)c.to.push({uid:z.uid,name:z.name})}
+ else if(f==='all'){c.all=!!el.checked;cxRe()}
+ else if(f==='kind'){c.kind=el.value==='rem'?'rem':'task';if(c.kind==='rem')c.txt=String(c.txt||'').slice(0,120);cxRe()}};
+/* הערכים מהטופס עצמו לפני ביצוע (גם אם אירוע השינוי לא הגיע) */
+function tpSync(c,box){const v=f=>box.querySelector(`[data-c=secTpF][data-f=${f}]`);let e;
+ if((e=v('txt')))c.txt=String(e.value||'').trim().slice(0,c.kind==='rem'?120:500);
+ if((e=v('d')))c.d=/^\d{4}-\d{2}-\d{2}$/.test(e.value)?e.value:'';
+ if((e=v('tm')))c.tm=/^([01]\d|2[0-3]):[0-5]\d$/.test(e.value)?e.value:'';
+ if((e=v('pri')))c.pri=e.checked?'h':''}
+async function tpRem(c,mid,force){c.busy=1;cxRe();
+ try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true};if(c.tm)d.tm=c.tm;if(force)d.force=true;
+   const r=await fnCall('secCal',d);
+   if(r&&r.ok===false&&r.warn){const w=r.warn;c.busy=0;cxRe();return ask('התאריך נופל ב'+w.kind+'. לקבוע את התזכורת בכל זאת? (אפשר גם לבחור בכרטיס תאריך אחר, למשל '+dShort(w.next)+')',()=>tpRem(c,mid,true),'כן, לקבוע')}
+   c.ref=r&&r.id||''}
+  await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'rem',ref:c.ref});
+  c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה')}
+ catch(e){if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
+ finally{c.busy=0;cxRe()}}
+ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const box=el.closest('[data-card]');if(box)tpSync(c,box);
+ const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';if(!mid)return toast('הכרטיס לא נמצא. פתחו את השיחה מחדש');
+ if(!c.txt)return toast(c.kind==='rem'?'כתבו על מה להזכיר':'כתבו מה צריך לעשות');
+ if(c.kind==='rem'){if(!c.d)return toast('בחרו תאריך לתזכורת');return tpRem(c,mid,false)}
+ if(!cxOn())return toast('אי אפשר לפתוח משימה כאן');
+ if(!c.all&&!(c.to||[]).length)return toast('סמנו למי המשימה, או "כל העובדים"');
+ c.busy=1;cxRe();let x=null;
+ try{const rv=X.tpRv===false?false:await cxRvNow();x={id:c.id,txt:c.txt,all:!!c.all,to:c.to||[],due:tpDue(c),pri:c.pri==='h'?'h':'',rv};
+  const r=await cxCreate(x);
+  let ok=1;try{await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'task'})}catch(e){ok=0}
+  c.busy=0;if(!ok){toast('המשימה נפתחה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב (לא תיפתח משימה נוספת)');return}
+  doneSt(c.id,'ok');toast(r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה ל'+cxNames(x)+', יעד: '+r.dlL);try{await tkLoad()}catch(e){}}
+ catch(e){if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
+ finally{c.busy=0;cxRe()}};
+ACT.secTpNo=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';
+ if(c.ref)return toast('התזכורת כבר נקבעה. לחצו "אישור" כדי לסיים');
+ c.busy=1;cxRe();try{if(mid)await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'no'});c.busy=0;doneSt(c.id,'no')}catch(e){if(e&&e.reason==='not-found'){c.busy=0;doneSt(c.id,'gone')}else err(e)}finally{c.busy=0;cxRe()}};
 
 window.__sec=X;
 /* 22.11.2026: ל-sec-notif.js ("התראות מהטלפון") – הלשוניות, ופתיחת משימה באותו קוד בדיוק כמו אישור כרטיס משימה כאן (cxCreate) */

@@ -270,7 +270,7 @@ async function eyes(g, input, now) {
   for (const d of mm.docs) {
     const x = d.data(); const t = x.t || 0;
     if (x.mc !== true || now - t > 864e5 || !Array.isArray(x.cards)) continue;
-    const via = x.mvia === 'video' ? 'video' : 'image';
+    const via = x.mvia === 'video' || x.mvia === 'pdf' ? x.mvia : 'image'; // 23.11.2026: pdf – מסמך מהשיחה (כרטיס משימה בלבד)
     for (const c of x.cards) {
       if (!c || c.st || typeof c.id !== 'string' || (c.k !== 'scan' && c.k !== 'task')) continue;
       if (c.k === 'scan') open.push({ k: 'media', id: 'md:' + c.id, t, title: (MDOC[c.doc] || 'מסמך') + ' מחכה לסריקה', sub: 'מהתמונה ששלחת בשיחה', go: { tab: 'chat' }, act: { k: 'scan', id: c.id, mid: d.id, doc: MDOC[c.doc] ? c.doc : 'inv', via }, r: { k: 'chat', id: d.id } });
