@@ -6556,9 +6556,9 @@ ACT.dxShare=async el=>{if(el.dataset.busy)return;el.dataset.busy='1';
 const EUN={};
 function dxLearn(){try{(S.inbox||[]).forEach(i=>{if(i&&i.ow&&i.by)EUN[i.ow]=String(i.by)});((ADM&&ADM.staff)||[]).forEach(u=>{if(u&&u.uid)EUN[u.uid]=String(u.name||u.email||'').split('@')[0]})}catch(e){}}
 function dxWho(t){try{if(!t)return '';const e=typeof t.eu==='string'?t.eu:'';
- if(e&&typeof SY!=='undefined'&&SY&&SY.uid===e)return fbBy()||'אני';
- const m=/^הוכנס על ידי ([^·]+)/.exec(String(t.note||''));if(m&&s_(m[1]))return s_(m[1]).slice(0,60);
- if(e){dxLearn();return EUN[e]?s_(EUN[e]).slice(0,60):'משתמש אחר'}return ''}catch(e){return ''}}
+ if(e&&typeof SY!=='undefined'&&SY&&SY.uid===e)return (window.NM&&NM.byUid(e))||fbBy()||'אני';
+ const m=/^הוכנס על ידי ([^·]+)/.exec(String(t.note||''));if(m&&s_(m[1]))return s_((window.NM&&NM.byPfx(String(m[1]).trim()))||m[1]).slice(0,60);
+ if(e){dxLearn();return EUN[e]||(window.NM&&NM.byUid(e))?s_((window.NM&&NM.byUid(e))||EUN[e]).slice(0,60):'משתמש אחר'}return ''}catch(e){return ''}}
 const dxWhoSm=t=>{const w=dxWho(t);return w?`<small class="who">הוכנס על ידי ${esc(w)}</small>`:''};
 const dxWhoDet=t=>`<div class="note who">הוכנס על ידי: <b>${esc(dxWho(t)||'לא ידוע')}</b></div>`;
 /* במסך האחיד: מי מכניס את המסמך הזה עכשיו (או US.who – שם ממלא־מקום שהחיבור קובע כשמנהל מטפל במסמך של עובד) */
