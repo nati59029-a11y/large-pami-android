@@ -3634,10 +3634,10 @@ const FBG={on:0,txt:'',t:0,ar:0,ad:0,sr:0,sd:0,z:0};
 function fbBgQ(){if(!FBG.t)FBG.t=setTimeout(fbBg,200)}
 function fbBgP(){try{const C=window.Capacitor;if(!C||!(C.isNativePlatform&&C.isNativePlatform())||(C.isPluginAvailable&&!C.isPluginAvailable('LpWork')))return null;return(C.Plugins&&C.Plugins.LpWork)||null}catch(e){return null}}
 function fbBg(){clearTimeout(FBG.t);FBG.t=0;try{const P=fbBgP();if(!P)return;
- const a=fbAdmin()?FBL.pend.filter(x=>x.st==='ai'||(x.st==='q'&&(x.tries||0)<3)).length:0,s=fbRole()&&bzF('feedback')?FBL.out.filter(x=>fbPush.b||!x.err).length:0;
+ const a=fbAdmin()?FBL.pend.filter(x=>x.st==='ai'||(x.st==='q'&&(x.tries||0)<3)).length:0,s=fbRole()&&bzF('feedback')?FBL.out.filter(x=>fbPush.b||!x.err).length:0,sp=typeof siPreN==='function'?siPreN():0;
  if(a<FBG.ar)FBG.ad+=FBG.ar-a;FBG.ar=a;if(!a)FBG.ad=0;if(s<FBG.sr)FBG.sd+=FBG.sr-s;FBG.sr=s;if(!s)FBG.sd=0;
- if(!a&&!s){/* z: פעם ראשונה אחרי טעינה – עוצרים גם שירות שנשאר מטעינה קודמת של המסכים */if(FBG.on||!FBG.z){FBG.on=0;FBG.z=1;FBG.txt='';Promise.resolve(P.stop()).catch(()=>{})}return}
- const t=(navigator.onLine===false?'ממתין לחיבור לאינטרנט – ':'')+[a?'מזהה דפי משוב… '+FBG.ad+' מתוך '+(FBG.ad+a):'',s?'שולח סריקות… '+FBG.sd+' מתוך '+(FBG.sd+s):''].filter(Boolean).join(' · ');
+ if(!a&&!s&&!sp){/* z: פעם ראשונה אחרי טעינה – עוצרים גם שירות שנשאר מטעינה קודמת של המסכים */if(FBG.on||!FBG.z){FBG.on=0;FBG.z=1;FBG.txt='';Promise.resolve(P.stop()).catch(()=>{})}return}
+ const t=(navigator.onLine===false?'ממתין לחיבור לאינטרנט – ':'')+[a?'מזהה דפי משוב… '+FBG.ad+' מתוך '+(FBG.ad+a):'',s?'שולח סריקות… '+FBG.sd+' מתוך '+(FBG.sd+s):'',sp?'מזהה מסמכים ששותפו… נשארו '+sp:''].filter(Boolean).join(' · ');
  if(FBG.on&&t===FBG.txt)return;Promise.resolve(P.start({text:t})).then(r=>{FBG.on=r&&r.on?1:0;FBG.txt=FBG.on?t:''}).catch(()=>{FBG.on=0;FBG.txt=''})}catch(e){}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)fbBgQ()});window.addEventListener('online',fbBgQ);window.addEventListener('offline',fbBgQ);
 async function fbLoad(){if(!fbRole())return 0;
@@ -4347,7 +4347,7 @@ async function siIn(files,meta){meta=meta||{};files=Array.isArray(files)?files:[
   try{await fput('shin:'+h,du)}catch(e){siSplice(y=>y===it);siSave();throw e}
   delete it.wr;if(!(SI.L||[]).includes(it))fdelK('shin:'+h);else{if(!pdf)SIU[it.id]=du;rep.ok++;nw.push(it)}siSave()}
   catch(e){rep.bad.push({name,why:SIW.read})}}
- siSave();if(isA()&&nw.length)siOpenUs(nw);if(isA())siPump();siShow(rep)}finally{SIing--}}
+ siSave();if(isA()&&nw.length){if(typeof siPreQ==='function')siPreQ(nw);siOpenUs(nw)}if(isA())siPump();siShow(rep)}finally{SIing--}}
 function siShow(rep){rep.dupQ=rep.dupQ||[];const issues=rep.dup.length||rep.bad.length||rep.over;
  if(isA()){if(!A&&!US&&!(typeof SIUQ!=='undefined'&&(SIUQ.length||siUsNext.b))&&!$('#dlg').open&&cur().v!=='todo'&&cur().v!=='tr')go('todo');else rerender()}else if(isW()){if(WS==='home'&&cur().v==='wk')rerender()}
  const head=rep.ok?rep.ok+(rep.ok>1?' מסמכים התקבלו':' מסמך התקבל')+' ונכנסו לתור "מסמכים שהתקבלו"':'לא נוסף מסמך חדש לתור';
@@ -4370,7 +4370,7 @@ async function siPull(){const P=siP();if(!P)return;if(siPull.b){siPull.again=1;r
   if(items.length||bad.length||(r&&(r.over||(r.rejected||[]).length)))await siIn(got,{over:(+(r&&r.over)||0)+Math.max(0,items.length-SI_MAX),rejected:[...((r&&r.rejected)||[]),...bad]})}while(siPull.again)}
  finally{siPull.b=0}}
 /* זיהוי (מנהל): השרת מסוג transfer מחזיר document_type, ובהעברה גם את פרטי ההעברות – נשמרים כדי לא לזהות שוב */
-function siPump(){if(!isA())return;const L=siLoad();while(SIact<SCQ.par&&BQact+SIact<SCQ.all){const x=L.find(y=>y.st==='q'&&!y.wr&&y.pri)||L.find(y=>y.st==='q'&&!y.wr&&!(y.nx>Date.now()));if(!x)break;if(x.big){x.st='fail';x.err=SI_BIG;siSave();siUI();continue}SIact++;x.st='run';siUI();siOne(x).finally(()=>{SIact--;siSave();siUI();siPump();if(BQ.length)bqPump()})}siTm()}
+function siPump(){if(!isA())return;const L=siLoad();while(SIact<SCQ.par&&BQact+SIact<SCQ.all){const x=L.find(y=>y.st==='q'&&!y.wr&&!y.pre&&y.pri)||L.find(y=>y.st==='q'&&!y.wr&&!y.pre&&!(y.nx>Date.now()));if(!x)break;if(x.big){x.st='fail';x.err=SI_BIG;siSave();siUI();continue}SIact++;x.st='run';siUI();siOne(x).finally(()=>{SIact--;siSave();siUI();siPump();if(BQ.length)bqPump()})}siTm()}
 async function siOne(x){try{const du=await fget(siKey(x));if(!du)throw new Error('הקובץ לא נמצא במכשיר');const o=await scqTry(()=>trAI({du,pdf:x.mime==='application/pdf'}),()=>!(SI.L||[]).includes(x)||!isA(),null,x);delete x.nx;delete x.pri;
   x.st='ok';x.err='';x.tr=o.type==='bank_transfer'?o.transfers:[];if(!x.man)x.type=o.type}
  catch(e){if(e===SCQ_STOP)return;if(e&&e.slow){x.st='q';x.nx=Date.now()+SCQ.slow;delete x.pri;x.err=String(e.message||'').slice(0,200);return}x.st='fail';x.err=String(e&&e.message||e).slice(0,200)}}
@@ -6267,6 +6267,7 @@ ACT.usDupSave=()=>{if(!USD)return;const f=USD.onSave;USD=null;closeDlg();f()};
 /* שיתוף מוואטסאפ → המסך האחיד */
 ACT.siUs=async el=>{const x=siFind(el);if(!x)return;if(siUsed('ft'+x.h))return toast(SI_SAVED);let du;try{du=await fget(siKey(x))}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
  usOpen();US.si=x.id;
+ if(typeof siPreOpen==='function'&&await siPreOpen(x,du))return;
  /* 23.11.2026: PDF ששותף עם כמה עמודים – מתפרק לעמודים, כל עמוד מזוהה לבד, ו"חיבור דפים" מחבר לחשבוניות (לפי מספר + ספק) ומסמן מה כבר במערכת */
  if(x.mime==='application/pdf'&&bzF('scan')&&typeof window.USCLS==='function'){let P=[];try{const r=await pdfDocPages(du,{max:US_MAXP,scale:2,maxW:1600});P=(r&&r.pages||[]).filter(imgOk)}catch(e){}
   if(US&&US.si===x.id&&P.length>1){P.forEach(u=>US.pg.push({u,hi:u}));US.i=0;usPane(1);toast('PDF עם '+P.length+' עמודים – מזהה ומפצל לחשבוניות…');usMulti();return}
@@ -6280,7 +6281,7 @@ let SIUQ=[];
 function siOpenUs(L){L.forEach(x=>{if(!SIUQ.includes(x.id)){SIUQ.push(x.id);x.st='us'}});siSave();if(!US&&!A&&!$('#dlg').open)siUsNext()}
 async function siUsNext(){if(siUsNext.b)return;siUsNext.b=1;try{while(SIUQ.length){const id=SIUQ.shift(),x=(SI.L||[]).find(y=>y.id===id);if(!x||siUsed('ft'+x.h))continue;await ACT.siUs({dataset:{id}});if(US&&US.si===id)return}}finally{siUsNext.b=0}}
 {const o=ACT.siUs;ACT.siUs=async el=>{const x=siFind(el);if(x&&!SIUQ.includes(x.id)){x.st='us';siSave()}return o(el)}}
-{const o=usReset;usReset=function(){const si=US&&US.si;o();const x=si&&(SI.L||[]).find(y=>y.id===si);if(x&&x.st==='us'){x.st='q';siSave();siPump()}if(si&&SIUQ.length&&!siUsNext.b)setTimeout(siUsNext,0)}}
+{const o=usReset;usReset=function(){const si=US&&US.si;o();const x=si&&(SI.L||[]).find(y=>y.id===si);if(x&&x.st==='us'){x.st=x.pre==='ok'?'ok':'q';siSave();siPump()}if(si&&SIUQ.length&&!siUsNext.b)setTimeout(siUsNext,0)}}
 {const o=usDone;usDone=function(){o();if(SIUQ.length)setTimeout(siUsNext,600)}}
 /* 23.11.2026: מסמכים ששותפו בזמן שטופס או חלון היו פתוחים – נפתחים במסך האחיד מיד כשהטופס/החלון נסגר */
 function siUsKick(){clearTimeout(siUsKick.t);if(!SIUQ.length)return;siUsKick.t=setTimeout(()=>{if(SIUQ.length&&!US&&!A&&!$('#dlg').open&&!siUsNext.b&&isA())siUsNext()},400)}
@@ -6288,6 +6289,39 @@ function siUsKick(){clearTimeout(siUsKick.t);if(!SIUQ.length)return;siUsKick.t=s
 try{$('#dlg').addEventListener('close',siUsKick)}catch(e){}
 /* פתיחה ידנית מהכרטיס: המסמך יוצא מתור ההמתנה, כדי שלא ייפתח שוב אחר כך */
 {const o=ACT.siUs;ACT.siUs=async el=>{if(el&&el.nodeType===1&&el.dataset&&el.dataset.id)SIUQ=SIUQ.filter(i=>i!==el.dataset.id);return o(el)}}
+/* 23.11.2026: זיהוי מיד כשמסמך משותף – ברקע, בלי קשר למסך הסריקה (ממשיך גם אחרי יציאה מהאפליקציה, בעזרת שירות LpWork).
+   שלב 1: הכנת הדפים (PDF מתפרק לעמודים, תמונה עוברת עיבוד כמו בסריקה). שלב 2: זיהוי כל דף (דף = 1 במכסה, כמו במסך האחיד).
+   התוצאה נשמרת במכשיר (IndexedDB, מפתח sipre:<hash>) אחרי כל דף. כשפותחים את המסמך – הדפים והזיהוי כבר מוכנים, בלי זיהוי נוסף.
+   x.pre: 'q' ממתין · 'run' רץ · 'ok' מוכן. זיהוי שנכשל בדף מסוים – המסך האחיד מנסה אותו שוב בפתיחה (כמו קודם) */
+const SIPK=x=>'sipre:'+x.h,SIPR={},SIPP={};let SIPact=0;
+const siPreN=()=>(SI.L||[]).filter(x=>x.pre==='q'||x.pre==='run').length;
+{const o=fdelK;fdelK=function(id){if(typeof id==='string'&&id.startsWith('shin:'))o('sipre:'+id.slice(5));return o(id)}}
+function siPreQ(L){if(!isA()||!bzF('scan'))return;(L||[]).forEach(x=>{if(!x.pre){x.pre='q';if(x.st==='q'||x.st==='fail')x.st='q'}});siSave();siPreRun();try{fbBgQ()}catch(e){}}
+async function siPreGet(x){let s=null;try{s=await fget(SIPK(x))}catch(e){}if(typeof s!=='string')return null;try{const o=JSON.parse(s);return o&&o.v===1&&Array.isArray(o.pg)&&o.pg.length?o:null}catch(e){return null}}
+async function siPreCls(du){let last=null;for(let i=1;i<=3;i++){if(navigator.onLine===false){await new Promise(r=>{const f=()=>{window.removeEventListener('online',f);r()};window.addEventListener('online',f);setTimeout(f,60000)});i--;continue}
+ try{return usMap(await usCall(du))}catch(e){last=e;const rs=e.reason||'';if(US_STOP[rs])return{kind:'unknown',err:US_STOP[rs]};if(!US_RETRY.includes(rs))break;if(i<3)await new Promise(z=>setTimeout(z,1500*i))}}
+ return{kind:'unknown',err:'הזיהוי לא הצליח'+(last&&last.message?' ('+last.message+')':'')}}
+async function siPreOne(x){const L=()=>(SI.L||[]).includes(x);let du=null;try{du=await fget(siKey(x))}catch(e){}if(!du||!L())return;
+ let o=await siPreGet(x);
+ if(!o){let pg=[];if(x.mime==='application/pdf'){let P=[];try{const r=await pdfDocPages(du,{max:US_MAXP,scale:2,maxW:1600});P=(r&&r.pages||[]).filter(imgOk)}catch(e){}
+   if(P.length>1||(x.big&&P.length===1))pg=P.map(u=>({u,hi:u}));else if(!x.big)pg=[{pdf:1}]}
+  else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);pg=[{u:r.u||du,hi:hi.u||r.u||du}]}catch(e){}}
+  if(!pg.length||!L())return;o={v:1,pg};try{await fput(SIPK(x),JSON.stringify(o))}catch(e){return}}
+ const n=o.pg.length;for(let i=0;i<n;i++){const g=o.pg[i];if(g.cls)continue;if(!L())return;SIPP[x.id]={i:i+1,n};siPreTick(x);
+  const r=await siPreCls(g.pdf?du:(g.hi||g.u));if(!L())return;g.cls=r;try{await fput(SIPK(x),JSON.stringify(o))}catch(e){}
+  if(r.err&&US_STOP[Object.keys(US_STOP).find(k=>US_STOP[k]===r.err)])break}
+ const c=(o.pg[0]||{}).cls||{},k=c.kind;x.type=k==='bank_transfer'?'bank_transfer':k==='delivery_note'?'delivery_note':['invoice','receipt','credit_note'].includes(k)?'invoice':'other';x.man=0;x.err='';x.pre='ok';if(x.st==='q'||x.st==='fail')x.st='ok';delete SIPP[x.id];siSave()}
+async function siPreRun(){while(SIPact<2){const x=(SI.L||[]).find(y=>(y.pre==='q')&&!y.wr);if(!x)break;SIPact++;x.pre='run';siSave();
+ const p=SIPR[x.id]=siPreOne(x).catch(()=>{}).finally(()=>{SIPact--;delete SIPR[x.id];delete SIPP[x.id];if(x.pre==='run')x.pre=(SI.L||[]).includes(x)?'':x.pre;siSave();siPreTick(x);try{siUI();fbBgQ()}catch(e){}siPreRun()})}}
+function siPreTick(x){const U=US,P=SIPP[x.id];if(U&&U.si===x.id&&U.siw)usSheet('מזהה את המסמך…',`<div class="empty">${P&&P.n>1?'דף '+P.i+' מתוך '+P.n+'…':'רגע, בודק איזה מסמך זה…'}</div><p class="note" style="text-align:center">הזיהוי ממשיך גם אם יוצאים מהאפליקציה</p>`)}
+/* אחרי טעינה מחדש: זיהוי שלא הסתיים ממשיך */
+{const o=siLoad;siLoad=function(){const r=o();if(isA()&&(SI.L||[]).some(x=>x.pre==='run'||x.pre==='q')&&!siLoad.pr){siLoad.pr=1;(SI.L||[]).forEach(x=>{if(x.pre==='run'&&!SIPR[x.id])x.pre='q'});setTimeout(()=>{siPreRun();try{fbBgQ()}catch(e){}},1500)}return r}}
+/* פתיחה במסך האחיד: מחכים לזיהוי שכבר רץ (בלי זיהוי כפול), ואז הדפים והזיהוי נכנסים כמו שהם */
+async function siPreOpen(x,du){if(!bzF('scan')||!isA())return false;if(!x.pre){siPreQ([x]);if(!x.pre)return false}
+ const U=US;if(x.pre!=='ok'){U.siw=1;U.step='siw';siPreTick(x);while((x.pre==='q'||x.pre==='run')&&US===U&&(SI.L||[]).includes(x)){if(!SIPR[x.id]&&x.pre==='q')siPreRun();await (SIPR[x.id]||new Promise(r=>setTimeout(r,500)))}U.siw=0}
+ if(US!==U||U.si!==x.id)return true;const o=await siPreGet(x);if(!o||US!==U)return !o?false:true;
+ U.pg=o.pg.map(g=>g.pdf?{pdf:1,du,cls:g.cls||null}:{u:g.u,hi:g.hi||g.u,cls:g.cls||null});U.i=0;usPane(1);
+ if(U.pg.length>1){toast('PDF עם '+U.pg.length+' עמודים – מפצל לחשבוניות…');usMulti()}else usDetect();return true}
 /* "צילום העברה" (בלי ספק שנבחר מראש) פותח את המסך האחיד (החלטה 7) */
 {const o=ACT.trGo;ACT.trGo=el=>{if(!el.dataset.sub&&usAllowed('transfer')){usOpen();return}o(el)}}
 /* ===== סריקה אחידה, שלב 5: חיבור דפים. כל דף מזוהה לבד (דף = 1 במכסה), והאפליקציה מחברת: Z בשלושה חלקים (עליון/אמצעי/תחתון, בסדר הנכון), חשבונית עד 12 דפים (לפי מספר+ספק),
