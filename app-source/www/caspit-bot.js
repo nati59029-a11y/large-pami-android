@@ -21,8 +21,9 @@ const ERR={'import-errors':'כספית טענה את הקובץ עם שורות 
  'hours-format':'קובץ השעות שירד מכספית לא נראה כמו שציפינו – שעות העובדים לא עודכנו (השאר עודכן).','hours-list':'הרובוט לא הצליח לקרוא את רשימת העובדים בכספית – שעות העובדים לא עודכנו.','hours-month':'הרובוט לא הצליח לבחור בכספית את החודש הקודם – השעות של החודש הקודם לא עודכנו.','hours-branch':'שעות העובדים של סניף נחל לכיש לא עודכנו (יהודה הנשיא עודכן).','hours-fail':'עדכון שעות העובדים מכספית נכשל (השאר עודכן).',
  limit:'יותר מדי שינויים לכספית בבת אחת – הרובוט עצר. אפשר להעלות את המגבלה למטה, או לשלוח את הקבצים מכאן.',auth:'החיבור בוטל. צריך לחבר מחדש עם קוד חדש.','min-ver':'צריך לעדכן את התוסף לגרסה חדשה.',disabled:'הסנכרון האוטומטי כבוי.',
  network:'אין חיבור לאינטרנט במחשב החנות.',offline:'אין חיבור לאינטרנט במחשב החנות.',timeout:'הפעולה לקחה יותר מדי זמן.',server:'תקלה זמנית בשרת.',rate:'יותר מדי פניות היום.',stale:'הנתונים השתנו באמצע – ננסה שוב.',busy:'סנכרון אחר רץ באותו זמן.',
- tab:'תקלה זמנית בלשונית של כספית.',parse:'לא הצלחנו לקרוא את הקובץ מכספית.','first-manual':'את הקטלוג הראשון מסנכרנים כאן באפליקציה.',fail:'הסנכרון נכשל.'};
+ tab:'תקלה זמנית בלשונית של כספית.',stuck:'העדכון התחיל ולא הסתיים (Chrome נסגר באמצע, או שהדף של כספית נתקע).',parse:'לא הצלחנו לקרוא את הקובץ מכספית.','first-manual':'את הקטלוג הראשון מסנכרנים כאן באפליקציה.',fail:'הסנכרון נכשל.'};
 const errTxt=(code,msg)=>ERR[code]||msg||ERR.fail;
+window.cxErrTxt=errTxt; /* 24.11.2026: גם למסך "מכירות כספית" (עדכון שעתי שנכשל) */
 /* פירוט התקלה מהתוסף (מסך וצעד) – מוצג בנוסף להסבר הכללי, כדי לדעת איפה הריצה נעצרה */
 const errDet=e=>{if(!e)return'';const m=String(e.msg||'').trim(),st=String(e.step||'').trim();return m&&ERR[e.code]&&m!==ERR[e.code]?'פירוט: '+m+(st?' (צעד '+st+')':''):''};
 async function load(){if(B.ld)return;B.ld=1;try{B.i=await fnCall('cxBotTok',{op:'info'});B.at=Date.now();B.err=''}catch(e){B.err=e&&e.message||'הטעינה נכשלה'}B.ld=0;if(cur().v==='cxSync')rerender()}
@@ -67,6 +68,8 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
     else h+=`<p class="note">עדכון אוטומטי של התוסף: תקין (נבדק ${dt(u.at)}).</p>`;}
    h+=`<button class="btn g w" ${big} data-a="cxBotUpd" style="min-height:48px;margin-bottom:8px">עדכון המחשב</button>`;
    if(i.tp&&i.tp.d&&i.tp.d===ilToday())h+=`<p class="note">מכירות היום (${dd(i.tp.d)}) עודכנו מהמחשב עד השעה ${esc(String(i.tp.hm||''))} – חלקי, הסכום הסופי נקלט בלילה.</p>`;
+   /* תוסף 0.1.19: העדכון השעתי האחרון נכשל (ואחריו לא הצליח עדכון) */
+   if(i.tf&&i.tf.s&&!(i.tp&&i.tp.at>i.tf.at))h+=`<p class="note" role="alert">⚠ העדכון של מכירות היום בשעה ${esc(String(i.tf.s).slice(11))}:00 נכשל: ${esc(errTxt(i.tf.c))}</p>`;
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}${errDet(lr)?`<br><bdi>${esc(errDet(lr))}</bdi>`:''}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;

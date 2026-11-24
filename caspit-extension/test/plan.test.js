@@ -119,3 +119,17 @@ test('"סנכרן עכשיו" (wantRemote): רק בקשה חדשה ותקינה,
   assert.equal(run0().req, null);
   assert.match(P.msgOf('remote'), /[א-ת]/); assert.match(P.msgOf('req-gone'), /[א-ת]/);
 });
+
+// 0.1.19: דיווח לשרת על העדכון השעתי של מכירות היום (todaySt → poll tf)
+test('0.1.19 tfOf: נכשל → קוד; רץ יותר מ-20 דקות → stuck; הצליח / רץ עכשיו / today-off / קלט פגום → null', () => {
+  const now = Date.parse('2026-11-24T09:30:00Z');
+  assert.deepEqual(P.tfOf({ slot: '2026-11-24 11', st: 'fail', code: 'needs-login', at: now }, now), { s: '2026-11-24 11', c: 'needs-login' });
+  assert.deepEqual(P.tfOf({ slot: '2026-11-24 11', st: 'fail', code: 'Bad Code!', at: now }, now), { s: '2026-11-24 11', c: 'fail' }, 'קוד לא תקין → fail');
+  assert.deepEqual(P.tfOf({ slot: '2026-11-24 11', st: 'fail', at: now }, now), { s: '2026-11-24 11', c: 'fail' });
+  assert.deepEqual(P.tfOf({ slot: '2026-11-24 11', st: 'run', at: now - 21 * 60e3 }, now), { s: '2026-11-24 11', c: 'stuck' });
+  assert.equal(P.tfOf({ slot: '2026-11-24 11', st: 'run', at: now - 5 * 60e3 }, now), null, 'רץ עכשיו');
+  assert.equal(P.tfOf({ slot: '2026-11-24 11', st: 'ok', at: now }, now), null);
+  assert.equal(P.tfOf({ slot: null, st: 'fail', code: 'today-off', at: now }, now), null, 'today-off – בלי slot');
+  assert.equal(P.tfOf({ slot: '2026-11-24', st: 'fail', code: 'tab' }, now), null, 'slot לא בצורה של שעה');
+  assert.equal(P.tfOf(null, now), null);
+});

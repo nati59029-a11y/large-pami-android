@@ -119,6 +119,10 @@ async function pollOnce() {
   const caps0 = (await get('caps')) || {};
   const ui = caps0.uq ? await updInfo().catch(() => null) : null;
   if (ui && ui.upd && (await get('updSent')) !== ui.upd.at + '|' + ui.upd.ok + '|' + ui.upd.ver) body.upd = ui.upd;
+  // 0.1.19: העדכון השעתי של מכירות היום נכשל (או נתקע) – מדווחים לשרת, כדי שהטלפון יראה למה "חלקי – עד השעה" לא מתקדם.
+  // רק לשרת שמכיר את השדה (caps.tf), ורק כשהשתנה. עד 0.1.18 הכישלון נשמר רק כאן (todaySt)
+  const tf = caps0.tf ? P.tfOf(await get('todaySt'), Date.now()) : null;
+  if (tf && (await get('tfSent')) !== tf.s + '|' + tf.c) body.tf = tf;
   try { r = await (await api()).call('poll', body); } catch (e) {
     // שרת ישן (bad-op) / העסק כבוי זמנית (403) → כל 15 דקות; האסימון בוטל (401) → מפסיקים עד חיבור מחדש / הפעלת Chrome
     if (e.code === 'bad-op' || (e.code === 'auth' && e.status === 403)) await pollEvery(POLL_SLOW_MIN);
@@ -127,11 +131,13 @@ async function pollOnce() {
   }
   await pollEvery(POLL_MIN);
   if (body.upd) await set({ updSent: body.upd.at + '|' + body.upd.ok + '|' + body.upd.ver });
+  if (body.tf) await set({ tfSent: body.tf.s + '|' + body.tf.c });
   // יכולות השרת (0.1.10): today = מכירות היום כל שעה, uq = "עדכון המחשב" מהטלפון; 0.1.14: hours = שעות העובדים (upload kind:'hours'). שרת ישן (בלי caps) → כבויות
   const cl = Array.isArray(r.caps) ? r.caps : [];
   // 0.1.15: hours2 = השרת מקבל empty (עובדים שכל השעות שלהם בחודש נמחקו בכספית). שרת בלי hours2 – לא שולחים empty (שדה לא מוכר נדחה)
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2') };
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2) await set({ caps });
+  // 0.1.19: tf = השרת מקבל ב-poll את העדכון השעתי שנכשל
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf') };
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
