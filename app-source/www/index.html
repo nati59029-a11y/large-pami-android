@@ -6343,7 +6343,7 @@ async function siPreCls(du){let last=null;for(let i=1;i<=3;i++){if(navigator.onL
  return{kind:'unknown',err:'הזיהוי לא הצליח'+(last&&last.message?' ('+last.message+')':'')}}
 async function siPreOne(x){const L=()=>(SI.L||[]).includes(x);let du=null;try{du=await fget(siKey(x))}catch(e){}if(!du||!L())return;
  let o=await siPreGet(x);
- if(!o){let pg=[];if(x.mime==='application/pdf'){let P=[];try{const r=await pdfDocPages(du,{max:US_MAXP,scale:2,maxW:1600});P=(r&&r.pages||[]).filter(imgOk)}catch(e){}
+ if(!o){let pg=[];if(x.mime==='application/pdf'){let P=[];try{const r=await Promise.race([pdfDocPages(du,{max:US_MAXP,scale:2,maxW:1600}),new Promise((_,j)=>setTimeout(()=>j(new Error('timeout')),90000))]);P=(r&&r.pages||[]).filter(imgOk)}catch(e){}
    if(P.length>1||(x.big&&P.length===1))pg=P.map(u=>({u}));else if(!x.big)pg=[{pdf:1}]}
   else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);const u=r.u||du;pg=[hi.u&&hi.u!==u?{u,hi:hi.u}:{u}]}catch(e){}}
   if(!pg.length||!L())return;o={v:1,pg};try{await fput(SIPK(x),JSON.stringify(o))}catch(e){return}}
@@ -6353,9 +6353,9 @@ async function siPreOne(x){const L=()=>(SI.L||[]).includes(x);let du=null;try{du
  const c=(o.pg[0]||{}).cls||{},k=c.kind;x.type=k==='bank_transfer'?'bank_transfer':k==='delivery_note'?'delivery_note':['invoice','receipt','credit_note'].includes(k)?'invoice':'other';x.man=0;x.err='';x.pre='ok';if(x.st==='q'||x.st==='fail')x.st='ok';delete SIPP[x.id];siSave()}
 async function siPreRun(){while(SIPact<2){const x=(SI.L||[]).find(y=>(y.pre==='q')&&!y.wr);if(!x)break;SIPact++;x.pre='run';siSave();
  const p=SIPR[x.id]=siPreOne(x).catch(()=>{}).finally(()=>{SIPact--;delete SIPR[x.id];delete SIPP[x.id];if(x.pre==='run')x.pre=(SI.L||[]).includes(x)?'':x.pre;siSave();siPreTick(x);try{siUI();fbBgQ()}catch(e){}siPreRun()})}}
-function siPreTick(x){const U=US,P=SIPP[x.id];if(U&&U.si===x.id&&U.siw)usSheet('מזהה את המסמך…',`<div class="empty">${P&&P.n>1?'דף '+P.i+' מתוך '+P.n+'…':'רגע, בודק איזה מסמך זה…'}</div><p class="note" style="text-align:center">הזיהוי ממשיך גם אם יוצאים מהאפליקציה</p>`)}
+function siPreTick(x){const U=US,P=SIPP[x.id];if(U&&U.si===x.id&&U.siw)usSheet('מזהה את המסמך…',`<div class="empty">${P&&P.n>1?'דף '+P.i+' מתוך '+P.n+'…':P?'רגע, בודק איזה מסמך זה…':x.mime==='application/pdf'?'מכין את עמודי ה-PDF…':'מכין את התמונה…'}</div><p class="note" style="text-align:center">הזיהוי ממשיך גם אם יוצאים מהאפליקציה</p>`)}
 /* אחרי טעינה מחדש: זיהוי שלא הסתיים ממשיך */
-{const o=siLoad;siLoad=function(){const r=o();if(isA()&&(SI.L||[]).some(x=>x.pre==='run'||x.pre==='q')&&!siLoad.pr){siLoad.pr=1;(SI.L||[]).forEach(x=>{if(x.pre==='run'&&!SIPR[x.id])x.pre='q'});setTimeout(()=>{siPreRun();try{fbBgQ()}catch(e){}},1500)}return r}}
+{const o=siLoad;siLoad=function(){const r=o();if(isA()&&bzF('scan')&&(SI.L||[]).length&&!siLoad.pr&&!SIing){siLoad.pr=1;(SI.L||[]).forEach(x=>{if(x.pre==='run'&&!SIPR[x.id])x.pre='q';if(!x.pre&&x.st!=='us'&&!x.wr){x.pre='q';if(x.st==='fail')x.st='q'}});setTimeout(()=>{siPreRun();try{fbBgQ()}catch(e){}},1500)}return r}}
 /* פתיחה במסך האחיד: מחכים לזיהוי שכבר רץ (בלי זיהוי כפול), ואז הדפים והזיהוי נכנסים כמו שהם */
 async function siPreOpen(x,du){if(!bzF('scan')||!isA())return false;if(!x.pre){siPreQ([x]);if(!x.pre)return false}
  const U=US;if(x.pre!=='ok'){U.siw=1;U.step='siw';siPreTick(x);while((x.pre==='q'||x.pre==='run')&&US===U&&(SI.L||[]).includes(x)){if(!SIPR[x.id]&&x.pre==='q')siPreRun();await (SIPR[x.id]||new Promise(r=>setTimeout(r,500)))}U.siw=0}
