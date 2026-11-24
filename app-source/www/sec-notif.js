@@ -194,6 +194,9 @@ function rulesH(){const S=st(),R=Object.entries(S.R).sort((a,b)=>(b[1].t||0)-(a[
  h+=`<div class="card"><b>מה עשיתי לבד</b>${S.G.length?S.G.map(g=>`<div class="secli"><p style="margin:2px 0">${esc(when(g.t))} · ${esc(g.a||'')} · <b>${esc(g.s||'')}</b></p><small class="note">${g.act==='cap'?esc((CAPM[g.why]||CAPM.day)+(g.n>1?' ('+g.n+' הודעות)':'')):g.act==='ign'?'סומן "התעלם"':g.ok?(g.dup?'המשימה כבר הייתה פתוחה':'נפתחה משימה ל'+esc(g.un||'העובד')):'לא נפתחה משימה: '+esc(g.why||'')+' – ההתראה נשארה ברשימה'}</small>${g.tk?` ${B('secCxGo','למשימה',` data-tid="${esc(g.tk)}"`)}`:''}</div>`).join(''):'<p class="note" style="margin:6px 0 0">עוד לא בוצעה פעולה לבד.</p>'}</div>`;
  return h}
 window.__secNotifH=()=>{try{return notifH()}catch(e){return '<p class="note">לא ניתן להציג את המסך כרגע.</p>'}};
+/* 23.11.2026 (גיטי, סבב 3): ללשונית "תקשורת" (sec-comm.js) – ההתראות שבזיכרון של הדף, לקריאה בלבד ורק במכשיר הזה (לא נשלחות לשרת). null = הקליטה לא פעילה כאן */
+window.__secNfList=()=>{try{return native()&&adm()&&plug()&&uid()&&N.cfg&&mine()?inbox().map(x=>({k:x.k,a:x.a,s:x.s,x:x.x,t:x.t,st:x.st})):null}catch(e){return null}};
+window.__secNfTick=()=>{try{tick()}catch(e){}};
 
 /* ---------- פעולות ---------- */
 const pick=el=>{const it=itemOf(el.dataset.k);if(!it){toast('ההתראה כבר לא ברשימה');re(1)}return it};

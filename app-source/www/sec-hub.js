@@ -41,6 +41,8 @@ function connOf(src){
  else if(st.mirror===false)c('biz','מערכות העסק (נתוני הכספים)','off','מראה הכספים כבוי בהגדרות','set');
  else if(Number.isFinite(st.mirrorAt)&&st.mirrorAt>0)c('biz','מערכות העסק (נתוני הכספים)','ok','נכון ל-'+(root.__hubFmt?root.__hubFmt(st.mirrorAt):''));
  else c('biz','מערכות העסק (נתוני הכספים)','unk','עוד לא נשלחו נתונים');
+ /* סבב 3 (23.11.2026): קבוצות פנימיות – רק כשהתוספת פעילה (st.grp מ-secState). כמה קבוצות פתוחות לגיטי */
+ if(st&&st.ok&&st.grp&&st.grp.on){const n=+st.grp.n||0;c('grp','קבוצות פנימיות (קריאה של גיטי)',n?'ok':'off',n?(n===1?'קבוצה אחת פתוחה לגיטי':n+' קבוצות פתוחות לגיטי'):'אף קבוצה לא פתוחה לגיטי','set')}
  if(cx){const L='כספית (רובוט מחשב החנות)',lr=cx.lr,at=lr&&lr.at&&root.__hubFmt?root.__hubFmt(lr.at):'';
   if(cx.err)c('cx',L,'unk','לא נטען');
   else if(!cx.dev)c('cx',L,'off','אין מחשב מחובר','cx');
@@ -58,7 +60,7 @@ function mergeAttention(eyes,extra){
  return out}
 /* יומן: סוג לפי שם הפעולה */
 const LT=[['facts','מידע על העסק',/^(fact|fixed|price|sens|rule|bank|import)/],['cal','יומן ותזכורות',/^(cal|rem)/],['rep','דוחות והתראות',/^(report|insight|notify|empAlert|daySum)/],
- ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
+ ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap|grp)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
 const logType=a=>{a=String(a||'');const m=LT.find(x=>x[2].test(a));return m?m[0]:'other'};
 const logTypes=()=>LT.map(x=>[x[0],x[1]]).concat([['other','אחר']]);
 const WHO={mgr:'מנהל העסק',sa:'מנהל המערכת',auto:'פעולה אוטומטית',sec:'המזכירה'};
@@ -192,6 +194,7 @@ function apprH(){const R=X.ey;
  const h=grp('הצעות ובקשות מהשיחה',O.filter(x=>x.k==='appr'||x.k==='media'),x=>row(x))
   +grp('טיוטות תשובה (ווצאפ ומייל)',O.filter(x=>x.k==='draft'),x=>row(x))
   +grp('חשבוניות שמחכות לאישור',O.filter(x=>x.k==='inv'),x=>row(x))
+  +(typeof window.__secCmtH==='function'?window.__secCmtH():''/* 24.11.2026: התחייבויות מהודעות – sec-cmt.js */)
   +grp('משימות שממתינות לאישור',M.filter(x=>x.ap),x=>`<div class="secli"><button type="button" class="secnb" data-a="hubGo" data-k="tk" data-s="wait"><p><b>${esc(x.title)}</b></p><small class="note">${esc(x.sub||'')}</small></button><div class="secrow"><button class="chip" data-a="tkOk" data-id="${esc(x.tid)}">אשר</button><button class="chip" data-a="hubGo" data-k="tk" data-s="wait">פתיחה</button></div></div>`);
  return `<div class="card"><b>מה ממתין לאישור שלך</b><p class="note" style="margin:4px 0 0">כל כפתור כאן מבצע אותה פעולה כמו במסך המקורי.</p></div>${h||'<div class="empty">אין כרגע משהו שממתין לאישור ✓</div>'}`}
 

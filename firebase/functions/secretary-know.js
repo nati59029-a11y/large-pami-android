@@ -284,7 +284,7 @@ async function secCal(request) {
     if (!ev) throw bad('bad-event', 'כותרת (עד ' + K.CAL_TITLE + ' תווים), תאריך ושעה תקינים');
     if (ev.d < today) throw bad('past', 'התאריך כבר עבר');
     // תיקון סבב 2 (ליקוי 4): תזכורת מכרטיס בשיחה (cid = מזהה הכרטיס) – מזהה קבוע sec<cid>. אישור חוזר (למשל אחרי שהסימון נכשל) מחזיר את הקיימת ולא יוצר שנייה
-    const cid = input.cid === undefined ? null : typeof input.cid === 'string' && /^tp[0-9a-f]{16}$/.test(input.cid) && rem ? input.cid : false;
+    const cid = input.cid === undefined ? null : typeof input.cid === 'string' && /^(tp|cm)[0-9a-f]{16}$/.test(input.cid) && rem ? input.cid : false; // cm – התחייבות שאושרה (lib/sec-cmt.js, 24.11.2026)
     if (cid === false) throw bad('bad-cid', 'מזהה כרטיס לא תקין');
     if (cid) {
       const ex = await col.doc('sec' + cid).get();
