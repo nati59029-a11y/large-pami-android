@@ -2618,6 +2618,7 @@ service cloud.firestore {
         allow read: if ordOk();
         allow create, update, delete: if false;
       }
+      // לקוחות הקפה מכספית (24.11.2026, functions/hk-import.js): hkcfg, hkpend, hkc, hkchk – בכוונה בלי כלל = שרת בלבד (האפליקציה קוראת דרך hkGet).
       // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
       match /lineplan/{id} {
         allow read: if ordOk() && feat('cellular');
