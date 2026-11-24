@@ -3,6 +3,7 @@
 // בלי קריאה ל-Firestore ובלי שליחה – רק חישובים. הקריאה, הכתיבה והשליחה – ב-secretary-remind.js.
 const K = require('./sec-know');   // bizDay, addDays, nextBizDay – אותו כלל ימי עסקים כמו tkBiz באפליקציה (7.4)
 const ST = require('./sec-tools'); // ideas, forecast – אותם חישובים כמו בצ'אט
+const TR = require('./sec-trend'); // 24.11.2026 (סבב 4 חלק ב): הוצאות חריגות – אותו חישוב כמו בצ'אט ובמסך "ניתוחים"
 const TKT = require('./tk-time');  // tkLateAt – "באיחור" לפי היעד בפועל (tkDl: dl אם נקבע, dl=0 בלי יעד, אחרת due) – כמו באפליקציה
 
 const TZ = 'Asia/Jerusalem';
@@ -316,9 +317,11 @@ function buildReport(o) {
 const SUM_WIN_H = 6;
 function sumDue(hm, h) { const a = String(h).padStart(2, '0') + ':00', b = String(Math.min(24, h + SUM_WIN_H)).padStart(2, '0') + ':00'; return hm >= a && hm < b; }
 // o: { kind:'am'|'pm', today, now, dayStart, fin (או null), tasks, cal: [{title, tm}] (היום, של המנהל), calNext: מספר אירועים מחר (ערב),
-//      wait: { tk, inv, draft, prop } (ממתינים לאישור), acts: { ok, fail } (פעולות המזכירה היום, מ-sec_log; ערב) }
+//      wait: { tk, inv, draft, prop } (ממתינים לאישור), acts: { ok, fail } (פעולות המזכירה היום, מ-sec_log; ערב),
+//      anSeen: { <מזהה חריגה>: זמן } – חריגות שכבר הופיעו בסיכום בוקר קודם (לא חוזרות) }. מחזיר גם an – מזהי החריגות שהופיעו עכשיו (לשמירה)
 function daySum(o) {
   const L = [], fin = o.fin, tasks = o.tasks || [];
+  let an = [];
   const open = tasks.filter((t) => t.st === 'open'), late = open.filter((t) => TKT.tkLateAt(t, o.now));
   const cal = (o.cal || []).slice().sort((a, b) => String(a.tm || '').localeCompare(String(b.tm || '')));
   if (o.kind === 'am') {
@@ -335,11 +338,21 @@ function daySum(o) {
     const due = (fin.open || []).filter((r) => r[3] && r[3] <= end && r[3] >= o.today && r[5] > 0.004);
     L.push('חשבוניות לתשלום ' + (o.kind === 'am' ? 'היום' : 'היום ומחר') + ': ' + (due.length ? due.length + ', סך ' + ils(sum(due, (r) => r[5])) : 'אין'));
     if (fin.late && fin.late.n) L.push('חשבוניות באיחור: ' + fin.late.n + ', סך ' + ils(fin.late.sum));
+    // 24.11.2026 (גיטי סבב 4 חלק ב): הוצאות חריגות – בסיכום הבוקר בלבד, כל חריגה פעם אחת (anSeen)
+    if (o.kind === 'am') {
+      const seen = o.anSeen || {}, A = TR.anomalies(fin, { today: o.today }).filter((x) => !seen[x.key]);
+      an = A.map((x) => x.key);
+      if (A.length) {
+        L.push('הוצאות חריגות (30% ומעלה מעל ממוצע 3 החודשים הקודמים): ' + A.length);
+        A.slice(0, 3).forEach((x) => L.push('• ' + (x.by === 'sup' ? 'ספק ' : 'קטגוריה ') + String(x.name).slice(0, 40) + ' – ' + ils(x.amount) + ' ב-' + x.month + ' מול ממוצע ' + ils(x.avg3) + ' (+' + x.overPct + '%)'));
+        if (A.length > 3) L.push('• ועוד ' + (A.length - 3) + ' – בלשונית "ניתוחים"');
+      }
+    }
   } else L.push('חשבוניות לתשלום: אין נתוני כספים (מראה הכספים כבוי או שלא עודכן)');
   const w = o.wait || {}, wl = [[w.tk, 'משימות'], [w.inv, 'חשבוניות שהתקבלו'], [w.draft, 'טיוטות תשובה'], [w.prop, 'הצעות של המזכירה']].filter((x) => x[0] > 0);
   L.push('ממתין לאישור שלך: ' + (wl.length ? wl.map((x) => x[0] + ' ' + x[1]).join(', ') : 'אין'));
   if (o.kind === 'pm') L.push('מחר ביומן: ' + (o.calNext || 'אין'));
-  return { title: (o.kind === 'am' ? 'סיכום בוקר – ' : 'סיכום ערב – ') + dayHm(o.today), body: L.join('\n') };
+  return { title: (o.kind === 'am' ? 'סיכום בוקר – ' : 'סיכום ערב – ') + dayHm(o.today), body: L.join('\n'), an };
 }
 
 // ---------- "תזכירי לי שוב" (15.11.2026, סעיף 7) ----------

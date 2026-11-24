@@ -189,6 +189,19 @@ function secFin(o){o=o||{};
   if(o.notes&&Array.isArray(S.enotes)){const nm=id=>{const s=typeof subById==='function'?subById(id):null;return s?String(s.name||'').slice(0,60).trim():''};
    f.notes=S.enotes.filter(n=>n&&typeof n.t==='string'&&n.t.trim()&&nm(n.sub)).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||''))||String(b.at||'').localeCompare(String(a.at||''))).slice(0,60)
     .map(n=>[nm(n.sub),/^\d{4}-\d{2}-\d{2}$/.test(String(n.d||''))?n.d:'',n.t.trim().slice(0,500)])}
+  /* 24.11.2026 (גיטי סבב 4 חלק ב – ניתוחים, sec-trend.js): סכום חודשי לכל כרטיס (ספק/מקור הכנסה) ומועדי החשבוניות של ספקי סחורה.
+     אותו סכום כמו catTotal/monthExpense: t.amt (זיכוי בשלילה, החזר כספי 0) לפי t.date, בלי ownOut. בלי כרטיסי עובדים (שכר – רק במתג השכר, f.pay).
+     spn=[שם, i/e, קטגוריה]; months[m].sp=[מספר ב-spn, סכום]; ord=[מספר ב-spn, [ימים מ-1970]] – isSupT בלי זיכוי, 400 יום אחורה, עד 60 */
+  {const lo=addMon(m0,-MONTHS),G=new Map(),tot=new Map(),dn=d=>Math.round(Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10))/864e5),d0=dn(td)-400,OD=new Map();
+   L.forEach(t=>{if(!t||!t.sub||(t.t!=='exp'&&t.t!=='inc')||ownOut(t)||typeof t.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(t.date))return;const c=cat(t.cat)||{};if(c.beh==='emp')return;
+    const m=t.date.slice(0,7);if(m<lo||m>m0)return;const k=t.sub+'|'+t.t,a=num(t.amt);let g=G.get(k);if(!g){g={sub:t.sub,k:t.t==='inc'?'i':'e',c:String(c.name||'').slice(0,40),m:{}};G.set(k,g)}g.m[m]=(g.m[m]||0)+a;tot.set(k,(tot.get(k)||0)+Math.abs(a));
+    if(t.t==='exp'&&isSupT(t)&&t.kind!=='credit'&&a>0){const d=dn(t.date);if(d>=d0){let o=OD.get(k);if(!o)OD.set(k,o=new Set());o.add(d)}}});
+   const keys=[...G.keys()].filter(k=>tot.get(k)>0.004).sort((a,b)=>tot.get(b)-tot.get(a)).slice(0,300);
+   if(keys.length){f.spn=keys.map(k=>{const g=G.get(k);return [String((subById(g.sub)||{}).name||'—').slice(0,60),g.k,g.c]});
+    keys.forEach((k,i)=>{const g=G.get(k);Object.keys(g.m).forEach(m=>{const v=rnd(g.m[m]);if(Math.abs(v)>0.004&&f.months[m]){(f.months[m].sp=f.months[m].sp||[]).push([i,v])}})});
+    f.ord=keys.map((k,i)=>OD.has(k)?[i,[...OD.get(k)].sort((a,b)=>a-b).slice(-60)]:null).filter(Boolean)}}
+  /* גבול הגודל בשרת (FIN_MAX 400KB): אם מתקרבים – מוותרים קודם על מועדי החשבוניות ואחר כך על הפירוט לפי ספק, ולא על שאר הנתונים */
+  try{const sz=()=>new TextEncoder().encode(JSON.stringify(f)).length;if(f.spn&&sz()>360000){delete f.ord;if(sz()>360000){delete f.spn;Object.values(f.months).forEach(x=>{delete x.sp})}}}catch(e){}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
  finally{BRSEL=sB;P=sP}}
@@ -222,7 +235,7 @@ document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
 /* 22.11.2026: קיצורי משימות (מנהל, תוספת משימות פעילה) – מטופלים בתוך האפליקציה (cxTry), בלי AI */
 const QT=['משימה חדשה לעובד','מה באיחור?','ממתין לאישור'];const qsL=()=>{try{return cxOn()?QS.concat(QT):QS}catch(e){return QS}};
-const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',rq:'rq',mq:'mq',facts:'@facts',cal:'@cal',bank:'@bank',gr:'gr'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
+const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',rq:'rq',mq:'mq',facts:'@facts',cal:'@cal',bank:'@bank',gr:'gr',trend:'@trend'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 /* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
 const mdLite=t=>t.split('\n').map(l=>{if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))return null;const h=/^\s*#{1,6}\s+(.*)$/.exec(l);if(h)return '<b>'+h[1].replace(/\*\*/g,'')+'</b>';return l.replace(/^(\s*)[-*•]\s+/,'$1• ')}).filter(l=>l!==null).join('\n').replace(/\*\*([^*\n]+?)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+?)__/g,'<b>$1</b>').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'');
