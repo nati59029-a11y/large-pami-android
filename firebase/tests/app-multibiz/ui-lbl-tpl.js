@@ -179,20 +179,20 @@ const PAGE_LIB = () => {
     const bk2 = await BKT(page);
     check('r 4 כמות: 1000 נדחית ("1 עד 999"), 999 מתקבלת; שורה של תבנית מקורית – בלי T', /1 עד 999/.test(t1000) && n1000 === 1 && bk2.length === 2 && bk2[1].n === 999 && bk2[1].tpl === 1 && !bk2[1].T, { t1000, n1000, n: bk2.length });
     const pb = await page.evaluate(() => [...document.querySelectorAll('#main [data-a=lblPrint]')].map((b) => ({ g: b.dataset.g, t: b.innerText, h: b.nextElementSibling && b.nextElementSibling.innerText })));
-    // הקבוצות לפי סדר ההופעה בסל: 40×30 (נוספה ראשונה) ואז 50×25
-    check('r 5 שני גדלים בסל: כפתור הדפסה לכל גודל (לפי סדר ההופעה), והנחיה לחלון ההדפסה לפי הגודל', pb.length === 2 && /40×30/.test(pb[0].t) && /100 מדבקות/.test(pb[0].t) && /40×30\u2069? מ"מ/.test(pb[0].h) && !/50×25/.test(pb[0].h) && /50×25/.test(pb[1].t) && /999/.test(pb[1].t) && /50×25/.test(pb[1].h), pb);
+    // 50×25 קודם (אף שנוספה שנייה), אחר כך שאר הגדלים לפי סדר ההופעה בסל
+    check('r 5 שני גדלים בסל: כפתור הדפסה לכל גודל (50×25 ראשון), והנחיה לחלון ההדפסה לפי הגודל', pb.length === 2 && /50×25/.test(pb[0].t) && /999/.test(pb[0].t) && /50×25/.test(pb[0].h) && /40×30/.test(pb[1].t) && /100 מדבקות/.test(pb[1].t) && /40×30\u2069? מ"מ/.test(pb[1].h) && !/50×25/.test(pb[1].h), pb);
     if (shots) await page.screenshot({ path: path.join(shots, 'r-basket.png'), fullPage: true });
-    const p0 = await printed(page, '#main [data-a=lblPrint][data-g="1"]');
+    const p0 = await printed(page, '#main [data-a=lblPrint][data-g="0"]');
     const eq0 = await page.evaluate(async ([src, a]) => { const L = LblPrint.bk().filter((r) => !r.T), OLD = window.__lbt.frozen(src), c = await LblPrint.build(L);
       // שלב 1 הגביל ל-200 בשורה: אותו סל עם 200 – זהה בבייטים לעותק הקפוא
       const L2 = L.map((r) => Object.assign({}, r, { n: 200 })), b = await OLD.build(L2, LblPrint.brand()), b2 = await LblPrint.build(L2);
       const eq = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]); return { old: eq([...b2], [...b]), now: eq(a, [...c]) }; }, [FROZEN, p0.a || []]);
     check('r 6 הדפסת 50×25 (999 > 300): חלון אישור, ואחריו PDF של 999 עמודים (זהה ל-build); אותו סל ב-200 – זהה בבייטים לשלב 1', /להדפיס 999 מדבקות/.test(p0.ask) && p0.count === 999 && JSON.stringify(p0.boxes) === '["0 0 141.73 70.87"]' && eq0.old && eq0.now && /הסר מהסל/.test(p0.dlg), { ask: p0.ask, count: p0.count, boxes: p0.boxes, eq0 });
-    const p1 = await printed(page, '#main [data-a=lblPrint][data-g="0"]');
+    const p1 = await printed(page, '#main [data-a=lblPrint][data-g="1"]');
     check('r 7 הדפסת 40×30 (100): בלי אישור, PDF של 100 עמודים בגודל 113.39×85.04 נק\'', !p1.ask && p1.count === 100 && JSON.stringify(p1.boxes) === '["0 0 113.39 85.04"]' && /40×30/.test(p1.dlg), { ask: p1.ask, count: p1.count, boxes: p1.boxes });
     await page.evaluate(() => { const L = LblPrint.bk(); for (let i = 0; i < 5; i++) L.push(JSON.parse(JSON.stringify(L[1]))); rerender(); }); await H.settle(page, 300);
     const big = await page.evaluate(() => document.getElementById('main').innerText);
-    const p2 = await printed(page, '#main [data-a=lblPrint][data-g="1"]'), t5k = await toasts(page);
+    const p2 = await printed(page, '#main [data-a=lblPrint][data-g="0"]'), t5k = await toasts(page);
     check('r 8 יותר מ-5,000 מדבקות בגודל אחד: אזהרה בסל, ההדפסה נחסמת', /עד 5,000 מדבקות/.test(big) && !p2.count && /עד 5,000/.test(t5k), { t5k, p2: p2.count });
     // שמירה: PATCH עם updateMask; 403 → במכשיר בלבד ונשלח שוב בכניסה הבאה
     const T1 = { id: 'new1', name: 'חדשה', w: 50, h: 25, grid: 12, brand: 'lay', els: MINE.els.slice(0, 2) };
