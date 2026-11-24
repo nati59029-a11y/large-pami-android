@@ -266,7 +266,8 @@ const pick = async (page, sel, file) => { await page.setInputFiles(sel, file); a
     const X = await open(browser, www, cM({}), em); await X.page.evaluate(() => { WS = 'home'; NAV = [{ v: isW() ? 'wk' : 'home' }]; render(0); }); await sleep(1500);
     await X.page.evaluate(() => { ['s3cOpen', 's3cFlush', 's3cMgr'].forEach((a) => { try { ACT[a]({ dataset: { id: 'rid001_20261114' } }); } catch (e) { /* */ } }); window.dispatchEvent(new Event('online')); }); await sleep(1500);
     const bad = X.log.filter((r) => /s3View|s3Log|s3Move|s3Run|shelfCheck|s3SaveMap|\/(smap|s3br|s3sum|sround)\b|\/srun/.test(r.url));
-    check('14 תוסף כבוי (' + em + '): אין שום בקשה של התלת מימד (פונקציות, מפה, סבבים)', !bad.length && !S.calls.length && !S.reads.length, bad.map((r) => r.url).slice(0, 4));
+    // staff לבדו אינו בקשת תלת מימד: מנהל קורא אותו גם לשמות/נוכחות (act-log.js, 23.11.2026)
+    check('14 תוסף כבוי (' + em + '): אין שום בקשה של התלת מימד (פונקציות, מפה, סבבים)', !bad.length && !S.calls.length && !S.reads.filter((p) => p !== 'staff').length, { bad: bad.map((r) => r.url).slice(0, 4), reads: S.reads.slice(0, 4) });
     await X.ctx.close();
   }
   await browser.close();
