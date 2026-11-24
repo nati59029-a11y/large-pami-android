@@ -462,6 +462,7 @@ const IN_DECL = [{ name: 'prepareReplyDraft', description: 'מכינה טיוט�
   ask: { type: 'string', description: 'כש-unsure: שאלה קצרה למנהל – מה לא ברור או מה חסר' },
   mr: { type: 'string', description: 'מזהה ההנחיה הקבועה שלפיה נכתבה הטיוטה, או ריק' }, mrc: { type: 'number', description: 'עד כמה ההנחיה מתאימה להודעה, 0–1' } }, required: ['text', 'cls'] } }];
 const ML = () => require('./lib/sec-learn');
+const PERM = () => require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות לפי סוג פעולה, לכל מנהל
 // 16.11.2026: שאלת הבהרה למנהל (רק כשהמזכירה לא בטוחה). טקסט נקי, שורה אחת, עד 200 תווים
 const askOf = (v) => typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
 const MLC = () => require('./secretary-learn')._core;
@@ -604,6 +605,8 @@ async function tryMrAutoWa(db, id, x, d, o) {
   if (!W.inWindow(sn.exists ? sn.get('lastIn') : 0, now)) extra.push('window');
   if (d.voice) extra.push('voice');
   if (!cfg.pnid) extra.push('notConnected');
+  const pw = await PERM().blockWhy(db, cs.exists ? cs.data() : {}, rule.uid, 'wa', {}, 'כלל אישי "לבד" בווצאפ'); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
+  if (pw) extra.push(pw);
   const fl = d.flags || [];
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: cfg.stop.on, owner: await MLC().ownerOk(db, rule.uid, 'wa'), rule, match: d.pm,
     inText: String(x.text || x.tr || ''), outText: String(d.text || ''), cls: d.cls, chk: fl.includes('chk'), unsure: fl.includes('unsure'), extra });

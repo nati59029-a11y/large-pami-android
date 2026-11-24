@@ -13,6 +13,9 @@
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
 //   sec_cfg/main   + 23.11.2026 (גיטי, סבב 3): grp [gid...] – קבוצות פנימיות שגיטי רשאית לקרוא (אין שדה = אף קבוצה). secPrefs op:'grp' בלבד (lib/sec-grp.js)
 //   sec_cfg/main   + 24.11.2026 (גיטי, סבב 3 חלק ב): cmt – זיהוי התחייבויות (true = פעיל; ברירת מחדל כבוי). secPrefs op:'cmtOn'
+//   sec_cfg/main   + 24.11.2026 (גיטי, סבב 4 חלק א): mgr.<uid>.perm { <סוג>: { m, cap?, t } } – הרשאות לפי סוג פעולה, לכל מנהל בנפרד;
+//                    mgr.<uid>.pq { <סוג>: { t, n, note } } – שאלה בפעם הראשונה. אין שדה = "טרם הוגדר" (בלי מיגרציה).
+//                    secPrefs op:'perm' – כל מנהל רק את שלו (לפי uid בשרת) (lib/sec-perm.js)
 //   sec_cmt/{cid}  { t, ch, src, from, who, what, d, prev, st:'pend'|'act'|'ok'|'no', actBy?, actAt?, kind?, ref?, stBy?, stAt? } – הצעות התחייבות (lib/sec-cmt.js). השרת בלבד
 //   sec_cmtq/{cid} { t, exp, n, lk?, ch, id?|gid,mid, wa?, from, text, grp? } – תור הזיהוי (נכתב בקליטה, מעובד ב-secRemind). השרת בלבד
 //   sec_cfg/use    { m, mc, d, dmc, w80, w100, r: { <uid>: { h, n, d, dn } }, mp: { h, n } } – מונה עלות במילי־סנט + קצב. מנהל־על בלבד (83)
@@ -43,6 +46,7 @@ const SK = require('./lib/sec-know');   // שלב 3: בנק תשובות
 const SENS = require('./lib/sec-sens'); // שלב 3: מידע רגיש (מוצפן)
 const RM = require('./lib/sec-remind'); // שלב 4: הגדרות התראות ודוחות
 const GRP = require('./lib/sec-grp');   // 23.11.2026 (גיטי, סבב 3): הרשאת קריאה לקבוצות פנימיות
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות לפי סוג פעולה
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -195,6 +199,11 @@ async function secState(request) {
   const grpOn = GRP.grpOn(who);
   out.grp = { on: grpOn, n: grpOn && cfg.grp.length ? (await GRP.allowedGroups(T.tdb(), cfg.grp)).length : 0, edit: !!who.superadmin }; // edit – רק מנהל־העל (24.11.2026, החלטה 5)
   out.cmt = { on: cfg.cmt, edit: !brLimited }; // 24.11.2026: זיהוי התחייבויות (מתג עסקי; מנהל עם הגבלת סניפים – צפייה בלבד)
+  out.perm = PERM.stateOf({ mgr: cfg.mgr }, who.uid); // 24.11.2026 (סבב 4 חלק א): מסך "הרשאות" – ההגדרות של המנהל המחובר בלבד
+  { // "עצור הכל" (sec_cfg/wa.stop.on) – לכלל "לבד" שרץ במכשיר (התראות מהטלפון, sec-notif.js). קריאה אחת
+    const ws = await db.doc('sec_cfg/wa').get();
+    out.stop = !!(ws.exists && ws.get('stop') && ws.get('stop').on === true);
+  }
   Object.assign(out, { mirror: cfg.mirror, mirrorAt: mir && mir.exists && Number.isInteger(mir.get('at')) ? mir.get('at') : null, cfTh: cfg.cfTh, pct: u.pct, saving: u.saving });
   return out;
 }
@@ -363,6 +372,11 @@ async function secPrefs(request) {
   const b = db.batch();
   const main = db.doc('sec_cfg/main');
   let out;
+  // 24.11.2026 (גיטי, סבב 4 חלק א): "אסור" במסך ההרשאות של המנהל הזה חוסם גם את האישור של כרטיס משימה / תזכורת / התחייבות (ולא רק את יצירת ההצעה)
+  if ((input.op === 'tkCard' && input.st === 'ok') || (input.op === 'cmt' && ['claim', 'ok'].includes(input.st))) {
+    const ty = input.op === 'cmt' ? 'cmt' : input.kind === 'rem' ? 'rem' : 'task';
+    if (PERM.decide({ mgr: cfg.mgr }, who.uid, ty).d === 'deny') throw deny('perm-deny', 'לפי מסך ההרשאות שלך גיטי לא רשאית לבצע את הפעולה הזו. אפשר לשנות בהגדרות המזכירה ← הרשאות.');
+  }
   if (input.op === 'mirror') {
     if (typeof input.on !== 'boolean') throw bad('bad-input', 'ערך לא תקין');
     b.set(main, { mirror: input.on, upd: t }, { merge: true });
@@ -455,6 +469,25 @@ async function secPrefs(request) {
       tx.set(db.collection('sec_log').doc(), logData(who.uid, 'sa', input.on ? 'grpOn' : 'grpOff', { tgt: gid, note: gs.exists ? GRP.cleanName(gs.get('name')) : '' }));
     });
     out = { gid, on: input.on };
+  } else if (input.op === 'perm') {
+    // 24.11.2026 (גיטי, סבב 4 חלק א, עדכון המשתמש): הרשאה לסוג פעולה – לכל מנהל בנפרד. מסך "הרשאות" או תשובה לשאלה בפעם הראשונה.
+    // היעד תמיד המנהל המחובר (who.uid מהשרת) – מנהל לא משנה הרשאות של מנהל אחר (uid אחר בבקשה – נדחה).
+    // "תמיד כך" נשמר ב-mgr.<uid>.perm.<סוג> (מחליף את הרשומה כולה); "רק הפעם" / "לשאול שוב" – לא נשמר, רק סוגר את השאלה. m:'unset' – חזרה ל"טרם הוגדר". הכול ביומן
+    let s;
+    try { s = PERM.parseSet(input, who.uid); } catch (e) {
+      if (e && (e.code === 'not-yours' || e.code === 'not-allowed')) throw deny(e.code, e.message);
+      if (e && typeof e.code === 'string') throw bad(e.code, e.message);
+      throw e;
+    }
+    b.update(main, Object.assign(PERM.updOf(s, t, FieldValue.delete()), { upd: t }));
+    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', s.m === 'unset' ? 'permUnset' : s.save ? 'permSet' : 'permOnce', { tgt: s.type, note: PERM.noteOf(s) }));
+    out = { type: s.type, m: s.m, scope: s.scope, saved: s.save && s.m !== 'unset' };
+    if (s.cap !== undefined) out.cap = s.cap;
+  } else if (input.op === 'permAsk') {
+    // 24.11.2026 (סבב 4 חלק א): המכשיר (התראות מהטלפון – sec-notif.js) הגיע לביצוע לבד בסוג 'app' בלי הגדרה – שאלה למנהל עצמו. רק הסוג הזה
+    if (input.type !== 'app') throw bad('bad-input', 'ערך לא תקין');
+    const first = await PERM.ask(db, who.uid, 'app', 'כלל אוטומטי על התראה מהטלפון');
+    return { ok: true, asked: first };
   } else if (input.op === 'cmtOn') {
     // 24.11.2026 (גיטי, סבב 3 חלק ב): מתג זיהוי ההתחייבויות לכל העסק (מייל, ווצאפ, קבוצות פתוחות). רק מנהל בלי הגבלת סניפים – הערוצים של כל העסק
     if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא משנה את ההגדרה הזו');
@@ -635,7 +668,7 @@ async function secChat(request) {
   }
   if (reply === null) {
     offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn, notes: !!notes });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who) }; // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who), perm: { mgr: cfg.mgr } }; // perm – ההרשאות (lib/sec-perm.js, לפי ctx.uid) // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
       const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);

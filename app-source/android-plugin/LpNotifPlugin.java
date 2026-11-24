@@ -24,7 +24,7 @@ import org.json.JSONObject;
  * Notifications from the phone for the secretary (22.11.2026) - the screens' side (www/sec-notif.js).
  * isEnabled()  {on}            - the manager gave "notification access" to this app in Android settings
  * openSettings()               - opens Android's "notification access" screen
- * getConfig()  {on, pkgs, skip, u} / setConfig({on, pkgs:[], skip:[], u})  - allow list of apps, skip list of senders, owner uid
+ * getConfig()  {on, all, pkgs, skip, u} / setConfig({on, all, pkgs:[], skip:[], u})  - allow list of apps (or all apps), skip list of senders, owner uid
  * getApps()    {apps:[{p, l}]} - installed apps with a launcher icon (package + name), for choosing what to follow
  * pull({all})  {items:[{k, p, a, s, x, t}]} - queued notifications not taken yet (marked as taken)
  * clear()                      - empties the queue
@@ -102,6 +102,7 @@ public class LpNotifPlugin extends Plugin {
         JSONObject c = LpNotifListen.cfg(getContext());
         JSObject r = new JSObject();
         r.put("on", c.optBoolean("on", false));
+        r.put("all", c.optBoolean("all", false));
         JSONArray pk = c.optJSONArray("pkgs");
         JSONArray sk = c.optJSONArray("skip");
         r.put("pkgs", pk == null ? new JSONArray() : pk);
@@ -115,7 +116,7 @@ public class LpNotifPlugin extends Plugin {
         try {
             JSArray pk = call.getArray("pkgs");
             JSArray sk = call.getArray("skip");
-            LpNotifListen.setCfg(getContext(), Boolean.TRUE.equals(call.getBoolean("on", false)), pk, sk, call.getString("u", ""));
+            LpNotifListen.setCfg(getContext(), Boolean.TRUE.equals(call.getBoolean("on", false)), Boolean.TRUE.equals(call.getBoolean("all", false)), pk, sk, call.getString("u", ""));
             call.resolve();
         } catch (Exception e) {
             call.reject("setConfig");

@@ -69,7 +69,7 @@ async function seed(o) {
     b.set(d.doc(`b/${A}/staff/${E1}`), { name: 'דנה לוי', role: 'employee', active: true });
     b.set(d.doc(`b/${B}/admins/${MB}`), { email: 'mb@b-owner.example' });
     for (const [u, biz, role] of [[M1, A, 'admin'], [M2, A, 'admin'], [E1, A, 'worker'], [MB, B, 'admin'], [SUPER2, A, 'admin']]) b.set(d.doc('users/' + u), { bizId: biz, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
-    const mgr = {}; for (const u of opt.consent || [M1, M2, SUPER2]) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f' };
+    const mgr = {}; for (const u of opt.consent || [M1, M2, SUPER2]) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f', perm: { mail: { m: 'auto' }, wa: { m: 'auto' }, fin: { m: 'auto', cap: 10000000 }, app: { m: 'auto' } } }; // 24.11.2026 (סבב 4 חלק א): בלי הגדרה – אין ביצוע לבד; כאן "לבד" כדי לבדוק את שאר התנאים כמו קודם
     b.set(d.doc(`b/${A}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: true, pay: {}, mgr });
     b.set(d.doc(`b/${B}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: true, pay: {}, mgr: { [MB]: { cv: ver, ca: 1 } } });
     // קליטה אוטומטית בחיבור ראשון (ברירת מחדל: מופעלת) – כבויה בבדיקות הקיימות, כדי שלא יתווספו מיילים ישנים לספירות; נבדקת בחלק משלה (opt.auto)

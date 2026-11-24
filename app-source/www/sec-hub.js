@@ -194,6 +194,7 @@ function apprH(){const R=X.ey;
  const h=grp('הצעות ובקשות מהשיחה',O.filter(x=>x.k==='appr'||x.k==='media'),x=>row(x))
   +grp('טיוטות תשובה (ווצאפ ומייל)',O.filter(x=>x.k==='draft'),x=>row(x))
   +grp('חשבוניות שמחכות לאישור',O.filter(x=>x.k==='inv'),x=>row(x))
+  +(typeof window.__secPermH==='function'?window.__secPermH():''/* 24.11.2026 (סבב 4 חלק א): שאלת הרשאה בפעם הראשונה – sec-perm.js */)
   +(typeof window.__secCmtH==='function'?window.__secCmtH():''/* 24.11.2026: התחייבויות מהודעות – sec-cmt.js */)
   +grp('משימות שממתינות לאישור',M.filter(x=>x.ap),x=>`<div class="secli"><button type="button" class="secnb" data-a="hubGo" data-k="tk" data-s="wait"><p><b>${esc(x.title)}</b></p><small class="note">${esc(x.sub||'')}</small></button><div class="secrow"><button class="chip" data-a="tkOk" data-id="${esc(x.tid)}">אשר</button><button class="chip" data-a="hubGo" data-k="tk" data-s="wait">פתיחה</button></div></div>`);
  return `<div class="card"><b>מה ממתין לאישור שלך</b><p class="note" style="margin:4px 0 0">כל כפתור כאן מבצע אותה פעולה כמו במסך המקורי.</p></div>${h||'<div class="empty">אין כרגע משהו שממתין לאישור ✓</div>'}`}

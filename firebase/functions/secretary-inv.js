@@ -28,6 +28,7 @@ const scan = require('./lib/scan');
 const CL = require('./lib/classify');
 const AI = require('./lib/sec-ai');
 const SI = require('./lib/sec-inv');
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות לפי סוג פעולה, לכל מנהל
 const C = require('./secretary')._core;
 const { gate, logData, bad, deny, pre, wrap } = C;
 
@@ -459,7 +460,8 @@ async function secDecide(request) {
   let after = null; // פעולות אחרי הטרנזקציה (התראה, יומן)
   const r = await db.runTransaction(async (tx) => {
     after = null; // טרנזקציה שרצה שוב – מתחילים נקי
-    const [s, cs, ws] = await Promise.all([tx.get(ref), op === 'claim' && mode === 'auto' ? tx.get(db.doc('sec_cfg/inv')) : null, op === 'claim' && mode === 'auto' ? tx.get(db.doc('sec_cfg/wa')) : null]);
+    const au = op === 'claim' && mode === 'auto';
+    const [s, cs, ws, pms] = await Promise.all([tx.get(ref), au ? tx.get(db.doc('sec_cfg/inv')) : null, au ? tx.get(db.doc('sec_cfg/wa')) : null, au ? tx.get(db.doc('sec_cfg/main')) : null]);
     if (!s.exists) throw gone();
     const x = s.data();
     if (!brAllowed(g, x)) throw deny('br-limited', 'החשבונית שייכת לסניף שאינו שלך');
@@ -485,6 +487,10 @@ async function secDecide(request) {
         // 4.3: הבדיקה בשרת, ברגע התפיסה – סימון הזכאות מהעיבוד + כל התנאים שוב עם ההגדרות של עכשיו
         const why = SI.eligOf(x, SI.invCfgOf(cs), !!(ws.exists && ws.get('stop') && ws.get('stop').on === true));
         if (x.el !== true && !why.length) why.push('el');
+        // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל שמכניס – "רישום הוצאה / הכנסה" חייב להיות "לבד", והסכום עד התקרה שלו.
+        // בלי הגדרה – שאלה בפעם הראשונה (אחרי הטרנזקציה) והחשבונית ממתינה לאישור
+        const pd = PERM.decide(pms && pms.exists ? pms.data() : {}, uid, 'fin', { amount: x.f && x.f.total });
+        if (pd.d !== 'auto') why.push(pd.why);
         if (why.length) return { deny: why, el: x.el === true };
       }
       if (mineCl && x.dev === dev) return { ok: true, x, again: true };
@@ -533,6 +539,7 @@ async function secDecide(request) {
     after = null;
   }
   if (r.deny) {
+    if (r.deny.includes('pmAsk')) await PERM.ask(db, uid, 'fin', 'חשבונית ספק – הכנסה אוטומטית');
     if (r.el) await ref.update({ el: false, why: r.deny }).catch(() => {});
     await db.collection('sec_log').doc().set(ilog(uid, 'mgr', 'invAutoNo', { tgt: id, note: r.deny.join(',') }));
     throw new HttpsError('failed-precondition', 'החשבונית לא עומדת בתנאים להכנסה אוטומטית – היא ממתינה לאישור', { reason: 'not-eligible', why: r.deny });

@@ -75,7 +75,7 @@ async function seed(o) {
     b.set(d.doc(`b/${A}/staff/${E1}`), { name: 'עובד', role: 'employee', active: true });
     b.set(d.doc(`b/${B}/admins/${MB}`), { email: 'mb@x.invalid' });
     for (const [u, biz, role] of [[M1, A, 'admin'], [M2, A, 'admin'], [M3, A, 'admin'], [E1, A, 'worker'], [MB, B, 'admin']]) b.set(d.doc('users/' + u), { bizId: biz, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
-    const mgr = {}; for (const u of [M1, M2, M3]) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f' };
+    const mgr = {}; for (const u of [M1, M2, M3]) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f', perm: { mail: { m: 'auto' }, wa: { m: 'auto' }, fin: { m: 'auto', cap: 10000000 }, app: { m: 'auto' } } }; // 24.11.2026 (סבב 4 חלק א): בלי הגדרה – אין ביצוע לבד; כאן "לבד" כדי לבדוק את שאר התנאים כמו קודם
     b.set(d.doc(`b/${A}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: false, pay: {}, mgr });
     b.set(d.doc(`b/${B}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: false, pay: {}, mgr: { [MB]: { cv: ver, ca: 1 } } });
     b.set(d.doc(`b/${A}/sec_cfg/inv`), Object.assign({ cap: 2000, nb: 2, sups: [{ id: 's1', name: 'ספק דמה בע"מ', hp: HP1, br: ['br1'] }, { id: 's2', name: 'מאפיית כהן', hp: HP2, br: ['br1', 'br2'] }], links: { ['wa:' + SUP_WA]: 's1' } }, opt.inv || {}));

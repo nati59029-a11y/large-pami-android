@@ -15,6 +15,7 @@
 const { onCall } = require('./lib/region');
 const { inputObject } = require('./lib/roles');
 const GRP = require('./lib/sec-grp');
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (סבב 4 חלק א): הרשאות לפי סוג פעולה, לכל מנהל
 const C = require('./secretary')._core;
 const { gate, bad, wrap } = C;
 
@@ -131,7 +132,14 @@ async function secComm(request) {
     if (!on) return { ok: true, on: false, edit: false, groups: [], max: GRP.MAX_ALLOWED };
     return { ok: true, on: true, edit: !!who.superadmin, groups: await GRP.listGroups(db, await GRP.readAllowed(db)), max: GRP.MAX_ALLOWED };
   }
-  if (input.op === 'cmts') return cmts(db, brLimited);
+  if (input.op === 'cmts') {
+    // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל המחובר – "אישור התחייבות" אסור → בלי הצעות אצלו. טרם הוגדר ויש הצעות → שאלה בפעם הראשונה
+    const pd = PERM.decide({ mgr: g.cfg.mgr }, who.uid, 'cmt');
+    if (pd.d === 'deny') return { ok: true, items: [], n: 0, perm: 'deny' };
+    const r = await cmts(db, brLimited);
+    if (pd.d === 'ask' && r.n) await PERM.ask(db, who.uid, 'cmt', 'הצעת התחייבות ממתינה');
+    return r;
+  }
   if (input.op === 'src') {
     const cid = typeof input.cid === 'string' && /^cm[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
     if (!cid) throw bad('bad-input', 'ערך לא תקין');

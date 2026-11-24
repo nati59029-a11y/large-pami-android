@@ -57,6 +57,7 @@ const K = require('./lib/sec-know');
 const W = require('./lib/sec-wa');
 const G = require('./lib/sec-google');
 const SO = require('./lib/sec-ord');
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות לפי סוג פעולה – תנאי נוסף לכל שליחה לבד
 const TK = require('./lib/tk-time');
 const C = require('./secretary')._core;
 const CUS = require('./customers')._core;
@@ -1649,6 +1650,13 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   if (G.NEVER_RE.test(String(x.subj || '') + '\n' + String(x.text || '')) || (r && W.NEVER_AUTO.includes(r.cls) && r.cls !== 'other')) no.push('risk');
   if (fl.includes('big') || fl.includes('cut') || fl.includes('sus') || x.st === 'sus') no.push('big');
   if (hasFile(x)) no.push('file');
+  { // 24.11.2026 (סבב 4 חלק א): מסך ההרשאות – טיוטת הזמנה ללקוח יוצאת במייל ("שליחת מייל"), לפי המנהל שהפעיל שליחה לבד ללקוח (בלי – המנהל הראשי)
+    const pms = await db.doc('sec_cfg/main').get();
+    const pmd = pms.exists ? pms.data() || {} : {};
+    const oa = as.exists && as.get('on') && typeof as.get('on') === 'object' ? as.get('on')[o.custId] : null;
+    const pw = await PERM.blockWhy(db, pmd, (oa && typeof oa.by === 'string' && oa.by) || pmd.mainUid || '', 'mail', {}, 'טיוטת הזמנה ללקוח במייל');
+    if (pw) no.push(pw);
+  }
   const key = G.sha('ord|' + o.custId).slice(0, 20);
   let lim = null;
   if (!no.length) { lim = await autoTake(db, key, now); if (lim.why) { if (lim.why === 'day') await holdAuto(db, 'day', now); no.push(lim.why); } }
@@ -1674,7 +1682,7 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   return { sent: true };
 }
 const OA_NO = { st: 'הטיוטה כבר טופלה', held: 'המענה האוטומטי נעצר להיום', risk: 'המייל נראה רגיש (בקשת הנחה, תלונה וכד׳)', from: 'השולח לא אומת', ask: 'יש בטיוטה שורות לבחירה/לבירור, פריט שאזל או פרט חסר',
-  cust: 'כרטיס הלקוח לא נמצא', big: 'מייל גדול, חתוך או חשוד', file: 'יש קובץ מצורף', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail', err: 'תקלה בבדיקה' };
+  ...PERM.WHY, cust: 'כרטיס הלקוח לא נמצא', big: 'מייל גדול, חתוך או חשוד', file: 'יש קובץ מצורף', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail', err: 'תקלה בבדיקה' };
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {
   await db.runTransaction(async (tx) => {
@@ -1998,7 +2006,7 @@ async function sentWrite(db, dRef, gmid, now, build) {
 // כל תנאי "אף פעם" נבדק כאן בקוד: G.autoBlock, מקור הנתונים, תיבה מחוברת, שרשור שכבר נענה, הגנת לולאה ומכסה, כפילות (autoAt בטרנזקציה, pend→sending), OUT_DAY
 async function tryAuto(db, id, x, r, rep0, now) {
   // ליקוי 2 (סבב 1): המתג "מענה אוטומטי במייל" ו-held נקראים מחדש כאן, ממש לפני ההחלטה לשלוח (המנהל אולי כיבה בזמן קריאת המודל). rep0 – לא בשימוש להחלטה
-  const [ws, rs, ms, rps] = await Promise.all([db.doc('sec_cfg/wa').get(), db.collection('sec_rules').where('auto', '==', true).limit(100).get(), db.doc('sec_cfg/mail').get(), db.doc('sec_cfg/mail_rep').get()]);
+  const [ws, rs, ms, rps, pms] = await Promise.all([db.doc('sec_cfg/wa').get(), db.collection('sec_rules').where('auto', '==', true).limit(100).get(), db.doc('sec_cfg/mail').get(), db.doc('sec_cfg/mail_rep').get(), db.doc('sec_cfg/main').get()]);
   const rep = repOf(rps);
   const list = rs.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((u) => u.ch !== 'wa' && !(u.cond && String(u.cond).trim()) && Array.isArray(u.q) && typeof u.a === 'string' && u.a.trim());
   // התאמה: קודם הנושא מול הניסוחים (bankMatch), ואחר כך "השאלה בתמצית" של המודל (ruleHits). גם כלל כבוי נמצא – כדי שהסיבה תירשם ("כלל כבוי")
@@ -2012,6 +2020,10 @@ async function tryAuto(db, id, x, r, rep0, now) {
     return { no };
   };
   const no = G.autoBlock({ stop: WA.waCfgOf(ws).stop.on, on: rep.auto, held: !!rep.held, rule, x, r, neverCls: W.NEVER_AUTO, now });
+  // 24.11.2026 (סבב 4 חלק א): מסך ההרשאות – "שליחת מייל" חייבת להיות "לבד" אצל המנהל שאישר את הכלל (בלי – מי שהפעיל את המענה האוטומטי, ואז המנהל הראשי). "עצור הכל" כבר נבדק ב-autoBlock
+  const pmd = pms.exists ? pms.data() || {} : {};
+  const pw = await PERM.blockWhy(db, pmd, rule.okBy || rule.by || (rps.exists && rps.get('by')) || pmd.mainUid || '', 'mail', {}, 'תשובה אוטומטית במייל');
+  if (pw) no.push(pw);
   // החלטה (א): כלל בלי נתון חי – מותר (הטקסט הקבוע של הכלל). כלל עם נתון חי – הנתון חייב להיות קיים, ציבורי ובתוקף; אחרת לא שולחים
   const filled = K.tplKeys(rule.a).length ? K.fillTpl(rule.a, r.fm) : String(rule.a).trim();
   if (!filled) no.push('src');
@@ -2086,6 +2098,8 @@ async function tryMrAuto(db, id, x, r, now) {
   const bx = mailCfgOf(ms).boxes[x.box];
   if (!bx || bx.st !== 'ok') base.push('notConnected');
   if (!G.addrOf(to)) base.push('to');
+  const pw = await PERM.blockWhy(db, cs.exists ? cs.data() : {}, rule.uid, 'mail', {}, 'כלל אישי "לבד" במייל'); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
+  if (pw) base.push(pw);
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: WA.waCfgOf(ws).stop.on, owner: await MLC().ownerOk(db, rule.uid, 'mail'), rule, match: r.mrPick || null,
     inText: String(x.subj || '') + '\n' + String(x.text || ''), outText: String(r.text || ''), cls: r.cls, chk: false, unsure: false, extra: base });
   if (!no.length && x.thr) {
