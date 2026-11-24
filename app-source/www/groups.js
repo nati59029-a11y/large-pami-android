@@ -6,11 +6,14 @@
    תוספת 19.11: הודעה יכולה לכלול re {mid,txt,byN,k} (תשובה) ו-fw (הועברה). סימונים (אימוג'י): grp/{gid}/x/{mid}_{uid} {mid,uid,byN,e,t}, e='' = בוטל.
    תפריט ⋯ לכל הודעה (לכולם): סימון, תשובה, שיתוף מחוץ לאפליקציה, העברה לקבוצה אחרת, שמירה בגלריה; למנהל גם הצמדה ומחיקה.
    וי (23.11): ✓ נשמר, ✓✓ אפור כולם d>=t ההודעה, ✓✓ כחול כולם t>=t ההודעה; 403 בכתיבה/קריאה של r = חוזרים ל-t בלבד / ✓ בלבד.
-   מסכים: V.gr (רשימה), V.grc (שיחה), V.grs (הגדרות מנהל). אין כאן שום דבר שנשמר במכשיר: הכול בזיכרון. */
+   מסכים: V.gr (רשימה), V.grc (שיחה), V.grs (הגדרות מנהל).
+   שמירה במכשיר (24.11.2026): הקבוצות, עד 150 ההודעות האחרונות בכל קבוצה, התמונות (עד 150) והודעות שממתינות לשליחה נשמרות ב-IndexedDB (lp-grp),
+   לפי עסק ומשתמש. כניסה מציגה מיד את מה שבמכשיר ומתעדכנת מהשרת ברקע; בלי רשת רואים את מה שנשמר, והודעת טקסט נשלחת כשהרשת חוזרת (🕓).
+   מהירות: בשיחה פתוחה בודקים כל 3 שניות, ומיד כשמגיעה התראה, כשחוזרים לאפליקציה וכשהרשת חוזרת. יציאה מהחשבון מוחקת את השמירה (GRP.out). */
 (function(){'use strict';
 if(typeof V==='undefined'||typeof fsx!=='function'||typeof bzF!=='function')return;
 const DAY=864e5,VMAX=30*1024*1024,VSEC=60,PAGE=50,CNTMAX=100;
-const GR={L:null,at:0,busy:0,off:0,err:'',n:0,c:null,s:null,staff:null,img:{},vu:''};
+const GR={L:null,at:0,busy:0,off:0,err:'',n:0,c:null,s:null,staff:null,img:{},vu:'',q:[],ix:null,cb:0};
 const on=()=>{try{return !!(fbRole()&&bzF('groups'))}catch(e){return false}};
 const bv=v=>({booleanValue:!!v});
 const TZ='Asia/Jerusalem';
@@ -36,6 +39,26 @@ const recount=()=>{GR.n=(GR.L||[]).reduce((a,g)=>a+g.n,0)};
 /* שם אמיתי לתצוגה בלבד (NM מ-act-log.js); בלי NM – הערך השמור */
 const nm=(uid,byN)=>{try{return (window.NM&&(NM.byUid(uid)||NM.byPfx(byN)))||byN||''}catch(e){return byN||''}};
 const nmP=byN=>nm('',byN);
+
+/* ---- שמירה במכשיר: IndexedDB אחד (lp-grp), מפתח = עסק|משתמש|שם. כל תקלה = כאילו אין שמירה (האפליקציה עובדת כמו קודם) ---- */
+const KEEP=150,IMAX=150,POLL=3000;
+let CDBP=null,CDBD=null;
+const cdb=()=>CDBP||(CDBP=new Promise((res,rej)=>{const r=indexedDB.open('lp-grp',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');r.onsuccess=()=>{CDBD=r.result;res(r.result)};r.onerror=()=>rej(r.error)}).catch(e=>{CDBP=null;throw e}));
+const ck=k=>(SY.bizId||'-')+'|'+SY.uid+'|'+k;
+async function cGet(k){try{if(!SY.uid)return null;const key=ck(k),d=await cdb();return await new Promise(res=>{const r=d.transaction('k').objectStore('k').get(key);r.onsuccess=()=>res(r.result===undefined?null:r.result);r.onerror=()=>res(null)})}catch(e){return null}}
+async function cPut(k,v){try{if(!SY.uid)return;const key=ck(k),d=await cdb();await new Promise(res=>{const t=d.transaction('k','readwrite'),o=t.objectStore('k');if(v===null)o.delete(key);else o.put(v,key);t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
+/* תמונות: עד IMAX במכשיר, הישנה ביותר נמחקת */
+async function imPut(k,du){try{if(!GR.ix){const x=await cGet('ix');GR.ix=Array.isArray(x)?x:[]}if(GR.ix.includes(k))return;GR.ix.push(k);while(GR.ix.length>IMAX)cPut('i:'+GR.ix.shift(),null);cPut('ix',GR.ix.slice());cPut('i:'+k,du)}catch(e){}}
+const gLite=g=>({id:g.id,name:g.name,mem:(g.mem||[]).slice(),ao:!!g.ao,md:!!g.md,t:g.t||0,last:g.last||null,rt:g.rt||0,rd:g.rd||0,muw:false,n:g.n||0,np:!!g.np,pin:g.pin||null});
+const mLite=m=>({id:m.id,by:m.by,byN:m.byN,t:m.t,k:m.k,txt:m.txt,vp:m.vp||'',vs:m.vs||0,vb:m.vb||0,re:m.re||null,fw:!!m.fw});
+/* פעם אחת אחרי הכניסה: רשימת הקבוצות והתור מהמכשיר (רק אם עוד לא נטען מהשרת) */
+function cBoot(){if(GR.cb||!on()||!SY.uid)return;GR.cb=SY.uid;const u=SY.uid;
+ cGet('L').then(L=>{if(SY.uid!==u||GR.L!==null||!Array.isArray(L))return;GR.L=L.filter(g=>g&&idOk(String(g.id||'')));recount();const v=cur().v;if(v==='gr'||['home','wk'].includes(v))rerender();else try{wbUp()}catch(e){}});
+ cGet('q').then(q=>{if(SY.uid!==u||!Array.isArray(q))return;q.forEach(x=>{if(x&&idOk(String(x.gid||''))&&idOk(String(x.mid||''))&&!GR.q.some(y=>y.mid===x.mid))GR.q.push({gid:x.gid,mid:x.mid,txt:String(x.txt||'').slice(0,2000),re:x.re||null,t:+x.t||Date.now()})});qFlush()})}
+function cSaveC(c){clearTimeout(c.sv);c.sv=setTimeout(()=>{if(!c.ready||!c.msgs.length)return;const ms=c.msgs.filter(m=>!m.pend);
+ cPut('c:'+c.gid,{msgs:ms.slice(-KEEP).map(mLite),rt:c.rtSaved||0,rd:[...c.rd],rx:[...c.rx].map(([k,v])=>[k,[...v]]),g:gLite(c.g)})},600)}
+/* יציאה מהחשבון: מוחקים את כל מה שנשמר */
+function grOut(){GR.L=null;GR.c=null;GR.img={};GR.n=0;GR.cb=0;GR.q=[];GR.ix=null;GR.at=0;try{if(CDBD)CDBD.close()}catch(e){}CDBD=null;CDBP=null;try{indexedDB.deleteDatabase('lp-grp')}catch(e){}}
 
 /* ---- עיצוב: רק משתני ערכת הנושא ---- */
 const st=document.createElement('style');st.textContent=`
@@ -98,7 +121,7 @@ body.grc .bar,body.grc .wbar{display:none!important}body.grc main{padding-bottom
 function rdPut(g,uid){const fl={d:iv(Math.max(g.rd||0,g.rt||0,g.last?g.last.t:0)),u:iv(Date.now()),n:sv(fbBy().slice(0,100))};if(g.muw)fl.mu=bv(false);
  fsx('/grp/'+g.id+'/r/'+uid+'?'+Object.keys(fl).map(k=>'updateMask.fieldPaths='+k).join('&'),{method:'PATCH',body:JSON.stringify({fields:fl})}).then(()=>{g.rd=+fl.d.integerValue;g.muw=false}).catch(e=>{if(e&&e.code===403)GR.rdOff=1})}
 async function grLoad(){
- if(GR.busy||!on())return;GR.busy=1;GR.err='';const uid=SY.uid;let ch=0;
+ if(GR.busy||!on())return;cBoot();GR.busy=1;GR.err='';const uid=SY.uid;let ch=0;
  try{
   let docs;
   if(fbAdmin())docs=(await fsx('/grp?pageSize=200')||{}).documents||[];
@@ -110,28 +133,42 @@ async function grLoad(){
    const lt=g.last?g.last.t:g.t;
    if(g.last&&lt>g.rt){try{const q=await qrun('/grp/'+g.id,{from:[{collectionId:'m'}],select:{fields:[{fieldPath:'by'}]},where:tF('GREATER_THAN',g.rt),limit:CNTMAX});g.n=q.filter(d=>gv(d,'by')!==uid).length;g.np=q.length>=CNTMAX}catch(e){if(e.code===403)throw e}}}));
   L.sort((a,b)=>((b.last?b.last.t:b.t)-(a.last?a.last.t:a.t)));
-  const sig=x=>(x||[]).map(g=>g.id+':'+g.n+':'+(g.last?g.last.t:0)+':'+g.name).join();ch=sig(L)!==sig(GR.L);GR.L=L;GR.off=0;recount()}
+  const sig=x=>(x||[]).map(g=>g.id+':'+g.n+':'+(g.last?g.last.t:0)+':'+g.name).join();ch=sig(L)!==sig(GR.L);GR.L=L;GR.off=0;recount();cPut('L',L.map(gLite))}
  catch(e){if(e&&e.code===403)GR.off=1;else GR.err=tkErr(e);ch=1}
  finally{GR.busy=0;GR.at=Date.now()}
  if(cur().v==='gr'||(ch&&['home','wk'].includes(cur().v)))rerender();else try{wbUp()}catch(e){}}
-function grTick(){if(on()&&!GR.busy&&Date.now()-GR.at>60000)grLoad()}
+function grTick(){if(!on())return;cBoot();if(!GR.busy&&Date.now()-GR.at>60000)grLoad()}
+/* רענון מיידי: התראה שהגיעה כשהאפליקציה פתוחה, חזרה לאפליקציה, חזרת הרשת. id = הקבוצה של ההתראה ('' = כל אחת) */
+function grKick(id){if(!on()||document.hidden)return;cBoot();qFlush();const c=GR.c,v=cur();
+ if(c&&v.v==='grc'&&v.a===c.gid&&(!id||id===c.gid))grPoll(c,0);
+ if(!GR.busy&&Date.now()-GR.at>2000)grLoad()}
 const grAvatar=n=>`<span class="gr-av" aria-hidden="true">${esc((String(n||'?').trim()[0]||'?'))}</span>`;
 function rowH(g){const n=g.n,lt=g.last?g.last.t:0;
  return `<button class="li gr-row" data-a="grOpen" data-id="${esc(g.id)}">${grAvatar(g.name)}<div class="t"><b>${esc(g.name)}</b><span>${esc(lastTx(g))}</span></div><div class="m"><span>${esc(lTime(lt))}</span>${n?`<span class="gr-cnt">${g.np?(CNTMAX-1)+'+':n>99?'99+':n}</span>`:''}</div></button>`}
 V.gr=()=>{
  if(!on())return{t:'קבוצות',s:'',h:'<div class="card"><p class="note">המסך הזה לא זמין.</p></div>'};
- if(!GR.busy&&(GR.L===null||Date.now()-GR.at>20000))grLoad();
+ cBoot();if(!GR.busy&&(GR.L===null||Date.now()-GR.at>3000))grLoad();
  const adm=fbAdmin(),top=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px"><span class="note" style="margin:0">${GR.L&&GR.L.length?GR.L.length+' קבוצות':''}</span>${adm?'<button class="chip on" data-a="grNew">＋ קבוצה חדשה</button>':''}</div>`;
  if(GR.off)return{t:'קבוצות',s:'',h:`${top}<div class="card"><p class="note" style="margin:0">הקבוצות יופעלו בקרוב.</p></div>`};
  if(GR.L===null)return{t:'קבוצות',s:'',h:`${top}<p class="note">${GR.err?esc(GR.err):'טוען…'}</p>`};
- return{t:'קבוצות',s:GR.n?GR.n+' הודעות שלא נקראו':'',h:`${top}${GR.L.length?GR.L.map(rowH).join(''):`<p class="note">${adm?'עוד אין קבוצות. אפשר ליצור קבוצה חדשה.':'אתה עוד לא חבר באף קבוצה.'}</p>`}${GR.err?`<p class="note">${esc(GR.err)}</p>`:''}<button class="btn g w" data-a="grRefresh" style="margin-top:8px">רענן</button>`}};
+ return{t:'קבוצות',s:GR.n?GR.n+' הודעות שלא נקראו':'',h:`${top}${GR.L.length?GR.L.map(rowH).join(''):`<p class="note">${adm?'עוד אין קבוצות. אפשר ליצור קבוצה חדשה.':'אתה עוד לא חבר באף קבוצה.'}</p>`}${GR.err?`<p class="note">${esc(GR.err)}${GR.L.length?' – מוצג המידע השמור במכשיר':''}</p>`:''}<button class="btn g w" data-a="grRefresh" style="margin-top:8px">רענן</button>`}};
 ACT.grRefresh=()=>{GR.at=0;grLoad();toast('מרענן...')};
-ACT.grOpen=el=>{const id=el.dataset.id;if(!idOk(id))return;const g=gGet(id);if(!g)return;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,dS:0,muw:0,rd:new Map(),rdOk:0,rdOff:0,ru:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null};go('grc',id)};
-/* לחיצה על התראה (data.k='grp', data.id=gid): פותח את שיחת הקבוצה */
-async function grOpenId(id){if(!on()||!idOk(String(id||'')))return;
- try{const g=gOf(await fsx('/grp/'+id));if(!g.id)throw 0;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,dS:0,muw:0,rd:new Map(),rdOk:0,rdOff:0,ru:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null};go('grc',id)}
- catch(e){toast('הקבוצה לא זמינה')}}
-window.GRP={n:()=>on()?GR.n:0,tick:grTick,off:()=>GR.off,open:grOpenId};
+const newC=(id,g)=>({gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,dS:0,muw:0,rd:new Map(),rdOk:0,rdOff:0,ru:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0,rx:new Map(),xt:0,xoff:0,re:null,stale:0,fc:0,pt:0});
+ACT.grOpen=el=>{const id=el.dataset.id;if(!idOk(id))return;const g=gGet(id);if(!g)return;GR.c=newC(id,g);go('grc',id)};
+/* לחיצה על התראה (data.k='grp', data.id=gid): פותח את שיחת הקבוצה.
+   24.11.2026: אם האפליקציה עוד עולה (אין משתמש / העסק לא נטען) – מחכים עד 30 שניות במקום לוותר בשקט;
+   הקבוצה נפתחת מיד ממה שנשמר במכשיר (גם בלי רשת), והפרטים שלה מתעדכנים מהשרת ברקע */
+async function grOpenId(id){id=String(id||'');if(!idOk(id))return;
+ if(!on()){const t0=Date.now(),w=()=>{if(on())grOpenId(id);else if(Date.now()-t0<30000)setTimeout(w,500)};setTimeout(w,500);return}
+ cBoot();const v=cur();if(v.v==='grc'&&v.a===id&&GR.c&&GR.c.gid===id){grKick(id);return}
+ let g=gGet(id);
+ if(!g){const cc=await cGet('c:'+id);if(cc&&cc.g&&cc.g.id===id)g=cc.g}
+ if(!g){const L=await cGet('L');g=(Array.isArray(L)&&L.find(x=>x&&x.id===id))||null}
+ if(g){const c=newC(id,g);GR.c=c;go('grc',id);
+  fsx('/grp/'+id).then(d=>{const n=gOf(d);if(!n.id||GR.c!==c)return;const ch=n.name!==c.g.name||n.ao!==c.g.ao||n.md!==c.g.md;['name','mem','ao','md','last'].forEach(k=>{c.g[k]=n[k]});if(ch&&cur().v==='grc'&&cur().a===id)rerender()}).catch(e=>{if(e&&(e.code===403||e.code===404)&&GR.c===c){c.err='הקבוצה לא זמינה';c.msgs=[];c.ready=0;c.stale=0;clearTimeout(c.tm);grPaint()}});return}
+ try{const g2=gOf(await fsx('/grp/'+id));if(!g2.id)throw 0;GR.c=newC(id,g2);go('grc',id)}
+ catch(e){toast(e&&e.offline?'אין חיבור לאינטרנט':'הקבוצה לא זמינה')}}
+window.GRP={n:()=>on()?GR.n:0,tick:grTick,off:()=>GR.off,open:grOpenId,kick:grKick,out:grOut};
 
 /* ---- שיחה ---- */
 const mineId=m=>m.by===SY.uid;
@@ -165,30 +202,55 @@ V.grc=gid=>{
  const c=GR.c;if(!on()||!c||c.gid!==gid)return{t:'קבוצה',s:'',h:'<div class="card"><p class="note">הקבוצה לא זמינה.</p></div>'};
  if(!c.started){c.started=1;grEnter(c)}
  if(c.sr)return{t:c.g.name,s:'חיפוש',h:srH(c)};
- return{t:c.g.name,s:'קבוצה',h:`<div id="grtop">${topH(c)}</div><div id="grpin">${pinH(c)}</div><div id="grmsgs">${msgsH(c)}</div><div id="grcomp">${compH(c)}</div>`}};
+ return{t:c.g.name,s:'קבוצה',h:`<div id="grtop">${topH(c)}</div><div id="grnet"></div><div id="grpin">${pinH(c)}</div><div id="grmsgs">${msgsH(c)}</div><div id="grcomp">${compH(c)}</div>`}};
 const atBottom=()=>window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-160;
 function grPaint(opt){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)return;const m=$('#grmsgs');if(!m)return;
  const bot=atBottom(),h0=document.documentElement.scrollHeight;m.innerHTML=msgsH(c);
  if(opt==='keep')window.scrollBy(0,document.documentElement.scrollHeight-h0);else if(opt==='bottom'||bot)window.scrollTo(0,document.documentElement.scrollHeight);
- grImgs()}
+ grImgs();cSaveC(c)}
 function grFit(t){t=t||$('#grtx');if(!t)return;try{t.style.height='auto';t.style.height=(t.scrollHeight+(t.offsetHeight-t.clientHeight))+'px'}catch(e){}}
 function grComp(){const c=GR.c;if(!c||cur().v!=='grc')return;const e=$('#grcomp');if(e){e.innerHTML=compH(c);grFit()}}
 function grScrollInit(){grFit();const u=document.getElementById('grunr');if(u)u.scrollIntoView({block:'start'});else window.scrollTo(0,document.documentElement.scrollHeight)}
+/* כניסה: קודם מה שנשמר במכשיר (מיד, גם בלי רשת), ואז מהשרת (grFresh). הודעות שממתינות לשליחה מוצגות עם 🕓 */
 async function grEnter(c){
+ const cc=await cGet('c:'+c.gid);if(GR.c!==c)return;
+ if(cc&&Array.isArray(cc.msgs)&&cc.msgs.length&&!c.ready){
+  c.msgs=cc.msgs.filter(m=>m&&idOk(String(m.id||''))).map(m=>Object.assign(mLite(m),{re:reOf(m.re)}));c.more=true;c.fc=1;
+  c.rt=c.rtSaved=Math.max(+cc.rt||0,0);
+  try{(cc.rd||[]).forEach(([u,x])=>{if(idOk(String(u))&&x)c.rd.set(u,{t:+x.t||0,d:+x.d||0,u:+x.u||0,n:String(x.n||'').slice(0,100)})});if(c.rd.size)c.rdOk=1}catch(e){}
+  try{(cc.rx||[]).forEach(([mid,L])=>{const r=new Map();(L||[]).forEach(([u,x])=>{if(x)r.set(u,{e:EMO.includes(x.e)?x.e:'',byN:String(x.byN||'').slice(0,100),t:+x.t||0})});c.rx.set(mid,r)})}catch(e){}
+  qMine(c);c.ready=1;c.loading=0;
+  if(cur().v==='grc'&&cur().a===c.gid){const m=$('#grmsgs');if(m){m.innerHTML=msgsH(c);grScrollInit();grImgs()}}}
+ grFresh(c)}
+async function grFresh(c){
+ let rt=0,dS=0,muw=false,d;
  try{
-  try{const r=await fsx('/grp/'+c.gid+'/r/'+SY.uid),f=fvj({mapValue:r})||{};c.rt=+f.t||0;c.dS=+f.d||0;c.muw=f.mu===true}catch(e){if(e.code!==404)throw e}
-  c.rtSaved=c.rt;grPinGet(c);
-  const d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:PAGE});
-  c.msgs=d.map(mOf).filter(m=>idOk(m.id)).reverse();c.more=d.length>=PAGE;
-  const f=c.msgs.find(m=>m.t>c.rt&&!mineId(m));c.unr=f?f.id:'';await grRxLoad(c,true);c.ready=1;c.loading=0}
- catch(e){c.err=e&&e.code===403?'אין הרשאה לקבוצה הזו':tkErr(e);c.loading=0;if(cur().v==='grc')grPaint();return}
- if(GR.c!==c||cur().v!=='grc')return;
- const m=$('#grmsgs');if(m){m.innerHTML=msgsH(c);grScrollInit();grImgs()}
- const t=$('#grtop');if(t)t.innerHTML=topH(c);
+  try{const r=await fsx('/grp/'+c.gid+'/r/'+SY.uid),f=fvj({mapValue:r})||{};rt=+f.t||0;dS=+f.d||0;muw=f.mu===true}catch(e){if(e.code!==404)throw e}
+  d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:PAGE})}
+ catch(e){if(GR.c!==c)return;
+  if(e&&e.code===403){c.err='אין הרשאה לקבוצה הזו';c.ready=0;c.msgs=[];c.stale=0;c.loading=0;if(cur().v==='grc')grPaint();return}
+  /* בלי רשת / תקלה זמנית: נשארים עם מה שבמכשיר ומנסים שוב בעוד כמה שניות */
+  c.stale=1;c.loading=0;if(!c.ready)c.err=tkErr(e);if(cur().v==='grc'){grPaint();grNet()}grPoll(c,6000);return}
+ if(GR.c!==c)return;
+ const was=c.ready,seen=new Set(c.msgs.map(m=>m.id));
+ c.rt=rt;c.dS=dS;c.muw=muw;c.rtSaved=rt;c.stale=0;c.err='';grPinGet(c);
+ const fr=d.map(mOf).filter(m=>idOk(m.id)).reverse();let ms=fr,more=d.length>=PAGE;
+ /* מה שבמכשיר נשאר רק כשאין "חור" בינו לבין מה שהגיע עכשיו; קבוצה קטנה (פחות מ-PAGE) – השרת קובע הכול (גם הודעות שנמחקו) */
+ if(more&&fr.length&&c.fc){const o=fr[0].t,ids=new Set(fr.map(m=>m.id));if(c.msgs.some(m=>!m.pend&&m.t>=o))ms=c.msgs.filter(m=>!m.pend&&m.t<o&&!ids.has(m.id)).concat(fr)}
+ const pd=c.msgs.filter(m=>m.pend&&!ms.some(x=>x.id===m.id));c.msgs=ms.concat(pd);c.more=more;qMine(c);
+ const f=c.msgs.find(m=>m.t>c.rt&&!mineId(m)&&!m.pend);c.unr=f?f.id:'';
+ await grRxLoad(c,true);if(GR.c!==c)return;c.ready=1;c.loading=0;
+ if(cur().v!=='grc'||cur().a!==c.gid)return;
+ const m=$('#grmsgs');if(m){
+  if(!was){m.innerHTML=msgsH(c);grScrollInit();grImgs()}
+  else{const nw=c.unr&&!seen.has(c.unr);grPaint(nw?'':undefined);if(nw){const u=document.getElementById('grunr');if(u)u.scrollIntoView({block:'start'})}}}
+ const t=$('#grtop');if(t)t.innerHTML=topH(c);grNet();
  grMark();grPoll(c);grRdLoad(c,true);grPres(c);grSact()}
+/* שורת "אין חיבור" מעל ההודעות */
+function grNet(){const c=GR.c;if(!c||cur().v!=='grc')return;const e=$('#grnet');if(e)e.innerHTML=c.stale&&c.ready?'<p class="note" style="margin:0 0 8px">📴 אין חיבור לשרת – מוצגות ההודעות השמורות במכשיר. מתעדכן אוטומטית כשהחיבור חוזר.</p>':''}
 async function grPinGet(c){try{const d=await fsx('/grp/'+c.gid),p=pOf((fvj({mapValue:d})||{}).pin);if(GR.c!==c)return;if(JSON.stringify(p)!==JSON.stringify(c.g.pin||null)){c.g.pin=p;grPinPaint()}}catch(e){}}
 /* סימון "נקרא עד" – הודעה אחרונה שנטענה (לא קודם ממה שכבר נשמר) */
-function grMark(){const c=GR.c;if(!c||!c.ready)return;const nt=c.msgs.reduce((a,m)=>Math.max(a,m.t),c.rtSaved);if(nt<=c.rtSaved)return;c.rtSaved=nt;
+function grMark(){const c=GR.c;if(!c||!c.ready||c.stale)return;const nt=c.msgs.reduce((a,m)=>m.pend?a:Math.max(a,m.t),c.rtSaved);if(nt<=c.rtSaved)return;c.rtSaved=nt;
  rWr(c,nt);
  const g=gGet(c.gid);if(g&&g!==c.g){g.rt=nt}c.g.rt=nt;c.g.n=0;c.g.np=false;recount();try{wbUp()}catch(e){}}
 /* כותב t,d=max(d,t),u,n (ו-mu:false אם היה true) בבקשה אחת; 403 = שרת ישן ← t בלבד */
@@ -200,8 +262,8 @@ async function rWr(c,t){const p='/grp/'+c.gid+'/r/'+SY.uid,q=o=>'?'+Object.keys(
 const memOf=(c,m)=>{const sa=GR.sact;return(c.g.mem||[]).filter(u=>u!==m.by&&!(fbAdmin()&&sa&&sa[u]===false))};
 function tkS(c,m){if(c.rdOff||!c.rdOk)return 1;const M=memOf(c,m);if(!M.length)return 1;let r=1,d=1;
  M.forEach(u=>{const x=c.rd.get(u),t=x?x.t:0,dd=x?Math.max(x.d,x.t):0;if(t<m.t)r=0;if(dd<m.t)d=0});return r?3:d?2:1}
-function tkH(c,m){if(!(mineId(m)||fbAdmin()))return '';const s=tkS(c,m);return `<button class="gr-tk s${s}" data-a="grInfo" data-id="${esc(m.id)}" aria-label="פרטי הודעה">${s>1?'✓✓':'✓'}</button>`}
-const tkPend=c=>!c.rdOff&&c.msgs.some(m=>(mineId(m)||fbAdmin())&&tkS(c,m)<3);
+function tkH(c,m){if(m.pend)return '<span class="gr-tk" aria-label="ממתין לשליחה" title="ממתין לשליחה">🕓</span>';if(!(mineId(m)||fbAdmin()))return '';const s=tkS(c,m);return `<button class="gr-tk s${s}" data-a="grInfo" data-id="${esc(m.id)}" aria-label="פרטי הודעה">${s>1?'✓✓':'✓'}</button>`}
+const tkPend=c=>!c.rdOff&&c.msgs.some(m=>!m.pend&&(mineId(m)||fbAdmin())&&tkS(c,m)<3);
 async function grRdLoad(c,full){if(c.rdOff)return;
  try{let d;
   if(full)d=((await fsx('/grp/'+c.gid+'/r?pageSize=300')||{}).documents)||[];
@@ -229,12 +291,38 @@ async function grPres(c){if(c.prOff)return;
  try{const j=await fsx('/pres?pageSize=300'),o={};((j&&j.documents)||[]).forEach(d=>{const f=fvj({mapValue:d})||{};o[idOf(d)]={on:f.on===true,t:+f.t||0,n:String(f.n||'').slice(0,100),e:String(f.e||'').slice(0,100)}});c.pr=o}
  catch(e){if(e&&e.code===403)c.prOff=1;else return}
  if(GR.c===c&&cur().v==='grc'&&!c.sr){const e=$('#grpr');if(e)e.innerHTML=prH(c)}}
-function grPoll(c){clearTimeout(c.tm);c.tm=setTimeout(async()=>{
+/* בשיחה פתוחה: הודעות חדשות כל POLL (3 שניות) כשהאפליקציה על המסך; ✓✓ כל 6 שניות (רק כשיש הודעה שעוד לא נקראה על ידי כולם),
+   סימונים כל 12, הצמדה כל 30, נוכחות כל 60. ms=0 = עכשיו (התראה / חזרה לאפליקציה). השאילתה חוזרת 15 שניות אחורה (שעונים שונים בטלפונים) ומסננת כפולים */
+function grPoll(c,ms){clearTimeout(c.tm);c.tm=setTimeout(async()=>{
  if(GR.c!==c||cur().v!=='grc'||cur().a!==c.gid)return;
- c.pt=(c.pt||0)+1;if(c.pt%4===0){grPinGet(c);if(tkPend(c))grRdLoad(c,false)}if(c.pt%8===0)grPres(c);if(c.pt%2===0&&await grRxLoad(c,false)&&GR.c===c)grPaint();
- try{const nw=c.msgs.reduce((a,m)=>Math.max(a,m.t),0),d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],where:tF('GREATER_THAN',nw),orderBy:[{field:{fieldPath:'t'},direction:'ASCENDING'}],limit:PAGE});
-  const add=d.map(mOf).filter(m=>idOk(m.id)&&!c.msgs.some(x=>x.id===m.id));if(add.length&&GR.c===c){c.msgs=c.msgs.concat(add);grPaint();grMark()}}catch(e){}
- grPoll(c)},8000)}
+ if(document.hidden||c.pb){grPoll(c);return}
+ if(c.stale){c.pb=1;try{await grFresh(c)}finally{c.pb=0}return}
+ c.pb=1;
+ try{c.pt=(c.pt||0)+1;if(c.pt%10===0)grPinGet(c);if(c.pt%2===0&&tkPend(c))grRdLoad(c,false);if(c.pt%20===0)grPres(c);if(c.pt%4===0&&await grRxLoad(c,false)&&GR.c===c)grPaint();
+  qFlush();
+  const nw=c.msgs.reduce((a,m)=>m.pend?a:Math.max(a,m.t),0),d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],where:tF('GREATER_THAN',Math.max(0,nw-15000)),orderBy:[{field:{fieldPath:'t'},direction:'ASCENDING'}],limit:PAGE});
+  if(GR.c===c){let ch=false;
+   d.map(mOf).filter(m=>idOk(m.id)).forEach(m=>{const o=c.msgs.find(x=>x.id===m.id);if(!o){c.msgs.push(m);ch=true}else if(o.pend){Object.assign(o,m,{pend:0});ch=true}});
+   if(ch){c.msgs.sort((x,y)=>(x.pend?1:0)-(y.pend?1:0)||x.t-y.t);grPaint();grMark()}}}
+ catch(e){}finally{c.pb=0}
+ grPoll(c)},ms===undefined?POLL:ms)}
+/* ---- תור שליחה (טקסט): ההודעה מופיעה מיד עם 🕓, נשלחת ברקע; בלי רשת – נשארת בתור (גם במכשיר) ונשלחת כשהרשת חוזרת.
+   אותו מזהה הודעה בכל ניסיון (documentId), ולכן "כבר קיים" (409) = נשלחה. t נקבע בכל ניסיון מחדש (החוקים דורשים זמן אמת ±2 דקות) ---- */
+const qSave=()=>cPut('q',GR.q.map(x=>({gid:x.gid,mid:x.mid,txt:x.txt,re:x.re||null,t:x.t})));
+function qMine(c){GR.q.filter(x=>x.gid===c.gid&&!c.msgs.some(m=>m.id===x.mid)).forEach(x=>c.msgs.push({id:x.mid,by:SY.uid,byN:fbBy(),t:x.t,k:'t',txt:x.txt,vp:'',vs:0,vb:0,re:reOf(x.re),fw:false,pend:1}))}
+const netErr=e=>!e||e.offline||!e.code||e.code===429||e.code>=500;
+function qFlush(){if(!on()||!GR.q.length)return;GR.q.forEach(x=>{if(!x.busy)qSend(x)})}
+async function qSend(x){x.busy=1;let ok=false,bad=null;const t=Date.now();
+ try{const f={by:sv(SY.uid),byN:sv(fbBy().slice(0,100)),t:iv(t),k:sv('t'),txt:sv(x.txt)},re=reOf(x.re);
+  if(re)f.re={mapValue:{fields:{mid:sv(re.mid),txt:sv(cut120(re.txt)),byN:sv(String(re.byN||'').slice(0,100)),k:sv(re.k)}}};
+  await fsx('/grp/'+x.gid+'/m?documentId='+encodeURIComponent(x.mid),{method:'POST',body:JSON.stringify({fields:f})});ok=true}
+ catch(e){if(e&&e.code===409)ok=true;else if(!netErr(e))bad=e}
+ x.busy=0;if(!ok&&!bad)return;
+ GR.q=GR.q.filter(y=>y!==x);qSave();
+ const c=GR.c;if(!c||c.gid!==x.gid)return;const m=c.msgs.find(y=>y.id===x.mid);if(!m)return;
+ if(ok){if(m.pend){m.pend=0;m.t=Math.max(t,m.t)}grPaint();grMark();return}
+ /* נדחה בשרת (למשל אין הרשאה): ההודעה יורדת מהמסך והטקסט חוזר לתיבה */
+ c.msgs=c.msgs.filter(y=>y!==m);if(!String(c.draft||'').trim()){c.draft=x.txt;grComp()}grPaint();toast('ההודעה לא נשלחה: '+tkErr(bad))}
 ACT.grMore=async()=>{const c=GR.c;if(!c||!c.msgs.length||c.loading)return;c.loading=1;
  try{const d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],where:tF('LESS_THAN',c.msgs[0].t),orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:PAGE});
   const old=d.map(mOf).filter(m=>idOk(m.id)&&!c.msgs.some(x=>x.id===m.id)).reverse();c.msgs=old.concat(c.msgs);c.more=d.length>=PAGE}catch(e){toast(tkErr(e))}
@@ -246,7 +334,7 @@ function grImgs(){const c=GR.c;if(!c)return;const els=[...document.querySelector
  if(IO)IO.disconnect();IO=new IntersectionObserver(es=>es.forEach(x=>{if(x.isIntersecting){IO.unobserve(x.target);grImgGet(c.gid,x.target.dataset.gimg)}}),{rootMargin:'300px'});els.forEach(e=>IO.observe(e))}
 const imgBusy={};
 async function grImgGet(gid,mid){const k=gid+'/'+mid;if(GR.img[k]||imgBusy[k]||!idOk(mid))return;imgBusy[k]=1;
- try{const d=await fsx('/grp/'+gid+'/m/'+mid+'/p/1'),du=gv(d,'img');if(!imgOk(du))throw 0;GR.img[k]=du;delete GR.img['x'+k]}catch(e){GR.img['x'+k]=1}
+ try{let du=await cGet('i:'+k);if(!imgOk(du)){const d=await fsx('/grp/'+gid+'/m/'+mid+'/p/1');du=gv(d,'img');if(!imgOk(du))throw 0;imPut(k,du)}GR.img[k]=du;delete GR.img['x'+k]}catch(e){GR.img['x'+k]=1}
  finally{delete imgBusy[k]}
  if(GR.c&&GR.c.gid===gid){grPaint();srPaint()}}
 ACT.grImg=el=>{const c=GR.c;if(!c)return;const k=c.gid+'/'+el.dataset.id;if(GR.img[k])return viewImg(null,'LargePami_group',GR.img[k]);delete GR.img['x'+k];grImgGet(c.gid,el.dataset.id)};
@@ -276,8 +364,9 @@ const reX=c=>c.re?{re:c.re}:null;
 const sendErr=(c,e)=>{c.sending='';grComp();toast(tkErr(e))};
 ACT.grSend=async()=>{const c=GR.c;if(!c||c.sending||!c.ready)return;dtFlush();const tx=$('#grtx'),txt=String((tx?tx.value:c.draft)||'').trim().slice(0,2000);if(!txt)return;
  if(!fbAdmin()&&c.g.ao)return toast('רק המנהל יכול לשלוח הודעות בקבוצה הזו');
- c.sending='שולח…';grComp();
- try{await grPost(c,'t',txt,reX(c));c.draft='';sendDone(c)}catch(e){c.draft=txt;sendErr(c,e)}};
+ const re=c.re?{mid:c.re.mid,txt:cut120(c.re.txt),byN:String(c.re.byN||'').slice(0,100),k:c.re.k}:null,x={gid:c.gid,mid:newMid(),txt,re,t:Date.now()};
+ GR.q.push(x);qSave();c.msgs.push({id:x.mid,by:SY.uid,byN:fbBy(),t:x.t,k:'t',txt,vp:'',vs:0,vb:0,re:reOf(re),fw:false,pend:1});
+ c.draft='';if(tx)tx.value='';c.re=null;grComp();grPaint('bottom');qSend(x)};
 CHG.grFile=async el=>{const f=el.files&&el.files[0];el.value='';const c=GR.c;if(!f||!c||c.sending||!c.g.md)return;dtFlush();
  const tx=$('#grtx');if(tx)c.draft=tx.value;
  if(/^video\//.test(f.type||'')||/\.(mp4|webm|3gp|mov)$/i.test(f.name||''))return grVideo(c,f);
@@ -285,7 +374,7 @@ CHG.grFile=async el=>{const f=el.files&&el.files[0];el.value='';const c=GR.c;if(
  c.sending='מכין את התמונה…';grComp();
  let du;try{du=await fbShrink(await rdU(f));if(du.length>880000||!imgOk(du))throw 0}catch(e){c.sending='';grComp();return toast('תמונה לא תקינה או גדולה מדי')}
  c.sending='שולח…';grComp();
- try{const cap=String(c.draft||'').trim().slice(0,2000),m=await grPost(c,'img',cap,reX(c));GR.img[c.gid+'/'+m.id]=du;c.draft='';
+ try{const cap=String(c.draft||'').trim().slice(0,2000),m=await grPost(c,'img',cap,reX(c));GR.img[c.gid+'/'+m.id]=du;imPut(c.gid+'/'+m.id,du);c.draft='';
   try{await fsx('/grp/'+c.gid+'/m/'+m.id+'/p/1',{method:'PATCH',body:JSON.stringify({fields:{img:sv(du),t:iv(Date.now()),uid:sv(SY.uid)}})})}catch(e2){toast('ההודעה נשלחה, אבל התמונה לא עלתה. '+tkErr(e2))}
   sendDone(c)}catch(e){sendErr(c,e)}};
 /* משך הסרטון נמדד ב-<video> מקומי לפני ההעלאה */
@@ -311,7 +400,7 @@ async function grVideo(c,f){
   await grPost(c,'vid',String(c.draft||'').trim().slice(0,2000),{mid,vp:name,vs:Math.min(VSEC,Math.max(1,Math.ceil(d))),vb:f.size,re:c.re});c.draft='';sendDone(c)}
  catch(e){c.sending='';grComp();toast(e&&e.code===403&&e.message?e.message:e&&e.offline?e.message:e&&e.code?tkErr(e):(e&&e.message)||'השליחה נכשלה')}}
 /* ⋯ של הודעה (כולם): סימון, תשובה, שיתוף, העברה, שמירה בגלריה; מנהל: גם הצמדה ומחיקה */
-ACT.grMenu=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;const adm=fbAdmin(),pd=c.g.pin&&c.g.pin.mid===id;
+ACT.grMenu=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;if(m.pend)return toast('🕓 ההודעה עוד לא נשלחה. היא תישלח מיד כשיהיה חיבור');const adm=fbAdmin(),pd=c.g.pin&&c.g.pin.mid===id;
  const r=c.rx&&c.rx.get(id),mine=r&&r.get(SY.uid)?r.get(SY.uid).e:'',I=`data-id="${esc(id)}"`,B=(a,t,cl)=>`<button class="btn ${cl||'g'} w" data-a="${a}" ${I} style="margin-bottom:8px">${t}</button>`;
  const media=m.k==='img'||(m.k==='vid'&&!m.gone&&Date.now()-m.t<=90*DAY);
  dlg(`<h3>אפשרויות הודעה</h3>${c.xoff?'':`<div class="gr-emo">${EMO.map(e=>`<button class="${e===mine?'on':''}" data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`}`
@@ -516,6 +605,12 @@ ACT.grDelG=()=>{const s=GR.s;if(!s||!s.gid||!fbAdmin())return;
  ask('למחוק את הקבוצה "'+s.name+'" עם כל ההודעות? אי אפשר לשחזר.',async()=>{
   try{await fsx('/grp/'+s.gid,{method:'DELETE'});GR.at=0;GR.L=null;GR.c=null;GR.s=null;toast('הקבוצה נמחקה');NAV=NAV.filter(x=>x.v!=='grc'&&x.v!=='grs');if(!NAV.length)NAV=[{v:'home'}];render(-1)}
   catch(e){toast(tkErr(e))}},'מחק קבוצה')};
+/* ---- רענון מיידי: התראה על הודעה בקבוצה כשהאפליקציה פתוחה, חזרה לאפליקציה, חזרת הרשת ----
+   ההתראה (grp-notify.js בשרת) נושאת data {k:'grp', id:gid}. מאזין נוסף ל-PushNotifications (לא מחליף את זה של secretary.js); רק כש-PushGate מוכן */
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(()=>grKick(''),300)});
+window.addEventListener('online',()=>setTimeout(()=>grKick(''),300));
+try{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;
+ if(P&&G&&isNat())G.state().then(g=>{if(g&&g.ready===true)P.addListener('pushNotificationReceived',n=>{const d=(n&&n.data)||{};if(d.k==='grp')grKick(String(d.id||''))})}).catch(()=>{})}catch(e){}
 /* ---- החלקה ימינה = תשובה; לחיצה ארוכה = שורת אימוג'י. החלקה שמאלה (חזרה, index.html) לא מושפעת ---- */
 (function(){let g=null,sup=0,pop=null;
  const emoOff=()=>{if(pop){pop.remove();pop=null}};
