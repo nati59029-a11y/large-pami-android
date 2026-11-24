@@ -30,16 +30,33 @@ const PR = ['12.9', '0', '7', '99999.99', '', '1234.5'], CD = ['5901234123457', 
 const HL = ['', 'חדש!', 'מבצע ענק בחנות'], PP = ['', '9.9', '100'], PK = ['', '500 גרם', '1.5 ליטר', 'xyz'], FSZ = [100, 70, 140, 120];
 const ITEMS = Array.from({ length: 24 }, (_, i) => it({ name: NM[i % 6], price: PR[(i * 5 + 1) % 6], code: CD[(i * 7 + 2) % 6], hl: HL[i % 3], pp: PP[(i >> 1) % 3], pack: PK[i % 4], fs: FSZ[(i >> 2) % 4] }));
 
-async function open(browser, www, who) {
-  const cfg = { mode: 'new', users: { m: 'biz-o', w: 'biz-o' }, biz: { 'biz-o': { dataRoot: 'b', features: F, name: 'עסק בדיקה' } }, admins: { 'b/biz-o/|m': 1 }, staff: { 'b/biz-o/|w': { perms: { lbl: true } } }, ctx: { deviceScaleFactor: 1 } };
-  const log = [];
+// תבניות בענן (מומצאות): "שלי" 40×30 עם "בתוקף עד" ומבצע כמות, תבנית 3 ערוכה (base 3), אחת מחוקה (רכה), אחת עם v לא מוכר
+const J1 = (els, o) => Object.assign({ grid: 12, brand: 'lay', els }, o || {});
+const MINE = J1([{ id: 'n', t: 'name', x: 14, y: 14, w: 444, h: 60, fs: 54, min: 20 }, { id: 'p', t: 'price', x: 14, y: 80, w: 444, h: 100, fs: 100 }, { id: 'e', t: 'exp', x: 14, y: 190, w: 444, h: 40, fs: 34 },
+  { id: 'm', t: 'multi', x: 14, y: 235, w: 444, h: 40, fs: 34 }, { id: 'b', t: 'bc', x: 40, y: 280, w: 392, h: 50, dg: 0 }]);
+const TDOC = (id, f) => ({ document: { name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/lblt/' + id, fields: f } });
+const TF = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'string' ? S(v) : typeof v === 'boolean' ? B(v) : N(v)]));
+const PRODS = [{ document: { name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/prod/p1', fields: { name: S('צלחות 20 יח׳ (דוגמה)'), price: N(12.9), barcode: S('5901234123457'), on: B(true), q: M({ _: N(5) }) } } }];
+async function open(browser, www, who, opt) {
+  opt = opt || {};
+  const biz = opt.biz || 'biz-o', pre = biz === 'biz-o' ? 'b/biz-o/' : '';
+  const cfg = { mode: 'new', users: { m: biz, w: biz }, biz: { [biz]: { dataRoot: biz === 'biz-o' ? 'b' : 'legacy', features: F, name: 'עסק בדיקה' } }, admins: { [pre + '|m']: 1 }, staff: { [pre + '|w']: { perms: { lbl: true } } }, ctx: { deviceScaleFactor: 1 } };
+  const log = [], ST = opt.st || { tpl: [], lbls: null, cfg: null, deny: 0, patches: [] };
   const { ctx, page } = await H.newPage(browser, www, cfg, log, 'lblt' + who);
   page.on('pageerror', (e) => log.push('pageerror: ' + e.message));
   await ctx.route(/:8080\/.*/, async (route) => {
-    const req = route.request(), u = new URL(req.url());
+    const req = route.request(), u = new URL(req.url()), m = req.method();
     const J = (b, st) => route.fulfill({ status: st || 200, contentType: 'application/json', body: JSON.stringify(b) });
-    if (/:runQuery$/.test(u.pathname)) return J([]);
-    if (/\/(ordcfg\/main|cfg\/lbl|lbls\/main)$/.test(u.pathname)) return J({ error: { code: 404, message: 'NOT_FOUND' } }, 404);
+    const NF = () => J({ error: { code: 404, message: 'NOT_FOUND' } }, 404);
+    if (/:runQuery$/.test(u.pathname)) { let c = ''; try { c = JSON.parse(req.postData()).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
+      return J(c === 'lblt' ? ST.tpl : c === 'prod' ? PRODS : []); }
+    if (/\/ordcfg\/main$/.test(u.pathname)) return NF();
+    if (/\/cfg\/lbl$/.test(u.pathname) && m === 'GET') return ST.cfg ? J({ name: 'x/cfg/lbl', fields: ST.cfg }) : NF();
+    if (/\/(lblt\/[^/]+|lbls\/main)$/.test(u.pathname)) {
+      if (m === 'GET') return ST.lbls ? J({ name: 'x/lbls/main', fields: ST.lbls }) : NF();
+      if (m === 'PATCH') { ST.patches.push({ url: u.href, path: u.pathname, f: JSON.parse(req.postData()).fields, deny: ST.deny });
+        return ST.deny ? J({ error: { code: ST.deny, message: 'PERMISSION_DENIED' } }, ST.deny) : J({ name: u.pathname, fields: JSON.parse(req.postData()).fields }); }
+    }
     return route.fallback();
   });
   await H.login(page, who + '@x.co');
@@ -65,6 +82,19 @@ const PAGE_LIB = () => {
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const browser = await H.launch();
   const ver = browser.version();
+  const mainT = (page) => page.evaluate(() => document.getElementById('main').innerText);
+  const goLbl = async (page) => { await page.evaluate(() => go('lbl')); await H.settle(page, 1500); };
+  const search = async (page, q) => { await page.fill('#main [data-i=lblQ]', q); await page.press('#main [data-i=lblQ]', 'Enter'); await H.settle(page, 500); };
+  const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('.toast')].map((e) => e.textContent).join(' | '));
+  const BKT = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('lp-lbl-basket') || '[]'));
+  const printed = async (page, sel) => { await page.evaluate(() => { window.__opened = []; }); await page.click(sel); await H.settle(page, 600);
+    const ask = await page.evaluate(() => { const d = document.querySelector('#dlg'); return d && d.open && d.querySelector('[data-a=yes]') ? d.innerText : ''; });
+    if (ask) { await page.click('#dlg [data-a=yes]'); await H.settle(page, 600); }
+    await H.settle(page, 1500);
+    const r = await page.evaluate(async () => { const u = window.__opened.pop(); if (!u) return null; const a = new Uint8Array(await (await fetch(u)).arrayBuffer()); const s = new TextDecoder('latin1').decode(a);
+      return { a: [...a], count: +(s.match(/\/Type \/Pages \/Count (\d+)/) || [])[1], boxes: [...new Set([...s.matchAll(/\/MediaBox \[([^\]]+)\]/g)].map((m) => m[1]))], dlg: document.getElementById('dlg').innerText }; });
+    await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await H.settle(page, 200);
+    return Object.assign({ ask }, r || {}); };
   { const { ctx, page, log } = await open(browser, www, 'm');
     await page.evaluate(PAGE_LIB);
     // ---------- z: זהות בייטים ----------
@@ -109,6 +139,99 @@ const PAGE_LIB = () => {
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check('m 99 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));
     await ctx.close(); }
+
+  // ---------- r: תבניות במסך ההדפסה, כמויות, הדפסה לפי גודל, שמירה ל-lblt / lbls ----------
+  { const ST = { tpl: [], lbls: { sz: { arrayValue: { values: [] } }, def: S('mine'), at: N(1), by: S('m') }, cfg: null, deny: 0, patches: [] };
+    const b3 = await (async () => { const T = require(path.resolve(www, 'lbl-tpl.js')).builtin(3); T.els.find((e) => e.id === 'p').fs = 90; return T; })();
+    ST.tpl = [TDOC('mine', TF({ v: 1, name: 'שלי 40×30', w: 40, h: 30, j: JSON.stringify(MINE), at: 5, by: 'w' })), TDOC('b3', TF({ v: 1, name: 'מחיר גדול שלי', w: 50, h: 25, base: 3, j: JSON.stringify(J1(b3.els)), at: 5, by: 'm' })),
+      TDOC('gone', TF({ v: 1, name: 'מחוקה', w: 50, h: 25, j: JSON.stringify(MINE), del: true, at: 5, by: 'm' })), TDOC('future', TF({ v: 2, name: 'גרסה עתידית', w: 50, h: 25, j: JSON.stringify(MINE), at: 5, by: 'm' }))];
+    const { ctx, page, log } = await open(browser, www, 'm', { st: ST });
+    await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+    await page.reload(); await H.settle(page, 2500);
+    await page.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden && ACT.startBlank) ACT.startBlank(); });
+    await page.evaluate(PAGE_LIB);
+    await goLbl(page);
+    const r0 = await page.evaluate(() => ({ br: LblPrint.brand(), row: !!document.querySelector('#main [data-c=lblBOn]') }));
+    check('r 0 עסק אחר (לא לארג\' פעמי): אין לוגו/חותמת ברירת מחדל', r0.br === null && !r0.row, r0);
+    await search(page, '5901234123457');
+    const r1 = await page.evaluate(() => { const B = [...document.querySelectorAll('#main [data-a=lblTpl]')]; const c = document.querySelector('#main canvas[data-lbl-t="c:mine"]');
+      return { n: B.length, v: B.map((b) => b.dataset.v), on: (B.find((b) => b.getAttribute('aria-pressed') === 'true') || {}).dataset, t3: (B.find((b) => b.dataset.v === '3') || {}).innerText, cw: c && c.width, ch: c && c.height, mine: (B.find((b) => b.dataset.v === 'c:mine') || {}).innerText }; });
+    check('r 1 בחירת תבנית: 5 המקוריות + "שלי" (40×30, קנבס 472×354); תבנית 3 ערוכה; מחוקה ו-v לא מוכר – לא מוצגות; ברירת המחדל של העסק (lbls.def) נבחרה',
+      r1.n === 6 && JSON.stringify(r1.v) === JSON.stringify(['1', '2', '3', '4', '5', 'c:mine']) && r1.on && r1.on.v === 'c:mine' && /ערוכה/.test(r1.t3) && r1.cw === 472 && r1.ch === 354 && /40×30/.test(r1.mine), r1);
+    const flds = () => page.evaluate(() => ['ex', 'mq', 'mp'].filter((k) => document.querySelector('#main #lblEd [data-k=' + k + ']')));
+    const f1 = await flds();
+    await page.click('#main [data-a=lblTpl][data-v="1"]'); await H.settle(page, 300);
+    const f2 = await flds();
+    check('r 2 שדות "בתוקף עד" ומבצע כמות – רק בתבנית שצריכה אותם', JSON.stringify(f1) === '["ex","mq","mp"]' && f2.length === 0, { f1, f2 });
+    await page.click('#main [data-a=lblTpl][data-v="c:mine"]'); await H.settle(page, 300);
+    await page.fill('#main #lblEd [data-k=ex]', '31.12.26'); await page.fill('#main #lblEd [data-k=mq]', '2'); await page.fill('#main #lblEd [data-k=mp]', '20');
+    await page.click('#main [data-a=lblQn][data-v="100"]'); await H.settle(page, 200);
+    const q100 = await page.evaluate(() => ({ v: document.querySelector('#main [data-i=lblQty]').value, on: document.querySelector('#main [data-a=lblQn][aria-pressed=true]').dataset.v, chips: [...document.querySelectorAll('#main [data-a=lblQn]')].map((b) => b.dataset.v).join(',') }));
+    await page.click('#main [data-a=lblAdd]'); await H.settle(page, 500);
+    const bk1 = await BKT(page);
+    const row = bk1[0] || {};
+    check('r 3 כפתורי כמות 1/10/20/50/100; הוספה לסל: עותק התבנית T בשורה, tpl "c:mine", 100 מדבקות, בתוקף עד ומבצע כמות',
+      q100.v === '100' && q100.on === '100' && q100.chips === '1,10,20,50,100' && bk1.length === 1 && row.tpl === 'c:mine' && row.n === 100 && row.T && row.T.id === 'mine' && row.T.w === 40 && row.T.els.length === 5 && row.it.ex === '31.12.26' && row.it.mq === '2' && row.it.mp === '20', { q100, row: Object.assign({}, row, { T: row.T && row.T.id }) });
+    await search(page, '5901234123457'); await page.click('#main [data-a=lblTpl][data-v="1"]'); await H.settle(page, 200);
+    await page.fill('#main [data-i=lblQty]', '1000'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 300);
+    const t1000 = await toasts(page), n1000 = (await BKT(page)).length;
+    await page.fill('#main [data-i=lblQty]', '999'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 500);
+    const bk2 = await BKT(page);
+    check('r 4 כמות: 1000 נדחית ("1 עד 999"), 999 מתקבלת; שורה של תבנית מקורית – בלי T', /1 עד 999/.test(t1000) && n1000 === 1 && bk2.length === 2 && bk2[1].n === 999 && bk2[1].tpl === 1 && !bk2[1].T, { t1000, n1000, n: bk2.length });
+    const pb = await page.evaluate(() => [...document.querySelectorAll('#main [data-a=lblPrint]')].map((b) => ({ g: b.dataset.g, t: b.innerText, h: b.nextElementSibling && b.nextElementSibling.innerText })));
+    // הקבוצות לפי סדר ההופעה בסל: 40×30 (נוספה ראשונה) ואז 50×25
+    check('r 5 שני גדלים בסל: כפתור הדפסה לכל גודל (לפי סדר ההופעה), והנחיה לחלון ההדפסה לפי הגודל', pb.length === 2 && /40×30/.test(pb[0].t) && /100 מדבקות/.test(pb[0].t) && /40×30\u2069? מ"מ/.test(pb[0].h) && !/50×25/.test(pb[0].h) && /50×25/.test(pb[1].t) && /999/.test(pb[1].t) && /50×25/.test(pb[1].h), pb);
+    if (shots) await page.screenshot({ path: path.join(shots, 'r-basket.png'), fullPage: true });
+    const p0 = await printed(page, '#main [data-a=lblPrint][data-g="1"]');
+    const eq0 = await page.evaluate(async ([src, a]) => { const L = LblPrint.bk().filter((r) => !r.T), OLD = window.__lbt.frozen(src), c = await LblPrint.build(L);
+      // שלב 1 הגביל ל-200 בשורה: אותו סל עם 200 – זהה בבייטים לעותק הקפוא
+      const L2 = L.map((r) => Object.assign({}, r, { n: 200 })), b = await OLD.build(L2, LblPrint.brand()), b2 = await LblPrint.build(L2);
+      const eq = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]); return { old: eq([...b2], [...b]), now: eq(a, [...c]) }; }, [FROZEN, p0.a || []]);
+    check('r 6 הדפסת 50×25 (999 > 300): חלון אישור, ואחריו PDF של 999 עמודים (זהה ל-build); אותו סל ב-200 – זהה בבייטים לשלב 1', /להדפיס 999 מדבקות/.test(p0.ask) && p0.count === 999 && JSON.stringify(p0.boxes) === '["0 0 141.73 70.87"]' && eq0.old && eq0.now && /הסר מהסל/.test(p0.dlg), { ask: p0.ask, count: p0.count, boxes: p0.boxes, eq0 });
+    const p1 = await printed(page, '#main [data-a=lblPrint][data-g="0"]');
+    check('r 7 הדפסת 40×30 (100): בלי אישור, PDF של 100 עמודים בגודל 113.39×85.04 נק\'', !p1.ask && p1.count === 100 && JSON.stringify(p1.boxes) === '["0 0 113.39 85.04"]' && /40×30/.test(p1.dlg), { ask: p1.ask, count: p1.count, boxes: p1.boxes });
+    await page.evaluate(() => { const L = LblPrint.bk(); for (let i = 0; i < 5; i++) L.push(JSON.parse(JSON.stringify(L[1]))); rerender(); }); await H.settle(page, 300);
+    const big = await page.evaluate(() => document.getElementById('main').innerText);
+    const p2 = await printed(page, '#main [data-a=lblPrint][data-g="1"]'), t5k = await toasts(page);
+    check('r 8 יותר מ-5,000 מדבקות בגודל אחד: אזהרה בסל, ההדפסה נחסמת', /עד 5,000 מדבקות/.test(big) && !p2.count && /עד 5,000/.test(t5k), { t5k, p2: p2.count });
+    // שמירה: PATCH עם updateMask; 403 → במכשיר בלבד ונשלח שוב בכניסה הבאה
+    const T1 = { id: 'new1', name: 'חדשה', w: 50, h: 25, grid: 12, brand: 'lay', els: MINE.els.slice(0, 2) };
+    const s1 = await page.evaluate((T) => LblPrint.tSave(T), T1);
+    const pt = ST.patches[ST.patches.length - 1] || {};
+    const mask = pt.url ? new URL(pt.url).searchParams.getAll('updateMask.fieldPaths').sort() : [];
+    check('r 9 שמירת תבנית: PATCH ל-lblt/new1 עם updateMask לכל 9 השדות (base/del לא קיימים – נמחקים), v=1, j תקין, by = המשתמש',
+      s1 === 'ok' && /\/b\/biz-o\/lblt\/new1$/.test(pt.path) && JSON.stringify(mask) === JSON.stringify(['at', 'base', 'by', 'del', 'h', 'j', 'name', 'v', 'w']) && pt.f.v.integerValue === '1' && !pt.f.base && !pt.f.del && pt.f.by.stringValue === 'm' && JSON.parse(pt.f.j.stringValue).els.length === 2, { s1, mask, path: pt.path });
+    ST.deny = 403;
+    const s2 = await page.evaluate((T) => LblPrint.tSave(Object.assign({}, T, { id: 'new2', name: 'בלי הרשאה' })), T1);
+    const loc = await page.evaluate(() => JSON.parse(localStorage.getItem('lp-lbl-tpl-biz-o') || 'null'));
+    check('r 10 403: נשמר במכשיר בלבד ("dev"), בתור לשליחה חוזרת; העותק במכשיר לפי העסק', s2 === 'dev' && loc && loc.q.length === 1 && loc.q[0].T.id === 'new2' && loc.L.some((t) => t.id === 'new2') && loc.L.some((t) => t.id === 'mine'), { s2, q: loc && loc.q.length });
+    ST.deny = 0; const n0 = ST.patches.length;
+    await page.evaluate(() => go('home')); await H.settle(page, 1200); await goLbl(page);
+    const loc2 = await page.evaluate(() => JSON.parse(localStorage.getItem('lp-lbl-tpl-biz-o') || 'null'));
+    const re = ST.patches.slice(n0).find((x) => /lblt\/new2$/.test(x.path));
+    check('r 11 כניסה הבאה למסך: השמירה נשלחת שוב, והתור מתרוקן', re && !re.deny && loc2.q.length === 0, { re: !!re, q: loc2 && loc2.q.length });
+    const s3 = await page.evaluate(() => LblPrint.sSave({ sz: [{ w: 40, h: 30 }, { w: 40, h: 30 }, { w: 200, h: 1 }], def: 'mine' }));
+    const ps = ST.patches[ST.patches.length - 1] || {}, mk2 = ps.url ? new URL(ps.url).searchParams.getAll('updateMask.fieldPaths').sort() : [];
+    check('r 12 שמירת הגדרות: PATCH ל-lbls/main עם updateMask (sz, def, at, by), גדלים תקינים בלבד', s3 === 'ok' && /\/lbls\/main$/.test(ps.path) && JSON.stringify(mk2) === '["at","by","def","sz"]' && ps.f.sz.arrayValue.values.length === 1 && ps.f.def.stringValue === 'mine', { s3, mk2, n: ps.f && ps.f.sz.arrayValue.values.length });
+    const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
+    check('r 99 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));
+    await ctx.close(); }
+
+  // ---------- l: לארג' פעמי – לוגו וחותמת ברירת מחדל (lbl-def/), פריסת "פס עליון" ----------
+  for (const [nm, cfgF] of [['בלי cfg/lbl', null], ['לוגו נמחק בהגדרות (logo ריק, בלי stamp)', { logo: S(''), lay: S('bot'), on: B(true), at: N(1), by: S('m') }]]) {
+    const ST = { tpl: [], lbls: null, cfg: cfgF, deny: 0, patches: [] };
+    for (const who of ['m', 'w']) {
+      const { ctx, page, log } = await open(browser, www, who, { biz: 'largpeami', st: ST });
+      await goLbl(page);
+      const r = await page.evaluate(() => { const b = LblPrint.brand(); return { lay: b && b.lay, logo: b ? (b.logo ? b.logo.slice(0, 22) : '') : null, stamp: b && b.stamp ? b.stamp.slice(0, 22) : '', row: !!document.querySelector('#main [data-c=lblBOn]') }; });
+      const ok = cfgF ? r.logo === '' && r.stamp === 'data:image/png;base64,' && r.lay === 'bot' && r.row : r.logo === 'data:image/png;base64,' && r.stamp === 'data:image/png;base64,' && r.lay === 'top' && r.row;
+      check(`l ${nm} (${who === 'm' ? 'מנהל' : 'עובד'}): ` + (cfgF ? 'הלוגו לא חוזר, החותמת – ברירת המחדל' : 'לוגו לארג\' פעמי וחותמת הבד"ץ מופיעים לבד, פס עליון'), ok, r);
+      if (shots && !cfgF && who === 'm') { await search(page, '5901234123457'); await H.settle(page, 800); await page.locator('#lblEd').screenshot({ path: path.join(shots, 'l-default.png') }); }
+      const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
+      if (errs.length) check('l בלי שגיאות JS', false, errs.slice(0, 3));
+      await ctx.close();
+    }
+  }
 
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify({ out }, null, 1));
