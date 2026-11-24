@@ -63,13 +63,14 @@ function ok(){if(DC.stale){DC.stale=0;paint()}}
    soff(e,t): הטעינה מהשרת נכשלה בגלל שאין חיבור והמסך מציג עותק שמור מזמן t – שורת "אין חיבור" (mark).
    again=1: גם אם כבר נקרא/נטען בהפעלה הזו (מסך שמתרוקן בכל כניסה); apply חייב לבדוק בעצמו שהזיכרון עדיין ריק.
    swait(n): מחכה לקריאה מהמכשיר שעוד בדרך (לפני הבקשה לשרת), כדי שעותק שמור לא יחליף תשובה חדשה וש-soff יידע מה מוצג. */
-const SF=new Set(),SR=new Set(),SP=new Map(),skey=n=>key('SCR',String(n),'');
+const SF=new Set(),SR=new Set(),SP=new Map(),SX=new Set(),skey=n=>key('SCR',String(n),'');
 function sput(n,v){try{const k=skey(n);if(!k)return;SR.add(k);const s=JSON.stringify(v);if(typeof s==='string')put(k,s)}catch(e){}}
-function sfill(n,apply,again){try{const k=skey(n);if(!k||(!again&&(SF.has(k)||SR.has(k))))return;SF.add(k);
- const p=get(k).then(r=>{if(!r||(!again&&SR.has(k))||skey(n)!==k)return;let v;try{v=JSON.parse(r.v)}catch(e){return}try{apply(v,r.t)}catch(e){}}).catch(()=>{}).then(()=>{if(SP.get(k)===p)SP.delete(k)});SP.set(k,p)}catch(e){}}
-function swait(n){try{return SP.get(skey(n))||Promise.resolve()}catch(e){return Promise.resolve()}}
+function sfill(n,apply,again){try{const k=skey(n);if(!k||(!again&&(SF.has(k)||SR.has(k))))return;SF.add(k);SX.delete(k);
+ const p=get(k).then(r=>{if(!r||SX.has(k)||(!again&&SR.has(k))||skey(n)!==k)return;let v;try{v=JSON.parse(r.v)}catch(e){return}try{apply(v,r.t)}catch(e){}}).catch(()=>{}).then(()=>{if(SP.get(k)===p)SP.delete(k)});SP.set(k,p)}catch(e){}}
+/* 24.11 (בדיקה): עד 3 שניות. אם המכשיר לא ענה עד אז – הטעינה מהשרת ממשיכה, והעותק שיגיע מאוחר לא יוצג (SX) */
+function swait(n){try{const k=skey(n),p=SP.get(k);if(!p)return Promise.resolve();return Promise.race([p,new Promise(r=>setTimeout(()=>{if(SP.get(k)===p)SX.add(k);r()},3000))])}catch(e){return Promise.resolve()}}
 function soff(e,t){try{if(e&&e.offline&&t)mark(t)}catch(x){}}
-function out(){GEN++;LH.clear();SF.clear();SR.clear();SP.clear();DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
+function out(){GEN++;LH.clear();SF.clear();SR.clear();SP.clear();SX.clear();DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
 const DC={get,put,del,out,key,rd,fnOk,mark,ok,sput,sfill,swait,soff,stale:0};
 window.DC=DC;
 })();
