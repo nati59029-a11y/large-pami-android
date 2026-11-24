@@ -1042,7 +1042,53 @@ async function ackPriceAlert(request) {
   await ref.update({ st: 'done', doneBy: w.uid, doneAt: Date.now() });
   return { ok: true };
 }
-const FNS = { setCustCfg, wipeCusts, restoreCusts, findCust, setCustPrice, delCustPrice, setPriceCfg, ackPriceAlert };
+// ---------- 24.11.2026 (לקוחות הקפה מכספית, סבב 2): מחיקת לקוח בודד – בקשת בעל העסק ("אמחק לקוחות לא רלוונטיים") ----------
+// delCust({ custId, confirm:'מחק' }) – מנהל. מותר רק ללקוח בלי מסמכים שנוצרו באפליקציה (כל ardoc שאינו ob / old – חשבונית, קבלה, זיכוי, טיוטה,
+// גם מבוטל) ובלי הזמנות. מסמכים מיובאים (ob / old) – מבוטלים (void + ההקצאות ביניהם, כמו "ביטול קבוצה" ב-ar-import.js), לא נמחקים.
+// לפני המחיקה – גיבוי של מסמך הלקוח ושל p שלו (כרטיסים מוצפנים כמו שהם), באותו מבנה של wipeCusts: custDelBak/{id} { at, by, byName, n:1, st:'done', cust, nv }
+// + items/{custId} { d, p }. אוסף נפרד – לא נכנס ל"שחזור לקוחות מגיבוי" (custBak), שמשחזר רק את הגיבוי האחרון. בלי כלל בחוקים = שרת בלבד.
+// הכול בטרנזקציה אחת. יומן: cardLog act:'delcust' (כמו wipe). הריצה הלילית של לקוחות הקפה (hk-import.js) רואה שמסמך הלקוח לא קיים → hkc.st='del', לא נוצר שוב.
+const DEL_DOCS = 100;
+async function delCust(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'confirm']);
+  const id = custIdOf(input.custId);
+  if (input.confirm !== 'מחק') throw bad('bad-confirm', 'כדי למחוק את הלקוח יש להקליד "מחק"');
+  const db = T.tdb();
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    const cref = db.doc('cust/' + id);
+    const cs = await tx.get(cref);
+    if (!cs.exists) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    const dq = await tx.get(db.collection('ardoc').where('cust', '==', id).limit(DEL_DOCS + 1));
+    if (dq.docs.some((s) => !['ob', 'old'].includes(s.get('t')))) throw pre('has-docs', 'ללקוח יש מסמכים באפליקציה – אי אפשר למחוק');
+    if (dq.size > DEL_DOCS) throw pre('too-many', 'ללקוח יש יותר מדי מסמכים מיובאים – אי אפשר למחוק מכאן');
+    if (!(await tx.get(db.collection('ord').where('custId', '==', id).limit(1))).empty) throw pre('has-docs', 'ללקוח יש מסמכים באפליקציה – אי אפשר למחוק');
+    const live = dq.docs.filter((s) => !s.get('void'));
+    const als = new Map();
+    for (const s of live) {
+      const [a1, a2] = await Promise.all([tx.get(db.collection('aralloc').where('rc', '==', s.id)), tx.get(db.collection('aralloc').where('inv', '==', s.id))]);
+      for (const a of a1.docs.concat(a2.docs)) if (!a.get('void')) als.set(a.id, a);
+    }
+    const pq = await tx.get(cref.collection('p'));
+    // כתיבות: גיבוי ← ביטול מסמכים והקצאות ← מחיקת p והלקוח ← יומן
+    const now = Date.now(), p = {};
+    pq.docs.forEach((x) => { p[x.id] = x.data(); });
+    const bref = db.collection('custDelBak').doc();
+    tx.set(bref, { at: now, by: w.uid, byName: w.name || '', n: 1, st: 'done', cust: id, nv: live.length });
+    tx.set(bref.collection('items').doc(id), { d: cs.data(), p });
+    for (const a of als.values()) tx.update(a.ref, { void: true, voidAt: now, voidBy: w.uid });
+    for (const s of live) tx.update(s.ref, { open: 0, st: 'void', void: { at: now, by: w.uid, why: 'מחיקת לקוח' }, upd: now });
+    for (const x of pq.docs) tx.delete(x.ref);
+    tx.delete(cref);
+    tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: id, act: 'delcust', nv: live.length });
+    res = { ok: true, nv: live.length, bak: bref.id };
+  }, { maxAttempts: 10 });
+  logger.info('delCust', { biz: w.bizId || '', nv: res.nv, bak: res.bak }); // בלי פרטי הלקוח
+  return res;
+}
+const FNS = { setCustCfg, wipeCusts, restoreCusts, findCust, setCustPrice, delCustPrice, setPriceCfg, ackPriceAlert, delCust };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(['wipeCusts', 'restoreCusts'].includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f)); // 11.11.2026: אלפי לקוחות
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)

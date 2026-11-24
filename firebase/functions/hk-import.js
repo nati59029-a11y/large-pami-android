@@ -16,7 +16,8 @@
 //   hkcfg/main         { st?:'on', pend?:{ sid, day, at, n, parts, pv }, apr?:{ sid, batch, pos, n, day, at, by, c }, first?:{ batch, day, at, by, n, c }, night?:{ day, at, batch, ...מונים } }
 //   hkpend/{sid}_{k}   { sid, k, rows:[{ xc, tz, name, ph, addr, bal, p? }] } – עד PART שורות לחלק. נמחק אחרי האישור או כשתמונה חדשה מחליפה.
 //   hkc/{xc}           { xc, st:'ok'|'chk'|'del', cust?, bal, day, b, why?, at, upd } – היתרה האחרונה בכספית שהוחלה, והלקוח באפליקציה.
-//   hkchk/{id}         { xc, name, ph, why, day, at, cust?, diff? } – "לבדוק" למנהל. a_{xc} = התאמה בעייתית; n_{YYYYMMDD}_{xc} = הפרש שלילי (diff אגורות, שלילי).
+//   hkchk/{id}         { xc, name, ph, why, day, at, cust?, diff?, doneAt?, doneBy? } – "לבדוק" למנהל. a_{xc} = התאמה בעייתית; n_{YYYYMMDD}_{xc} = הפרש שלילי (diff אגורות, שלילי).
+//                      סבב 2: hkChkDone (מנהל) מסמן "טופל" (doneAt, doneBy) – בלי מחיקה. hkGet מחזיר רק פתוחים. פריט שנכתב שוב (הפרש נוסף / התאמה חוזרת) – נפתח שוב.
 // כל האוספים – שרת בלבד (אין להם כלל בחוקים = אין קריאה ואין כתיבה מהאפליקציה). האפליקציה קוראת דרך hkGet.
 // פרטיות: ביומן השרת רק קודים ומספרים – בלי שמות, טלפונים ות.ז.
 
@@ -323,7 +324,7 @@ async function night(w, db, cfg, day, rows, now) {
         if (it.mode === 'same') { cnt.same++; continue; }
         if (it.mode === 'relink') { tx.update(hk, { cust: it.cid, upd: now }); cnt.same++; continue; }
         if (it.mode === 'neg') {
-          tx.set(db.doc(`hkchk/n_${ymd8(day)}_${it.xc}`), { xc: it.xc, name: it.name, ph: it.ph, why: it.why || 'neg', day, at: now, cust: it.cid, diff: FieldValue.increment(it.diff) }, { merge: true });
+          tx.set(db.doc(`hkchk/n_${ymd8(day)}_${it.xc}`), { xc: it.xc, name: it.name, ph: it.ph, why: it.why || 'neg', day, at: now, cust: it.cid, diff: FieldValue.increment(it.diff), doneAt: FieldValue.delete(), doneBy: FieldValue.delete() }, { merge: true });
           if (!it.why) tx.update(hk, { bal: it.bal, day, cust: it.cid, upd: now }); // היתרה החדשה = הבסיס להפרש הבא
           cnt.neg++; cnt.nsum += it.diff; continue;
         }
@@ -353,14 +354,14 @@ async function who(request) {
   if (w.role !== 'manager') throw deny('manager-only', 'לקוחות הקפה מכספית – מנהל בלבד');
   return w;
 }
-// hkGet() → { st:'none'|'pend'|'apr'|'on', pend?:{ sid, day, at, n, pv }, apr?:{ pos, n, c }, first?, night?, chk:[{ id, xc, name, ph, why, msg, day, at, cust?, diff? }] }
+// hkGet() → { st:'none'|'pend'|'apr'|'on', pend?:{ sid, day, at, n, pv }, apr?:{ pos, n, c }, first?, night?, chk:[{ id, xc, name, ph, why, msg, day, at, cust?, diff? }] } – chk: רק פריטים שלא סומנו "טופל"
 async function hkGet(request) {
   await who(request);
   onlyKeys(inputObject(request), []);
   const db = T.tdb();
   const [cs, q] = await Promise.all([db.doc(CFG).get(), db.collection('hkchk').orderBy('at', 'desc').limit(CHK_MAX).get()]);
   const c = cs.exists ? cs.data() || {} : {};
-  const out = { st: c.st === 'on' ? 'on' : c.apr ? 'apr' : c.pend ? 'pend' : 'none', chk: q.docs.map((s) => Object.assign({ id: s.id }, s.data(), { msg: WHY[s.get('why')] || '' })) };
+  const out = { st: c.st === 'on' ? 'on' : c.apr ? 'apr' : c.pend ? 'pend' : 'none', chk: q.docs.filter((s) => !s.get('doneAt')).map((s) => Object.assign({ id: s.id }, s.data(), { msg: WHY[s.get('why')] || '' })) };
   if (c.pend && c.st !== 'on') out.pend = { sid: c.pend.sid, day: c.pend.day, at: c.pend.at, n: c.pend.n, pv: Object.assign({}, c.pend.pv, { chkL: (c.pend.pv && c.pend.pv.chkL || []).map((x) => Object.assign({}, x, { msg: WHY[x.why] || '' })) }) };
   if (c.apr) out.apr = { pos: c.apr.pos, n: c.apr.n, c: c.apr.c };
   if (c.first) out.first = c.first;
@@ -430,6 +431,25 @@ async function hkApprove(request) {
   return { done, pos: st.pos, n: st.n, c: st.c, batch: st.batch };
 }
 
+// hkChkDone({ id }) – סבב 2: סימון פריט "לבדוק" כטופל (doneAt, doneBy). בלי מחיקה; פעם שנייה – בלי שינוי (done:true כבר).
+const CHK_ID = /^(?:a_[0-9A-Za-z-]{1,20}|n_\d{8}_[0-9A-Za-z-]{1,20})$/;
+async function hkChkDone(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['id']);
+  if (typeof input.id !== 'string' || !CHK_ID.test(input.id)) throw bad('bad-id', 'פריט לא תקין');
+  const db = T.tdb(), ref = db.doc('hkchk/' + input.id);
+  let out = null;
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'הפריט לא נמצא', { reason: 'no-chk' });
+    if (s.get('doneAt')) { out = { ok: true, dup: true }; return; }
+    tx.update(ref, { doneAt: Date.now(), doneBy: w.uid });
+    out = { ok: true };
+  });
+  return out;
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -439,4 +459,5 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 exports.hkGet = onCall({ memory: '512MiB', timeoutSeconds: 60 }, wrap('hkGet', hkGet));
 exports.hkApprove = onCall({ memory: '512MiB', timeoutSeconds: 300 }, wrap('hkApprove', hkApprove));
+exports.hkChkDone = onCall(wrap('hkChkDone', hkChkDone));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { snap, rowOf, rowsOf, planOf, pvOf, tzOf, obSlot, MAX_ROWS, CH, CALL_ROWS, WHY } });

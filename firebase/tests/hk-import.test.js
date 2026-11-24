@@ -5,6 +5,8 @@
 //   - אישור: לקוחות פרטיים עם xc, ללקוח קיים רק xc, יתרות פתיחה ob, cust.ar = חישוב מחדש מהמסמכים, "לבדוק" לא נוגע בכלום, קבוצת arimp.
 //   - לילה: הפרש חיובי → old, שלילי → "לבדוק", לקוח חדש, לקוח שנמחק, אותו יום פעמיים → בלי כפילות.
 //   - ביטול קבוצה (arImpVoid הקיים). הרשאות: עובד / בלי כניסה / עסק אחר. החוקים: האוספים סגורים לאפליקציה.
+//   - סבב 2: hkChkDone ("טופל", בלי מחיקה); delCust – מחיקת לקוח עם מסמכים מיובאים בלבד (void + גיבוי), סירוב כשיש מסמך אמיתי / הזמנה,
+//     עובד נדחה, ואחרי המחיקה הריצה הלילית לא יוצרת את הלקוח שוב.
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -230,6 +232,74 @@ describe('לקוחות הקפה מכספית', () => {
     assert.equal(await balanced('p0521110004'), 1000, 'יתרת פתיחה ישנה (לא מהייבוא) – לא נגעו');
   });
 
+  it('סבב 2 – hkChkDone: "טופל" מסמן זמן ומי, לא מוחק, ונעלם מהרשימה; עובד נדחה', async () => {
+    const id = `n_${today.replace(/-/g, '')}_102`;
+    assert.equal((await call('hkChkDone', E1, { id })).reason, 'manager-only');
+    assert.equal((await call('hkChkDone', MGR, { id: '../x' })).reason, 'bad-id');
+    assert.equal((await call('hkChkDone', MGR, { id, x: 1 })).reason, 'bad-field');
+    assert.equal((await call('hkChkDone', MGR, { id: 'a_777' })).status, 'not-found');
+    assert.ok((await ok('hkGet', MGR, {})).chk.some((x) => x.id === id));
+    const r = await ok('hkChkDone', MGR, { id });
+    assert.equal(r.ok, true); assert.equal(r.dup, undefined);
+    const d = await get('hkchk/' + id);
+    assert.ok(d && d.doneAt > 0, 'לא נמחק – מסומן'); assert.equal(d.doneBy, MGR); assert.equal(d.diff, -1000);
+    assert.ok(!(await ok('hkGet', MGR, {})).chk.some((x) => x.id === id), 'לא מוצג יותר');
+    assert.equal((await ok('hkChkDone', MGR, { id })).dup, true);
+    assert.equal((await call('hkChkDone', MB, { id })).status, 'not-found', 'עסק אחר – לא רואה');
+  });
+
+  it('סבב 2 – delCust: מסרב כשיש מסמך אמיתי / הזמנה; עובד נדחה; מוחק לקוח עם מסמכים מיובאים (void + גיבוי); הלילה לא מחזיר אותו', async () => {
+    const cid = cHash('203'); // יובא בייבוא הראשון (ob) – אחרי ביטול הקבוצה בבדיקה הקודמת המסמך כבר מבוטל
+    const cid2 = cHash('400'); // נוסף 0 – נשתמש בו עם מסמך מיובא חי
+    // מסמכים מיובאים חיים ללקוח (ob חובה + old זכות, עם הקצאה ביניהם) – כמו אחרי ייבוא
+    await adm().doc(`b/${A}/ardoc/x_ob_${cid2}_v2`).set({ t: 'ob', k: 'dr', cust: cid2, gross: 500, net: 500, vat: 0, open: 300, st: 'part', d: '2026-01-01', at: 1, imp: 'tst', lines: [], ser: 'X', no: '', ext: '' });
+    await adm().doc(`b/${A}/ardoc/x_old_t_${cid2}`).set({ t: 'old', k: 'cr', cust: cid2, gross: 200, net: 200, vat: 0, open: 0, st: 'ok', d: '2026-01-02', at: 2, imp: 'tst', lines: [], ser: 'X', no: '', ext: '' });
+    await adm().doc(`b/${A}/aralloc/al_t1`).set({ rc: `x_old_t_${cid2}`, inv: `x_ob_${cid2}_v2`, amt: 200, cust: cid2, at: 2 });
+    await adm().doc(`b/${A}/cust/${cid2}/p/card`).set({ box: { v: 1 }, last4: '1234' });
+    // סירובים
+    assert.ok(['no-perm', 'manager-only'].includes((await call('delCust', E1, { custId: cid2, confirm: 'מחק' })).reason), 'עובד נדחה');
+    assert.equal((await call('delCust', MGR, { custId: cid2 })).reason, 'bad-confirm');
+    assert.equal((await call('delCust', MGR, { custId: cid2, confirm: 'כן' })).reason, 'bad-confirm');
+    assert.equal((await call('delCust', MGR, { custId: '../x', confirm: 'מחק' })).reason, 'bad-id');
+    assert.equal((await call('delCust', MGR, { custId: 'p0500000000', confirm: 'מחק' })).reason, 'no-cust');
+    // מסמך אמיתי (חשבונית) – סירוב, גם כשהוא מבוטל
+    await adm().doc(`b/${A}/ardoc/inv_t1`).set({ t: 'inv', cust: cid, gross: 100, open: 0, st: 'void', void: { at: 1 }, d: '2026-01-01', at: 1, lines: [] });
+    const r1 = await call('delCust', MGR, { custId: cid, confirm: 'מחק' });
+    assert.equal(r1.reason, 'has-docs'); assert.match(r1.text, /ללקוח יש מסמכים באפליקציה – אי אפשר למחוק/);
+    assert.ok(await get('cust/' + cid), 'לא נמחק');
+    // הזמנה – סירוב
+    const cid3 = cHash('401');
+    await adm().doc(`b/${A}/ord/o_t1`).set({ custId: cid3, no: 1, status: 'new', at: 1 });
+    assert.equal((await call('delCust', MGR, { custId: cid3, confirm: 'מחק' })).reason, 'has-docs');
+    assert.ok(await get('cust/' + cid3));
+    // מחיקה
+    const c0 = await get('cust/' + cid2);
+    const r = await ok('delCust', MGR, { custId: cid2, confirm: 'מחק' });
+    assert.equal(r.nv, 2, 'שני המסמכים החיים (ה-ob מהייבוא הראשון כבר בוטל בבדיקה הקודמת)');
+    assert.equal(await get('cust/' + cid2), null, 'הלקוח נמחק');
+    assert.equal(await get(`cust/${cid2}/p/card`), null, 'גם הכרטיס המוצפן (נשמר בגיבוי)');
+    for (const id of [`x_ob_${cid2}_v2`, `x_old_t_${cid2}`]) { const d = await get('ardoc/' + id); assert.ok(d, 'לא נמחק'); assert.equal(d.st, 'void'); assert.equal(d.open, 0); assert.equal(d.void.by, MGR); }
+    assert.equal((await get('aralloc/al_t1')).void, true, 'ההקצאה בוטלה');
+    const bk = await get('custDelBak/' + r.bak);
+    assert.equal(bk.cust, cid2); assert.equal(bk.st, 'done'); assert.equal(bk.n, 1); assert.equal(bk.by, MGR);
+    const it0 = await get(`custDelBak/${r.bak}/items/${cid2}`);
+    assert.deepEqual(it0.d, c0, 'גיבוי מלא של מסמך הלקוח'); assert.equal(it0.p.card.last4, '1234');
+    assert.ok((await all('cardLog')).some((x) => x.act === 'delcust' && x.cust === cid2 && x.by === MGR), 'יומן');
+    assert.equal((await all('custBak')).length, 0, 'לא נכנס לגיבוי של "שחזור לקוחות"');
+    assert.equal((await call('delCust', MGR, { custId: cid2, confirm: 'מחק' })).reason, 'no-cust', 'פעם שנייה – כבר נמחק');
+    // הלילה: הלקוח בכספית עם יתרה גבוהה יותר – לא נוצר שוב ולא מקבל מסמך
+    const n0 = (await all('ardoc')).length;
+    await adm().doc(`b/${A}/private/cxbot`).set({ hk: { d: today, n: 0 } }, { merge: true }); // מגבלת 12 תמונות ביום – הבדיקות הקודמות כבר השתמשו בחלק
+    const rn = await snap(today, [{ xc: '400', tz: '', name: 'נוסף 0', ph: '', addr: '', bal: 900 }]);
+    assert.equal(rn.st, 'night'); assert.equal(rn.del, 1); assert.equal(rn.add, 0); assert.equal(rn.new, 0);
+    assert.equal(await get('cust/' + cid2), null, 'לא נוצר שוב');
+    assert.equal((await get('hkc/400')).st, 'del');
+    assert.equal((await all('ardoc')).length, n0, 'בלי מסמך חדש');
+    // ושוב – נשאר נמחק
+    const rn2 = await snap(today, [{ xc: '400', tz: '', name: 'נוסף 0', ph: '', addr: '', bal: 1000 }]);
+    assert.equal(rn2.del, 1); assert.equal(await get('cust/' + cid2), null);
+  });
+
   it('מגבלת תמונות ביום לעסק', async () => {
     await adm().doc(`b/${A}/private/cxbot`).set({ hk: { d: today, n: 12 } }, { merge: true });
     const r = await bot({ op: 'hkSnap', ver: '0.1.0', day: today, rows: [{ xc: '1', bal: 0 }] });
@@ -240,7 +310,7 @@ describe('לקוחות הקפה מכספית', () => {
     const { assertFails } = require('@firebase/rules-unit-testing');
     for (const u of [MGR, E1]) {
       const c = env.authenticatedContext(u, { email: u + '@example.invalid' }).firestore();
-      for (const p of ['hkcfg/main', 'hkpend/x_0', 'hkc/101', 'hkchk/a_103']) {
+      for (const p of ['hkcfg/main', 'hkpend/x_0', 'hkc/101', 'hkchk/a_103', 'custDelBak/x', 'custDelBak/x/items/y']) {
         await assertFails(c.doc(`b/${A}/${p}`).get()); await assertFails(c.doc(`b/${A}/${p}`).set({ x: 1 }));
       }
       await assertFails(c.collection(`b/${A}/hkchk`).get());
