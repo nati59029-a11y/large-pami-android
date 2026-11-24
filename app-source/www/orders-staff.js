@@ -324,20 +324,26 @@ const pForm=(p)=>`<h3>${p?'עריכת מוצר':'מוצר חדש'}</h3><form dat
  <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`;
 INP.oxCostX=el=>{const o=el.form&&el.form.elements.cost;if(!o)return;const n=num(el.value);o.value=el.value.trim()&&n>=0?String(incVat(n)):''};
 INP.oxCostInc=el=>{const o=el.form&&el.form.elements.costx;if(!o)return;const n=num(el.value);o.value=el.value.trim()&&n>=0?String(exVat(n)):''};
-ACT.oxNewP=()=>dlg(pForm(null));
+ACT.oxNewP=()=>{PF_CB=null;dlg(pForm(null))};
 /* 17.11.2026 (סנכרון כספית A1): היסטוריית מחיר ועלות של מוצר (priceLog, דרך השרת – מנהל בלבד). מוצג בחלון נפרד; "חזרה" פותח שוב את טופס המוצר */
 const SRC={app:'באפליקציה',caspit:'מכספית',conf:'התנגשות עם כספית – האפליקציה קובעת'};
 ACT.oxPHist=async el=>{const id=el.dataset.id,p=prod(id);if(!p)return;dlg('<h3>היסטוריית מחיר ועלות</h3><p class="note">טוען…</p>');
  try{const r=await fnCall('cxHist',{pid:id});dlg(`<h3>היסטוריית מחיר ועלות</h3><p class="note" style="margin-top:0">${esc(p.name)}${r.codes&&r.codes.length?' · קוד כספית '+r.codes.map(esc).join(', '):''}</p><div style="max-height:55vh;overflow:auto">${(r.log||[]).map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${x.k==='c'?'עלות':'מחיר'}: ${x.src==='conf'?'בכספית '+(x.old==null?'—':ils(x.old))+' · נשאר '+(x.new==null?'—':ils(x.new)):(x.old==null?'—':ils(x.old))+' ← '+ils(x.new)}</b><small>${tm(x.at)} · ${SRC[x.src]||esc(x.src||'')}</small></div></div>`).join('')||'<p class="note">אין שינויים רשומים עדיין</p>'}</div><div class="row"><button class="btn g grow" style="min-height:44px" data-a="oxEditP" data-id="${esc(id)}">חזרה למוצר</button><button class="btn g grow" style="min-height:44px" data-a="closeDlg">סגור</button></div>`)}
  catch(e){dlg(`<h3>היסטוריית מחיר ועלות</h3><p class="note">${esc(e.message||'הטעינה נכשלה')}</p><button class="btn g w" data-a="closeDlg">סגור</button>`)}};
-ACT.oxEditP=el=>{const p=prod(el.dataset.id);if(p)dlg(pForm(p))};
+ACT.oxEditP=el=>{PF_CB=null;const p=prod(el.dataset.id);if(p)dlg(pForm(p))};
+/* מדבקות (24.11.2026, lbl-print.js): אותו טופס מוצר מלא, ואחרי שמירה ורענון המלאי – PF_CB(id, d) */
+let PF_CB=null;
+window.__oxOn=on;
+window.__oxNewP=async(pre,cb)=>{if(!O.P)await load();if(hasBr()&&!SBR){const B=myBr();if(B.length)SBR=B[0].id}dlg(pForm(null));PF_CB=cb||null;
+ const f=document.querySelector('#dlg form[data-f=oxPF]');if(f&&pre){if(pre.name)f.elements.name.value=pre.name;if(pre.barcode)f.elements.barcode.value=pre.barcode}};
+window.__oxEditP=async(id,cb)=>{if(!O.P)await load();const p=prod(id);if(!p)return false;dlg(pForm(p));PF_CB=cb||null;return true};
 FRM.oxPF=async f=>{const x=fd(f),price=num(x.price);if(!x.name.trim())return toast('חסר שם');if(!(price>=0))return toast('מחיר לא תקין');const d={name:x.name.trim(),price,barcode:x.barcode.trim()};
  if(!(x.cost&&x.cost.trim())&&x.costx&&x.costx.trim()){const e=num(x.costx);if(!(e>=0))return toast('עלות לא תקינה');x.cost=String(incVat(e))}/* רק 'לפני מע"מ' מולא – מחשבים כולל */
  if(x.cost&&x.cost.trim()){const c=num(x.cost);if(!(c>=0))return toast('עלות לא תקינה');if(!x.id||c!==costOf(x.id))d.cost=c}
  if(x.id){d.id=x.id;d.on=!x.off}else{d.reqId=x.req;if(x.qty&&x.qty.trim()){const v=num(x.qty);if(!(v>=0))return toast('כמות לא תקינה');d.qty=v;d.br=sbr()}else if(hasBr())d.br=SBR}
  try{Object.assign(d,pExtRead(f,x,!x.id))}catch(e){return toast(e.message)}
  if(d.sup&&window.supSyncNames)window.supSyncNames([d.sup]);/* סנכרון ספקים: ספק חדש מהמוצר – לכרטסת (מנהל) */
- const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveProduct',d);closeDlg();toast('המוצר נשמר');await load(true)}catch(e){b.disabled=false;err(e)}};
+ const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('saveProduct',d);closeDlg();toast('המוצר נשמר');await load(true);if(PF_CB){const c=PF_CB;PF_CB=null;try{c(r&&r.id||x.id,d)}catch(e){}}}catch(e){b.disabled=false;err(e)}};
 // הכנסת מלאי – כמה שורות בבת אחת
 ACT.oxIn=()=>{O.inL=[{pid:'',qty:''}];O.inReq=rid();dlg(inH())};
 const inH=()=>`<h3>הכנסת מלאי${hasBr()?' · '+esc(bn(SBR)):''}</h3><form data-f="oxInF">${O.inL.map((l,i)=>`<div class="row"><label class="f grow"><span>מוצר</span><select name="p${i}"><option value="">בחר</option>${(O.P||[]).map(p=>`<option value="${esc(p.id)}"${l.pid===p.id?' selected':''}>${esc(p.name)}${p.barcode?' · '+esc(p.barcode):''}</option>`).join('')}</select></label><label class="f" style="width:96px"><span>כמות</span><input name="q${i}" inputmode="decimal" value="${esc(l.qty)}"></label></div>`).join('')}

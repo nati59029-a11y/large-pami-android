@@ -584,6 +584,36 @@ test('ייבוא: בתור "ממתין לטעינה" כבר יש קובץ של �
   await cp.evaluate(() => localStorage.removeItem('preq'));
 });
 
+// 0.1.18 – התקלה של 23.11 (03:02): בכספית שורת הקובץ בתור היא <th>שם</th><th>סוג</th><td>פעולות</td>. הקובץ נכנס לתור, אבל התוסף
+// ספר את השורה ככותרת, חשב שהתור ריק וניסה שוב ושוב (הקובץ נכנס פעמיים). עכשיו: נקלט מהניסיון הראשון ומועלה פעם אחת
+test('0.1.18 העלאה: שורת קובץ בתאי th (כמו בכספית) → נקלטת בניסיון הראשון; מועלה פעם אחת', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.removeItem('qtdhead'); localStorage.setItem('qthrow', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  await cp.evaluate(() => localStorage.removeItem('qthrow'));
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  assert.equal(imports.at(-1).type, 'price');
+});
+
+// 0.1.18 – אותו מבנה, וקובץ של מישהו אחר כבר בתור → עוצרים, לא מעלים
+test('0.1.18 העלאה: קובץ זר בתור בתאי th → עוצרים לפני הבחירה', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.setItem('qthrow', '1'); localStorage.setItem('preq', 'someone-else.csv'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.removeItem('qthrow'); });
+  assert.equal(imports.length, nImp, 'שום קובץ לא הועלה');
+  assert.match(JSON.stringify(s.st.lastRun), /import-queue-not-empty|כבר ממתינים/);
+});
+
 // 0.1.16 – התקלה של 22.11 (15:02): בכספית שורת הכותרת של התור היא td רגיל – לא נספרת כשורת קובץ; הקובץ שלנו מועלה פעם אחת
 test('0.1.16 העלאה: כותרת התור בתאי td (כמו בכספית) → לא נחשבת קובץ נוסף; מועלה פעם אחת', async () => {
   const cp = caspitPage();
@@ -892,7 +922,7 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(await tt(W), null);
   srv.caps = ['today', 'uq'];
   await sw.evaluate(() => self.__cxTest.pollOnce());
-  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false });
+  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false, tf: false });
   const c0 = cnt(), H0 = (await store()).salesHash || {};
   const r = await tt(W);
   assert.equal(r && r.st, 'ok', JSON.stringify(r));
@@ -1006,6 +1036,32 @@ test('0.1.13 היכרות לקוחות בנחל לכיש: כישלון באמצ�
     r = await sw.evaluate(() => self.__cxTest.discBr());
     assert.equal(r.out.err.code, 'branch-restore', JSON.stringify(r.out)); assert.equal(r.cur, 'נחל לכיש');
   } finally { await ls({ nlHkEmpty: null, brFail: null, store: 'יהודה הנשיא' }); }
+});
+
+// 0.1.19: העדכון השעתי שנכשל מדווח לשרת ב-poll (tf) – רק לשרת עם caps tf, ורק כשהשתנה
+test('0.1.19 poll: עדכון שעתי שנכשל → tf פעם אחת; שינוי → שוב; שרת בלי tf – לא נשלח', async () => {
+  const polls = () => srv.ops('poll');
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('poll'); return chrome.storage.local.remove(['caps', 'tfSent']); });
+  await sw.evaluate(() => chrome.storage.local.set({ todaySt: { slot: '2026-11-24 11', st: 'fail', at: Date.now(), code: 'needs-login' } }));
+  srv.caps = ['today', 'uq'];
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.equal(polls().at(-1).tf, undefined, 'שרת בלי tf – לא נשלח');
+  srv.caps = ['today', 'uq', 'tf'];
+  await sw.evaluate(() => self.__cxTest.pollOnce()); // לומד את caps
+  const n0 = polls().length;
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  const got = polls().slice(n0 - 1).map((c) => c.tf).filter(Boolean);
+  assert.deepEqual(got, [{ s: '2026-11-24 11', c: 'needs-login' }], 'נשלח פעם אחת');
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.equal(polls().at(-1).tf, undefined, 'לא נשלח שוב כשלא השתנה');
+  await sw.evaluate(() => chrome.storage.local.set({ todaySt: { slot: '2026-11-24 12', st: 'ok', at: Date.now() } }));
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.equal(polls().at(-1).tf, undefined, 'הצליח – לא מדווחים');
+  await sw.evaluate(() => chrome.storage.local.set({ todaySt: { slot: '2026-11-24 13', st: 'run', at: Date.now() - 25 * 60e3 } }));
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.deepEqual(polls().at(-1).tf, { s: '2026-11-24 13', c: 'stuck' });
+  await sw.evaluate(async () => { await chrome.storage.local.remove(['todaySt', 'tfSent']); return self.__cxTest.setupAlarms(); });
+  srv.caps = null;
 });
 
 test('0.1.13 (תיקון בודק) שעתי: נחל לכיש נכשל → בלי העלאה חלקית בכלל (התמונה הקודמת של נחל לכיש לא נמחקת), רישום ב-todaySt', async () => {
