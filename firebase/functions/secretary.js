@@ -482,13 +482,18 @@ async function secPrefs(request) {
       if (e && typeof e.code === 'string') throw bad(e.code, e.message);
       throw e;
     }
-    await PERM.writeRec(db, who.uid, (rec) => PERM.nextRec(rec, s, t), logData(who.uid, 'mgr', s.m === 'unset' ? 'permUnset' : s.save ? 'permSet' : 'permOnce', { tgt: s.type, note: PERM.noteOf(s) }));
+    let ref = null; // החלטת המשתמש 1: הפריט שעורר את השאלה – האפליקציה מבצעת / מבטלת אותו לפי התשובה
+    await PERM.writeRec(db, who.uid, (rec) => { ref = PERM.refOf(((rec.pq || {})[s.type] || {}).ref); return PERM.nextRec(rec, s, t); }, logData(who.uid, 'mgr', s.m === 'unset' ? 'permUnset' : s.save ? 'permSet' : 'permOnce', { tgt: s.type, note: PERM.noteOf(s) }));
     out = { type: s.type, m: s.m, scope: s.scope, saved: s.save && s.m !== 'unset' };
+    if (ref && s.m !== 'unset') out.ref = ref;
     if (s.cap !== undefined) out.cap = s.cap;
   } else if (input.op === 'permAsk') {
     // 24.11.2026 (סבב 4 חלק א): המכשיר (התראות מהטלפון – sec-notif.js) הגיע לביצוע לבד בסוג 'app' בלי הגדרה – שאלה למנהל עצמו. רק הסוג הזה
     if (input.type !== 'app') throw bad('bad-input', 'ערך לא תקין');
-    const first = await PERM.ask(db, who.uid, 'app', 'כלל אוטומטי על התראה מהטלפון');
+    // החלטת המשתמש 3: mig:true – במכשיר כבר יש כלל "כן, לבצע לבד" שאושר לפני הפריסה → "לבד, תמיד" לסוג 'app' בלבד (רק אם עוד לא הוגדר, ביומן permMig).
+    // הכללים נשמרים רק במכשיר (בכוונה – התראות לא עולות לשרת), ולכן השרת סומך על המכשיר של המנהל עצמו; זה משנה רק את ההגדרה שלו
+    if (input.mig === true) return { ok: true, mig: await PERM.legacyAuto(db, who.uid, 'app', {}, 'כלל "לבד" קיים בהתראות מהטלפון') };
+    const first = await PERM.ask(db, who.uid, 'app', 'כלל אוטומטי על התראה מהטלפון', { k: 'app' });
     return { ok: true, asked: first };
   } else if (input.op === 'cmtOn') {
     // 24.11.2026 (גיטי, סבב 3 חלק ב): מתג זיהוי ההתחייבויות לכל העסק (מייל, ווצאפ, קבוצות פתוחות). רק מנהל בלי הגבלת סניפים – הערוצים של כל העסק

@@ -134,10 +134,13 @@ async function secComm(request) {
   }
   if (input.op === 'cmts') {
     // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל המחובר – "אישור התחייבות" אסור → בלי הצעות אצלו. טרם הוגדר ויש הצעות → שאלה בפעם הראשונה
-    const pd = PERM.decide(await PERM.readRec(db, who.uid), 'cmt');
+    // החלטות המשתמש 1–2: "לבד" (ו"עצור הכל" כבוי) – auto:true, והאפליקציה מאשרת לבד הצעות עם תאריך (כתזכורת למנהל); השרת בודק שוב בכל שלב
+    const ws = await db.doc('sec_cfg/wa').get();
+    const pd = PERM.decide(await PERM.readRec(db, who.uid), 'cmt', { stop: !!(ws.exists && ws.get('stop') && ws.get('stop').on === true) });
     if (pd.d === 'deny') return { ok: true, items: [], n: 0, perm: 'deny' };
     const r = await cmts(db, brLimited);
-    if (pd.d === 'ask' && r.n) await PERM.ask(db, who.uid, 'cmt', 'הצעת התחייבות ממתינה');
+    if (pd.d === 'ask' && r.n) await PERM.ask(db, who.uid, 'cmt', 'הצעת התחייבות ממתינה', { k: 'cmt' });
+    if (pd.d === 'auto') r.auto = true;
     return r;
   }
   if (input.op === 'src') {

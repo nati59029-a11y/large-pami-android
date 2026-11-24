@@ -36,7 +36,9 @@ function record(Lr,it,act,to,now){const rk=ruleKey(it),uid=to&&to.uid||'',k=rk+'
 function suggest(Lr,R){const best={};Object.keys(Lr||{}).forEach(k=>{const e=Lr[k];if(!e)return;const b=best[e.rk];if(!b||e.t>b.t)best[e.rk]=e});
  return Object.values(best).filter(e=>e.n>=2&&AUTO.has(e.act)&&(e.act!=='task'||!!e.uid)&&!(R&&R[e.rk])).sort((a,b)=>b.t-a.t)}
 const ruleFor=(R,it)=>{const r=R&&R[ruleKey(it)];return r&&r.on===true&&AUTO.has(r.act)?r:null};
-function setRule(R,e,on,now){R[e.rk]={p:e.p,a:e.a,s:e.s,act:e.act,uid:e.uid||'',un:e.un||'',on:!!on,t:now||Date.now()};return R[e.rk]}
+/* v:2 – כלל שאושר אחרי מסך ההרשאות (24.11.2026). כלל פעיל בלי v = אושר "לבד" לפני הפריסה (החלטת המשתמש 3 – מיגרציה עצלה, legacyRules) */
+function setRule(R,e,on,now){R[e.rk]={p:e.p,a:e.a,s:e.s,act:e.act,uid:e.uid||'',un:e.un||'',on:!!on,t:now||Date.now(),v:2};return R[e.rk]}
+const legacyRules=R=>Object.values(R||{}).some(r=>r&&r.on===true&&AUTO.has(r.act)&&r.v!==2);
 /* מחיקת כלל – גם הספירה של אותו שולח מתאפסת (אחרת ההצעה הייתה חוזרת מיד) */
 function delRule(R,Lr,rk){delete R[rk];Object.keys(Lr||{}).forEach(k=>{if(Lr[k]&&Lr[k].rk===rk)delete Lr[k]})}
 /* מזהה קבוע מהמפתח של ההתראה (משימה ממנה = 'sec'+id): פתיחה חוזרת, ידנית או אוטומטית, מזוהה בשרת (409) ולא יוצרת כפילות */
@@ -60,7 +62,7 @@ function capTake(C,rk,day,used){if(!C||typeof C!=='object'||C.d!==day)C={d:day,n
 function appPerm(st,act){const p=st&&st.perm;if(!p||!p.m||typeof p.m!=='object')return 'approve';
  if(act==='task'&&p.m.task&&p.m.task.m==='deny')return 'deny';
  const e=p.m.app;if(!e)return 'ask';if(e.m==='deny')return 'deny';if(e.m!=='auto')return 'approve';return st.stop===true?'approve':'auto'}
-const Core={MAXI,LOGN,AUTO_RUN,AUTO_DAY,MAXM,isOtp,appPerm,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd,stPut,applySt,stTrim,capTake};
+const Core={MAXI,LOGN,AUTO_RUN,AUTO_DAY,MAXM,isOtp,appPerm,legacyRules,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd,stPut,applySt,stTrim,capTake};
 if(typeof module==='object'&&module&&module.exports){module.exports=Core;return}
 root.SecNotifCore=Core;
 
@@ -133,10 +135,16 @@ async function tick(){const P=plug();if(!P||!adm()||!uid()||N.tk)return;N.tk=1;
 /* תקרה: עד AUTO_RUN משימות בכל עיבוד ועד AUTO_DAY ביום לכל כלל. מעבר לתקרה – ההתראה נשארת "ממתינה להחלטה" (cap), ושורה אחת ביומן לכל כלל */
 const CAPM={day:'הגעתי לתקרה היומית של הכלל – ממתין לאישורך',run:'הגעתי לתקרה של '+AUTO_RUN+' משימות אוטומטיות בבת אחת – ממתין לאישורך'};
 const dayK=t=>{try{return new Date(t).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'})}catch(e){return new Date(t).toISOString().slice(0,10)}};
-async function autoRun(added){const S=st();if(S.off)return;
- /* 24.11.2026 (סבב 4 חלק א): כלל "לבד" רץ רק אם מסך ההרשאות של המנהל מתיר "פעולה על הודעה מאפליקציה / SMS" ו"עצור הכל" כבוי. אחרת ההתראה נשארת "מה לעשות?" */
- const pm=appPerm(window.__sec&&window.__sec.st);
- if(pm!=='auto'){if(pm==='ask'&&!N.pa&&added.some(it=>ruleFor(S.R,it))){N.pa=1;try{fnCallSec('secPrefs',{op:'permAsk',type:'app'}).catch(()=>{N.pa=0})}catch(e){N.pa=0}}return}
+async function autoRun(added,once){const S=st();if(S.off)return;
+ /* 24.11.2026 (סבב 4 חלק א): כלל "לבד" רץ רק אם מסך ההרשאות של המנהל מתיר "פעולה על הודעה מאפליקציה / SMS" ו"עצור הכל" כבוי. אחרת ההתראה נשארת "מה לעשות?".
+    once – תשובה "לבד" לשאלה הראשונה שחלה גם על ההתראות שעוררו אותה (החלטה 1), גם ב"רק הפעם". "עצור הכל" ו"משימה אסורה" – נבדקים תמיד */
+ const X0=window.__sec&&window.__sec.st,pm=once&&X0&&X0.stop!==true?'auto':appPerm(X0);
+ if(pm!=='auto'){
+  if(pm==='ask'&&!N.pa&&added.some(it=>ruleFor(S.R,it))){N.pa=1;
+   /* החלטה 3: כלל שאושר "לבד" לפני הפריסה – "לבד, תמיד" לסוג הזה (השרת: רק אם עוד לא הוגדר, ביומן). אחרת – שאלה בפעם הראשונה */
+   try{const leg=legacyRules(S.R),r=await fnCallSec('secPrefs',leg?{op:'permAsk',type:'app',mig:true}:{op:'permAsk',type:'app'});
+    if(leg&&r&&r.mig&&X0&&X0.perm&&X0.perm.m){X0.perm.m.app={m:'auto',mig:1};return autoRun(added)}}catch(e){N.pa=0}}
+  return}
  let ch=0,used=0;const day=dayK(Date.now()),capd={};
  for(const it of added){const r=ruleFor(S.R,it);if(!r)continue;
   if(r.act==='ign'){setSt(it.k,{st:'ign',by:'auto'});S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'ign',ok:1});ch=1;continue}
@@ -213,6 +221,8 @@ window.__secNotifH=()=>{try{return notifH()}catch(e){return '<p class="note">ל�
 /* 23.11.2026 (גיטי, סבב 3): ללשונית "תקשורת" (sec-comm.js) – ההתראות שבזיכרון של הדף, לקריאה בלבד ורק במכשיר הזה (לא נשלחות לשרת). null = הקליטה לא פעילה כאן */
 window.__secNfList=()=>{try{return native()&&adm()&&plug()&&uid()&&N.cfg&&mine()?inbox().map(x=>({k:x.k,a:x.a,s:x.s,x:x.x,t:x.t,st:x.st})):null}catch(e){return null}};
 window.__secNfTick=()=>{try{tick()}catch(e){}};
+/* מ-sec-perm.js (החלטה 1): תשובה לשאלה הראשונה על 'app' – "לבד" מבצע עכשיו את הכללים על ההתראות שממתינות; "אסור" – הן נשארות "מה לעשות?" */
+window.__secNfAutoNow=m=>{try{if(m!=='auto'||!uid())return;const L=inbox().filter(x=>x.st==='new');if(L.length)autoRun(L,true).then(()=>{if(onTab())re()})}catch(e){}};
 
 /* ---------- פעולות ---------- */
 const pick=el=>{const it=itemOf(el.dataset.k);if(!it){toast('ההתראה כבר לא ברשימה');re(1)}return it};

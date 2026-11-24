@@ -296,6 +296,8 @@ async function ask2(q,deep,via){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)r
  try{const fin=secFin({pay:!!X.st.pay,rec:true,notes:X.st.sens===true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
+  /* 24.11.2026 (גיטי סבב 4, החלטה 2): כרטיס משימה / תזכורת שהשרת סימן auto ("לבד" במסך ההרשאות) – מאושר מיד באותה זרימה */
+  (r.cards||[]).filter(c=>c&&c.k==='tkp'&&c.auto===true).forEach(c=>setTimeout(()=>window.__secTpAuto(c.id),300));
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
  catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
@@ -2054,6 +2056,12 @@ ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;con
   doneSt(c.id,'ok');toast(r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה ל'+cxNames(x)+', יעד: '+r.dlL);try{await tkLoad()}catch(e){}}
  catch(e){if(e&&e.reason==='perm-deny'){toast(e.message);return}if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
  finally{c.busy=0;cxRe()}};
+/* 24.11.2026 (גיטי סבב 4, החלטות 1–2): אישור / ביטול של כרטיס בלי לחיצה – כרטיס "לבד", או תשובה לשאלה הראשונה שחלה מיד על הכרטיס שעורר אותה.
+   אישור רק כשיש את כל הפרטים (למשימה – למי; לתזכורת – תאריך); אחרת הכרטיס נשאר לאישור. השרת בודק את ההרשאות שוב (tkCard chk / secCal) */
+window.__secTpAuto=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||!c.txt)return false;const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;
+ if(c.kind==='rem'?!c.d:(!cxOn()||(!c.all&&!(c.to||[]).length)))return false;
+ ACT.secTpOk({dataset:{id:cid,mid},closest:()=>null});return true}catch(e){return false}};
+window.__secTpCancel=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||c.ref)return false;const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;ACT.secTpNo({dataset:{id:cid,mid}});return true}catch(e){return false}};
 ACT.secTpNo=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';
  if(c.ref)return toast('התזכורת כבר נקבעה. לחצו "אישור" כדי לסיים');
  c.busy=1;cxRe();try{if(mid)await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'no'});c.busy=0;doneSt(c.id,'no')}catch(e){if(e&&e.reason==='not-found'){c.busy=0;doneSt(c.id,'gone')}else err(e)}finally{c.busy=0;cxRe()}};

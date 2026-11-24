@@ -22,7 +22,8 @@ const dShow=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?(+m[3])
 async function load(){if(M.b)return;M.b=1;M.err='';
  try{const r=await fnCall('secComm',{op:'cmts'});if(!r||!Array.isArray(r.items))throw new Error('לא נטען');
   const old=new Map((M.L||[]).map(c=>[c.cid,c]));
-  M.L=r.items.map(x=>{const o=old.get(x.cid);if(o)return o;const k=cxOk()?'task':'rem';return Object.assign({},x,{kind:k,txt:x.what,to:[],all:false,busy:0})})}
+  M.L=r.items.map(x=>{const o=old.get(x.cid);if(o)return o;const k=cxOk()?'task':'rem';return Object.assign({},x,{kind:k,txt:x.what,to:[],all:false,busy:0})});
+  M.auto=r.auto===true;if(M.auto)setTimeout(autoRun,0)}
  catch(e){M.err=e&&e.message||'לא נטען'}
  finally{M.b=0;M.ld=1;re()}}
 function cxOk(){try{const c=cx();return !!(c&&c.on())}catch(e){return false}}
@@ -82,13 +83,21 @@ async function fin(c,kind,undo){const r=await mark(c,'ok',kind);if(!(r&&r.alread
  let u=1;try{await undo()}catch(e){u=0}c.ref='';done(c,r.st);
  toast((STL[r.st]||'ההצעה כבר הוכרעה')+(u?(kind==='rem'?' – התזכורת שנוצרה בוטלה':' – המשימה שנוצרה נמחקה'):(kind==='rem'?' – לא הצלחתי לבטל את התזכורת, מחקו אותה ביומן':' – לא הצלחתי למחוק את המשימה, מחקו אותה במסך המשימות')));
  try{if(kind!=='rem'&&typeof tkLoad==='function')tkLoad()}catch(e){}return false}
-async function okRem(c,force){c.busy=1;re();
+/* 24.11.2026 (גיטי סבב 4, החלטות המשתמש 1–2): "אישור התחייבות" מוגדר "לבד" אצל המנהל הזה (השרת מחזיר auto רק כש"עצור הכל" כבוי) –
+   הצעה עם תאריך נקבעת לבד כתזכורת למנהל (אותה זרימה: תפיסה → secCal → סימון; השרת בודק את ההרשאות בכל שלב). בלי תאריך – נשארת לאישור.
+   עד AUTO_N בכל טעינה, וכל הצעה פעם אחת בלבד בדף הזה */
+const AUTO_N=5,tried=new Set();
+async function autoRun(){if(!M.auto)return;let n=0;
+ for(const c of (M.L||[]).filter(x=>!x.st&&!x.busy&&x.d&&!tried.has(x.cid))){if(n>=AUTO_N)break;n++;tried.add(c.cid);c.kind='rem';c.txt=String(c.txt||c.what||'').slice(0,120);
+  try{await okRem(c,true,true)}catch(e){}}}
+root.__secCmtAuto=()=>{M.L=null;M.ld=0;load()};/* מ-sec-perm.js: אחרי תשובה "לבד" לשאלה הראשונה – טעינה מחדש (השרת יחזיר auto) */
+async function okRem(c,force,quiet){c.busy=1;re();
  if(!c.ref&&!(await claim(c)))return;
  try{if(!c.ref){const d={op:'add',title:c.txt.slice(0,120),d:c.d,rem:true,cid:c.cid};if(force)d.force=true;
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){c.busy=0;re();return ask('התאריך נופל ב'+r.warn.kind+'. לקבוע את התזכורת בכל זאת?',()=>okRem(c,true),'כן, לקבוע')}
    c.ref=r&&r.id||'sec'+c.cid}
-  if(!(await fin(c,'rem',()=>fnCall('secCal',{op:'del',id:'sec'+c.cid}))))return;c.ref='';done(c,'ok');toast('✓ התזכורת נקבעה')}
+  if(!(await fin(c,'rem',()=>fnCall('secCal',{op:'del',id:'sec'+c.cid}))))return;c.ref='';done(c,'ok');toast(quiet?'✓ גיטי קבעה לבד תזכורת מהתחייבות':'✓ התזכורת נקבעה')}
  catch(e){c.busy=0;toast(c.ref?'התזכורת נקבעה, אבל הסימון נכשל. לחצו "אישור" שוב':(e&&e.message)||'הקביעה נכשלה');re()}}
 ACT.cmtOk=async el=>{const c=byId(el.dataset.id);if(!c||c.st||c.busy)return;sync(c,el.closest('[data-cmt]'));
  if(!c.txt)return toast(c.kind==='rem'?'כתבו על מה להזכיר':'כתבו מה צריך לעשות');

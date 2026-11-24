@@ -34,8 +34,14 @@ describe('sec-perm: ההחלטה', () => {
     assert.equal(P.decide(rec({ ord: { m: 'auto', cap: 1e6 } }), 'ord', { amount: 1 }).d, 'approve');
     assert.equal(P.decide(rec({ ord: { m: 'deny' } }), 'ord').d, 'deny');
   });
-  it('סוג שאין לו ביצוע לבד (משימה, תזכורת, התחייבות) – לבד שנשמר בטעות = לאישור', () => {
-    for (const k of ['task', 'rem', 'cmt']) assert.equal(P.decide(rec({ [k]: { m: 'auto' } }), k).d, 'approve');
+  it('החלטה 2: "לבד" גם למשימה, תזכורת והתחייבות – כפוף ל"עצור הכל"', () => {
+    for (const k of ['task', 'rem', 'cmt']) {
+      assert.equal(P.decide(rec({ [k]: { m: 'auto' } }), k).d, 'auto', k);
+      assert.equal(P.decide(rec({ [k]: { m: 'auto' } }), k, { stop: true }).d, 'approve', k);
+      assert.equal(P.parseSet({ type: k, m: 'auto' }, A).m, 'auto');
+      assert.equal(P.decide(rec(), k).d, 'ask', 'בפעם הראשונה – שאלה');
+    }
+    assert.equal(P.stateOf(rec()).types.filter((t) => t.auto).map((t) => t.k).join(','), 'task,rem,mail,wa,fin,cmt,app');
   });
   it('סוג לא מוכר / רשומה פגומה', () => {
     assert.equal(P.decide(rec(), 'pay').d, 'deny');
@@ -74,7 +80,6 @@ describe('sec-perm: שינוי הרשאות – רק המנהל עצמו', () =>
     assert.throws(() => P.parseSet({ type: 'fin', m: 'auto' }, A), (e) => e.code === 'bad-cap');
     assert.throws(() => P.parseSet({ type: 'fin', m: 'auto', cap: -1 }, A), (e) => e.code === 'bad-cap');
     assert.throws(() => P.parseSet({ type: 'ord', m: 'auto', cap: 10 }, A), (e) => e.code === 'no-auto');
-    assert.throws(() => P.parseSet({ type: 'task', m: 'auto' }, A), (e) => e.code === 'no-auto');
     assert.throws(() => P.parseSet({ type: '__proto__', m: 'deny' }, A), (e) => e.code === 'bad-input');
     assert.throws(() => P.parseSet({ type: 'mail', m: 'maybe' }, A), (e) => e.code === 'bad-input');
     assert.equal(P.parseSet({ type: 'ord', m: 'deny' }, A).m, 'deny');
@@ -148,6 +153,75 @@ describe('sec-perm: אחסון נפרד לכל מנהל (sec_perm/{uid}) ושא�
     assert.equal(state.docs['sec_cfg/main'].mgr[A].perm, undefined, 'נמחק מהמסמך המשותף');
     assert.equal(state.docs['sec_cfg/main'].mgr[A].cv, 'v', 'שאר הרשומה של המנהל נשארה');
     assert.equal(state.log.length, 1);
+  });
+});
+
+describe('החלטה 1: התשובה הראשונה חלה מיד על הפריט שעורר את השאלה', () => {
+  it('ask שומר את הפריט (ref) ו-pqOf מחזיר אותו; ref לא תקין לא נשמר', async () => {
+    const { db, state } = fakeDb(main());
+    await P.ask(db, A, 'task', 'הצעה בשיחה', { k: 'tkp', cid: 'tp0123456789abcdef', evil: '<x>' });
+    assert.deepEqual(P.pqOf(state.docs['sec_perm/' + A]).task.ref, { k: 'tkp', cid: 'tp0123456789abcdef' });
+    await P.ask(db, A, 'cmt', '', { k: 'zzz' });
+    assert.equal(P.pqOf(state.docs['sec_perm/' + A]).cmt.ref, undefined);
+    assert.equal(P.refOf({ k: 'tkp', cid: '../x' }).cid, undefined);
+  });
+  it('בתשובה (writeRec + nextRec) – ה-ref נקרא לפני שהשאלה נסגרת, והשאלה נמחקת', async () => {
+    const { db, state } = fakeDb(main());
+    await P.ask(db, A, 'rem', 'x', { k: 'tkp', cid: 'tpaaaa' });
+    let ref = null;
+    const s = P.parseSet({ type: 'rem', m: 'deny', scope: 'once' }, A);
+    await P.writeRec(db, A, (r) => { ref = P.refOf(((r.pq || {})[s.type] || {}).ref); return P.nextRec(r, s, 5); }, { act: 'permOnce' });
+    assert.deepEqual(ref, { k: 'tkp', cid: 'tpaaaa' });
+    assert.deepEqual(state.docs['sec_perm/' + A].pq, {});
+    assert.deepEqual(state.docs['sec_perm/' + A].perm, {}, '"רק הפעם" – לא נשמר');
+  });
+});
+
+describe('החלטה 3: כלל "לבד" קיים – מיגרציה עצלה ל"לבד, תמיד" לסוג שלו בלבד', () => {
+  it('בעל כלל בלי הגדרה: blockWhy עם legacy → לבד, נשמר עם mig, שורה אחת ביומן', async () => {
+    const { db, state } = fakeDb(main());
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true }), '');
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true }), '');
+    assert.deepEqual(P.permOf(state.docs['sec_perm/' + A]).mail.mig, 1);
+    assert.equal(state.log.filter((l) => l.act === 'permMig').length, 1);
+    assert.equal(P.permOf(state.docs['sec_perm/' + A]).wa, undefined, 'לא מפעיל סוגים אחרים');
+    assert.equal(state.docs['sec_perm/' + B], undefined, 'לא אצל מנהל אחר');
+  });
+  it('לא דורס הגדרה קיימת ("אסור" נשאר אסור), ובלי legacy – שאלה רגילה', async () => {
+    const d = main(); d['sec_perm/' + A] = { perm: { mail: { m: 'deny' } }, pq: {} };
+    const { db, state } = fakeDb(d);
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true }), 'pmDeny');
+    assert.equal(await P.blockWhy(db, A, 'wa', {}, 'x'), 'pmAsk');
+    assert.equal(state.log.filter((l) => l.act === 'permMig').length, 0);
+  });
+  it('סוג כספי: רק עם תקרה ("נכנס ישר" של העסק), והתקרה נאכפת', async () => {
+    const { db, state } = fakeDb(main());
+    assert.equal(await P.legacyAuto(db, A, 'fin', {}), false, 'בלי תקרה – לא');
+    assert.equal(await P.legacyAuto(db, A, 'fin', { cap: 5000 }), true);
+    assert.equal(P.decide(state.docs['sec_perm/' + A], 'fin', { amount: 4000 }).d, 'auto');
+    assert.equal(P.decide(state.docs['sec_perm/' + A], 'fin', { amount: 6000 }).d, 'approve');
+    assert.equal(await P.legacyAuto(db, A, 'ord', { cap: 1 }), false, 'הזמנה מספק – לעולם לא');
+    assert.equal(await P.legacyAuto(db, 'stranger', 'mail'), false, 'רק מנהל שאישר תנאים');
+  });
+  it('מכשיר: כלל פעיל שאושר לפני הפריסה (בלי v) = legacy; כלל חדש (v:2) או "תמיד לשאול" – לא', () => {
+    assert.equal(NF.legacyRules({ a: { on: true, act: 'ign' } }), true);
+    assert.equal(NF.legacyRules({ a: { on: true, act: 'task', v: 2 } }), false);
+    assert.equal(NF.legacyRules({ a: { on: false, act: 'ign' } }), false);
+    assert.equal(NF.legacyRules(null), false);
+  });
+});
+
+describe('החלטה 4: הודעות פתיחה / "קיבלנו" בווצאפ – מחוץ להרשאות, אבל "עצור הכל" עוצר אותן', () => {
+  it('sendAuto: "עצור הכל" פעיל – לא נשלח, ונרשם autoStopped', async () => {
+    const WA = require('../functions/secretary-wa')._core;
+    const logs = []; let sent = 0;
+    const db = { doc: (p) => ({ get: async () => ({ exists: p === 'sec_cfg/wa', data: () => ({ stop: { on: true } }), get: (k) => ({ stop: { on: true } })[k] }) }), collection: () => ({ doc: () => ({ set: async (v) => { logs.push(v); } }) }) };
+    for (const kind of ['open', 'ack']) {
+      const r = await WA.sendAuto(db, { pnid: 'p1', in: 'i1' }, '972500000001', 'שלום', kind, { now: 1, send: async () => { sent++; return {}; } });
+      assert.deepEqual(r, { stopped: true });
+    }
+    assert.equal(sent, 0);
+    assert.deepEqual(logs.map((l) => l.act), ['autoStopped', 'autoStopped']);
   });
 });
 

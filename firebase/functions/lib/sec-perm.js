@@ -14,15 +14,17 @@
 //     auto → רק אם "עצור הכל" כבוי, ובסוג כספי – רק עם סכום ידוע ועד התקרה; אחרת – לאישור.
 //     בלי הגדרה → ask: נרשמת שאלה לאותו מנהל (ask) והפעולה עצמה – לאישור (כמו approve).
 //   ברמת העסק וקבוע: "עצור הכל", תקרת העלות (מנגנונים קיימים), "הזמנה מספק" – תמיד באישור (גם אם נשמר "לבד" בטעות).
-//   סוג שאין לגיטי עדיין דרך לבצע לבד (auto:false) – "לבד" לא נשמר. "לבד" לא עוקף שום בדיקה קיימת (כללי הבטיחות, מכסות) – רק תנאי נוסף.
+//   החלטות המשתמש (24.11.2026): (1) התשובה הראשונה חלה מיד גם על הפריט שעורר את השאלה (pq.<סוג>.ref – האפליקציה מבצעת / מבטלת אותו);
+//   (2) "לבד" גם למשימה, תזכורת והתחייבות; (3) כלל שכבר סומן "לבד" לפני הפריסה – מיגרציה עצלה ל"לבד, תמיד" לסוג שלו בלבד (legacyAuto).
+//   סוג שאין לגיטי דרך לבצע לבד (auto:false) – "לבד" לא נשמר. "לבד" לא עוקף שום בדיקה קיימת (כללי הבטיחות, מכסות) – רק תנאי נוסף.
 
 const TYPES = Object.freeze({
-  task: Object.freeze({ l: 'יצירת משימה', auto: false }),
-  rem: Object.freeze({ l: 'תזכורת', auto: false }),
+  task: Object.freeze({ l: 'יצירת משימה', auto: true }), // 24.11.2026 (החלטת המשתמש 2): "לבד" גם למשימה, תזכורת והתחייבות
+  rem: Object.freeze({ l: 'תזכורת', auto: true }),
   mail: Object.freeze({ l: 'שליחת מייל', auto: true }),
   wa: Object.freeze({ l: 'הודעת ווצאפ', auto: true }),
   fin: Object.freeze({ l: 'רישום הוצאה / הכנסה', auto: true, money: true }),
-  cmt: Object.freeze({ l: 'אישור התחייבות', auto: false }),
+  cmt: Object.freeze({ l: 'אישור התחייבות', auto: true }),
   ord: Object.freeze({ l: 'הזמנה מספק', auto: false, money: true, fixed: 'approve' }),
   app: Object.freeze({ l: 'פעולה על הודעה מאפליקציה / SMS', auto: true }),
 });
@@ -57,6 +59,7 @@ function permOf(rec) {
     const o = { m: e.m };
     if (TYPES[k].money && capOk(e.cap)) o.cap = e.cap;
     if (Number.isFinite(e.t)) o.t = e.t;
+    if (e.mig === 1) o.mig = 1;
     out[k] = o;
   }
   return out;
@@ -69,6 +72,8 @@ function pqOf(rec) {
     const e = obj(q[k]);
     if (!Number.isFinite(e.t)) continue;
     out[k] = { t: e.t, n: Number.isInteger(e.n) && e.n > 0 ? e.n : 1, note: typeof e.note === 'string' ? e.note.slice(0, 120) : '' };
+    const r = refOf(e.ref);
+    if (r) out[k].ref = r;
   }
   return out;
 }
@@ -158,10 +163,20 @@ async function writeRec(db, uid, fn, log) {
   });
 }
 
+// הפריט שעורר את השאלה (החלטת המשתמש 1: התשובה חלה מיד גם עליו). k – סוג הפריט: 'tkp' (כרטיס בשיחה, cid), 'cmt' (הצעות ההתחייבות שהוצגו), 'app' (התראות בטלפון)
+const REF_K = ['tkp', 'cmt', 'app'];
+function refOf(x) {
+  const r = obj(x);
+  if (!REF_K.includes(r.k)) return null;
+  const o = { k: r.k };
+  if (typeof r.cid === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(r.cid)) o.cid = r.cid;
+  return o;
+}
+
 // "שאלה בפעם הראשונה" למנהל uid: נרשמת פעם אחת לכל סוג (כל עוד לא נענתה), עם מונה כמה פעמים גיטי הגיעה אליה. רישום ביומן – רק בפעם הראשונה.
 // רק למנהל שאישר את התנאים (sec_cfg/main.mgr.<uid>.cv). שורת היומן – באותו מבנה כמו logData ב-secretary.js.
 // לא זורק (תקלה כאן לא עוצרת את הפעולה – היא ממילא נשארת לאישור)
-async function ask(db, uid, type, note) {
+async function ask(db, uid, type, note, ref) {
   if (!TYPES[type] || !uidOk(uid)) return false;
   let first = false;
   try {
@@ -171,18 +186,45 @@ async function ask(db, uid, type, note) {
       const cur = obj(obj(rec.pq)[type]);
       first = !Number.isFinite(cur.t);
       const n = (Number.isInteger(cur.n) ? cur.n : 0) + 1;
-      return { perm: rec.perm, pq: Object.assign({}, rec.pq, { [type]: { t: first ? Date.now() : cur.t, n, note: String(note || cur.note || '').slice(0, 120) } }) };
+      const q = { t: first ? Date.now() : cur.t, n, note: String(note || cur.note || '').slice(0, 120) };
+      const rf = refOf(ref) || refOf(cur.ref); // הפריט האחרון שעורר את השאלה
+      if (rf) q.ref = rf;
+      return { perm: rec.perm, pq: Object.assign({}, rec.pq, { [type]: q }) };
     }, () => (first ? { t: Date.now(), by: uid, who: 'auto', act: 'permAsk', ch: 'app', tgt: type, note: String(note || '').slice(0, 120) } : null));
     return first;
   } catch (e) { return false; }
 }
 
-// לנקודות הביצוע: '' = מותר לבד; אחרת קוד הסיבה (WHY). בלי הגדרה – גם רושם שאלה לאותו מנהל. אין בעלים – לאישור, בלי שאלה
-async function blockWhy(db, uid, type, o, note) {
+// החלטת המשתמש 3 (24.11.2026) – מיגרציה עצלה ולא הרסנית: כלל שכבר סומן "לבד" לפני הפריסה ממשיך לעבוד. כשבעל הכלל עוד לא הגדיר את סוג
+// הפעולה – נשמר אצלו "לבד, תמיד" לאותו סוג בלבד (mig:1), ושורה אחת ביומן (permMig). לא נוגע בסוג שכבר הוגדר, ולא בסוגים אחרים.
+// o.cap – תקרה לסוג כספי (למשל תקרת "נכנס ישר" של החשבוניות). מחזיר true אם נשמר עכשיו
+async function legacyAuto(db, uid, type, o, note) {
+  const t = TYPES[type];
+  if (!t || !t.auto || t.fixed || !uidOk(uid)) return false;
+  const cap = t.money ? obj(o).cap : undefined;
+  if (t.money && !capOk(cap)) return false;
+  let done = false;
+  try {
+    await writeRec(db, uid, (rec, main) => {
+      if (!oldOf(main, uid).cv) return null; // רק מנהל שאישר את התנאים
+      if (permOf(rec)[type]) return null; // כבר הוגדר – לא משנים
+      done = true;
+      const perm = Object.assign({}, rec.perm, { [type]: Object.assign({ m: 'auto', t: Date.now(), mig: 1 }, t.money ? { cap } : {}) });
+      const pq = Object.assign({}, rec.pq); delete pq[type];
+      return { perm, pq };
+    }, () => (done ? { t: Date.now(), by: uid, who: 'auto', act: 'permMig', ch: 'app', tgt: type, note: String(note || '').slice(0, 120) + (cap !== undefined ? ' cap=' + cap : '') } : null));
+  } catch (e) { return false; }
+  return done;
+}
+
+// לנקודות הביצוע: '' = מותר לבד; אחרת קוד הסיבה (WHY). בלי הגדרה – גם רושם שאלה לאותו מנהל. אין בעלים – לאישור, בלי שאלה.
+// opt.legacy – הפעולה באה מכלל שכבר מסומן "לבד" (החלטה 3): בלי הגדרה – מיגרציה ל"לבד" במקום שאלה. opt.ref – הפריט שעורר את השאלה
+async function blockWhy(db, uid, type, o, note, opt) {
   if (!uidOk(uid)) return 'pmOwner';
-  const r = decide(await readRec(db, uid), type, o);
+  let r = decide(await readRec(db, uid), type, o);
+  if (r.d === 'ask' && opt && opt.legacy && (await legacyAuto(db, uid, type, opt, note))) r = decide(await readRec(db, uid), type, o);
   if (r.d === 'auto') return '';
-  if (r.d === 'ask') await ask(db, uid, type, note);
+  if (r.d === 'ask') await ask(db, uid, type, note, opt && opt.ref);
   return r.why;
 }
 
@@ -203,4 +245,4 @@ function isOtp(text, title) {
   return OTP_NUM.test(s) || /סיסמ|password|passcode/i.test(s);
 }
 
-module.exports = { COLL, TYPES, KEYS, MODES, SCOPES, CAP_MAX, WHY, permOf, pqOf, recFrom, readRec, decide, isAuto, parseSet, noteOf, nextRec, writeRec, ask, blockWhy, stateOf, isOtp };
+module.exports = { COLL, TYPES, KEYS, MODES, SCOPES, CAP_MAX, WHY, permOf, pqOf, recFrom, readRec, decide, isAuto, parseSet, noteOf, nextRec, writeRec, refOf, ask, legacyAuto, blockWhy, stateOf, isOtp };

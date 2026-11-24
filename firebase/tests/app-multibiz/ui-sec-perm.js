@@ -23,7 +23,7 @@ async function open(browser, www, o) {
   const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: true, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: NT, types: TYPES, unseen: 0,
     learn: o.learn !== false, brLimited: false, stop: false,
     perm: { edit: true, m: { mail: { m: 'auto' }, wa: { m: 'deny' } }, q: { fin: { t: now - 6e5, n: 2, note: 'חשבונית ספק – הכנסה אוטומטית' } },
-      types: [['task', 'יצירת משימה', 0, 0, ''], ['rem', 'תזכורת', 0, 0, ''], ['mail', 'שליחת מייל', 1, 0, ''], ['wa', 'הודעת ווצאפ', 1, 0, ''], ['fin', 'רישום הוצאה / הכנסה', 1, 1, ''], ['cmt', 'אישור התחייבות', 0, 0, ''], ['ord', 'הזמנה מספק', 0, 1, 'approve'], ['app', 'פעולה על הודעה מאפליקציה / SMS', 1, 0, '']].map(([k, l, a, m, f]) => ({ k, l, auto: !!a, money: !!m, fixed: f })) } };
+      types: [['task', 'יצירת משימה', 1, 0, ''], ['rem', 'תזכורת', 1, 0, ''], ['mail', 'שליחת מייל', 1, 0, ''], ['wa', 'הודעת ווצאפ', 1, 0, ''], ['fin', 'רישום הוצאה / הכנסה', 1, 1, ''], ['cmt', 'אישור התחייבות', 1, 0, ''], ['ord', 'הזמנה מספק', 0, 1, 'approve'], ['app', 'פעולה על הודעה מאפליקציה / SMS', 1, 0, '']].map(([k, l, a, m, f]) => ({ k, l, auto: !!a, money: !!m, fixed: f })) } };
   const DAY = '2026-11-04';
   // הצ'אט הקודם: שני דפים. בדף האחרון: כרטיס שאושר, כרטיס שבוטל, כרטיס ממתין, כרטיס ניתוב ממתין
   const page2 = [{ id: 'o1', role: 'u', text: 'שאלה ישנה', t: now - 9e6 }, { id: 'o2', role: 'a', text: 'תשובה ישנה ' + XSS, t: now - 9e6 + 1, src: [] }];
@@ -64,11 +64,14 @@ async function open(browser, www, o) {
     bodies.push([n, body]);
     const ok = (r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
     if (n === 'secState') return ok(st);
-    if (n === 'secPrefs' && body.op === 'perm') { if (body.m === 'auto' && body.type === 'fin' && !(body.cap >= 0)) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'צריך תקרה' } }) }); return ok({ ok: true, type: body.type, m: body.m, scope: body.scope, saved: body.scope === 'always' && body.m !== 'unset', ...(body.cap !== undefined ? { cap: body.cap } : {}) }); }
+    if (n === 'secPrefs' && body.op === 'perm') { if (body.m === 'auto' && body.type === 'fin' && !(body.cap >= 0)) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'צריך תקרה' } }) }); return ok({ ok: true, type: body.type, m: body.m, scope: body.scope, saved: body.scope === 'always' && body.m !== 'unset', ...(body.cap !== undefined ? { cap: body.cap } : {}), ...(body.type === 'app' ? { ref: { k: 'app' } } : body.type === 'task' ? { ref: { k: 'tkp', cid: 'tp0123456789abcdef' } } : {}) }); }
     if (n === 'secGoogle') return ok({ ok: true, configured: true, max: 3, boxes: [{ id: 'b1', addr: 'a@b.co', st: 'ok', clean: false }], cal: { connected: false } });
     if (n === 'secWaCfg') return ok({ ok: true, connected: false });
     if (n === 'cxBotTok') return ok({ dev: { id: 'd1', at: now - 600e3 }, lr: { st: 'needs-login', at: now - 3600e3 }, runs: [] }); // 23.11.2026 (סבב 2): מצב כספית
     if (n === 'secChatLoad') return ok(body.before ? { ok: true, msgs: page2, more: false } : { ok: true, msgs: page1, more: true });
+    if (n === 'secComm' && body.op === 'cmts') return ok({ ok: true, auto: true, n: 2, items: [{ cid: 'cm00000000000000c1', t: now - 1e5, ch: 'mail', from: 'רונית', who: 'them', what: 'לוודא שהספק שלח', d: '2026-11-06', prev: 'אשלח מחר', st: '' }, { cid: 'cm00000000000000c2', t: now - 2e5, ch: 'mail', from: 'דני', who: 'them', what: 'בלי תאריך', d: '', prev: 'אחזור אליך', st: '' }] });
+    if (n === 'secPrefs' && body.op === 'cmt') return ok({ ok: true, st: body.st });
+    if (n === 'secChat' && /לבד/.test(body.text || '')) return ok({ ok: true, id: 'a8', reply: 'קבעתי.', mode: 'ok', src: [], cards: [{ k: 'tkp', id: 'tp00000000000000aa', kind: 'rem', txt: 'להתקשר לספק', d: '2026-11-05', tm: '', pri: '', all: false, to: [], auto: true }], pct: 11, saving: false });
     if (n === 'secChat') return ok({ ok: true, id: 'a9', reply: 'לקבוע תזכורת?', mode: 'ok', src: [], cards: [{ k: 'cal', id: 'k7', title: 'להתקשר לספק', d: DAY, tm: '09:00', to: 'me', rem: true }], pct: 11, saving: false });
     if (n === 'secCal') return ok(body.op === 'list' ? { ok: true, events: [], we: 'warn', today: '2026-11-03' } : { ok: true, id: body.id });
     if (n === 'secNotes') return ok(body.op === 'list' ? { ok: true, notes, unseen: 0, types: TYPES } : body.op === 'snooze' ? { ok: true, id: body.id, at: body.at || now + 75600e3, l: body.when === 'morning' ? 'מחר 08:00' : 'היום 12:00' } : { ok: true });
@@ -113,7 +116,7 @@ async function open(browser, www, o) {
     check('מסך הרשאות: 8 סוגי פעולה', rows.length === 8, rows.map((r) => r.k));
     const R = Object.fromEntries(rows.map((r) => [r.k, r]));
     check('מצב נוכחי: מייל "לבד", ווצאפ "אסור", משימה "טרם הוגדר"', /לבד/.test(R.mail.t) && /אסור/.test(R.wa.t) && /טרם הוגדר/.test(R.task.t), [R.mail.t.slice(0, 40), R.wa.t.slice(0, 40)]);
-    check('"לבד" לא זמין במשימה ובהזמנה מספק; זמין במייל', R.task.autoDis && R.ord.autoDis && !R.mail.autoDis);
+    check('"לבד" לא זמין רק בהזמנה מספק; זמין במייל, במשימה, בתזכורת ובהתחייבות (החלטה 2)', R.ord.autoDis && !R.mail.autoDis && !R.task.autoDis && !R.rem.autoDis && !R.cmt.autoDis);
     check('תקרת סכום רק בסוג כספי שאפשר לבד (רישום הוצאה; לא בהזמנה מספק)', R.fin.cap && !R.ord.cap && !R.mail.cap);
     check('ההסבר: הגדרות אישיות לכל מנהל', /ההגדרות שלך בלבד/.test(await page.$eval('#secPermSet', (e) => e.innerText)));
     check('בלי גלילה לרוחב (הגדרות)', await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth <= 1));
@@ -125,7 +128,7 @@ async function open(browser, www, o) {
     check('שמירה: secPrefs op:perm, תמיד כך, עם תקרה', b1 && b1[1].op === 'perm' && b1[1].type === 'fin' && b1[1].m === 'auto' && b1[1].scope === 'always' && b1[1].cap === 750, b1 && b1[1]);
     check('אחרי השמירה: "עד 750 ₪"', /750/.test(await page.$eval('#secPermSet form[data-k=fin]', (e) => e.innerText)));
     // שאלה בפעם הראשונה – במרכז האישורים (סוג אחר: מצב מדומה חדש)
-    await page.evaluate(() => { window.__sec.st.perm.q = { app: { t: Date.now(), n: 1, note: 'כלל אוטומטי על התראה מהטלפון' } }; ACT.secSetX && ACT.secSetX(); const b = document.querySelector('#secTabs [data-v=appr]'); if (b) b.click(); }); await H.settle(page, 900);
+    await page.evaluate(() => { window.__secNfAutoNow = (m) => { window.__nfNow = m; }; window.__sec.st.perm.q = { app: { t: Date.now(), n: 1, note: 'כלל אוטומטי על התראה מהטלפון' } }; ACT.secSetX && ACT.secSetX(); const b = document.querySelector('#secTabs [data-v=appr]'); if (b) b.click(); }); await H.settle(page, 900);
     const q = await page.$('form[data-f=permQ][data-k=app]');
     check('מרכז האישורים: כרטיס "גיטי שואלת"', !!q);
     if (q) {
@@ -137,7 +140,25 @@ async function open(browser, www, o) {
       const b2 = bodies.filter((b) => b[0] === 'secPrefs').pop();
       check('תשובה: secPrefs op:perm app לבד רק הפעם', b2 && b2[1].type === 'app' && b2[1].m === 'auto' && b2[1].scope === 'once', b2 && b2[1]);
       check('הכרטיס נעלם אחרי התשובה', !(await page.$('form[data-f=permQ][data-k=app]')));
+      check('החלטה 1: "לבד" חל מיד על ההתראות שעוררו את השאלה (__secNfAutoNow)', await page.evaluate(() => window.__nfNow === 'auto'));
     }
+    // החלטה 1: שאלה שעלתה מכרטיס בשיחה – "אסור" מבטל את הכרטיס, "לבד" מאשר אותו
+    await page.evaluate(() => { window.__tpOrig = [window.__secTpAuto, window.__secTpCancel]; window.__secTpCancel = (cid) => { window.__tpc = cid; return true; }; window.__secTpAuto = (cid) => { window.__tpa = cid; return true; }; window.__sec.st.perm.q = { task: { t: Date.now(), n: 1, note: 'הצעה בשיחה' } }; rerender(); }); await H.settle(page, 500);
+    {
+      await page.evaluate(() => { const f = document.querySelector('form[data-f=permQ][data-k=task]'); f.querySelector('input[name=m][value=deny]').checked = true; f.querySelector('input[name=sc][value=always]').checked = true; f.querySelector('button').click(); }); await H.settle(page, 700);
+      check('החלטה 1: "אסור" מבטל מיד את הכרטיס שעורר את השאלה', await page.evaluate(() => window.__tpc === 'tp0123456789abcdef' && !window.__tpa));
+    }
+    // החלטה 2: כרטיס תזכורת שהשרת סימן auto ("לבד") – נקבע מיד בלי לחיצה, באותה זרימה (secCal add עם cid → tkCard ok)
+    await page.evaluate(() => { [window.__secTpAuto, window.__secTpCancel] = window.__tpOrig; ACT.secSetX && ACT.secSetX(); const b = document.querySelector('#secTabs [data-v=chat]'); if (b) b.click(); }); await H.settle(page, 500);
+    await page.evaluate(() => window.__secAsk('תזכירי לי לבד מחר להתקשר לספק')); await H.settle(page, 1500);
+    const add = bodies.filter((b) => b[0] === 'secCal' && b[1].op === 'add' && b[1].cid === 'tp00000000000000aa');
+    const okc = bodies.filter((b) => b[0] === 'secPrefs' && b[1].op === 'tkCard' && b[1].st === 'ok' && b[1].cid === 'tp00000000000000aa');
+    check('החלטה 2: כרטיס "לבד" – התזכורת נקבעה בלי לחיצה, פעם אחת, וסומנה בשרת', add.length === 1 && okc.length === 1, { add: add.length, ok: okc.length });
+    // החלטה 2: "אישור התחייבות" = לבד – הצעה עם תאריך נקבעת לבד כתזכורת; בלי תאריך – נשארת לאישור
+    await page.evaluate(() => { ACT.secSetX && ACT.secSetX(); const b = document.querySelector('#secTabs [data-v=appr]'); if (b) b.click(); }); await H.settle(page, 1500);
+    const c1 = bodies.filter((b) => b[0] === 'secCal' && b[1].op === 'add' && b[1].cid === 'cm00000000000000c1').length, c2 = bodies.filter((b) => (b[0] === 'secCal' || b[0] === 'secPrefs') && b[1].cid === 'cm00000000000000c2').length;
+    const cl = bodies.filter((b) => b[0] === 'secPrefs' && b[1].op === 'cmt' && b[1].cid === 'cm00000000000000c1').map((b) => b[1].st);
+    check('החלטה 2: התחייבות "לבד" עם תאריך – תפיסה, תזכורת וסימון בלי לחיצה; בלי תאריך – לא נגעו', c1 === 1 && c2 === 0 && cl.join() === 'claim,ok', { c1, c2, cl });
     check('בלי שגיאות JS', errs.length === 0, errs);
     check('תוכן זדוני לא הורץ', !(await page.evaluate(() => window.__xss)));
   } finally { await browser.close(); }

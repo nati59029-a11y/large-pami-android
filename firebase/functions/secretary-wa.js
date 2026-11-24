@@ -136,6 +136,8 @@ async function errMark(db, ok, now) {
 }
 
 // ---------- שליחה אוטומטית (פתיחה 97, "קיבלנו" 22, תשובה למנהל 112) – נעצרת ב"עצור הכל" ----------
+// 24.11.2026 (גיטי סבב 4, החלטת המשתמש 4) – חריג מכוון: הודעות הפתיחה, "קיבלנו" והתשובה למנהל הן נוסח קבוע שהמנהל הגדיר, ולא פעולה של גיטי,
+// ולכן הן מחוץ למסך ההרשאות (lib/sec-perm.js). "עצור הכל" כן עוצר אותן – הבדיקה הראשונה כאן (בדיקות: secretary-wa.test.js, sec-perm.unit.test.js)
 async function sendAuto(db, ctx, to, text, kind, o) {
   const now = o.now || Date.now();
   const cs = await db.doc('sec_cfg/wa').get();
@@ -605,7 +607,7 @@ async function tryMrAutoWa(db, id, x, d, o) {
   if (!W.inWindow(sn.exists ? sn.get('lastIn') : 0, now)) extra.push('window');
   if (d.voice) extra.push('voice');
   if (!cfg.pnid) extra.push('notConnected');
-  const pw = await PERM().blockWhy(db, rule.uid, 'wa', {}, 'כלל אישי "לבד" בווצאפ'); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
+  const pw = await PERM().blockWhy(db, rule.uid, 'wa', {}, 'כלל אישי "לבד" בווצאפ', { legacy: true }); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
   if (pw) extra.push(pw);
   const fl = d.flags || [];
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: cfg.stop.on, owner: await MLC().ownerOk(db, rule.uid, 'wa'), rule, match: d.pm,
@@ -1094,4 +1096,4 @@ exports.secSend = onCall({ secrets: [WA_ACCESS_TOKEN] }, wrap('secSend', (r) => 
 exports.secWaCfg = onCall(wrap('secWaCfg', secWaCfg));
 exports.secAdminWa = onCall(wrap('secAdminWa', secAdminWa));
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, secInbox, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS, notifyMgrs, pubInfo, staffNames, tryMrAutoWa, redraft } }); // notifyMgrs, pubInfo, staffNames – גם לשלב 6 (secretary-google.js)
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, sendAuto, secSend, secInbox, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS, notifyMgrs, pubInfo, staffNames, tryMrAutoWa, redraft } }); // notifyMgrs, pubInfo, staffNames – גם לשלב 6 (secretary-google.js)
