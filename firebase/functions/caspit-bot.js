@@ -66,7 +66,9 @@ const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
 const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
 const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
-const CAPS = ['today', 'uq', 'hours', 'hours2']; // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
+const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf']; // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
+// tf (תוסף 0.1.19, 24.11.2026): poll מקבל tf = { s:'YYYY-MM-DD HH', c:קוד } – העדכון השעתי של מכירות היום שנכשל במחשב (עד אז נשמר רק בתוסף)
+const TF_S = /^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3])$/, TF_C = /^[a-z0-9-]{1,30}$/;
 const UST = ['reload', 'same', 'copying', 'busy', 'none'];
 const VER3 = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -166,6 +168,7 @@ async function cxBotTok(w, input) {
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
+      tf: d.h && d.tf && typeof d.tf.s === 'string' && d.tf.s.slice(0, 10) === ilDay(Date.now()) ? d.tf : null, // 0.1.19: עדכון שעתי שנכשל היום
       hrl: d.h ? d.hrl || null : null, // 0.1.14: העלאת השעות האחרונה (מספרים בלבד)
       runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null, scr: r.st !== 'ok' && r.info ? scrOut(r.info.scr) : null }; }),
     };
@@ -543,7 +546,8 @@ async function handle(req, res, opts) {
   const ver = str(b.ver, 20);
   // poll (כל דקה): פטור מהמונה היומי – אסימון ועסק כבר נבדקו למעלה, ובלי קריאות נוספות למסד (חוץ מכתיבת pl פעם ב-5 דקות)
   if (op === 'poll') {
-    if (Object.keys(b).some((k) => !['op', 'ver', 'log', 'wait', 'upd', 'ack', 'res'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
+    if (Object.keys(b).some((k) => !['op', 'ver', 'log', 'wait', 'upd', 'ack', 'res', 'tf'].includes(k))) return no(400, 'bad-field', 'שדה לא מוכר');
+    if (b.tf !== undefined && !(b.tf && typeof b.tf === 'object' && !Array.isArray(b.tf) && Object.keys(b.tf).every((k) => k === 's' || k === 'c') && typeof b.tf.s === 'string' && TF_S.test(b.tf.s) && typeof b.tf.c === 'string' && TF_C.test(b.tf.c))) return no(400, 'bad-field', 'שדה לא תקין');
     if (b.wait !== undefined && !(Number.isInteger(b.wait) && b.wait > 0 && b.wait < now + 24 * 3600e3)) return no(400, 'bad-field', 'שדה לא תקין');
     // "עדכון המחשב": תשובת התוסף (ack = מזהה הבקשה, res = { st, cur, disk })
     if (b.ack !== undefined || b.res !== undefined) {
@@ -561,6 +565,8 @@ async function handle(req, res, opts) {
       if (ver) up.ver = ver;
     }
     if (b.upd !== undefined) { const u = updOf(b.upd, now), o0 = v.dev.upd; if (!o0 || o0.at !== u.at || o0.ok !== u.ok || o0.ver !== u.ver || o0.fails !== u.fails) up.upd = u; }
+    // tf: נשמר רק כשהשתנה (התוסף שולח רק כשהשתנה) – בלי כתיבה בכל דקה
+    if (b.tf !== undefined && !(v.dev.tf && v.dev.tf.s === b.tf.s && v.dev.tf.c === b.tf.c)) up.tf = { s: b.tf.s, c: b.tf.c, at: now };
     if (Object.keys(up).length) await priv(v.bizId, 'cxbot').set(up, { merge: true });
     const out = reqLive(q, now) ? { ok: true, want: true, id: q.id } : { ok: true, want: false };
     out.caps = CAPS;

@@ -922,7 +922,7 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(await tt(W), null);
   srv.caps = ['today', 'uq'];
   await sw.evaluate(() => self.__cxTest.pollOnce());
-  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false });
+  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false, tf: false });
   const c0 = cnt(), H0 = (await store()).salesHash || {};
   const r = await tt(W);
   assert.equal(r && r.st, 'ok', JSON.stringify(r));
@@ -1036,6 +1036,32 @@ test('0.1.13 היכרות לקוחות בנחל לכיש: כישלון באמצ�
     r = await sw.evaluate(() => self.__cxTest.discBr());
     assert.equal(r.out.err.code, 'branch-restore', JSON.stringify(r.out)); assert.equal(r.cur, 'נחל לכיש');
   } finally { await ls({ nlHkEmpty: null, brFail: null, store: 'יהודה הנשיא' }); }
+});
+
+// 0.1.19: העדכון השעתי שנכשל מדווח לשרת ב-poll (tf) – רק לשרת עם caps tf, ורק כשהשתנה
+test('0.1.19 poll: עדכון שעתי שנכשל → tf פעם אחת; שינוי → שוב; שרת בלי tf – לא נשלח', async () => {
+  const polls = () => srv.ops('poll');
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('poll'); return chrome.storage.local.remove(['caps', 'tfSent']); });
+  await sw.evaluate(() => chrome.storage.local.set({ todaySt: { slot: '2026-11-24 11', st: 'fail', at: Date.now(), code: 'needs-login' } }));
+  srv.caps = ['today', 'uq'];
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.equal(polls().at(-1).tf, undefined, 'שרת בלי tf – לא נשלח');
+  srv.caps = ['today', 'uq', 'tf'];
+  await sw.evaluate(() => self.__cxTest.pollOnce()); // לומד את caps
+  const n0 = polls().length;
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  const got = polls().slice(n0 - 1).map((c) => c.tf).filter(Boolean);
+  assert.deepEqual(got, [{ s: '2026-11-24 11', c: 'needs-login' }], 'נשלח פעם אחת');
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.equal(polls().at(-1).tf, undefined, 'לא נשלח שוב כשלא השתנה');
+  await sw.evaluate(() => chrome.storage.local.set({ todaySt: { slot: '2026-11-24 12', st: 'ok', at: Date.now() } }));
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.equal(polls().at(-1).tf, undefined, 'הצליח – לא מדווחים');
+  await sw.evaluate(() => chrome.storage.local.set({ todaySt: { slot: '2026-11-24 13', st: 'run', at: Date.now() - 25 * 60e3 } }));
+  await sw.evaluate(() => self.__cxTest.pollOnce());
+  assert.deepEqual(polls().at(-1).tf, { s: '2026-11-24 13', c: 'stuck' });
+  await sw.evaluate(async () => { await chrome.storage.local.remove(['todaySt', 'tfSent']); return self.__cxTest.setupAlarms(); });
+  srv.caps = null;
 });
 
 test('0.1.13 (תיקון בודק) שעתי: נחל לכיש נכשל → בלי העלאה חלקית בכלל (התמונה הקודמת של נחל לכיש לא נמחקת), רישום ב-todaySt', async () => {

@@ -130,6 +130,15 @@ function wantRemote(r, o) {
   if (run && !isTerminal(run) && x.now - (run.touchedAt || run.startedAt || 0) < STALE_MS) return null;
   return r.id;
 }
-const api = { STEPS, BACKOFF, RETRY, STALE_MS, MSG, REQ_RE, err, codeOf, newRun, advance, fail, isTerminal, canResume, resumeFrom, msgOf, wantRemote };
+// 0.1.19: מה לדווח על העדכון השעתי האחרון (todaySt) → { s:'YYYY-MM-DD HH', c:קוד } | null.
+// נכשל → הקוד שלו; "רץ" יותר מ-20 דקות (ה-service worker נסגר באמצע / נתקע) → 'stuck'; הצליח / today-off (בלי slot) → לא מדווחים
+const TF_C = /^[a-z0-9-]{1,30}$/;
+function tfOf(st, now) {
+  if (!st || typeof st.slot !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}$/.test(st.slot)) return null;
+  if (st.st === 'fail') return { s: st.slot, c: TF_C.test(st.code || '') ? st.code : 'fail' };
+  if (st.st === 'run' && now - (+st.at || 0) > 20 * 60e3) return { s: st.slot, c: 'stuck' };
+  return null;
+}
+const api = { tfOf, STEPS, BACKOFF, RETRY, STALE_MS, MSG, REQ_RE, err, codeOf, newRun, advance, fail, isTerminal, canResume, resumeFrom, msgOf, wantRemote };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxPlan = api;
 })(typeof self !== 'undefined' ? self : this);

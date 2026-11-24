@@ -13,6 +13,7 @@ async function load() {
   $('next').textContent = s.connected ? when(s.next) : '—';
   $('impN').classList.toggle('hide', s.imp !== false);
   $('upd').textContent = updTxt(s);
+  $('today').textContent = todayTxt(s);
   $('sync').disabled = !s.connected || s.busy;
   $('disc').disabled = s.busy;
   $('dl').classList.toggle('hide', !s.disc);
@@ -41,6 +42,17 @@ $('send').addEventListener('click', async () => {
   msg(r.ok ? 'הדוח נשלח לאפליקציה' : 'השליחה נכשלה: ' + self.CxPlan.msgOf(r.code), r.ok ? 'ok' : 'bad');
 });
 $('opt').addEventListener('click', () => chrome.runtime.openOptionsPage());
+// 0.1.19: העדכון השעתי של מכירות היום (todaySt) – עד עכשיו לא הוצג בשום מקום
+function todayTxt(s) {
+  if (s.capsToday === false) return 'כבוי – השרת עוד לא אישר (נבדק כל דקה)';
+  const t = s.today;
+  if (!t || !t.st) return 'עוד לא רץ';
+  const at = new Date(t.at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const h = typeof t.slot === 'string' ? t.slot.slice(11) + ':00' : '';
+  if (t.st === 'ok') return 'עודכן עד ' + (t.hm || h) + (t.n === 0 ? ' (אין מכירות היום)' : '') + ' · ' + at;
+  if (t.st === 'run') return 'רץ עכשיו (' + h + ') · התחיל ' + at;
+  return 'נכשל' + (h ? ' ב-' + h : '') + ': ' + self.CxPlan.msgOf(t.code) + (t.msg ? ' (' + t.msg + ')' : '') + ' · ' + at;
+}
 // גרסה + מצב העדכון האוטומטי (upd.json שהסקריפט במחשב כותב)
 function updTxt(s) {
   const u = s.upd && s.upd.upd, t = 'גרסה ' + s.ver;
