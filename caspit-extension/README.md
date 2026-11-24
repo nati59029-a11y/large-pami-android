@@ -70,7 +70,7 @@
 השרת: היום האחרון שנקלט (`lastSales`) מתקדם לפי `report` – רק ימים מתוך `days` של ה-hello, ברצף מההתחלה, שמופיעים ב-`info.sales` (גם יום בלי מכירות). `export` מעל המגבלה → `reason:'limit'` לפני שמשהו מסומן. `apply`/`export` בזמן שמנהל שומר בטלפון → `reason:'busy'` (ניסיון חוזר).
 
 `run` של upload/preview/apply הוא מזהה משנה שהתוסף יוצר לכל קטלוג/יום (`/^[A-Za-z0-9_-]{8,40}$/`); `log` = `runId` מ-hello.
-מגבלות בתוסף: ≤500 שורות מחיר, ≤50 פריטים חדשים (או `limits.newMax` אם נמוך יותר), אחרת עוצר עם `limit` ומדווח.
+מגבלות בתוסף: ≤500 שורות מחיר, פריטים חדשים לפי `limits.newMax` מהאפליקציה (0.1.20: עד 100000 = "ללא הגבלה"; עד 0.1.19 – עד 50), אחרת עוצר עם `limit` ומדווח.
 
 ## בדיקות
 `node --test --test-concurrency=1 'caspit-extension/test/*.test.js'` (צריך `playwright` עם Chromium). e2e: כספית מדומה (`test/fixtures/caspit/`) דרך `context.route`, ושרת cxBot מדומה.
