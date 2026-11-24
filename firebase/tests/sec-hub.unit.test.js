@@ -43,6 +43,15 @@ describe('sec-hub: מצב חיבורים (רק לפי מקור אמיתי)', () 
     assert.equal(b({ ok: true, mirror: false, mirrorAt: 5 }), 'off');
     assert.equal(b(null), 'unk');
   });
+  it('קבוצות פנימיות (סבב 3): שורה רק כשהתוספת פעילה; פעיל רק כשיש קבוצה פתוחה לגיטי', () => {
+    const g = (st) => by(C.connOf({ st }), 'grp');
+    assert.equal(g({ ok: true }), undefined);
+    assert.equal(g({ ok: true, grp: { on: false, n: 3 } }), undefined);
+    assert.equal(g({ ok: true, grp: { on: true, n: 0 } }).s, 'off');
+    const r = g({ ok: true, grp: { on: true, n: 2 } });
+    assert.equal(r.s, 'ok'); assert.match(r.n, /2 קבוצות/); assert.equal(r.a, 'set');
+    assert.equal(C.logType('grpOn'), 'set'); assert.equal(C.logType('grpOff'), 'set');
+  });
 });
 
 describe('sec-hub: איחוד פריטי תשומת לב', () => {

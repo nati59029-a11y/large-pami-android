@@ -512,6 +512,9 @@ async function saveMail(db, c, ctx, gid, now, o) {
       }
     }
   }
+  // 24.11.2026 (גיטי, סבב 3 חלק ב): זיהוי התחייבויות – רק מייל חדש מאדם (לא היסטוריה, לא פרסומת, לא חשוד). lib/sec-cmt.js בודק את המתג,
+  // ו"עצור הכל" בעובד (secRemind); כאן רק סינון מקומי ופריט בתור, בלי AI. תקלה שם לא פוגעת בקליטת המייל
+  if (doc.hum && !sus && !o.hist) await require('./lib/sec-cmt').safe(db, { ch: 'mail', id: ref.id, from: p.name || p.from, text: (p.subj ? p.subj + '\n' : '') + (doc.text || '') }, { ai: o.ai, now });
   return sus ? 'sus' : 'saved';
 }
 // קבצים מצורפים של מייל אחד → secretary-inv.ingest. סוג לא מותר (zip, Office, הפעלה…) או גדול מדי – כרטיס בלי הורדה (10.3).
@@ -669,7 +672,7 @@ async function ingestBox(boxId, addr, o) {
   let err = false, fail = null;
   for (const gid of todo.slice(0, cap.ok)) {
     let r;
-    try { r = await saveMail(db, c, ctx, gid, now, {}); } catch (e) {
+    try { r = await saveMail(db, c, ctx, gid, now, { ai: o && o.ai }); } catch (e) {
       logger.warn('secretary-google: mail fetch failed', { reason: (e && e.details && e.details.reason) || 'error' });
       // תקלה – נקודת ההמשך לא עוברת את המייל הזה. אותו מייל נכשל MAIL_TRIES פעמים – מדלגים עליו (נרשם ומתריעים), כדי שלא יתקע את כל מה שאחריו
       const n = (bx.fail && bx.fail.g === gid ? bx.fail.n : 0) + 1;

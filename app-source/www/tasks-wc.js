@@ -636,6 +636,7 @@ ACT.tkwMenu=el=>{const t=tkGet(el.dataset.id);if(!t)return;const did=esc(t.id),n
  if(t.st==='wait')m+=B('tkRej',t.pr==='1'?'דחה':'החזר לעובד');
  if(t.st!=='done'){if(nw)m+=B('tkMv','העבר לעובד…');if(nw&&t.ow)m+=B('tkUnclaim','בטל תפיסה');if(rvNew())m+=B('tkwDl','שנה תאריך יעד')}
  m+=B('tkCm',icd('chat')+' הערה / תגובות');
+ if(/^seccm[0-9a-f]{16}$/.test(String(t.id||''))&&typeof ACT.tkwSrc==='function')m+=B('tkwSrc','ההודעה המקורית');/* 24.11.2026: משימה מהתחייבות שאושרה – sec-cmt.js */
  if(t.st==='open'&&nw)m+=B('tkwNd',icd('bell')+' תזכורת לעובד');
  if(t.st==='open'&&t.pr!=='1'&&!(t.np>0))m+=B('tkReq',icd('cam')+' בקש תמונה');
  if(t.st==='done'&&t.pr==='1')m+=B('tkImg','הצג תמונה');

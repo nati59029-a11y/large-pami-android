@@ -329,6 +329,8 @@ Object.assign(exports, require('./secretary-google'));
 Object.assign(exports, require('./secretary-inv'));
 // "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
 Object.assign(exports, require('./secretary-learn'));
+// גיטי – מרכז תקשורת (23.11.2026, סבב 3 חלק א): secComm – פיד מאוחד (מייל, ווצאפ, קבוצות פנימיות שפתוחות לגיטי) ורשימת הקבוצות להגדרות. secretary-comm.js
+Object.assign(exports, require('./secretary-comm'));
 // קול, תמונה וסרטון למזכירה (15.11.2026): secMedia (תמלול, תמונה/סרטון, סימון כרטיס), secMediaClean (ניקוי הקבצים הזמניים ב-sec_tmp). secretary-media.js
 Object.assign(exports, require('./secretary-media'));
 
