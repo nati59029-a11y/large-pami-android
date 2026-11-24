@@ -13,6 +13,7 @@
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
 //   sec_cfg/main   + 23.11.2026 (גיטי, סבב 3): grp [gid...] – קבוצות פנימיות שגיטי רשאית לקרוא (אין שדה = אף קבוצה). secPrefs op:'grp' בלבד (lib/sec-grp.js)
 //   sec_cfg/main   + 24.11.2026 (גיטי, סבב 3 חלק ב): cmt – זיהוי התחייבויות (true = פעיל; ברירת מחדל כבוי). secPrefs op:'cmtOn'
+//   sec_cfg/perm   + 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות הפעולה של גיטי ותקרות הסכום (lib/sec-perm.js). מנהל־על בלבד – secPrefs op:'perm' / op:'permCard'
 //   sec_cmt/{cid}  { t, ch, src, from, who, what, d, prev, st:'pend'|'act'|'ok'|'no', actBy?, actAt?, kind?, ref?, stBy?, stAt? } – הצעות התחייבות (lib/sec-cmt.js). השרת בלבד
 //   sec_cmtq/{cid} { t, exp, n, lk?, ch, id?|gid,mid, wa?, from, text, grp? } – תור הזיהוי (נכתב בקליטה, מעובד ב-secRemind). השרת בלבד
 //   sec_cfg/use    { m, mc, d, dmc, w80, w100, r: { <uid>: { h, n, d, dn } }, mp: { h, n } } – מונה עלות במילי־סנט + קצב. מנהל־על בלבד (83)
@@ -43,6 +44,7 @@ const SK = require('./lib/sec-know');   // שלב 3: בנק תשובות
 const SENS = require('./lib/sec-sens'); // שלב 3: מידע רגיש (מוצפן)
 const RM = require('./lib/sec-remind'); // שלב 4: הגדרות התראות ודוחות
 const GRP = require('./lib/sec-grp');   // 23.11.2026 (גיטי, סבב 3): הרשאת קריאה לקבוצות פנימיות
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות פעולה ותקרות סכום
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -195,6 +197,7 @@ async function secState(request) {
   const grpOn = GRP.grpOn(who);
   out.grp = { on: grpOn, n: grpOn && cfg.grp.length ? (await GRP.allowedGroups(T.tdb(), cfg.grp)).length : 0, edit: !!who.superadmin }; // edit – רק מנהל־העל (24.11.2026, החלטה 5)
   out.cmt = { on: cfg.cmt, edit: !brLimited }; // 24.11.2026: זיהוי התחייבויות (מתג עסקי; מנהל עם הגבלת סניפים – צפייה בלבד)
+  out.perm = PERM.stateOf(await PERM.readPerm(db), who.superadmin); // 24.11.2026 (סבב 4): הרשאות הפעולה של גיטי – כל מנהל רואה, רק מנהל־העל משנה
   Object.assign(out, { mirror: cfg.mirror, mirrorAt: mir && mir.exists && Number.isInteger(mir.get('at')) ? mir.get('at') : null, cfTh: cfg.cfTh, pct: u.pct, saving: u.saving });
   return out;
 }
@@ -344,6 +347,20 @@ async function secMirrorPut(request) {
   return { ok: true, at: now };
 }
 
+// 24.11.2026 (סבב 4): שינוי הרשאה אחד מהמסך – קריאה, בדיקה, שמירה ורישום ביומן בטרנזקציה אחת
+async function permWrite(db, uid, ch, t) {
+  const ref = db.doc('sec_cfg/perm');
+  return db.runTransaction(async (tx) => {
+    const ps = await tx.get(ref);
+    const cur = PERM.permOf(ps.exists ? ps.data() : null);
+    let a;
+    try { a = PERM.applyChange(cur, ch); } catch (e) { if (e && e.badPerm) throw bad(e.badPerm === 'bad-amount' ? 'bad-amount' : 'bad-input', e.badPerm === 'bad-amount' ? 'סכום לא תקין' : 'ערך לא תקין'); throw e; }
+    tx.set(ref, Object.assign({}, a.set, { upd: t, updBy: uid }), { merge: true });
+    tx.set(db.collection('sec_log').doc(), logData(uid, 'sa', 'permSet', { note: a.note + ' screen' }));
+    const next = PERM.permOf(Object.assign({}, ps.exists ? ps.data() : {}, a.set, a.set.t ? { t: Object.assign({}, (ps.exists && ps.get('t')) || {}, a.set.t) } : {}));
+    return { perm: PERM.stateOf(next, true) };
+  });
+}
 // secPrefs – הגדרות של מנהל העסק: מתג המראה (45), אישור סף התזרים (51), "לא רלוונטי" לרעיון (56)
 const NR_DAYS = 90, NR_MAX = 200, PREFS_HOUR = 30;
 const CMT_ACT_MS = 10 * 60000; // תפיסת הצעת התחייבות (claim) בתוקף 10 דקות – אחר כך מנהל אחר יכול לתפוס / לדחות
@@ -455,6 +472,37 @@ async function secPrefs(request) {
       tx.set(db.collection('sec_log').doc(), logData(who.uid, 'sa', input.on ? 'grpOn' : 'grpOff', { tgt: gid, note: gs.exists ? GRP.cleanName(gs.get('name')) : '' }));
     });
     out = { gid, on: input.on };
+  } else if (input.op === 'perm') {
+    // 24.11.2026 (גיטי, סבב 4 חלק א, החלטות 1–4): הרשאה לכל סוג פעולה (אסור / רק אחרי אישור / לבד) ותקרות הסכום – מסך ההגדרות.
+    // רק מנהל־העל (כמו op:'grp'). שינוי אחד בכל קריאה: { type, lvl } או { num, v }. סוג שלא ברשימה (כולל תשלום) – נדחה
+    if (!who.superadmin) throw deny('not-superadmin', 'רק מנהל־העל יכול לשנות את ההרשאות של גיטי');
+    out = await permWrite(db, who.uid, input.type !== undefined ? { type: input.type, lvl: input.lvl } : { num: input.num, v: input.v }, t);
+  } else if (input.op === 'permCard') {
+    // 24.11.2026 (סבב 4, החלטה 12): כרטיס שינוי הרשאה מהשיחה (k:'perm', נוצר ב-secChat רק למנהל־העל). השינוי נקרא מהכרטיס השמור בשרת –
+    // לא מהאפליקציה – ונשמר רק כאן, אחרי בדיקה חוזרת שהמאשר הוא מנהל־העל. הקריאה, השמירה, הסימון והיומן – בטרנזקציה אחת
+    if (!who.superadmin) throw deny('not-superadmin', 'רק מנהל־העל יכול לשנות את ההרשאות של גיטי');
+    const mid = typeof input.mid === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(input.mid) ? input.mid : null;
+    const cid = typeof input.cid === 'string' && /^pm[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
+    if (!mid || !cid || !['ok', 'no'].includes(input.st)) throw bad('bad-input', 'ערך לא תקין');
+    const mRef = db.doc(`sec_chat/${who.uid}/m/${mid}`), pRef = db.doc('sec_cfg/perm');
+    const r = await db.runTransaction(async (tx) => {
+      const [ms, ps] = await Promise.all([tx.get(mRef), tx.get(pRef)]);
+      const cards = ms.exists && Array.isArray(ms.get('cards')) ? ms.get('cards') : [];
+      const c = cards.find((x) => x && x.k === 'perm' && x.id === cid);
+      if (!c) throw pre('not-found', 'הכרטיס לא נמצא');
+      if (c.st) return { st: c.st, already: true };
+      let a = null;
+      if (input.st === 'ok') {
+        try { a = PERM.applyChange(PERM.permOf(ps.exists ? ps.data() : null), c.ch); } catch (e) { if (e && e.badPerm) throw bad('bad-input', 'השינוי בכרטיס לא תקין'); throw e; }
+        tx.set(pRef, Object.assign({}, a.set, { upd: t, updBy: who.uid }), { merge: true });
+      }
+      let hit = false;
+      tx.update(mRef, { cards: cards.map((x) => (x && x.id === cid && !x.st && !hit ? ((hit = true), Object.assign({}, x, { st: input.st, stAt: t })) : x)) });
+      tx.set(db.collection('sec_log').doc(), logData(who.uid, 'sa', a ? 'permSet' : 'permCardNo', { tgt: cid, note: (a ? a.note : String((c.ch && (c.ch.type || c.ch.num)) || '')) + ' chat' }));
+      return { st: input.st };
+    });
+    if (r.already) return { ok: true, st: r.st, already: true };
+    out = { st: r.st, perm: PERM.stateOf(await PERM.readPerm(db), true) };
   } else if (input.op === 'cmtOn') {
     // 24.11.2026 (גיטי, סבב 3 חלק ב): מתג זיהוי ההתחייבויות לכל העסק (מייל, ווצאפ, קבוצות פתוחות). רק מנהל בלי הגבלת סניפים – הערוצים של כל העסק
     if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא משנה את ההגדרה הזו');
@@ -482,6 +530,10 @@ async function secPrefs(request) {
       const other = st === 'act' && cs.get('actBy') !== who.uid && (cs.get('actAt') || 0) > t - CMT_ACT_MS;
       if (input.st === 'claim') {
         if (other) throw pre('busy', 'מנהל אחר מאשר את ההצעה הזו עכשיו');
+        // 24.11.2026 (סבב 4): "אסור" – לא נוצרת משימה / תזכורת מהצעה של גיטי (גם הצעה שנוצרה לפני השינוי). בלי סוג – כששניהם אסורים
+        const pm = PERM.permOf((await tx.get(db.doc('sec_cfg/perm'))).data() || null);
+        const kinds = input.kind === 'rem' ? ['rem'] : input.kind === 'task' ? ['task'] : ['task', 'rem'];
+        if (kinds.every((k) => !PERM.canPropose(pm, k))) throw deny('perm-no', 'מנהל־העל הגדיר שגיטי לא מציעה ' + (kinds.length > 1 ? 'משימות ותזכורות' : kinds[0] === 'rem' ? 'תזכורות' : 'משימות'));
         tx.update(cRef, { st: 'act', actBy: who.uid, actAt: t });
         return { st: 'act' };
       }
@@ -597,6 +649,9 @@ async function secChat(request) {
   const stale = finFrom === 'mirror' && now - mirrorAt > STALE_MS;
 
   const pol = ST.policyOf(text);
+  // 24.11.2026 (סבב 4, החלטה 12): הוראה לשנות את ההרשאות של גיטי ("תני לעצמך לשלוח הודעות לבד", "תעלי את התקרה ל-1000") – בלי AI:
+  // מנהל־העל מקבל כרטיס אישור (שום דבר לא נשמר לפני "אשר" – secPrefs op:'permCard'); מנהל אחר – תשובה שאין הרשאה; תשלום – תמיד נדחה
+  const pq = pol.sensitive || (cfg.learn && LR().routeOf(text)) ? null : PERM.parseChat(text); // הוראת ניתוב (secLearn) – קודמת
   const logs = [];
   const results = [];
   let sensUsed = false; // תיקון סבב 1: התור הזה הפעיל את getSensitiveInfo
@@ -606,8 +661,8 @@ async function secChat(request) {
   let bank = null, bankCond = [];
   let s3 = null; // שלב 13ב: סיכום סבבי סריקת החנות שנכנס להקשר (ומשמש מקור לבדיקת המספרים)
   // 15.11.2026 (סעיף 6, תיקון סבב 1): הוראת ניתוב ("חשבוניות מהיום – למסך לטיפול") – המזכירה עונה כרגיל, וכרטיס הניתוב מצורף כהצעה נוספת; הכלל נשמר רק ב"אשר" (secLearn op:'route')
-  const rt = cfg.learn && !pol.sensitive ? LR().routeOf(text) : null;
-  if (!pol.sensitive && !deep) {
+  const rt = cfg.learn && !pol.sensitive && !pq ? LR().routeOf(text) : null;
+  if (!pol.sensitive && !pq && !deep) {
     // בנק תשובות (3.5): לפני כל פנייה למודל. התאמה בלי תנאים = התשובה השמורה, בלי AI ובלי עלות (נספר ב-sec_usage.bank).
     // "חשבי לעומק" – תמיד למודל. כלל עם תנאים – עובר למודל כמידע (עד 40)
     const rs = await db.collection('sec_rules').limit(SK.RULES_MAX).get();
@@ -625,6 +680,13 @@ async function secChat(request) {
     await meter(db, who.uid, tier, false, cfg.rate);
     reply = ST.TXT.sensitive; mode = 'policy';
     logs.push(['policy', 'sensitive']);
+  } else if (pq) {
+    await meter(db, who.uid, tier, false, cfg.rate); // קצב בלבד – בלי AI ובלי עלות
+    mode = 'perm';
+    const pr = await permReply(db, who, pq);
+    reply = pr.reply;
+    if (pr.card) cards.push(pr.card);
+    logs.push([pr.act, pr.note || '']);
   } else if (bank) {
     await meter(db, who.uid, tier, false, cfg.rate); // קצב בלבד – אין עלות
     reply = bank.rule.a; mode = 'bank';
@@ -635,7 +697,8 @@ async function secChat(request) {
   }
   if (reply === null) {
     offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn, notes: !!notes });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who) }; // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who),
+      perm: await PERM.readPerm(db) }; // perm – 24.11.2026 (סבב 4): הרשאות הפעולה (proposeTask: "אסור" – בלי כרטיס) // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
       const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);
@@ -753,6 +816,22 @@ async function secChat(request) {
   const props = (am.cards || []).filter((c) => c.k === 'fact' || c.k === 'cal');
   if (props.length) { const b2 = db.batch(); for (const c of props) b2.update(db.doc((c.k === 'fact' ? 'sec_facts/' : 'sec_cal/') + c.id), { mid: aa.id }); await b2.commit().catch((e) => logger.warn('secChat: card mid failed', { code: e && e.code })); }
   return { ok: true, id: aa.id, reply, mode, deep, src: am.src, cards: am.cards || [], nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
+}
+// 24.11.2026 (סבב 4): התשובה להוראת הרשאה בצ'אט (pq = PERM.parseChat). כרטיס – רק למנהל־העל ורק כשיש שינוי אמיתי
+const PERM_TXT = {
+  pay: 'תשלומים והעברות כסף חסומים אצלי לגמרי: אין לי שום אפשרות לבצע אותם, ואי אפשר לתת לי הרשאה כזו – גם לא בהגדרות. תשלום מבצעים רק בעצמכם.',
+  deny: 'רק מנהל־העל יכול לשנות את ההרשאות שלי (מה מותר לי לעשות לבד ותקרות הסכום). אפשר לבקש ממנו – זה נמצא בהגדרות המזכירה, בכרטיס "הרשאות של גיטי".',
+  card: 'הכנתי כרטיס לשינוי ההרשאה. שום דבר לא ישתנה לפני אישור בכרטיס.',
+};
+async function permReply(db, who, pq) {
+  if (pq.pay) return { reply: PERM_TXT.pay, act: 'permPayNo' };
+  if (!who.superadmin) return { reply: PERM_TXT.deny, act: 'permDeny', note: pq.change ? String(pq.change.type || pq.change.num) : '' };
+  if (pq.bad === 'range') { const L = PERM.LIM[pq.num]; return { reply: PERM.NUM_L[pq.num] + ': אפשר לקבוע בין ' + L[0].toLocaleString('he-IL') + ' ל-' + L[1].toLocaleString('he-IL') + '. לא הוכן שינוי.', act: 'permUnclear', note: pq.num }; }
+  const cur = await PERM.readPerm(db);
+  const a = PERM.applyChange(cur, pq.change);
+  const txt = PERM.changeText(cur, pq.change);
+  if (a.same) return { reply: 'זה כבר מוגדר כך – ' + txt.replace(/ ← .*$/, '') + '. לא הוכן שינוי.', act: 'permSame', note: a.note };
+  return { reply: PERM_TXT.card, act: 'permProp', note: a.note, card: { k: 'perm', id: 'pm' + require('node:crypto').randomBytes(8).toString('hex'), ch: pq.change, txt } };
 }
 function argNote(a, name) {
   if (name === 'getSensitiveInfo' || name === 'getEmployeeNotes') return ''; // תיקון סבב 1: בלי שם העובד או טקסט מהמודל ביומן – רק שם הכלי

@@ -536,6 +536,17 @@ describe('"עצור הכל" (30–33), "קיבלנו" (22), הודעת פתיח�
     assert.ok(!/קיבלנו/.test(fs.S[2].p.text));
     assert.ok((await coll(`b/${A}/sec_draft`)).filter((d) => d.auto).every((d) => d.st === 'sent'));
   });
+  it('24.11.2026 (גיטי, סבב 4): "שליחת הודעה: אסור" עוצר פתיחה ו"קיבלנו" (הטיוטה נוצרת); "רק אחרי אישור" מפורש – מנגנון שהודלק ממשיך', async () => {
+    await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).set({ t: { msg: 'no' } }));
+    const fs = fakeSend();
+    await inProc('wamid.P1', OUT1, 'שלום', '2026-11-16T20:30:00+02:00', fs);
+    assert.equal(fs.S.length, 0);
+    assert.ok(await get(`b/${A}/sec_draft/${W.msgId('wamid.P1')}`), 'הטיוטה נוצרה (שליחה רק בלחיצה)');
+    assert.ok((await logsOf(A)).some((l) => l.act === 'permBlock' && l.note === 'msg:open+ack'));
+    await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).set({ t: { msg: 'ask' } }));
+    await inProc('wamid.P2', OUT2, 'שלום', '2026-11-16T20:30:00+02:00', fs);
+    assert.equal(fs.S.length, 1, 'הנחת סבב 4: מה שהמנהל כבר הדליק ממשיך כל עוד לא "אסור"');
+  });
   it('"עצור הכל" (כל מנהל): עוצר פתיחה, "קיבלנו" ותשובה למנהל; הקליטה ממשיכה; לחיצה ידנית עובדת; עובד לא יכול', async () => {
     assert.equal((await call('secWaCfg', E1, { op: 'stop', on: true })).status, 'PERMISSION_DENIED');
     assert.equal((await call('secWaCfg', M2, { op: 'stop', on: true })).status, 'OK');

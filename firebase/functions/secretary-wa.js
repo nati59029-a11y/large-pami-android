@@ -37,6 +37,7 @@ const K = require('./lib/sec-know');
 const R = require('./lib/sec-remind');
 const W = require('./lib/sec-wa');
 const C = require('./secretary')._core;
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (סבב 4): "אסור" לשליחת הודעות עוצר גם שליחה לבד שהמנהל כבר הדליק
 const { gate, logData, bad, deny, pre, wrap, dayKey, hourKey } = C;
 
 const WA_APP_SECRET = defineSecret('WA_APP_SECRET');
@@ -141,6 +142,8 @@ async function sendAuto(db, ctx, to, text, kind, o) {
   const cs = await db.doc('sec_cfg/wa').get();
   const cfg = waCfgOf(cs);
   if (cfg.stop.on) { await db.collection('sec_log').doc().set(wlog('', 'auto', 'autoStopped', { tgt: to, note: kind })); return { stopped: true }; }
+  // 24.11.2026 (סבב 4): הודעת פתיחה / "קיבלנו" – נעצרות כשמנהל־העל הגדיר "שליחת הודעה: אסור". התשובה למנהל עצמו (mgr) – לא הודעה לאחרים, ממשיכה
+  if (kind !== 'mgr' && await PERM.blocked(db, 'msg')) { await db.collection('sec_log').doc().set(wlog('', 'auto', 'permBlock', { tgt: to, note: 'msg:' + kind })); return { perm: true }; }
   // פעם אחת לכל הודעה: סימון ב-sec_in לפני השליחה (בטרנזקציה). עיבוד חוזר של אותה הודעה לא שולח שוב פתיחה / "קיבלנו" / תשובה למנהל
   if (ctx.in) {
     const iRef = db.doc('sec_in/' + ctx.in);
@@ -427,6 +430,7 @@ async function calCreate(db, uid, inId, a, today, now, created, logs) {
   const ev = K.cleanEvent({ title: a.title, d: a.d, tm: a.tm, note: a.note }); // רק השדות האלה. uid / biz / מוזמנים – לא נלקחים מהמודל
   if (!ev) return { error: 'כותרת, תאריך (YYYY-MM-DD) ושעה (HH:MM) תקינים' };
   if (ev.d < today) return { error: 'התאריך כבר עבר' };
+  if (a.kind !== 'ev' && await PERM.blocked(db, 'rem')) return { error: 'מנהל־העל הגדיר שגיטי לא קובעת תזכורות' }; // 24.11.2026 (סבב 4): "תזכורת: אסור"
   // מזהה קבוע לפי ההודעה ומספר היצירה בה – עיבוד חוזר של אותה הודעה לא יוצר אירוע כפול ולא נספר שוב במגבלה
   const ref = db.doc('sec_cal/w' + inId + '_' + created.length);
   const ex = await ref.get();
@@ -604,6 +608,7 @@ async function tryMrAutoWa(db, id, x, d, o) {
   if (!W.inWindow(sn.exists ? sn.get('lastIn') : 0, now)) extra.push('window');
   if (d.voice) extra.push('voice');
   if (!cfg.pnid) extra.push('notConnected');
+  if (await PERM.blocked(db, 'msg')) extra.push('permNo'); // 24.11.2026 (סבב 4): "שליחת הודעה: אסור" – גם כלל אישי "לבד" לא שולח
   const fl = d.flags || [];
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: cfg.stop.on, owner: await MLC().ownerOk(db, rule.uid, 'wa'), rule, match: d.pm,
     inText: String(x.text || x.tr || ''), outText: String(d.text || ''), cls: d.cls, chk: fl.includes('chk'), unsure: fl.includes('unsure'), extra });

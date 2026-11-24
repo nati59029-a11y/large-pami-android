@@ -210,6 +210,8 @@ async function run(name, a, ctx) {
     }
     case 'proposeTask': {
       const kind = a.kind === 'reminder' ? 'rem' : 'task';
+      // 24.11.2026 (סבב 4): "אסור" חוסם גם הצעה. ctx.perm – ההרשאות שנקראו בתחילת השיחה (secChat). בלי ctx.perm – ברירת המחדל (אחרי אישור)
+      if (!require('./sec-perm').canPropose(ctx.perm, kind)) return { error: 'not-allowed', note: 'מנהל־העל הגדיר שגיטי לא מציעה ' + (kind === 'rem' ? 'תזכורות' : 'משימות') + '. לא נוצר כרטיס. אמרי זאת למנהל בקצרה; את ההגדרה משנה רק מנהל־העל.' };
       if ((ctx.cards || []).filter((c) => c && c.k === 'tkp').length >= CARDS_MAX) return { error: 'too-many', note: 'כבר הוצעו כמה כרטיסים בתשובה הזו. בקשי מהמנהל לאשר אותם קודם.' };
       const max = kind === 'rem' ? REM_MAX : TXT_MAX;
       const txt = clean(a.text, max + 1);

@@ -60,7 +60,7 @@ function mergeAttention(eyes,extra){
  return out}
 /* יומן: סוג לפי שם הפעולה */
 const LT=[['facts','מידע על העסק',/^(fact|fixed|price|sens|rule|bank|import)/],['cal','יומן ותזכורות',/^(cal|rem)/],['rep','דוחות והתראות',/^(report|insight|notify|empAlert|daySum)/],
- ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap|grp)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
+ ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['perm','הרשאות של גיטי',/^perm/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap|grp)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
 const logType=a=>{a=String(a||'');const m=LT.find(x=>x[2].test(a));return m?m[0]:'other'};
 const logTypes=()=>LT.map(x=>[x[0],x[1]]).concat([['other','אחר']]);
 const WHO={mgr:'מנהל העסק',sa:'מנהל המערכת',auto:'פעולה אוטומטית',sec:'המזכירה'};
