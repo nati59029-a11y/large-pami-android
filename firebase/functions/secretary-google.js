@@ -530,7 +530,7 @@ async function invErrCard(db, ref, x, now) {
 // תור הניסיון החוזר של מייל חדש: עד INVQ_TRIES ניסיונות (כולל הראשון בקליטה), במרווחים שגדלים: 15 דק', 30, שעה, שעתיים → כרטיס תקלה (בערך אחרי 4 שעות).
 // תיבה שאי אפשר להתחבר אליה בכלל (החיבור פג/נכשל) – לא נספר כניסיון, אבל אחרי INVQ_AGE מהכניסה לתור – כרטיס תקלה, כדי שלא יישאר בתור לנצח
 const INVQ_TRIES = 5, INVQ_WAIT = 15 * 60000, INVQ_RUN = 20, INVQ_AGE = 2 * 864e5, INVQ_LEASE = 4 * 60000;
-const INVQ_DEL = () => ({ invQ: FieldValue.delete(), invQN: FieldValue.delete(), invQT: FieldValue.delete(), invQ0: FieldValue.delete(), invL: FieldValue.delete() });
+const INVQ_DEL = () => ({ invQH: FieldValue.delete(), invQ: FieldValue.delete(), invQN: FieldValue.delete(), invQT: FieldValue.delete(), invQ0: FieldValue.delete(), invL: FieldValue.delete() });
 const gWhy = (e) => ({ reason: (e && e.details && e.details.reason) || (e && e.code) || 'error', g: (e && e.details && e.details.g) || '' });
 async function invFiles(db, c, gid, p, big, sus, now, hist) {
   const INV = require('./secretary-inv')._core;
@@ -2767,7 +2767,7 @@ async function mailInvRetry(db, bizId, now) {
       if (!p) { await d.ref.update(Object.assign({ inv: [] }, INVQ_DEL())); continue; }
       const big = p.size > G.FULL_MAX;
       if (!big) { const f = G.parseMsg(await c.full(x.gid)); if (f) p = f; }
-      const r = await invFiles(db, c, x.gid, p, big, x.sus, now); // בלי hist – חשבונית חדשה רגילה
+      const r = await invFiles(db, c, x.gid, p, big, x.sus, now, x.invQH === true); // בלי hist – חשבונית חדשה רגילה; invQH (24.11.2026) – קובץ ממייל ישן אחרי אישור שולח: נשאר "ממייל ישן" (בלי מלאי ובלי התראה)
       await d.ref.update(Object.assign({ inv: r.ids }, INVQ_DEL(), big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {}));
       out.n++; out.files += r.ids.length;
     } catch (e) {

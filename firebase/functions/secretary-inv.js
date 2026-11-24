@@ -79,7 +79,12 @@ async function ingest(db, o) {
     // 19.11.2026 (בעל העסק): קובץ שבטוח אינו חשבונית (הזמנה ליומן, טקסט, HTML, קובץ הפעלה, קובץ ריק, ארכיון, Word/Excel) – לא מוצג ב"ממתינות": נדחה אוטומטית
     const no = SI.NOT_INV_BAD.includes(chk.why);
     const st = no ? { st: 'rej', rejAt: now, rejBy: 'auto', notInv: chk.why, purgeAt: now + SI.KEEP_DAYS * 864e5 } : { st: 'new' };
-    try { await ref.create(Object.assign({ k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }, st, histF)); } catch (e) { if (e && e.code === 6) return { id, dup: true, bad: true }; throw e; }
+    try { await ref.create(Object.assign({ k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }, st, histF)); } catch (e) {
+      if (!(e && e.code === 6)) throw e;
+      // 24.11.2026: הכרטיס נסגר באישור השולח, אבל ההורדה החוזרת עדיין נחסמה (למשל המייל לא אומת) – הכרטיס חוזר, כדי שהקובץ לא ייעלם בשקט
+      await db.runTransaction(async (tx) => { const s = await tx.get(ref); if (s.exists && s.get('st') === 'rej' && s.get('rejBy') === 'trust') tx.update(ref, { st: 'new', why: [chk.why], rejAt: FieldValue.delete(), rejBy: FieldValue.delete(), purgeAt: FieldValue.delete() }); }).catch(() => {});
+      return { id, dup: true, bad: true };
+    }
     await db.collection('sec_log').doc().set(ilog('', 'sec', no ? 'invNotInv' : 'invBad', { tgt: id, note: chk.why }));
     return no ? { id, bad: true, notInv: true } : { id, bad: true };
   }
@@ -223,8 +228,6 @@ async function workIn(id, o) {
     up.dup = dup;
   } else Object.assign(up, { sub: '', match: '', br: '', brOk: false, ns: '', full: false, dup: '' });
   const why = SI.eligOf(Object.assign({}, x, up), cfg, stop);
-  if (x.long === true) why.push('long'); // 24.11.2026: קובץ ארוך – תמיד באישור המנהל
-  if (x.act === true) why.push('act');   // PDF עם פקודות (שולח מאושר) – תמיד באישור המנהל
   Object.assign(up, { el: why.length === 0, why });
   if (!(await live(up))) return { skip: 'rej' };
   // תיקון 1 (ליקוי 7): שני קבצים של אותה חשבונית שזוהו באותו זמן – בדיקה שנייה אחרי הכתיבה; מי שמוצאת את השנייה – ממתינה
@@ -269,7 +272,7 @@ function outOf(id, x, uid, now) {
     f: x.f || {}, unsure: x.unsure || [], sub: x.sub || '', subN: x.subN || '', match: x.match || '', br: x.br || '', brOk: x.brOk === true,
     ns: x.ns || '', nsShow: show(x.ns), ua: x.ua === true, dup: x.dup || '', el: x.el === true, why: x.why || [], hold: x.hold || '', err: x.err || '', t0: x.t0 || '',
     hist: x.hist === true, noStock: x.noStock === true, wait: x.st === 'q' && Number(x.qwt) > now, long: x.long === true, act: x.act === true,
-    trustOk: x.k === 'bad' && (x.why || []).some((w) => w === 'active' || w === 'unv') && ((x.src || [])[0] || {}).ch === 'mail' && !((x.src || [])[0] || {}).ua,
+    trustOk: x.st === 'new' && x.k === 'bad' && (x.why || []).some((w) => w === 'active' || w === 'unv') && ((x.src || [])[0] || {}).ch === 'mail' && !((x.src || [])[0] || {}).ua,
   };
   if (x.st === 'cl') Object.assign(o, { mine: x.by === uid, dev: x.by === uid ? x.dev || '' : '', clAt: x.clAt || 0, stale: now - (x.clAt || 0) > SI.CLAIM_MS });
   if (x.st === 'ok') Object.assign(o, { okAt: x.okAt || 0, auto: x.auto === true, mineOk: x.okBy === uid, okDev: x.okBy === uid ? x.dev || '' : '', purged: x.purged === true });
@@ -338,7 +341,7 @@ async function secInv(request) {
     }
     if (!Object.keys(up).length) throw bad('nothing', 'אין מה לשמור');
     await ref.set(Object.assign(up, { upd: now, updBy: who.uid }), { merge: true });
-    await db.collection('sec_log').doc().set(ilog(who.uid, 'mgr', 'invCfg', { note: Object.keys(up).filter((k) => !['upd', 'updBy'].includes(k)).map((k) => k + '=' + (k === 'off' ? input.sub + ':' + input.off : up[k])).join(',') }));
+    await db.collection('sec_log').doc().set(ilog(who.uid, 'mgr', 'invCfg', { note: Object.keys(up).filter((k) => !['upd', 'updBy'].includes(k)).map((k) => k + '=' + (k === 'off' ? input.sub + ':' + input.off : k === 'trust' ? 'del:' + show(input.untrust) : up[k])).join(',') }));
     const c = SI.invCfgOf(await ref.get());
     return { ok: true, cfg: { auto: c.auto, cap: c.cap, off: Object.keys(c.off).filter((k) => c.off[k] === true), trust: Object.keys(c.trust).filter((k) => c.trust[k] === true).map((k) => ({ k, show: show(k) })) } };
   }
@@ -420,7 +423,7 @@ async function secDecide(request) {
     const s = await ref.get();
     if (!s.exists) throw gone();
     const x = s.data(), s0 = (x.src || [])[0] || {};
-    if (x.k !== 'bad' || !(x.why || []).some((w) => w === 'active' || w === 'unv') || s0.ch !== 'mail' || !s0.from) throw pre('not-active', 'אפשר לאשר רק שולח של PDF עם פקודות שהגיע במייל');
+    if (x.st !== 'new' || x.k !== 'bad' || !(x.why || []).some((w) => w === 'active' || w === 'unv') || s0.ch !== 'mail' || !s0.from) throw pre('not-active', 'אפשר לאשר רק שולח של PDF עם פקודות שהגיע במייל');
     if (s0.ua) throw pre('unauth', 'Gmail לא אישר שהמייל באמת נשלח מהכתובת הזו – אי אפשר לאשר אותה');
     const key = SI.senderKey('mail', s0.from);
     const q = s0.in ? await db.collection('sec_in').where('gid', '==', s0.in).limit(5).get() : null;
@@ -428,10 +431,10 @@ async function secDecide(request) {
     const b = db.batch();
     b.set(db.doc('sec_cfg/inv'), { trust: { [key]: true }, upd: now, updBy: uid }, { merge: true });
     if (mail) {
-      b.update(mail.ref, { invQ: true, invQN: 1, invQT: now, invQ0: now });
+      b.update(mail.ref, Object.assign({ invQ: true, invQN: 1, invQT: now, invQ0: now }, x.hist === true || s0.hist === true ? { invQH: true } : {}));
       b.update(ref, { st: 'rej', rejAt: now, rejBy: 'trust', el: false, purgeAt: now + SI.KEEP_DAYS * 864e5 });
     }
-    b.set(db.collection('sec_log').doc(), ilog(uid, 'mgr', 'invTrust', { tgt: id, note: mail ? 'requeue' : 'no-mail' }));
+    b.set(db.collection('sec_log').doc(), ilog(uid, 'mgr', 'invTrust', { tgt: id, note: show(key).slice(0, 120) + (mail ? ':requeue' : ':no-mail') }));
     await b.commit();
     return { ok: true, id, sender: show(key), requeued: !!mail };
   }
