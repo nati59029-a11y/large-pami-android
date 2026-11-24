@@ -76,10 +76,14 @@ const payTxt=c=>c.pay==='other'?String(c.payTxt||'אחר'):((PAYS.find(x=>x[0]==
 const WSTAG='<span class="tag t1">לקוח עסקי</span>';
 const cLabel=c=>esc(c.name||c.bn||'')+(c.wholesale===true?' '+WSTAG:'');
 async function cfgLoad(){try{const d=await fsx('/custcfg/main');C.cfg=d?dec(d):{}}catch(e){C.cfg={}}}
+/* B2b (24.11.2026): רשימת הלקוחות (cust) והגדרות השדות (custcfg) נפתחות מיד מהעותק השמור במכשיר – תצוגה בלבד, ואז loadL מעדכן מהשרת.
+   C.sc = מוצג עותק שמור: פעולות לקוחות, לקוח עסקי ושמירת הזמנה מחכות (scGate ב-orders-staff.js). C.cfgSc – ההגדרות מהעותק השמור, נטענות שוב מהשרת */
+function fillL(){DC.sfill('oc',(v,t)=>{if(C.L||!v||!Array.isArray(v.L))return;C.L=v.L;if(!C.cfg&&v.cfg&&typeof v.cfg==='object'){C.cfg=v.cfg;C.cfgSc=1}C.sc=1;C.sct=t;if(/^oc/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})}
+if(Array.isArray(window.__oxScR))window.__oxScR.push([/^(oc|ob)|^oxSave$/,()=>C.sc]);
 async function loadL(force){if(C.busy||(!force&&C.L&&Date.now()-C.at<20000))return;C.busy=1;
- try{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],limit:3000}})});
-  C.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>!x.mv).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'he'));C.at=Date.now();if(!C.cfg)await cfgLoad()}
- catch(e){C.err=e.message||'הטעינה נכשלה';C.L=C.L||[]}finally{C.busy=0;if(/^oc/.test(cur().v))rerender()}}
+ try{await DC.swait('oc');const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],limit:3000}})});
+  C.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>!x.mv).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'he'));C.at=Date.now();if(!C.cfg||C.cfgSc){await cfgLoad();C.cfgSc=0}if(!DC.stale){C.sc=0;DC.sput('oc',{L:C.L,cfg:C.cfg})}}
+ catch(e){if(C.sc&&C.L&&e&&e.offline){DC.soff(e,C.sct)}else{if(C.sc){C.L=null;C.sc=0;if(C.cfgSc){C.cfg=null;C.cfgSc=0}}C.err=e.message||'הטעינה נכשלה';C.L=C.L||[]}}finally{C.busy=0;if(/^oc/.test(cur().v))rerender()}}
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 
 /* ---------- הזמנה חדשה: ת"ז ראשונה ---------- */
@@ -231,7 +235,7 @@ ACT.ocFinish=async el=>{const D=O.draft;if(!D){NAV.pop();return rerender()}
 const crow=c=>`<button class="li" data-a="go" data-v="ocCard" data-arg="${esc(c.id)}"><div class="m"><b>${cLabel(c)}</b>${badTag(c)}<small dir="ltr" style="text-align:right">${esc(c.phone||c.bph||'')}${c.tz||c.btz?' · '+esc(c.tz||c.btz):''}</small></div>${ico('chev','chev')}</button>`;
 const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||phsOf(c).some(p=>p.includes(dig(q)||'\u0000'))||String(c.tz||'').includes(dig(q)||'\u0000')||dig(c.bph).includes(dig(q)||'\u0000')||dig(c.btz).includes(dig(q)||'\u0000');
 const listH=()=>{const L=(C.L||[]).filter(c=>match(c,C.q.trim()));return L.slice(0,200).map(crow).join('')+(L.length>200?`<p class="note">מוצגים 200 מתוך ${L.length}. חפשו כדי לצמצם.</p>`:'')||'<div class="empty">אין לקוחות</div>'};
-V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
+V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){fillL();loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
  return{t:T,s:C.L.length+' לקוחות',h:`${mgr()&&typeof impCardH==='function'?impCardH('cust'):''}<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
  <div class="card" id="ocCount" style="margin:8px 0;text-align:center"><b class="a" style="font-size:1.4em">${C.L.length}</b> <span>לקוחות</span></div>
  ${mgr()?'<button class="btn g s w" data-a="ocCfg">שדות נוספים ללקוח</button>':''}
@@ -255,7 +259,7 @@ const ocRow=(l,v,o)=>v==null||v===''?'':`<div class="ocR"${o&&o.bad?` data-bad="
 const ocMulti=v=>{const L=[...new Set(String(v).split(' | ').map(x=>x.trim()).filter(Boolean))];return L.length>1?L.map(x=>'• '+esc(x)).join('<br>'):esc(L[0]||'')};
 const ocTel=p=>`<a href="tel:${esc(p)}" dir="ltr" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center;text-indent:0">${esc(p)}</a>`;
 const portH=(p,i)=>`<div class="ocP"><b dir="ltr" style="display:block;text-align:right">${p.phone?esc(p.phone):p.bph?esc(p.bph)+' '+BADT:'קו '+(i+1)}</b>${ocRow('תאריך ניוד',p.d)}${ocRow('חברת ניוד',p.co)}${p.tz?ocRow('ת.ז ניוד',p.tz):p.btz?ocRow('ת.ז ניוד',p.btz,{bad:'ptz'}):''}${p.act?ocRow('נויד בפועל',actTxt(p.act)):''}${p.br?ocRow('סניף',brNm(p.br)||p.br):''}</div>`;
-V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
+V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){fillL();loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
  const c=C.L.find(x=>x.id===id);if(!c)return{t:T,h:'<div class="empty">הלקוח לא נמצא</div>'};
  if(!O.L&&!C.ol){C.ol=1;fnLoadOrders()}
  const L=ordsOf(c),ed=`<button class="btn g s" style="min-height:44px;padding:4px 14px" data-a="ocEdit" data-id="${esc(c.id)}">עריכה</button>`,H=(t,e)=>`<div class="ocH"><span>${t}</span>${e?ed:''}</div>`;

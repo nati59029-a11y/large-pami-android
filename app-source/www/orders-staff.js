@@ -34,10 +34,19 @@ const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 async function runQ(coll,where,lim,ord){const sq={from:[{collectionId:coll}],limit:lim||500};if(where)sq.where=where;if(ord)sq.orderBy=[{field:{fieldPath:ord},direction:'DESCENDING'}];
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document))}
 const brWhere=()=>{const m=mine();return m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:{arrayValue:{values:m.slice(0,30).map(s=>({stringValue:s}))}}}}:null};
+/* B2b (24.11.2026): ההזמנות נפתחות מיד מהעותק השמור במכשיר (DC.sfill, dev-cache.js – תצוגה בלבד; פעם אחת בהפעלה), ואז load מעדכן מהשרת.
+   O.sc = מוצג עותק שמור (הזמנות, מוצרים, קטגוריות, ordcfg); O.csc = עלויות (getCosts) מהעותק השמור. כל עוד מוצג עותק שמור:
+   הזמנה חדשה, טיפול בהזמנה, הגדרות, העברות וייבוא לא נפתחים (scV), וכל פעולה של הזמנות/כסף מחכה (scGate – "מעדכן מהשרת…").
+   השמירה (DC.sput) רק אחרי תשובה מהשרת (לא מהמטמון של fsx – DC.stale). בלי חיבור – העותק נשאר עם שורת "אין חיבור"; 403/שגיאת שרת – העותק יורד מהמסך.
+   getWsPrices (מחירים שנכנסים להזמנה) לא נשמר – תמיד מהשרת. */
+const scRe=()=>{if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()};
+function fill(){DC.sfill('ox',(v,t)=>{if(O.L||!v||!Array.isArray(v.L)||!Array.isArray(v.P))return;O.L=v.L;O.P=v.P;O.C=Array.isArray(v.C)?v.C:[];O.cfg=v.cfg&&typeof v.cfg==='object'?v.cfg:{};O.sc=1;O.sct=t;scRe()});
+ DC.sfill('oxc',v=>{if(O.cost||!v||typeof v!=='object'||Array.isArray(v))return;O.cost=v;O.csc=1;scRe()})}
+const scV=t=>({t,h:`<div class="empty">${O.off||DC.stale?'אין חיבור – המסך הזה ייפתח כשהחיבור יחזור':'מעדכן מהשרת…'}</div>`});window.__oxScV=scV;
 let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))return;O.busy=1;O.err='';
- try{const[L,P,c,C]=await Promise.all([runQ('ord',brWhere(),500),prodPage(null),fsx('/ordcfg/main').catch(e=>{if(e.code===404)return null;throw e}),runQ('cat',null,500).catch(()=>[])]);O.C=C.sort((a,b)=>(a.ord||0)-(b.ord||0)||String(a.name).localeCompare(String(b.name),'he'));
-  O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now();costLoad();if(P.last)prodRest(P.last)}
- catch(e){O.err=e.message||'הטעינה נכשלה'}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
+ try{await DC.swait('ox');const[L,P,c,C]=await Promise.all([runQ('ord',brWhere(),500),prodPage(null),fsx('/ordcfg/main').catch(e=>{if(e.code===404)return null;throw e}),runQ('cat',null,500).catch(()=>[])]);O.C=C.sort((a,b)=>(a.ord||0)-(b.ord||0)||String(a.name).localeCompare(String(b.name),'he'));
+  O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now();if(!DC.stale){O.sc=0;O.off=0;DC.sput('ox',{L:O.L,P:O.P,C:O.C,cfg:O.cfg})}costLoad();if(P.last)prodRest(P.last)}
+ catch(e){if(O.sc&&O.L&&e&&e.offline){O.off=1;DC.soff(e,O.sct)}else{if(O.sc){O.L=null;O.P=null;O.C=[];O.cfg=null;O.sc=0;O.off=0}O.err=e.message||'הטעינה נכשלה'}}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
 /* 17.11.2026 (סנכרון כספית A1): מוצרים בעמודים של 2,000 לפי מזהה (היה: עד 2,000 בלבד). העמוד הראשון – כמו קודם; השאר נטענים ברקע
    ומצטרפים לרשימה (O.pMore בזמן הטעינה). כך ~9,000 מוצרים נטענים בלי לעכב את המסך. */
 const PPG=2000;
@@ -46,7 +55,7 @@ async function prodPage(after){const sq={from:[{collectionId:'prod'}],orderBy:[{
 async function prodRest(after){const t=O.at;O.pMore=1;try{let a=after;for(let g=0;g<30&&a;g++){const L=await prodPage(a);if(O.at!==t)return;a=L.last;O.P=O.P.concat(L)}O.P.sort((x,y)=>String(x.name).localeCompare(String(y.name),'he'));O.pErr=0}catch(e){O.pErr=1}finally{if(O.at===t){O.pMore=0;O.sm=null;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}}}
 window.__oxReload=()=>{O.at=0;O.P=null};
 /* עלות (החלטה 00:12): מנהל ועובד עם ord רואים עלות בכל מקום; נטען ברקע מ-getCosts (בעמודים) */
-async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;O.cerr=0;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){O.cerr=1}}
+async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;O.cerr=0;if(!DC.stale){O.csc=0;DC.sput('oxc',W)}if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){O.cerr=1;if(O.csc&&!(e&&e.offline)){O.cost=null;O.csc=0}}}
 const costOf=id=>O.cost&&typeof O.cost[id]==='number'?O.cost[id]:null;
 const costH=id=>{const c=costOf(id);return c==null?'':' · עלות '+ils(c)};
 /* עלות לפני מע"מ: מחושב להצגה בלבד מול "מחיר עלות" (כולל מע"מ); נשמר רק cost. אחוז המע"מ בהגדרות העסק (ברירת מחדל 18) */
@@ -105,7 +114,7 @@ const sumMonth=()=>{const d=new Date(),m0=new Date(d.getFullYear(),d.getMonth(),
 /* ---------- רשימת הזמנות ---------- */
 const FL=[['open','פתוחות'],['new','חדשה'],['work','בטיפול'],['wait_pay','ממתין לתשלום'],['paid','שולם'],['out','יצא למשלוח'],['done','הושלם'],['cancel','בוטלה'],['all','הכול']];
 let OBR='';
-V.ox=()=>{const T='הזמנות';if(!on())return deny(T);if(!O.L){load();return loading(T)}
+V.ox=()=>{const T='הזמנות';if(!on())return deny(T);if(!O.L){fill();load();return loading(T)}
  const L0=O.L.filter(o=>!OBR||o.br===OBR),cnt=k=>k==='all'?L0.length:k==='open'?L0.filter(o=>!['done','cancel'].includes(o.status)).length:L0.filter(o=>o.status===k).length;
  const L=L0.filter(o=>O.st==='all'||(O.st==='open'?!['done','cancel'].includes(o.status):o.status===O.st));
  const B=myBr(),bc=B.length>1?`<div class="chips scroll-x nw" role="group" aria-label="סינון לפי סניף" style="margin:8px 0"><button class="chip ${OBR?'':'on'}" data-a="oxBr" data-id="" aria-pressed="${!OBR}">כל הסניפים</button>${B.map(b=>`<button class="chip ${OBR===b.id?'on':''}" data-a="oxBr" data-id="${esc(b.id)}" aria-pressed="${OBR===b.id}">${esc(b.name)}</button>`).join('')}</div>`:'';
@@ -142,7 +151,7 @@ const lineH=(it,i,br)=>{const p=it.pid?prod(it.pid):null,src=hasBr()&&br?srcOf(b
 const freeH=(it,i,br)=>{const B=myBr();return `<div class="row"><label class="f grow"><span>עלות ליחידה ₪ (רשות)</span><input data-i="oxLn" data-k="c" data-n="${i}" inputmode="decimal" value="${esc(it.c==null?'':it.c)}"></label>${B.length>1?`<label class="f grow"><span>סניף השורה</span><select data-i="oxLn" data-k="lb" data-n="${i}"><option value="">כמו ההזמנה</option>${B.filter(b=>b.id!==br).map(b=>`<option value="${esc(b.id)}"${it.lb===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:''}</div>`};
 // "לפי המלאי": מוצע הסניף שיש בו מספיק (קודם הסניף של ההזמנה) – כמו בשרת
 function suggest(p,br,qty){if(!hasBr()||!br||srcOf(br)!=='stock')return '';if(q(p,br)>=qty)return '';const c=brs().map(b=>b.id).filter(b=>q(p,b)>=qty);return c.length?c[0]:''}
-V.oxNew=()=>{const T='הזמנה חדשה';if(!on())return deny(T);if(!O.P){load();return loading(T)}const D=draft(),B=myBr();
+V.oxNew=()=>{const T='הזמנה חדשה';if(!on())return deny(T);if(!O.P){load();return loading(T)}if(O.sc)return scV(T);const D=draft(),B=myBr();
  const brH=B.length>1?`<label class="f"><span>סניף ההזמנה</span><select data-i="oxD" data-k="br" required><option value="">בחר סניף</option>${B.map(b=>`<option value="${esc(b.id)}"${D.br===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:B.length===1?`<p class="note">סניף: ${esc(B[0].name)}</p>`:'';
  const f=(l,k,t,x)=>`<label class="f"><span>${l}</span><input data-i="oxD" data-k="${k}" type="${t||'text'}" value="${esc(D[k])}" ${x||''}></label>`;
  const hits=D.q?(O.P||[]).filter(p=>p.on!==false&&(String(p.name).includes(D.q)||bcHit(p,D.q.trim()))).slice(0,8):[];
@@ -189,7 +198,7 @@ ACT.oxSave=async el=>{const D=draft();custJoin(D);let items;try{if(hasBr()&&!D.b
   await load(true);NAV.pop();{const i=NAV.map(x=>x.v).lastIndexOf('ox');if(i>=0){NAV.length=i+1;render(0)}else go('ox')}return r}catch(e){el.disabled=false;err(e)}}; // מחזיר את ההזמנה שנשמרה (לכרטיס מטופס ההזמנה)
 
 /* ---------- כרטיס הזמנה ---------- */
-V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return loading(T)}const o=O.L.find(x=>x.id===id);if(!o)return{t:T,h:'<div class="empty">ההזמנה לא נמצאה</div>'};
+V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){fill();load();return loading(T)}const o=O.L.find(x=>x.id===id);if(!o)return{t:T,h:'<div class="empty">ההזמנה לא נמצאה</div>'};
  const c=o.cust||{},open=['new','work','wait_pay'].includes(o.status);
  // משוב סבב 2 (החלטות 13–16): לקוח בשוטף – "נשלח" (data-s=out; השרת רושם ממתין לתשלום + shp) במקום "ממתין לתשלום", בלי כפתורי תשלום (רק "סמן שולם").
  // הזמנה שנשלחה (o.shp) – נעולה לעריכה ולא חוזרת ל"בטיפול". לקוח מיידי/פרטי – כמו קודם
@@ -293,7 +302,7 @@ FRM.oxEdF=async f=>{const x=fd(f),E=O.ed;const L=E.items.map((it,i)=>Object.assi
 
 /* ---------- מלאי ---------- */
 let SBR='';
-V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const B=myBr();if(hasBr()&&!SBR&&B.length)SBR=B[0].id;const br=hasBr()?SBR:NB;
+V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){if(!O.L)fill();load();return loading(T)}const B=myBr();if(hasBr()&&!SBR&&B.length)SBR=B[0].id;const br=hasBr()?SBR:NB;
  const bc=B.length>1?`<div class="chips scroll-x nw" role="group" aria-label="סניף" style="margin:8px 0">${B.map(b=>`<button class="chip ${SBR===b.id?'on':''}" data-a="oxSBr" data-id="${esc(b.id)}" aria-pressed="${SBR===b.id}">${esc(b.name)}</button>`).join('')}</div>`:B.length===1?`<p class="note">סניף: ${esc(B[0].name)}</p>`:'';
  const L=stockL();
  return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${sumH(br)}${catBar()}${bc}
@@ -350,7 +359,7 @@ ACT.oxHist=async()=>{dlg('<h3>היסטוריית תנועות</h3><p class="note
  dlg(`<h3>היסטוריית תנועות</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.at)} · <b>${esc(x.name)}</b>${hasBr()?' · '+esc(bn(x.br)):''} · ${WHY[x.why]||x.why} · <bdi dir="ltr">${x.delta>0?'+':''}${n3(x.delta)}</bdi>${x.no?' · הזמנה #'+x.no:''}${x.note?' · '+esc(x.note):''}</div>`).join('')||'<p class="note">אין תנועות</p>'}</div><button class="btn g w" data-a="closeDlg">סגור</button>`)}catch(e){dlg(`<h3>היסטוריית תנועות</h3><p class="note">${esc(e.message)}</p><button class="btn g w" data-a="closeDlg">סגור</button>`)}};
 
 /* ---------- מקור המלאי לכל סניף (מנהל) ---------- */
-V.oxCfg=()=>{const T='מאיזה סניף יורד המלאי';if(!on()||!mgr())return deny(T);if(!O.cfg){load();return loading(T)}const B=brs();
+V.oxCfg=()=>{const T='מאיזה סניף יורד המלאי';if(!on()||!mgr())return deny(T);if(!O.cfg){load();return loading(T)}if(O.sc)return scV(T);const B=brs();
  return{t:T,s:'לכל סניף בנפרד',h:`<p class="note"${B.length?'':' hidden'}>"לפי המלאי" – בכל שורה מוצע הסניף שיש בו מספיק, והעובד יכול לשנות. סניף קבוע – כל ההזמנות של הסניף יורדות ממלאי של הסניף שנבחר; הסחורה מועברת לסניף ההזמנה.</p>
  <form class="card" data-f="oxCfgF"${B.length?'':' hidden'}>${B.map(b=>`<label class="f"><span>הזמנות של ${esc(b.name)}</span><select name="${esc(b.id)}"><option value="stock">לפי המלאי</option>${B.map(x=>`<option value="${esc(x.id)}"${srcOf(b.id)===x.id?' selected':''}>תמיד מ${esc(x.name)}</option>`).join('')}</select></label>`).join('')}<button class="btn w">שמור</button></form>
  <form class="card" data-f="oxVatF"><label class="f"><span>אחוז מע"מ (לחישוב עלות לפני/אחרי מע"מ)</span><input name="vat" inputmode="decimal" value="${vatP()}" required></label><button class="btn w">שמור</button></form>`}};
@@ -469,7 +478,7 @@ async function wsLoad(D){if(mgr()){const W={};let a;for(let g=0;g<200;g++){const
  const pids=[...new Set(D.items.filter(it=>it.pid).map(it=>it.pid))].slice(0,100);if(!pids.length)return {};D.wsC=D.custId;const r=await fnCall('getWsPrices',{custId:D.custId,reqId:D.req,pids});return r&&r.wp||{}}
 
 /* העברות בין סניפים: רשימה + העברה ידנית */
-V.oxXfer=()=>{const T='העברות בין סניפים';if(!on())return deny(T);if(!O.P){load();return loading(T)}if(O.xf===undefined){O.xf=null;xfLoad()}
+V.oxXfer=()=>{const T='העברות בין סניפים';if(!on())return deny(T);if(!O.P){load();return loading(T)}if(O.sc)return scV(T);if(O.xf===undefined){O.xf=null;xfLoad()}
  const XW={order:'הזמנה',cancel:'ביטול הזמנה',edit:'עריכת הזמנה',manual:'ידנית'};
  return{t:T,s:'סחורה שעברה מסניף לסניף',h:`<button class="btn w" data-a="oxXfNew">העברה ידנית</button><div class="sec"><h3>אחרונות</h3></div>${O.xf?O.xf.map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(x.name)}</b><small>${tm(x.at)} · ${esc(bn(x.from))} ← ${esc(bn(x.to))} · ${XW[x.why]||esc(x.why)}${x.no?' · הזמנה #'+x.no:''}${x.note?' · '+esc(x.note):''}</small></div><b class="a">${n3(x.qty)}</b></div>`).join('')||'<div class="empty">אין העברות</div>':'<p class="note">טוען…</p>'}`}};
 async function xfLoad(){try{const m=mine()&&hasBr()?mine().slice(0,30):null;
@@ -489,7 +498,7 @@ const IMF0=[['name','שם המוצר',1],['price','מחיר מכירה',1],['bar
 const IMF=IMF0; // 00:12: גם עובד מייבא סיטונאי ועלות
 const IMK='lp-ox-imp-map';
 const imMap0=()=>{try{return JSON.parse(localStorage.getItem(IMK)||'{}')||{}}catch(e){return{}}};
-V.oxImp=()=>{const T='ייבוא מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const I=O.im;
+V.oxImp=()=>{const T='ייבוא מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}if(O.sc)return scV(T);const I=O.im;
  if(!I)return{t:T,s:'Excel או CSV',h:`${impCardH('prod')}<div class="card"><p class="note" style="margin-top:0">שורה ראשונה = כותרות. אחרי בחירת הקובץ בוחרים איזו עמודה היא איזה שדה. מוצר קיים (לפי ברקוד, ואם אין – לפי שם מדויק) מתעדכן ולא נוצר פעמיים.</p><label class="btn w" style="display:flex;align-items:center;justify-content:center">בחר קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="oxImpFile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div>`};
  const opt=(k)=>`<option value="">— לא לייבא —</option>${I.head.map((h,i)=>`<option value="${i}"${String(I.map[k])===String(i)?' selected':''}>${esc(String(h||'עמודה '+(i+1)))}</option>`).join('')}`;
  const pv=imRows(),bad=pv.filter(r=>r.err),good=pv.length-bad.length;
@@ -641,5 +650,14 @@ const dayH=()=>{const D=DAY();if(!D.b&&(!D.r||!D.at||D.br!==(OBR||'')))setTimeou
 ACT.oxDayK=el=>{const D=DAY();D.k=el.dataset.k;if(D.k!=='custom'){[D.from,D.to]=pfRange(D.k);D.r=null;dayLoad()}else rerender()};
 FRM.oxDayF=f=>{const x=fd(f),D=DAY(),ok=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'');if(!ok(x.from)||!ok(x.to))return toast('בחר תאריכים');if(x.to<x.from)return toast('תאריך הסיום לפני תאריך ההתחלה');if(dAdd(x.from,366)<x.to)return toast('תקופה של עד שנה');D.from=x.from;D.to=x.to;D.r=null;dayLoad()};
 ACT.oxDayProf=()=>{if(!prOk())return;const D=DAY(),P=PF();P.k=D.k==='today'||D.k==='yest'?D.k:'custom';P.from=D.from;P.to=D.to;P.br=OBR||'';P.r=null;P.err='';P.b=0;go('oxProf')};
-window.__ox=O;window.__oxAfter=after;/* חוסרים (19.11.2026): טעינת המלאי לזיהוי מוצר */window.__oxLoadAll=()=>load();window.__pExtRead=pExtRead;/* לבדיקה (ui-hs.js 47) *//* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__payKind=payKind;window.__oxAuthH=o=>afterOn()?authH(o):''; /* החלטה 32 */window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
+window.__ox=O;window.__oxAfter=after;/* חוסרים (19.11.2026): טעינת המלאי לזיהוי מוצר */window.__oxLoadAll=async()=>{await load();/* B2b: מוצג עותק שמור – מחכים לתשובה מהשרת (מדבקות, חוסרים) */for(let i=0;i<100&&O.busy&&O.sc;i++)await new Promise(r=>setTimeout(r,100))};window.__pExtRead=pExtRead;/* לבדיקה (ui-hs.js 47) *//* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__payKind=payKind;window.__oxAuthH=o=>afterOn()?authH(o):''; /* החלטה 32 */window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
+/* B2b (24.11.2026): כל עוד מוצג עותק שמור (O.sc וכו') – פעולות של הזמנות, לקוחות, ליקוט, קווים, חשבוניות (ar) וקישור הזמנה לחוסר
+   מחכות לתשובה מהשרת (scWait – "מעדכן מהשרת… נסה שוב בעוד רגע"). נעטף פעם אחת אחרי שכל הקבצים נטענו (DOMContentLoaded), כך שגם פעולה
+   שקובץ אחר החליף/עטף נחסמת. SCOK – תצוגה, סינון ומעבר בלבד (לא כותבים ולא מכניסים מחיר להזמנה). __oxScR: [שמות, דגל] – כל קובץ מוסיף את הדגל שלו */
+const SCR=window.__oxScR=[[/./,()=>O.sc],[/^(oxEditP|oxNewP|oxPF|obUnder)$/,()=>O.csc]];
+const SCP=/^(ox|oc|ob|ol|os|imp|ar(?!Debt|Led|Rem|CRem))[A-Z]|^hsOrd/;
+const SCOK=new Set('oxProfit oxProfitF oxSall oxRe oxSt oxBr oxPRetry oxMore oxSBr oxDnF oxImpX impHide oxPfK oxPfPaid oxPfBr oxPfRe oxPfF oxPfGo oxDayK oxDayF oxDayProf oxHist oxPHist oxAmX oxCats ocRe oxPkBack oxSoRe olSec olPV osClr'.split(' '));
+const scBlk=k=>SCR.some(([re,f])=>{try{return re.test(k)&&!!f()}catch(e){return false}});window.__oxScBlk=scBlk;
+function scGate(){[ACT,FRM].forEach(T=>Object.keys(T).forEach(k=>{const f=T[k];if(!SCP.test(k)||SCOK.has(k)||typeof f!=='function'||f.scg)return;const g=function(){if(scBlk(k)){scWait();return}return f.apply(this,arguments)};g.scg=1;T[k]=g}))}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scGate);else setTimeout(scGate,0);
 })();

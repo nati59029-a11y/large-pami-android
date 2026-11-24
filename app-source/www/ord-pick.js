@@ -70,6 +70,7 @@ function lineH(o,s,i){const it=s.it[i],x=s.l[i],p=it.pid?prod(it.pid):null;
  return h+'</div>'}
 V.oxPick=id=>{const T='טיפול בהזמנה';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};
  if(!O.L){const r=V.oxOrd(id);return Object.assign({},r,{t:T})}
+ if(O.sc&&window.__oxScV)return window.__oxScV(T); // B2b: הליקוט נבנה רק מהזמנה שנטענה מהשרת (לא מהעותק השמור)
  const o=ordOf(id);if(!o)return{t:T,h:'<div class="empty">ההזמנה לא נמצאה</div>'};
  if(!PS[id]&&o.pk&&o.pk.l)return sumV(o);
  if(!canPick(o))return{t:T,s:'#'+o.no,h:`<div class="empty">אי אפשר לטפל בהזמנה במצב הזה</div><button type="button" class="btn g w" data-a="oxPkBack">חזרה להזמנה</button>`};
@@ -158,16 +159,19 @@ ACT.oxPkGo=el=>{const o=ordOf(el.dataset.id);if(!o||!canPick(o))return toast('א
 
 /* ---------- להזמין מספקים ---------- */
 const SO={L:null,busy:0,err:''};window.__so=SO;/* סנכרון ספקים (sup-sync.js) */
+/* B2b (24.11.2026): "להזמין מספקים" (supord) נפתח מיד מהעותק השמור – תצוגה בלבד; SO.sc: הפעולות (oxSo*) מחכות, sup-sync לא רץ על העותק */
+function soFill(){DC.sfill('so',(v,t)=>{if(SO.L||!Array.isArray(v))return;SO.L=v;SO.sc=1;SO.sct=t;if(['oxSup','ox'].includes(cur().v)&&!document.querySelector('#dlg[open]'))rerender()})}
+if(Array.isArray(window.__oxScR))window.__oxScR.push([/^oxSo/,()=>SO.sc]);
 async function soLoad(){if(SO.busy)return;SO.busy=1;SO.err='';
- try{const m=brMineIds(),vs=a=>({arrayValue:{values:a.map(v=>({stringValue:v}))}});
+ try{await DC.swait('so');const m=brMineIds(),vs=a=>({arrayValue:{values:a.map(v=>({stringValue:v}))}});
   // עובד משויך לסניפים – השאילתה חייבת לסנן לפי סניף (החוקים); אחרת – רק פתוחות
   const where=m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:vs(m.slice(0,30))}}:{fieldFilter:{field:{fieldPath:'st'},op:'IN',value:vs(['open','ord'])}};
   const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supord'}],where,limit:1000}})});
-  SO.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>x.st==='open'||x.st==='ord').sort((a,b)=>(a.at||0)-(b.at||0))}
- catch(e){SO.err=e&&e.message||'הטעינה נכשלה'}finally{SO.busy=0;if(cur().v==='oxSup')rerender()}}
+  SO.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>x.st==='open'||x.st==='ord').sort((a,b)=>(a.at||0)-(b.at||0));if(!DC.stale){SO.sc=0;DC.sput('so',SO.L)}}
+ catch(e){if(SO.sc&&SO.L&&e&&e.offline)DC.soff(e,SO.sct);else{if(SO.sc){SO.L=null;SO.sc=0}SO.err=e&&e.message||'הטעינה נכשלה'}}finally{SO.busy=0;if(cur().v==='oxSup')rerender()}}
 const supK=s=>String(s||'').trim().toLowerCase();
 V.oxSup=()=>{const T='להזמין מספקים';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};
- if(!SO.L){if(!SO.busy&&!SO.err)soLoad();return{t:T,h:SO.err?`<div class="card"><p class="note">${esc(SO.err)}</p><button type="button" class="btn g w" data-a="oxSoRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'}}
+ if(!SO.L){if(!SO.busy&&!SO.err){soFill();soLoad()}return{t:T,h:SO.err?`<div class="card"><p class="note">${esc(SO.err)}</p><button type="button" class="btn g w" data-a="oxSoRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'}}
  const G=new Map();SO.L.forEach(x=>{const k=supK(x.sup);if(!G.has(k))G.set(k,{n:x.sup,L:[]});G.get(k).L.push(x)});
  const gs=[...G.values()].sort((a,b)=>String(a.n).localeCompare(String(b.n),'he'));
  const b=(x,st,t)=>`<button type="button" class="btn g s grow" data-a="oxSoSt" data-id="${esc(x.id)}" data-s="${st}">${t}</button>`;
@@ -180,7 +184,7 @@ ACT.oxSoRe=()=>{SO.L=null;SO.err='';soLoad();rerender()};
 ACT.oxSoSt=el=>{const id=el.dataset.id,st=el.dataset.s;const run=async()=>{el.disabled=true;try{await fnCall('supOrdSet',{id,st});const x=(SO.L||[]).find(y=>y.id===id);if(x){if(st==='done'||st==='void')SO.L=SO.L.filter(y=>y!==x);else x.st=st}toast(st==='done'?'סומן: הגיע. אל תשכחו להכניס למלאי':'עודכן');rerender()}catch(e){el.disabled=false;err(e)}};
  if(st==='void')ask('להוריד את המוצר מהרשימה "להזמין מספקים"?',run,'כן, להוריד');else run()};
 // כניסה מרשימת ההזמנות
-{const f=V.ox;if(f)V.ox=()=>{const r=f();try{if(!r||!r.h||!on())return r;if(SO.L===null&&!SO.busy&&!SO.err&&O.L)soLoad();const n=SO.L?SO.L.length:0;
+{const f=V.ox;if(f)V.ox=()=>{const r=f();try{if(!r||!r.h||!on())return r;if(SO.L===null&&!SO.busy&&!SO.err&&O.L){soFill();soLoad()}const n=SO.L?SO.L.length:0;
  const a0=r.h.indexOf('data-v="oxStock"'),at=a0>=0?r.h.indexOf('</div>',a0)+6:-1;if(at>5)r.h=r.h.slice(0,at)+`<button type="button" class="btn g s w" data-a="go" data-v="oxSup" style="margin-bottom:6px">להזמין מספקים${n?` (${n})`:''}</button>`+r.h.slice(at)}catch(e){}return r}} // אחרי שורת "הזמנה חדשה / מלאי / לקוחות"
 window.__oxPick={PS,sess,SO};
 })();

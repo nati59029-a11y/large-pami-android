@@ -23,13 +23,17 @@ function phN(v){let p=String(v==null?'':v).trim().replace(/[\s-]/g,'');if(/^\+?9
 const bn=id=>!id||id==='_'?'':(brNm(id)||id);
 const dd=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?(+m[3])+'.'+(+m[2])+'.'+m[1]:esc(d||'')};
 const L={P:null,cfg:null,busy:0};
+/* B2b (24.11.2026): חבילות הניוד (lineplan) והגדרות הסלולר (ordcfg/cell) מוצגות מיד מהעותק השמור – תצוגה בלבד, ואז lload מעדכן מהשרת.
+   L.sc = מוצג עותק שמור: פעולות החבילות ושמירת הזמנה מחכות (scGate), ו-seedOnce (כתיבה בשרת) לא רץ לפי העותק */
+if(Array.isArray(window.__oxScR))window.__oxScR.push([/^ol|^oxSave$/,()=>L.sc]);
 async function lload(force){if(L.busy||(!force&&L.P))return;L.busy=1;
- try{const[r,c]=await Promise.all([fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'lineplan'}],limit:200}})}),fsx('/ordcfg/cell').catch(e=>{if(e.code===404)return null;throw e})]);
-  L.P=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));L.cfg=c?dec(c):{}}
- catch(e){L.P=L.P||[];L.cfg=L.cfg||{}}finally{L.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}
+ if(!L.P)DC.sfill('ol',(v,t)=>{if(L.P||!v||!Array.isArray(v.P))return;L.P=v.P;L.cfg=v.cfg&&typeof v.cfg==='object'?v.cfg:{};L.sc=1;L.sct=t;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()});
+ try{await DC.swait('ol');const[r,c]=await Promise.all([fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'lineplan'}],limit:200}})}),fsx('/ordcfg/cell').catch(e=>{if(e.code===404)return null;throw e})]);
+  L.P=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));L.cfg=c?dec(c):{};if(!DC.stale){L.sc=0;DC.sput('ol',{P:L.P,cfg:L.cfg})}}
+ catch(e){if(L.sc&&L.P&&e&&e.offline)DC.soff(e,L.sct);else{if(L.sc){L.P=null;L.cfg=null;L.sc=0}L.P=L.P||[];L.cfg=L.cfg||{}}}finally{L.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}
  seedOnce()}
 // 2026-11-12: עסק שהסלולר כבר פעיל בו ועוד לא קיבל את תוכניות ברירת המחדל (מהאקסל) – נטענות פעם אחת דרך השרת
-async function seedOnce(){if(L.seedTry||!cell()||!L.cfg||L.cfg.seeded||!L.P)return;L.seedTry=1;try{const r=await fnCall('ensureLinePlans',{});if(r&&r.added)await lload(true);else if(L.cfg)L.cfg.seeded=1}catch(e){}}
+async function seedOnce(){if(L.sc||L.seedTry||!cell()||!L.cfg||L.cfg.seeded||!L.P)return;L.seedTry=1;try{const r=await fnCall('ensureLinePlans',{});if(r&&r.added)await lload(true);else if(L.cfg)L.cfg.seeded=1}catch(e){}}
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const carriers=()=>Array.isArray(L.cfg&&L.cfg.carriers)?L.cfg.carriers:[];
 const ads=()=>Array.isArray(L.cfg&&L.cfg.ads)?L.cfg.ads:[];

@@ -86,7 +86,7 @@ async function xLoad(force){if(!force&&HS.x&&Date.now()-HS.xat<600000)return;HS.
  try{const j=await fsx('/hsx?pageSize=300');HS.x=((j&&j.documents)||[]).map(DEC).filter(d=>idOk(d.id))}catch(e){HS.x=HS.x||[]}
  HS.xi=null;sugPaint()}
 const xIdx=()=>{if(!HS.xi&&HS.x&&HS.x.length&&PM())HS.xi=C.xIndex(HS.x,PM());return HS.xi};
-const cIdx=()=>{try{const P=ordOn()&&window.__ox&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;const SL=supList(),sk=SL.length;if(HS.cP!==P||HS.cK!==sk){HS.cP=P;HS.cK=sk;HS.ci=C.catIndex(P,SL,PM())}return HS.ci}catch(e){return null}};
+const cIdx=()=>{try{const P=ordOn()&&window.__ox&&!window.__ox.sc&&Array.isArray(window.__ox.P)?window.__ox.P:null;/* B2b: לא לפי עותק שמור */if(!P||!PM())return null;const SL=supList(),sk=SL.length;if(HS.cP!==P||HS.cK!==sk){HS.cP=P;HS.cK=sk;HS.ci=C.catIndex(P,SL,PM())}return HS.ci}catch(e){return null}};
 /* המנהל: בניית hsx מחשבוניות התמחור (pinv) – רק חדשות מאז הפעם הקודמת, רק שמות מוצרים (בלי מחירים). כשל (403 וכו') – בשקט */
 async function xBuild(){if(HS.xb||!mgr()||!PM())return;HS.xb=1;const K='hs-xat|'+who();
  try{const last=+localStorage.getItem(K)||0;
@@ -231,10 +231,10 @@ ACT.hsEdit=el=>{const x=find(el.dataset.id);if(!x)return;
   custOn:!!(x.cust&&(x.cust.nm||x.cust.ph)),cust:Object.assign({nm:'',ph:''},x.cust||{}),ord:x.ord&&x.ord.id?{id:x.ord.id,no:x.ord.no||0}:null,np:x.np?1:0,touched:true});
  xLoad();catLoad();if(x.np)imgGet(x.id).then(imgPaint);go('hsEd',x.id)};
 /* זיהוי המוצר מהמלאי (19.11.2026): חיפוש בכל מוצרי הקטלוג (שם, כינוי, ברקוד, קוד פריט). הספק של המוצר (prod.sup) מוצע ראשון ונבחר אוטומטית בחוסר חדש */
-const pIdx=()=>{try{const P=window.__ox&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;if(HS.pP!==P){HS.pP=P;HS.pi=PM().index(P)}return HS.pi}catch(e){return null}};
+const pIdx=()=>{try{const P=window.__ox&&!window.__ox.sc&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;if(HS.pP!==P){HS.pP=P;HS.pi=PM().index(P)}return HS.pi}catch(e){return null}};
 function prodHit(){const f=HS.f,n=String(f&&f.n||'').trim(),ix=pIdx();if(n.length<2||!ix)return null;try{return PM().search(ix,n,{limit:1,min:0.75})[0]||null}catch(e){return null}}
 /* טעינת המלאי פעם אחת למסך החוסר (אם עוד לא נטען במסך ההזמנות) */
-function catLoad(){try{if(window.__ox&&window.__ox.P||!ordOn()||typeof window.__oxLoadAll!=='function'||HS.cl)return;HS.cl=1;Promise.resolve(window.__oxLoadAll()).catch(()=>{}).then(()=>{HS.cl=0;sugPaint()})}catch(e){HS.cl=0}}
+function catLoad(){try{if(window.__ox&&window.__ox.P&&!window.__ox.sc||!ordOn()||typeof window.__oxLoadAll!=='function'||HS.cl)return;HS.cl=1;Promise.resolve(window.__oxLoadAll()).catch(()=>{}).then(()=>{HS.cl=0;sugPaint()})}catch(e){HS.cl=0}}
 const supRef=n=>{const k=supK(n);if(!k)return null;const s=supList().find(y=>supK(y.name)===k);return s?{id:s.id,name:s.name}:{id:C.nameId(n),name:String(n).trim().slice(0,60)}};
 function sugList(){const f=HS.f;if(!f)return[];const n=String(f.n||'').trim();if(n.length<2||!PM())return[];
  let L=[];try{L=C.suggest(n,{idx:xIdx(),cidx:cIdx(),items:all(),sups:supList()},PM())}catch(e){}
