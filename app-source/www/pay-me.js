@@ -109,7 +109,7 @@ function viewFill(m){DC.sfill('pm|'+m,(v,t)=>{if(m in PW.D||!v||!wOn())return;PW
 window.pmTile=()=>{try{if(!wOn())return'';if(HM.u!==SY.uid)homeFill();if((HM.u!==SY.uid||Date.now()-HM.t>3e5)&&!HM.b)setTimeout(homeLoad,0);if(HM.u!==SY.uid||!HM.d)return'';
  const d=HM.d;return `<button class="tile" data-a="pmGo" data-pay-tile style="border-color:var(--acc);color:var(--acc);font-size:1.05rem;text-align:center">${ico('chart')}שכר משוער<b style="display:block;font-size:1.15rem;margin-top:2px">${ils((d.est||0)/100)}</b><small style="display:block;font-size:.72rem;font-weight:600;opacity:.85;line-height:1.25">${d.slip?'הסכום הסופי לפי התלוש':'הסכום הסופי בסוף החודש'}</small></button>`}catch(e){return''}};
 async function viewLoad(){const m=PW.m;if(PW.b||!wOn())return;PW.b=1;PW.err='';try{await DC.swait('pm|'+m);const r=await docOf(m);PW.D[m]=r.v;PW.at[m]=r.at;delete PW.st[m];DC.sput('pm|'+m,{v:r.v,at:r.at})}
- catch(e){if(PW.st[m]){if(e&&e.offline)DC.soff(e,PW.st[m]);else{delete PW.D[m];delete PW.st[m]}}PW.err=e&&e.offline?e.message:(e&&e.code===403?'אין לך הרשאה לנתוני השכר':'הטעינה נכשלה: '+(e&&e.message||''))}
+ catch(e){if(PW.st[m]){if(e&&e.offline)DC.soff(e,PW.st[m]);else{delete PW.D[m];delete PW.st[m]}}if(e&&e.code===403)DC.sput('pm|'+m,{v:null,at:0});PW.err=e&&e.offline?e.message:(e&&e.code===403?'אין לך הרשאה לנתוני השכר':'הטעינה נכשלה: '+(e&&e.message||''))}
  finally{PW.b=0}try{if(cur().v==='wk'&&WS==='pm')rerender()}catch(e){}}
 ACT.pmGo=()=>{if(!wOn())return;WS='pm';PW.m=HM.m||months()[0];PW.err='';const ld=!(PW.m in PW.D);if(ld)viewFill(PW.m);rerender();if(ld)viewLoad()};
 ACT.pmMon=el=>{const m=el.dataset.m;if(!months().includes(m)||PW.b)return;PW.m=m;PW.err='';const ld=!(m in PW.D);if(ld)viewFill(m);rerender();if(ld)viewLoad()};

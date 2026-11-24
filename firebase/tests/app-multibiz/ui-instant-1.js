@@ -13,7 +13,7 @@ const mv = (o) => ({ mapValue: { fields: o } });
 const DOCS = 'projects/demo-largpeami/databases/(default)/documents/b/acme/';
 const docOf = (name, f) => ({ name: DOCS + name, fields: f, createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
 const T0 = H.T0;
-let VER = 'א', DELAY = 0, OFF = false, ANS = {}; const WR = [];
+let VER = 'א', DELAY = 0, OFF = false, ANS = {}, FORB = new Set(); const WR = [];
 // לכל גרסה מידע אחר, כדי להבדיל בין העותק השמור לתשובה החדשה: סכום השכר (באגורות) ומצב סיכום היום
 const EST = { א: 94000, ב: 12300, ג: 45600, ד: 78900, ה: 31400, ו: 27100 }, DST = { א: 'sum', ב: 'ok', ג: 'sum', ד: 'ok', ה: 'sum', ו: 'ok' };
 const ils = (v) => String(v / 100);
@@ -26,7 +26,9 @@ async function mock(ctx) {
   await ctx.route((u) => ['8080', '5001', '9099'].includes(new URL(u).port), async (route) => {
     const req = route.request(), u = new URL(req.url()), m = req.method(), p = decodeURIComponent(u.pathname), body = req.postData() || '';
     if (OFF) return route.abort('internetdisconnected');
-    const ok = async (o, tag) => { if (DELAY) await sleep(DELAY); ANS[tag] = (ANS[tag] || 0) + 1; return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) }); };
+    const ok = async (o, tag) => { if (DELAY) await sleep(DELAY); ANS[tag] = (ANS[tag] || 0) + 1;
+      if (FORB.has(tag)) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 403, message: 'PERMISSION_DENIED', status: 'PERMISSION_DENIED' } }) });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) }); };
     if (u.port === '5001') { const fn = p.split('/').pop(); let d = {}; try { d = JSON.parse(body).data || {}; } catch (e) { /* */ }
       if (fn === 'shApi' && d.op === 'week') return ok({ result: WEEK() }, 'shf'); return route.fallback(); }
     if (u.port !== '8080') return route.fallback();
@@ -36,6 +38,7 @@ async function mock(ctx) {
       const c = sq.from && sq.from[0].collectionId, w = sq.where && sq.where.fieldFilter, fp = w && w.field.fieldPath, val = w && w.value && w.value.stringValue;
       if (c === 'inbox' && fp === 'owner' && val === 'wa') return ok([{ document: docOf('inbox/i1', { owner: sv('wa'), status: sv('new'), created: sv('2026-11-03T08:00:00Z'), data: sv(JSON.stringify({ amt: '120', catName: 'קטגוריה ' + VER, date: '2026-11-03', note: '' })) }), readTime: 'x' }], 'inbox');
       if (c === 'rq') return ok([{ document: docOf('rq/r1', { owner: sv('wa'), by: sv('דנה'), txt: sv('בקשה ' + VER), t: iv(T0 - 36e5), st: sv('new'), ans: sv('') }), readTime: 'x' }], 'rq');
+      if (c === 'mq' && fp === 'uid' && val === 'wa') return ok([{ document: docOf('mq/q9', { uid: sv('wa'), by: sv('דנה'), t: iv(T0 - 36e5), st: sv('new'), k: sv('invoice'), np: iv(1) }), readTime: 'x' }], 'mqmine');
       if (c === 'mq' && fp === 'st') return ok([{ document: docOf('mq/q1', { uid: sv('wz'), by: sv('שולח ' + VER), t: iv(T0 - 36e5), st: sv('new'), k: sv('invoice'), np: iv(1) }), readTime: 'x' }], 'mq');
       if (c === 'dr' && fp === 'uid') return ok([{ document: docOf('dr/wa_20261103', { uid: sv('wa'), day: sv('2026-11-03'), n: sv('דנה'), st: sv(DST[VER]), e: { arrayValue: { values: [mv({ txt: sv('עבדתי'), t: iv(T0) })] } } }), readTime: 'x' }], 'dr');
       return route.fallback(); }
@@ -45,6 +48,8 @@ async function mock(ctx) {
   });
 }
 const main = (pg) => pg.evaluate(() => (document.getElementById('main') || {}).innerText || '');
+// הערך השמור במכשיר (מחרוזת JSON) לעותק תצוגה n, או null
+const idbVal = (pg, n) => pg.evaluate((k) => new Promise((res) => { const r = indexedDB.open('lp-cache'); r.onsuccess = () => { const q = r.result.transaction('k').objectStore('k').get(k); q.onsuccess = () => { r.result.close(); res(q.result ? q.result.v : null); }; q.onerror = () => { r.result.close(); res(null); }; }; r.onerror = () => res(null); }), 'acme|wa|SCR|' + n);
 const banner = (pg) => pg.evaluate(() => { const e = document.getElementById('dcnet'); return e ? e.innerText : ''; });
 const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < (ms || 4000)) { if (await fn()) return Date.now() - t0; await sleep(50); } return -1; };
 // טעינה מחדש: מחכים לאירוע load ומחזירים את הזמן שבו התחילה (התשובות מהשרת מעוכבות DELAY מרגע הבקשה)
@@ -114,6 +119,9 @@ const tileTxt = (pg) => pg.evaluate(() => { const b = document.querySelector('[d
     await pg.evaluate(() => go('rq')); await waitFor(async () => /בקשה ו/.test(await main(pg)), 5000); await home(pg);
     await waitFor(async () => /קטגוריה ו/.test(await main(pg)) && (await tileTxt(pg)).includes(ils(EST.ו)), 6000); await sleep(600);
 
+    // "מסמכים ששלחתי למנהל": יש מסמך שמחכה לתשובה (lp-mq-out) – נטען מהשרת ונשמר
+    await pg.evaluate(async () => { localStorage.setItem(LK('lp-mq-out'), '["q9"]'); MQ.mb = 0; await mqMine(); WS = 'home'; NAV = [{ v: 'wk' }]; render(0); });
+    check('6ב "מסמכים ששלחתי למנהל" נטען ונשמר במכשיר', /מסמכים ששלחתי למנהל/.test(await main(pg)) && /q9/.test(await idbVal(pg, 'wk-mq') || ''), (await main(pg)).slice(-200)); await sleep(400);
     // 7. בלי רשת: כל המסכים מהעותק השמור (ו), עם שורת "אין חיבור"
     OFF = true; DELAY = 0; await reload(pg); await home(pg);
     const t7 = await waitFor(async () => /קטגוריה ו/.test(await main(pg)) && (await tileTxt(pg)).includes(ils(EST.ו)), 4000);
@@ -125,7 +133,20 @@ const tileTxt = (pg) => pg.evaluate(() => { const b = document.querySelector('[d
     check('7ג בלי רשת: סיכום היום מהעותק השמור', await waitFor(async () => /סיכום היום אושר/.test(await main(pg)), 4000) >= 0, (await main(pg)).slice(0, 200));
     await pg.evaluate(() => go('rq'));
     check('7ד בלי רשת: הבקשות שלי מהעותק השמור', await waitFor(async () => /בקשה ו/.test(await main(pg)), 4000) >= 0, (await main(pg)).slice(0, 200));
+    await home(pg);
+    check('7ה בלי רשת: "מסמכים ששלחתי למנהל" מהעותק השמור, עם שורת "אין חיבור"', await waitFor(async () => /מסמכים ששלחתי למנהל/.test(await main(pg)) && /אין חיבור/.test(await banner(pg)), 4000) >= 0, { m: (await main(pg)).slice(-200), b: await banner(pg) });
     OFF = false;
+    // 7ו. השרת עונה 403 (הרשאה בוטלה): העותק השמור יורד מהמסך ונמחק מהמכשיר
+    VER = 'ז'; FORB = new Set(['mqmine', 'rq', 'pay', 'drcfg']); await reload(pg); await home(pg); await sleep(2500); await home(pg); await sleep(500);
+    check('7ו 403 על "מסמכים ששלחתי למנהל": העותק יורד מהבית ונמחק מהמכשיר', !/מסמכים ששלחתי למנהל/.test(await main(pg)) && (await idbVal(pg, 'wk-mq')) === '[]', { m: (await main(pg)).slice(-200), v: await idbVal(pg, 'wk-mq') });
+    await pg.evaluate(() => go('rq')); await sleep(1500);
+    check('7ז 403 על הבקשות שלי: העותק יורד מהמסך ונמחק מהמכשיר', !/בקשה ו/.test(await main(pg)) && (await idbVal(pg, 'wk-rq')) === '[]', { m: (await main(pg)).slice(-200), v: await idbVal(pg, 'wk-rq') });
+    await pg.evaluate(() => { WS = 'home'; NAV = [{ v: 'wk' }]; ACT.pmGo(); }); await sleep(1500);
+    const pv = await idbVal(pg, 'pm|2026-11');
+    check('7ח 403 על "השכר שלי": נתוני השכר לא מוצגים, והעותק של החודש נמחק מהמכשיר (לא יופיע שוב בפתיחה הבאה)', !(await main(pg)).includes(ils(EST.ו)) && /אין לך הרשאה/.test(await main(pg)) && pv !== null && JSON.parse(pv).v === null, { m: (await main(pg)).slice(0, 200), pv });
+    await pg.evaluate(() => go('dr')); await sleep(1500);
+    check('7ט 403 על סיכום היום: העותק יורד, מוצגת שגיאה עם "נסה שוב", והעותק נמחק מהמכשיר', !/אושר|ממתין לאישור/.test(await main(pg)) && /נסה שוב/.test(await main(pg)) && (await idbVal(pg, 'dr')) === 'null', { m: (await main(pg)).slice(0, 200), v: await idbVal(pg, 'dr') });
+    FORB = new Set();
     // 8. יציאה מהחשבון מוחקת גם את עותקי התצוגה
     await pg.evaluate(() => syOut(1)); await sleep(800);
     const dbs = await pg.evaluate(async () => (indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : ['?']));
@@ -137,6 +158,10 @@ const tileTxt = (pg) => pg.evaluate(() => { const b = document.querySelector('[d
   VER = 'א'; DELAY = 0; OFF = false;
   { const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b', features: F } }, admins: { 'b/acme/|ma': 1 } };
     const x = await H.newPage(browser, www, cfg, [], 'm-instant'); const pg = x.page; await pg.setViewportSize({ width: 412, height: 900 });
+    // קריאה איטית מהמכשיר (lp-slow = מילישניות): פתיחת lp-cache מסתיימת באיחור – כדי לבדוק שעותק שמור שמגיע מאוחר לא דורס תשובה מהשרת
+    await pg.addInitScript(() => { const d = +localStorage.getItem('lp-slow') || 0; if (!d) return; const o = indexedDB.open.bind(indexedDB);
+      indexedDB.open = function (n, v) { const r = v === undefined ? o(n) : o(n, v); if (n !== 'lp-cache') return r; let h = null; Object.defineProperty(r, 'onsuccess', { configurable: true, set(f) { h = f; }, get() { return h; } });
+        r.addEventListener('success', (e) => setTimeout(() => { if (h) h.call(r, e); }, d)); return r; }; });
     await mock(x.ctx); await H.login(pg, 'ma@x.co');
     await pg.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden && typeof ACT.startBlank === 'function') ACT.startBlank(); });
     await pg.evaluate(() => go('mq')); await waitFor(async () => /שולח א/.test(await main(pg)), 5000);
@@ -165,6 +190,15 @@ const tileTxt = (pg) => pg.evaluate(() => { const b = document.querySelector('[d
     OFF = true; DELAY = 0; await reload(pg); await pg.evaluate(() => { if ($('#dlg').open) closeDlg(); go('mq'); });
     check('14 בלי רשת: "ממתין לטיפול" מהעותק השמור', await waitFor(async () => /שולח [בגד]/.test(await main(pg)), 4000) >= 0, (await main(pg)).slice(0, 200));
     OFF = false;
+    // 14א. קריאה איטית מהמכשיר (2 שניות) + השרת עונה 403 מיד: העותק השמור לא חוזר למסך אחרי התשובה, ונמחק מהמכשיר
+    await pg.evaluate(() => localStorage.setItem('lp-slow', '2000')); FORB = new Set(['rq']); VER = 'ה';
+    await reload(pg); await pg.evaluate(() => { if ($('#dlg').open) closeDlg(); go('rq'); }); await sleep(5000);
+    const rv = await pg.evaluate(() => new Promise((res) => { const r = indexedDB.open('lp-cache'); r.onsuccess = () => { const q = r.result.transaction('k').objectStore('k').get('acme|ma|SCR|rq'); q.onsuccess = () => res(q.result ? q.result.v : null); }; }));
+    check('14א קריאה מאוחרת מהמכשיר לא דורסת תשובת 403 מהשרת: אין בקשות על המסך והעותק נמחק', !/בקשה [א-ה]/.test(await main(pg)) && rv === '[]', { m: (await main(pg)).slice(0, 200), rv });
+    // 14ב. קריאה איטית מהמכשיר ותשובה מיידית מהשרת: נשאר המידע החדש מהשרת
+    FORB = new Set(); VER = 'ו'; await reload(pg); await pg.evaluate(() => { if ($('#dlg').open) closeDlg(); go('mq'); }); await sleep(5000);
+    check('14ב קריאה מאוחרת מהמכשיר לא דורסת את התשובה החדשה מהשרת ("ממתין לטיפול")', /שולח ו/.test(await main(pg)) && !/שולח [א-ה]/.test(await main(pg)), (await main(pg)).slice(0, 200));
+    await pg.evaluate(() => localStorage.removeItem('lp-slow'));
     check('15 אין שגיאות JS אצל המנהל', pg.__errors.length === 0, pg.__errors);
     await x.ctx.close(); }
 

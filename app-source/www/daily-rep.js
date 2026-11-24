@@ -27,14 +27,14 @@ const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he
 const mmss=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const tag=d=>{const c=d.st==='ok'?'t3':d.st==='raw'?'t4':'t1';return `<span class="tag ${c}">${esc(ST[d.st]||'נשלח')}</span>`};
 const stf=u=>{const s=(D.staff||[]).find(x=>x.uid===u);return s?s.name:''};
-const load=(k,fn)=>{if(ld[k]||D.err)return;ld[k]=1;fn().then(()=>{if(SCK.includes(k))scSave()},e=>{D.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(['dr','staff','tk','wk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})};
+const load=(k,fn)=>{if(ld[k]||D.err)return;ld[k]=1;fn().then(()=>{if(SCK.includes(k))scSave()},e=>{/* B2a: מוצג עותק שמור – בלי חיבור: נשאר, עם שורת "אין חיבור"; כל שגיאה אחרת: העותק יורד (403 – נמחק גם מהמכשיר) והשגיאה מוצגת */if(D.csc&&e&&e.offline){DC.soff(e,D.cst);return}if(D.csc){reset();if(e&&e.code===403)DC.sput('dr',null)}D.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(['dr','staff','tk','wk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 /* B2a (24.11.2026): המסך (והמשבצת בבית של העובד) נפתח מיד מהעותק השמור במכשיר (DC.sfill – תצוגה בלבד, פעם אחת בהפעלה), ואז נטען מהשרת ברקע.
    נשמר אחרי כל טעינה מוצלחת: הגדרות, הסיכומים שלי (עובד), עובדים, ממתין לאישור ורשימת היום (מנהל). כרטיס סיכום ופעולות – תמיד מהשרת, כמו היום */
 const SCK=['cfg','my','staff','pend','day'];
 function scSave(){if(!D.cfg)return;DC.sput('dr',{cfg:D.cfg,my:D.my,staff:D.staff,pend:D.pend,day:D.dayL?D.day:'',dayL:D.dayL})}
-function scFill(){if(!on()||D.cfg)return;DC.sfill('dr',v=>{if(D.cfg||!v||!v.cfg||typeof v.cfg!=='object'||!on())return;const A=a=>Array.isArray(a)?a:null;
- D.cfg=v.cfg;D.csc=1;if(!D.my&&isW()&&!mgr())D.my=A(v.my);if(mgr()){if(!D.staff)D.staff=A(v.staff);if(!D.pend)D.pend=A(v.pend);if(!D.dayL&&v.day&&v.day===(D.day||todayIL())){D.day=v.day;D.dayL=A(v.dayL)}}
+function scFill(){if(!on()||D.cfg)return;DC.sfill('dr',(v,t)=>{if(D.cfg||!v||!v.cfg||typeof v.cfg!=='object'||!on())return;const A=a=>Array.isArray(a)?a:null;
+ D.cfg=v.cfg;D.csc=1;D.cst=t;if(!D.my&&isW()&&!mgr())D.my=A(v.my);if(mgr()){if(!D.staff)D.staff=A(v.staff);if(!D.pend)D.pend=A(v.pend);if(!D.dayL&&v.day&&v.day===(D.day||todayIL())){D.day=v.day;D.dayL=A(v.dayL)}}
  /* רענון ברקע: אותן טעינות שהמסך היה מפעיל, כשהזיכרון ריק */
  load('cfg',cfgLoad);if(mgr()){load('staff',staffLoad);load('pend',pendLoad);if(D.dayL){const dd=D.day;load('day',async()=>{const L=await runQ('day',dd,500);if(dd===D.day)D.dayL=L})}}else if(isW())load('my',myLoad);
  if(['dr','staff','tk','wk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})}
