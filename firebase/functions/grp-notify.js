@@ -11,7 +11,10 @@
 // תנאים לעסק: עסק קיים ופעיל, תוספת groups מופעלת (כמו החוקים). בשורש – רק כשלארג' פעמי במצב legacy (שם החוקים לא בודקים תוספת).
 // ההתראה: כותרת = שם הקבוצה, גוף = "<שולח>: <תחילת ההודעה>" או "<שולח>: 📷 תמונה" / "<שולח>: 🎬 סרטון".
 //   tag לכל קבוצה (grp_<gid>) – הודעה חדשה מחליפה את ההתראה הקודמת של אותה קבוצה. במסך נעול מוסתר (private). data: { k: 'grp', id: gid }.
-//   בלי כפתורים – הודעת notification רגילה לכל טלפון רשום (fcmPayload בלי act).
+//   בלי כפתורים. טלפון ישן / בלי תמיכה בכפתורים – הודעת notification רגילה, בדיוק כמו קודם (fcmPayload בלי act).
+//   אישור קבלה (24.11.2026): טלפון עם APK שתומך בכפתורים (tokensAct) – הודעת data בלבד, priority high (sendItem), עם אסימון חד־פעמי
+//   (push-act.js, kind 'grp', acts ריק = בלי כפתורים). הטלפון מציג את ההתראה בעצמו (אותה כותרת, גוף, tag, private) ושולח ברקע 'rcv' ל-pushAct,
+//   שכותב grp/{gid}/r/{uid}.d – כך השולח רואה ✓✓ אפור גם כשהאפליקציה של הנמען סגורה.
 // בנוסף: grp/{gid}.last = { txt (עד 120), byN, t, k } – רק אם ההודעה חדשה מ-last הקיים (טרנזקציה; הודעה שמגיעה באיחור לא דורסת).
 // 24.11.2026: אחרי ההתראות – זיהוי התחייבויות בקבוצה שפתוחה לגיטי (lib/sec-cmt.js; הצעה בלבד, sec_cmt).
 // אזור: europe-west1 בלבד (כמו secMailWork – טריגר Firestore), בלי ניסיון חוזר (כדי לא לשלוח התראה פעמיים).
@@ -99,7 +102,9 @@ async function onMsg(bizId, gid, mid, m, opts) {
       try {
         const toks = await RM.tokensOf(db, u);
         if (!toks.length) continue;
-        const res = await send(toks, msg, gid);
+        let actT = new Set();
+        try { actT = new Set(await RM.tokensAct(db, u, o.now)); } catch (e) { logger.warn('grpMsg: act tokens failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
+        const res = await RM.sendItem(send, toks, actT, msg, gid, { bizId: biz.bizId, uid: u, kind: 'grp', id: gid, mt: t, gp: bizId ? 'b' : 'r', show: '', now: o.now });
         if (res.some((x) => x.ok)) sent++;
         await RM.dropTokens(db, u, res.filter((x) => !x.ok && RM.BAD_TOKEN.includes(x.code)).map((x) => x.token));
       } catch (e) {

@@ -13,6 +13,8 @@ import java.util.Map;
  * Data message with a one-time token ("at") -> we build the notification with buttons (LpNotif). super is NOT called for it:
  * the screens get a copy without "at" and "u" (the one-time token never reaches the WebView / JS).
  * {k:'x', tag} -> remove that notification (the item was handled elsewhere).
+ * Group message {k:'grp', at, acts:''} (24.11.2026) -> the same notification without buttons, and a delivery receipt
+ * ("rcv", the one-time token) is sent to the server in the background (LpActJob.receipt), so the sender sees grey ✓✓.
  * Ordinary notification messages (old devices / old server) are shown by Firebase as before - not touched here.
  */
 public class LpMessagingService extends MessagingService {
@@ -40,6 +42,7 @@ public class LpMessagingService extends MessagingService {
             if (d.get("at") == null) return;
             LpNotif.dropSnooze(this, tag);
             LpNotif.show(this, d, null);
+            if ("grp".equals(k)) LpActJob.receipt(this, d);
         } catch (Exception e) {
             // never crash the messaging service
         }

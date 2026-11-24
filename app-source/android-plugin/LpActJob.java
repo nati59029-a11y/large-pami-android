@@ -28,6 +28,8 @@ import org.json.JSONObject;
  * Job id: one per notification tag (always negative, so it never meets WorkManager's non-negative ids).
  * The one-time token is only in the job extras (private to the app, like the snooze store) - never logged.
  * Not exported; only the system (BIND_JOB_SERVICE) binds to it.
+ * Group delivery receipt (a = "rcv", 24.11.2026): scheduled by LpMessagingService when a group message arrives. Same request,
+ * but quiet: nothing is ever shown (success or failure), it only stops trying.
  */
 public class LpActJob extends JobService {
     static final long MAX_AGE = 7L * 24 * 3600 * 1000;
@@ -77,6 +79,13 @@ public class LpActJob extends JobService {
         }
     }
 
+    /** Group message arrived: tell the server it was received (same address check as the buttons). */
+    static void receipt(Context c, Map<String, String> d) {
+        if (LpNotif.s(d, "at").isEmpty()) return;
+        URL url = LpActReceiver.allowed(c, LpNotif.s(d, "u"));
+        if (url != null) schedule(c, d, "rcv", url);
+    }
+
     static JobInfo.Builder builder(int id, ComponentName cn, PersistableBundle x) {
         return new JobInfo.Builder(id, cn)
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
@@ -124,7 +133,7 @@ public class LpActJob extends JobService {
     /** One try. true = try again later. */
     static boolean run(Context c, PersistableBundle x) {
         if (x == null) return false;
-        final int ep = epoch;
+        final int ep0 = epoch;
         Map<String, String> d = new HashMap<>();
         for (String k : LpNotif.KEYS) {
             String v = x.getString(k);
@@ -133,6 +142,8 @@ public class LpActJob extends JobService {
         String a = x.getString("a");
         long t0 = x.getLong("t0", 0);
         boolean old = System.currentTimeMillis() - t0 > MAX_AGE;
+        // delivery receipt: never shows anything - epoch -1 never matches, so fail() is silent
+        final int ep = "rcv".equals(a) ? -1 : ep0;
         URL url = a == null ? null : LpActReceiver.allowed(c, x.getString("url"));
         if (url == null || LpNotif.s(d, "at").isEmpty()) {
             fail(c, d, ep, FAIL + "אי אפשר לבצע מההתראה" + TAP);
@@ -195,7 +206,7 @@ public class LpActJob extends JobService {
     }
 
     static void fail(Context c, Map<String, String> d, int ep, String msg) {
-        if (ep == epoch) LpNotif.failed(c, d, msg);
+        if (ep >= 0 && ep == epoch) LpNotif.failed(c, d, msg);
     }
 
     static boolean giveUpOrRetry(Context c, Map<String, String> d, int ep, boolean old) {
