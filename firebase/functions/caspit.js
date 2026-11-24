@@ -37,6 +37,7 @@ async function mgrW(request) { const w = await O.who(request); if (w.role !== 'm
 const runOf = (v) => { if (typeof v !== 'string' || !RUN_RE.test(v)) throw bad('bad-run', 'מזהה סנכרון לא תקין'); return v; };
 const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null, lastSales: d.lastSales || null,
   bot: { newMax: d.bot && Number.isInteger(d.bot.newMax) ? d.bot.newMax : BOT_NEW0 }, cats: Array.isArray(d.cats) ? d.cats : [] }; };
+const NEW_ALL = 100000; // "ללא הגבלה" לפריטים חדשים – התקרה הטכנית של cxExport (max עד 100000)
 const BOT_NEW0 = 1; // רובוט כספית: פריטים חדשים לכספית בכל ריצה – 1 (בדיקה ראשונה עם פריט אחד) עד שהמנהל מעלה (החלטות 2, 11)
 const numOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const s = (v, n) => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '').slice(0, n);
@@ -71,7 +72,8 @@ async function cxSetCfg(w, input) {
   const up = { upd: Date.now(), by: w.uid };
   // רובוט כספית (שלב B): כמה פריטים חדשים מותר לרובוט לטעון לכספית בריצה אחת (0–50)
   if (input.newMax !== undefined) {
-    if (!Number.isInteger(input.newMax) || input.newMax < 0 || input.newMax > 50) throw bad('bad-newmax', 'פריטים חדשים בכל ריצה: מספר בין 0 ל-50');
+    // 24.11.2026 (בעל העסק): ללא הגבלה = NEW_ALL. עד אז 0–50
+    if (!Number.isInteger(input.newMax) || input.newMax < 0 || input.newMax > NEW_ALL) throw bad('bad-newmax', 'פריטים חדשים בכל ריצה: מספר בין 0 ל-' + NEW_ALL + ' (או ללא הגבלה)');
     up.bot = { newMax: input.newMax };
   }
   if (input.skip !== undefined) {

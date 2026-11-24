@@ -1,7 +1,7 @@
 // תוסף כספית – עזרים: גיבוב sha256, base64, קריאת CSV/Excel לשורות, מזהה ריצה, מגבלות בטיחות.
 (function (root) {
 'use strict';
-const LIMITS = { price: 500, newMax: 50 }; // מגבלות בכל ריצה – גם בתוסף, לא רק בשרת
+const LIMITS = { price: 500, newMax: 100000 }; // מגבלות בכל ריצה – גם בתוסף, לא רק בשרת. 0.1.20: פריטים חדשים – ללא הגבלה (100000; בפועל לפי האפליקציה, limits.newMax)
 const subtle = () => (root.crypto && root.crypto.subtle) || (typeof require === 'function' ? require('crypto').webcrypto.subtle : null);
 async function sha256(data) {
   const u = typeof data === 'string' ? new TextEncoder().encode(data) : data instanceof Uint8Array ? data : new Uint8Array(data);

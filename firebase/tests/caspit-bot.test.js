@@ -249,10 +249,15 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     assert.equal(nw.body.reason, 'limit', 'newMax=1 ויש 2 מוצרים חדשים');
     assert.equal((await P(A, 'app1').get()).get('cx'), undefined, 'לא ניתן קוד חדש');
     assert.equal((await call('cxSetCfg', E1, { newMax: 5 })).reason, 'manager-only');
-    assert.equal((await call('cxSetCfg', MGR, { newMax: 51 })).reason, 'bad-newmax');
+    assert.equal((await call('cxSetCfg', MGR, { newMax: 100001 })).reason, 'bad-newmax');
+    // 24.11.2026 (בעל העסק): "ללא הגבלה" = 100000
+    await ok('cxSetCfg', MGR, { newMax: 100000 });
+    assert.equal((await okb(TOK, { op: 'hello', mode: 'connect' })).limits.newMax, 100000);
+    assert.equal((await bot(TOK, { op: 'export', kind: 'price', max: 501, ver: '0.1.0' })).body.reason, 'bad-max', 'מחירים – עדיין עד 500');
+    assert.equal((await bot(TOK, { op: 'export', kind: 'new', max: 100001, ver: '0.1.0' })).body.reason, 'bad-max');
     await ok('cxSetCfg', MGR, { newMax: 5 });
     assert.equal((await okb(TOK, { op: 'hello', mode: 'connect' })).limits.newMax, 5);
-    const n2 = await okb(TOK, { op: 'export', kind: 'new', max: 50 });
+    const n2 = await okb(TOK, { op: 'export', kind: 'new', max: 100000 }); // תוסף 0.1.20 שולח עד 100000; השרת חותך לפי newMax (5)
     assert.equal(n2.n, 2); assert.match(n2.csv, /מוצר app1/);
     const p2 = await okb(TOK, { op: 'export', kind: 'price', max: 500 });
     assert.equal(p2.n, 2);
