@@ -37,7 +37,7 @@ const TPL_RE = /^[a-z0-9_]{1,100}$/;
 const LOGO_MAX = 400 * 1024; // אורך ה-data URL (Firestore – עד 1MB למסמך)
 const CHS = ['wa', 'mail', 'both'];
 const CFG_TXT = { name: 80, bn: 20, addr: 160, phone: 30, foot: 1500 };
-const WT_KEYS = ['oc', 'inv', 'ir', 'rc', 'cr', 'st'];
+const WT_KEYS = ['oc', 'inv', 'ir', 'rc', 'cr', 'st', 'qt']; // qt – הצעת מחיר (quotes-pdf.js, 24.11.2026)
 
 const ilDay = (now) => new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const fileOf = (id, ed) => `oc_${id}_${ed}`;
@@ -1205,4 +1205,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff, arStatement, setRemCfg };
 const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly', 'arStatement']; // שולחות: סוד ווטסאפ + סודות המייל
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(SENDS.includes(k) ? { secrets: [WA_ACCESS_TOKEN].concat(S.MAIL_SECRETS), timeoutSeconds: 120, memory: '512MiB' } : { memory: '512MiB' }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, docBuf, docOf, docName, sendDoc, docRecord, CHS, wantDoc, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, WA_ACCESS_TOKEN } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, docBuf, docOf, docName, sendDoc, docRecord, CHS, wantDoc, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, logoOf, WA_ACCESS_TOKEN } });

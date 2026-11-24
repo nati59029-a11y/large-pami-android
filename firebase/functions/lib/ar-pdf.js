@@ -4,7 +4,7 @@
 // טהור: מקבל אובייקט מסמך ומחזיר Buffer. בלי Firestore, בלי רשת, בלי Storage (השמירה והקישור – ar-file.js).
 //
 //   render(doc) → Promise<Buffer>
-//   doc = { t:'oc'|'inv'|'ir'|'rc'|'cr'|'st', no?, ed?, d:'YYYY-MM-DD', draft?, title?,
+//   doc = { t:'oc'|'inv'|'ir'|'rc'|'cr'|'st'|'qt', no?, ed?, d:'YYYY-MM-DD', vu?:'YYYY-MM-DD' (הצעת מחיר: "בתוקף עד"), draft?, title?,
 //           biz:{ name, bn, addr, phone, mail, logo?(Buffer | data:image/png|jpeg;base64,…), foot },
 //           cust:{ name, bn, addr, phone, mail },
 //           vm:'ex'|'inc', rate (מע"מ באחוזים), disc? (אחוז הנחה כללית – כמו ar-calc.totals),
@@ -26,7 +26,7 @@ const C = require('./ar-calc');
 const FONT = path.join(__dirname, '..', 'assets', 'IBMPlexSansHebrew-Regular.ttf');
 const FONT_B = path.join(__dirname, '..', 'assets', 'IBMPlexSansHebrew-Bold.ttf');
 const LIM = { lines: 500, rows: 2000, txt: 200, foot: 1500, note: 600, logo: 1024 * 1024 };
-const TITLES = { oc: 'אישור הזמנה', inv: 'חשבונית מס', ir: 'חשבונית מס / קבלה', rc: 'קבלה', cr: 'חשבונית מס זיכוי', st: 'כרטסת לקוח' };
+const TITLES = { oc: 'אישור הזמנה', inv: 'חשבונית מס', ir: 'חשבונית מס / קבלה', rc: 'קבלה', cr: 'חשבונית מס זיכוי', st: 'כרטסת לקוח', qt: 'הצעת מחיר' };
 const DRAFT_TXT = 'טיוטה – לא מסמך רשמי';
 
 // ---------- bidi ----------
@@ -234,6 +234,7 @@ async function render(docIn, opts) {
   P.text(title, { b: true, size: 18, color: COL.gold, x: L, w: 240, y: ty, align: 'left' }); ty += 25;
   if (doc.no != null && doc.no !== '') { P.text('מס׳ ' + clean(doc.no, 30) + (isNum(doc.ed) && doc.ed > 1 ? ' (מהדורה ' + doc.ed + ')' : ''), { size: 10, x: L, w: 240, y: ty, align: 'left' }); ty += 15; }
   if (dateTxt(doc.d)) { P.text('תאריך: ' + dateTxt(doc.d), { size: 10, x: L, w: 240, y: ty, align: 'left' }); ty += 15; }
+  if (dateTxt(doc.vu)) { P.text('בתוקף עד: ' + dateTxt(doc.vu), { b: true, size: 10, x: L, w: 240, y: ty, align: 'left' }); ty += 15; } // הצעת מחיר (qt.vu)
   if (doc.draft) { P.text(DRAFT_TXT, { b: true, size: 10, color: COL.red, x: L, w: 240, y: ty, align: 'left' }); ty += 15; }
   y = Math.max(hy, ty, lg ? y + 70 : 0) + 8;
   pdf.moveTo(L, y).lineTo(R, y).lineWidth(1).strokeColor(COL.gold).stroke(); y += 10;
