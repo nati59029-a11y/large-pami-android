@@ -9,6 +9,7 @@ const zlib = require('node:zlib');
 const scan = require('./scan');
 
 const MAX_FILE = 10 * 1024 * 1024; // כמו SCAN_MAX_FILE_MB (ברירת המחדל) – בדיקה לפני הורדה ולפני פענוח (10.3)
+const LONG_SCAN_MAX = 20;          // 24.11.2026 (בעל העסק): קובץ ארוך (5–20 עמודים) – גם הוא נסרק ומזוהה, אבל לעולם לא "נכנס ישר" (why 'long'). מעל – בדיקה ידנית
 const MAX_PAGES = 4;               // חשבונית: עד 4 עמודים (4.2). מעל – כרטיס "קובץ ארוך – לבדיקה ידנית", בלי זיהוי
 const PART = 700000;               // גודל חלק (base64) ב-sec_inv/{id}/p/{k} – מתחת למגבלת המסמך של Firestore
 const CAP_DEFAULT = 20000;         // תקרה אחת לעסק (35) – 20,000 ₪ (החלטת בעל הפרויקט, תיקון 1 לשלב 7). סכום ששווה לתקרה – ממתין
@@ -176,7 +177,10 @@ function objStreams(buf, s) {
   }
   return out;
 }
-function inspect(buf) {
+// o.allowActive (24.11.2026, בעל העסק): שולח שהמנהל אישר, במייל מאומת – PDF עם פקודות נקלט (מסומן act). הצפנה עדיין חוסמת
+function inspect(buf, o) {
+  const allow = !!(o && o.allowActive);
+  let act = false;
   if (!Buffer.isBuffer(buf) || !buf.length) return { ok: false, why: 'empty' };
   if (buf.length > MAX_FILE) return { ok: false, why: 'big' };
   const mb = magicBad(buf);
@@ -188,10 +192,11 @@ function inspect(buf) {
   const s = decNames(s0);
   if (/\/Encrypt(?![A-Za-z0-9])/.test(s)) return { ok: false, why: 'enc' };
   // PDF עם פקודות (JavaScript, הפעלת קובץ, קובץ מוטמע) – לא נפתח. נבדק גם בתוך אוספי אובייקטים דחוסים
-  if (ACTIVE_RE.test(s)) return { ok: false, why: 'active' };
-  const os = objStreams(buf, s0);
-  if (!os) return { ok: false, why: 'unv' }; // אי אפשר לאמת שאין בו פקודות – חסום (הנחה: כרטיס "התקבל קובץ שלא נקלט")
-  if (os.some((t) => ACTIVE_RE.test(t) || /\/Encrypt(?![A-Za-z0-9])/.test(t))) return { ok: false, why: 'active' };
+  if (ACTIVE_RE.test(s)) { if (!allow) return { ok: false, why: 'active' }; act = true; }
+  let os = objStreams(buf, s0);
+  if (!os) { if (!allow) return { ok: false, why: 'unv' }; os = []; act = true; } // אי אפשר לאמת שאין בו פקודות – חסום (הנחה: כרטיס "התקבל קובץ שלא נקלט")
+  if (os.some((t) => /\/Encrypt(?![A-Za-z0-9])/.test(t))) return { ok: false, why: allow ? 'enc' : 'active' };
+  if (os.some((t) => ACTIVE_RE.test(t))) { if (!allow) return { ok: false, why: 'active' }; act = true; }
   // עמודים: גם /Type /Page (כולל בתוך אוספים דחוסים) וגם /Count של עץ העמודים – הגבוה מביניהם
   // מגבלה אחת לכל הקובץ (ולא 500 לכל אוסף) – אחרת 200 אוספים × 500 חיפושי מילון תוקעים את התור (סבב 1 של הבודק, שלב 8)
   let nPage = 0, nCount = 0, guard = 0;
@@ -202,7 +207,9 @@ function inspect(buf) {
     while (guard < 200 && (m = re.exec(t)) && guard++ < 200) { const c = /\/Count\s+(\d{1,7})/.exec(dictAt(t, m.index)); if (c) nCount = Math.max(nCount, Number(c[1])); }
   }
   const pages = Math.max(nPage, nCount) || 1;
-  return pages > MAX_PAGES ? { ok: true, long: true, mime, pages } : { ok: true, mime, pages };
+  const r = pages > MAX_PAGES ? { ok: true, long: true, mime, pages } : { ok: true, mime, pages };
+  if (act) r.act = true;
+  return r;
 }
 // קובץ מצורף במייל: שם וסוג מוצהרים. מה שאינו PDF או תמונה – נדחה בלי הורדה
 const OK_EXT = ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
@@ -294,7 +301,7 @@ function invCfgOf(snap) {
   return {
     auto: d.auto !== false,
     cap: typeof d.cap === 'number' && Number.isFinite(d.cap) && d.cap >= 0 ? d.cap : CAP_DEFAULT,
-    off: obj(d.off), links: obj(d.links),
+    off: obj(d.off), links: obj(d.links), trust: obj(d.trust), // trust: שולחים שהמנהל אישר ל-PDF עם פקודות (מפתח השולח → true)
     sups: Array.isArray(d.sups) ? d.sups : [], nb: Number.isInteger(d.nb) ? d.nb : 0, br1: typeof d.br1 === 'string' ? d.br1 : '', supH: typeof d.supH === 'string' ? d.supH : '', supAt: Number(d.supAt) || 0, supBy: typeof d.supBy === 'string' ? d.supBy : '', supDev: typeof d.supDev === 'string' ? d.supDev : '',
   };
 }
@@ -340,4 +347,4 @@ function dupKeys(m, sub) {
 // מפתח השולח: ווצאפ – מספר, מייל – כתובת
 const senderKey = (ch, from) => (ch === 'wa' ? 'wa:' : 'm:') + String(from || '').toLowerCase().slice(0, 200);
 
-module.exports = { SURE, NOT_INV_BAD, sureNotInv, staleNotInv, MAX_FILE, MAX_PAGES, PART, CAP_DEFAULT, KEEP_DAYS, CLAIM_MS, KINDS, sha, hpN, hpOk, NINV, nameKey, inspect, badByName, mapClassify, matchSup, brOf, invCfgOf, eligOf, fullOf, dupKeys, senderKey };
+module.exports = { SURE, NOT_INV_BAD, sureNotInv, staleNotInv, MAX_FILE, MAX_PAGES, LONG_SCAN_MAX, PART, CAP_DEFAULT, KEEP_DAYS, CLAIM_MS, KINDS, sha, hpN, hpOk, NINV, nameKey, inspect, badByName, mapClassify, matchSup, brOf, invCfgOf, eligOf, fullOf, dupKeys, senderKey };

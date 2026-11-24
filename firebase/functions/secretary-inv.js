@@ -66,7 +66,12 @@ async function ingest(db, o) {
   if (o.hist) src.hist = true;
   const histF = o.hist ? { hist: true, noStock: true } : {};
   const fn = String(o.fn || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
-  const chk = o.why ? { ok: false, why: o.why } : SI.inspect(o.buf);
+  let chk = o.why ? { ok: false, why: o.why } : SI.inspect(o.buf);
+  // 24.11.2026 (בעל העסק): PDF עם פקודות משולח שהמנהל אישר (sec_cfg/inv.trust) – נקלט, רק במייל שעבר אימות (DKIM/DMARC), כדי שזיוף כתובת לא יעקוף
+  if (!chk.ok && (chk.why === 'active' || chk.why === 'unv') && src.ch === 'mail' && o.auth === true && Buffer.isBuffer(o.buf)
+    && SI.invCfgOf(await db.doc('sec_cfg/inv').get()).trust[SI.senderKey('mail', src.from)] === true) chk = SI.inspect(o.buf, { allowActive: true });
+  // 24.11.2026 (בעל העסק): קובץ ארוך עד LONG_SCAN_MAX עמודים – נסרק כרגיל (מסומן long, לא "נכנס ישר"). מעל – כרטיס לבדיקה ידנית כמו קודם
+  const lng = !!(chk.ok && chk.long), man = lng && !(chk.pages <= SI.LONG_SCAN_MAX);
   if (!chk.ok) {
     // קובץ חשוד / לא נתמך: לא נשמר, לא נפתח ולא נשלח לזיהוי. כרטיס עם שם השולח
     const id = 'x' + SI.sha(src.ch + '|' + src.in + '|' + (o.idx || 0) + '|' + fn).slice(0, 40);
@@ -100,18 +105,20 @@ async function ingest(db, o) {
     for (let j = k; j < Math.min(np, k + 10); j++) b.set(db.doc(`sec_inv/${id}/p/${j}`), { d: b64.slice(j * SI.PART, (j + 1) * SI.PART) });
     await b.commit();
   }
-  const doc = { st: chk.long ? 'new' : 'q', k: chk.long ? 'long' : 'q', t: now, src: [src], fn, mime: chk.mime, size: o.buf.length, np, pages: chk.pages, el: false };
+  const doc = { st: man ? 'new' : 'q', k: man ? 'long' : 'q', t: now, src: [src], fn, mime: chk.mime, size: o.buf.length, np, pages: chk.pages, el: false };
+  if (lng) doc.long = true;
+  if (chk.act) doc.act = true; // PDF עם פקודות משולח מאושר
   if (src.sus) doc.sus = true;
   Object.assign(doc, histF);
   try { await ref.create(doc); } catch (e) { if (e && e.code === 6) { await add(); return { id, dup: true }; } throw e; }
-  await db.collection('sec_log').doc().set(ilog('', 'sec', chk.long ? 'invLong' : 'invIn', { tgt: id, note: src.ch }));
+  await db.collection('sec_log').doc().set(ilog('', 'sec', man ? 'invLong' : 'invIn', { tgt: id, note: src.ch + (lng ? ':long' : '') + (chk.act ? ':act' : '') }));
   // בדיקות שמריצות את הזיהוי בתוך התהליך (עם מודל מדומה) – בלי תור, כדי שהטריגר באמולטור לא יתחרה בהן. רק באמולטור
   const noQ = process.env.FUNCTIONS_EMULATOR === 'true' && process.env.SEC_INV_TEST_NOQUEUE === '1';
-  if (!chk.long && !noQ) {
+  if (!man && !noQ) {
     const bizId = (T.scope() || {}).bizId;
     await getFirestore().doc('sec_waq/' + bizId + '__' + id).create({ biz: bizId, id, inv: true, t: now }).catch(() => {});
   }
-  return { id, long: !!chk.long };
+  return { id, long: man };
 }
 
 // =====================================================================================
@@ -216,6 +223,8 @@ async function workIn(id, o) {
     up.dup = dup;
   } else Object.assign(up, { sub: '', match: '', br: '', brOk: false, ns: '', full: false, dup: '' });
   const why = SI.eligOf(Object.assign({}, x, up), cfg, stop);
+  if (x.long === true) why.push('long'); // 24.11.2026: קובץ ארוך – תמיד באישור המנהל
+  if (x.act === true) why.push('act');   // PDF עם פקודות (שולח מאושר) – תמיד באישור המנהל
   Object.assign(up, { el: why.length === 0, why });
   if (!(await live(up))) return { skip: 'rej' };
   // תיקון 1 (ליקוי 7): שני קבצים של אותה חשבונית שזוהו באותו זמן – בדיקה שנייה אחרי הכתיבה; מי שמוצאת את השנייה – ממתינה
@@ -259,7 +268,8 @@ function outOf(id, x, uid, now) {
     src: (x.src || []).slice(0, SRC_MAX).map((s) => ({ ch: s.ch, from: s.from, name: s.name || '', t: s.t || 0, sus: !!s.sus })),
     f: x.f || {}, unsure: x.unsure || [], sub: x.sub || '', subN: x.subN || '', match: x.match || '', br: x.br || '', brOk: x.brOk === true,
     ns: x.ns || '', nsShow: show(x.ns), ua: x.ua === true, dup: x.dup || '', el: x.el === true, why: x.why || [], hold: x.hold || '', err: x.err || '', t0: x.t0 || '',
-    hist: x.hist === true, noStock: x.noStock === true, wait: x.st === 'q' && Number(x.qwt) > now,
+    hist: x.hist === true, noStock: x.noStock === true, wait: x.st === 'q' && Number(x.qwt) > now, long: x.long === true, act: x.act === true,
+    trustOk: x.k === 'bad' && (x.why || []).some((w) => w === 'active' || w === 'unv') && ((x.src || [])[0] || {}).ch === 'mail' && !((x.src || [])[0] || {}).ua,
   };
   if (x.st === 'cl') Object.assign(o, { mine: x.by === uid, dev: x.by === uid ? x.dev || '' : '', clAt: x.clAt || 0, stale: now - (x.clAt || 0) > SI.CLAIM_MS });
   if (x.st === 'ok') Object.assign(o, { okAt: x.okAt || 0, auto: x.auto === true, mineOk: x.okBy === uid, okDev: x.okBy === uid ? x.dev || '' : '', purged: x.purged === true });
@@ -300,7 +310,7 @@ async function secInv(request) {
     for (const d of a.docs.concat(r.docs)) { if (seen.has(d.id)) continue; seen.add(d.id); const x = d.data(); if (brAllowed(g, x)) items.push(outOf(d.id, x, who.uid, now)); }
     items.sort((p, q) => q.t - p.t);
     const cfg = SI.invCfgOf(cs);
-    return { ok: true, items, cfg: { auto: cfg.auto, cap: cfg.cap, off: Object.keys(cfg.off).filter((k) => cfg.off[k] === true), supH: cfg.supH, supAt: cfg.supAt, supMe: cfg.supBy === who.uid, supDev: cfg.supBy === who.uid ? cfg.supDev : '', linked: Object.keys(cfg.links).length }, stop, br: g.br };
+    return { ok: true, items, cfg: { auto: cfg.auto, cap: cfg.cap, off: Object.keys(cfg.off).filter((k) => cfg.off[k] === true), trust: Object.keys(cfg.trust).filter((k) => cfg.trust[k] === true).map((k) => ({ k, show: show(k) })), supH: cfg.supH, supAt: cfg.supAt, supMe: cfg.supBy === who.uid, supDev: cfg.supBy === who.uid ? cfg.supDev : '', linked: Object.keys(cfg.links).length }, stop, br: g.br };
   }
   if (op === 'file') {
     const id = String(input.id || '');
@@ -322,11 +332,15 @@ async function secInv(request) {
       if (typeof input.sub !== 'string' || !SUB_RE.test(input.sub) || typeof input.off !== 'boolean') throw bad('bad-sub', 'ספק לא תקין');
       up.off = { [input.sub]: input.off ? true : FieldValue.delete() };
     }
+    if (input.untrust !== undefined) { // 24.11.2026: ביטול אישור שולח ל-PDF עם פקודות
+      if (typeof input.untrust !== 'string' || !/^m:[^\s]{3,200}$/.test(input.untrust)) throw bad('bad-trust', 'שולח לא תקין');
+      up.trust = { [input.untrust]: FieldValue.delete() };
+    }
     if (!Object.keys(up).length) throw bad('nothing', 'אין מה לשמור');
     await ref.set(Object.assign(up, { upd: now, updBy: who.uid }), { merge: true });
     await db.collection('sec_log').doc().set(ilog(who.uid, 'mgr', 'invCfg', { note: Object.keys(up).filter((k) => !['upd', 'updBy'].includes(k)).map((k) => k + '=' + (k === 'off' ? input.sub + ':' + input.off : up[k])).join(',') }));
     const c = SI.invCfgOf(await ref.get());
-    return { ok: true, cfg: { auto: c.auto, cap: c.cap, off: Object.keys(c.off).filter((k) => c.off[k] === true) } };
+    return { ok: true, cfg: { auto: c.auto, cap: c.cap, off: Object.keys(c.off).filter((k) => c.off[k] === true), trust: Object.keys(c.trust).filter((k) => c.trust[k] === true).map((k) => ({ k, show: show(k) })) } };
   }
   // sups: רשימת הספקים (שם, ח.פ, סניפים) מהמכשיר של המנהל – כדי שהשרת יזהה "ספק מוכר" ו"ספק של סניף אחד" (4.3, 40)
   const L = Array.isArray(input.sups) ? input.sups : null;
@@ -372,7 +386,7 @@ async function secInv(request) {
 // secDecide – כל שינוי מצב בתור (4.7, 9.4). claim במצב אוטומטי בודק את כל התנאים שוב (4.3) ומסרב כשאחד לא מתקיים.
 async function secDecide(request) {
   const input = inputObject(request);
-  const op = ['claim', 'done', 'rej', 'release', 'hold', 'undo', 'sender'].includes(input.op) ? input.op : null;
+  const op = ['claim', 'done', 'rej', 'release', 'hold', 'undo', 'sender', 'trust', 'scan'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const id = String(input.id || '');
   if (!ID_RE.test(id)) throw bad('bad-id', 'מזהה לא תקין');
@@ -399,6 +413,45 @@ async function secDecide(request) {
     b.set(db.collection('sec_log').doc(), ilog(uid, 'mgr', 'invSender', { tgt: id }));
     await b.commit();
     return { ok: true, id, sender: show(x.ns), sub: x.sub };
+  }
+  // 24.11.2026 (בעל העסק): "אישור השולח" בכרטיס "PDF עם פקודות" – השולח נשמר כמאושר, והקבצים של המייל יורדו שוב מ-Gmail (תור הניסיון החוזר של המייל)
+  if (op === 'trust') {
+    if (g.br) throw deny('br-limited', 'אישור שולח – למנהל בלי הגבלת סניפים');
+    const s = await ref.get();
+    if (!s.exists) throw gone();
+    const x = s.data(), s0 = (x.src || [])[0] || {};
+    if (x.k !== 'bad' || !(x.why || []).some((w) => w === 'active' || w === 'unv') || s0.ch !== 'mail' || !s0.from) throw pre('not-active', 'אפשר לאשר רק שולח של PDF עם פקודות שהגיע במייל');
+    if (s0.ua) throw pre('unauth', 'Gmail לא אישר שהמייל באמת נשלח מהכתובת הזו – אי אפשר לאשר אותה');
+    const key = SI.senderKey('mail', s0.from);
+    const q = s0.in ? await db.collection('sec_in').where('gid', '==', s0.in).limit(5).get() : null;
+    const mail = q ? q.docs.find((d) => d.get('ch') === 'mail') : null;
+    const b = db.batch();
+    b.set(db.doc('sec_cfg/inv'), { trust: { [key]: true }, upd: now, updBy: uid }, { merge: true });
+    if (mail) {
+      b.update(mail.ref, { invQ: true, invQN: 1, invQT: now, invQ0: now });
+      b.update(ref, { st: 'rej', rejAt: now, rejBy: 'trust', el: false, purgeAt: now + SI.KEEP_DAYS * 864e5 });
+    }
+    b.set(db.collection('sec_log').doc(), ilog(uid, 'mgr', 'invTrust', { tgt: id, note: mail ? 'requeue' : 'no-mail' }));
+    await b.commit();
+    return { ok: true, id, sender: show(key), requeued: !!mail };
+  }
+  // 24.11.2026 (בעל העסק): "סריקה" לכרטיס "קובץ ארוך" שנקלט לפני השינוי – חוזר לתור הזיהוי (עד LONG_SCAN_MAX עמודים, הקובץ עדיין שמור)
+  if (op === 'scan') {
+    const ok = await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      if (!s.exists || !brAllowed(g, s.data())) throw gone();
+      const x = s.data();
+      if (x.k !== 'long' || x.st !== 'new' || !(x.np > 0) || x.purged) throw pre('not-long', 'אפשר לסרוק רק קובץ ארוך שעדיין שמור');
+      if (!(Number(x.pages) <= SI.LONG_SCAN_MAX)) throw pre('too-long', 'הקובץ ארוך מ-' + SI.LONG_SCAN_MAX + ' עמודים – רק בדיקה ידנית');
+      tx.update(ref, { st: 'q', k: 'q', long: true, rqAt: now });
+      return true;
+    });
+    if (ok) {
+      await db.collection('sec_log').doc().set(ilog(uid, 'mgr', 'invScan', { tgt: id }));
+      const noQ = process.env.FUNCTIONS_EMULATOR === 'true' && process.env.SEC_INV_TEST_NOQUEUE === '1';
+      if (!noQ) await getFirestore().doc('sec_waq/' + (T.scope() || {}).bizId + '__' + id).create({ biz: (T.scope() || {}).bizId, id, inv: true, t: now }).catch(() => {});
+    }
+    return { ok: true, id };
   }
   let after = null; // פעולות אחרי הטרנזקציה (התראה, יומן)
   const r = await db.runTransaction(async (tx) => {
