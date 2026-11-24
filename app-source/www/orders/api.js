@@ -231,7 +231,9 @@ export async function registerPush() {
     const act = g.act === true ? 1 : 0;
     // 16.11.2026 מכשיר אחד: מזהה הכניסה של האפליקציה (lp-sync: ds), רק אם השרת כבר אישר אותה (dsc)
     let s = ''; try { const y = JSON.parse(localStorage.getItem('lp-sync')) || {}; if (y.dsc && typeof y.ds === 'string') s = y.ds; } catch (e) { /* */ }
-    P.addListener('registration', (t) => { if (t && t.value) call(FN.registerPushToken, s ? { token: t.value, act, s } : { token: t.value, act }).catch(() => {}); });
+    // 24.11.2026: rcv (אישור קבלה בקבוצות) – רק כשה-APK מדווח עליו (PushGate, Java) ורק עם act:1; בלעדיו השרת היה מוחק את היכולת שנרשמה במסך הראשי
+    const rcv = act === 1 && g.rcv === true ? 1 : 0;
+    P.addListener('registration', (t) => { if (t && t.value) { const b = s ? { token: t.value, act, s } : { token: t.value, act }; if (rcv) b.rcv = 1; call(FN.registerPushToken, b).catch(() => {}); } });
     await P.register();
     return 'requested';
   } catch (e) { return 'error'; }
