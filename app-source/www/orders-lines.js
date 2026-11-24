@@ -30,7 +30,7 @@ async function lload(force){if(L.busy||(!force&&L.P))return;L.busy=1;
  if(!L.P)DC.sfill('ol',(v,t)=>{if(L.P||!v||!Array.isArray(v.P))return;L.P=v.P;L.cfg=v.cfg&&typeof v.cfg==='object'?v.cfg:{};L.sc=1;L.sct=t;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()});
  try{await DC.swait('ol');const[r,c]=await Promise.all([fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'lineplan'}],limit:200}})}),fsx('/ordcfg/cell').catch(e=>{if(e.code===404)return null;throw e})]);
   L.P=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));L.cfg=c?dec(c):{};if(!DC.stale){L.sc=0;DC.sput('ol',{P:L.P,cfg:L.cfg})}}
- catch(e){if(L.sc&&L.P&&e&&e.offline)DC.soff(e,L.sct);else{if(L.sc){L.P=null;L.cfg=null;L.sc=0}L.P=L.P||[];L.cfg=L.cfg||{}}}finally{L.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}
+ catch(e){if(e&&e.code===403)DC.sdel('ol');if(L.sc&&L.P&&e&&e.offline)DC.soff(e,L.sct);else{if(L.sc){L.P=null;L.cfg=null;L.sc=0}L.P=L.P||[];L.cfg=L.cfg||{}}}finally{L.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}
  seedOnce()}
 // 2026-11-12: עסק שהסלולר כבר פעיל בו ועוד לא קיבל את תוכניות ברירת המחדל (מהאקסל) – נטענות פעם אחת דרך השרת
 async function seedOnce(){if(L.sc||L.seedTry||!cell()||!L.cfg||L.cfg.seeded||!L.P)return;L.seedTry=1;try{const r=await fnCall('ensureLinePlans',{});if(r&&r.added)await lload(true);else if(L.cfg)L.cfg.seeded=1}catch(e){}}

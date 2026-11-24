@@ -83,7 +83,7 @@ if(Array.isArray(window.__oxScR))window.__oxScR.push([/^(oc|ob)|^oxSave$/,()=>C.
 async function loadL(force){if(C.busy||(!force&&C.L&&Date.now()-C.at<20000))return;C.busy=1;
  try{await DC.swait('oc');const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],limit:3000}})});
   C.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>!x.mv).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'he'));C.at=Date.now();if(!C.cfg||C.cfgSc){await cfgLoad();C.cfgSc=0}if(!DC.stale){C.sc=0;DC.sput('oc',{L:C.L,cfg:C.cfg})}}
- catch(e){if(C.sc&&C.L&&e&&e.offline){DC.soff(e,C.sct)}else{if(C.sc){C.L=null;C.sc=0;if(C.cfgSc){C.cfg=null;C.cfgSc=0}}C.err=e.message||'הטעינה נכשלה';C.L=C.L||[]}}finally{C.busy=0;if(/^oc/.test(cur().v))rerender()}}
+ catch(e){if(e&&e.code===403)DC.sdel('oc');if(C.sc&&C.L&&e&&e.offline){DC.soff(e,C.sct)}else{if(C.sc){C.L=null;C.sc=0;if(C.cfgSc){C.cfg=null;C.cfgSc=0}}C.err=e.message||'הטעינה נכשלה';C.L=C.L||[]}}finally{C.busy=0;if(/^oc/.test(cur().v))rerender()}}
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 
 /* ---------- הזמנה חדשה: ת"ז ראשונה ---------- */

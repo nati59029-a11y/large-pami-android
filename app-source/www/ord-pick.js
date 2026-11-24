@@ -168,7 +168,7 @@ async function soLoad(){if(SO.busy)return;SO.busy=1;SO.err='';
   const where=m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:vs(m.slice(0,30))}}:{fieldFilter:{field:{fieldPath:'st'},op:'IN',value:vs(['open','ord'])}};
   const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supord'}],where,limit:1000}})});
   SO.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>x.st==='open'||x.st==='ord').sort((a,b)=>(a.at||0)-(b.at||0));if(!DC.stale){SO.sc=0;DC.sput('so',SO.L)}}
- catch(e){if(SO.sc&&SO.L&&e&&e.offline)DC.soff(e,SO.sct);else{if(SO.sc){SO.L=null;SO.sc=0}SO.err=e&&e.message||'הטעינה נכשלה'}}finally{SO.busy=0;if(cur().v==='oxSup')rerender()}}
+ catch(e){if(e&&e.code===403)DC.sdel('so');if(SO.sc&&SO.L&&e&&e.offline)DC.soff(e,SO.sct);else{if(SO.sc){SO.L=null;SO.sc=0}SO.err=e&&e.message||'הטעינה נכשלה'}}finally{SO.busy=0;if(cur().v==='oxSup')rerender()}}
 const supK=s=>String(s||'').trim().toLowerCase();
 V.oxSup=()=>{const T='להזמין מספקים';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};
  if(!SO.L){if(!SO.busy&&!SO.err){soFill();soLoad()}return{t:T,h:SO.err?`<div class="card"><p class="note">${esc(SO.err)}</p><button type="button" class="btn g w" data-a="oxSoRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'}}

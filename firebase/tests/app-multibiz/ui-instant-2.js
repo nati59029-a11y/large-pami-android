@@ -84,6 +84,7 @@ const click = (pg, sel) => pg.evaluate((s) => { const b = document.querySelector
 // פעולה ישירה (כמו לחיצה) עם אלמנט מדומה – בודקים שלא נקראה פונקציה בשרת ולא נשלחה כתיבה
 const act = (pg, name, ds, frm) => pg.evaluate(([n, ds, frm]) => { const el = document.createElement(frm ? 'form' : 'button'); Object.assign(el.dataset, ds || {}); try { const r = (frm ? FRM : ACT)[n](el); if (r && r.catch) r.catch(() => {}); return true; } catch (e) { return String(e); } }, [name, ds, frm]);
 const WAIT = /מעדכן מהשרת/;
+const scKeys = (pg) => pg.evaluate(() => new Promise((res) => { const r = indexedDB.open('lp-cache'); r.onsuccess = () => { try { const q = r.result.transaction('k').objectStore('k').getAllKeys(); q.onsuccess = () => { r.result.close(); res(q.result.map(String).filter((k) => /\|SCR\|/.test(k))); }; } catch (e) { res([]); } }; r.onerror = () => res([]); }));
 
 (async () => {
   const [www] = process.argv.slice(2); const browser = await H.launch();
@@ -118,6 +119,16 @@ const WAIT = /מעדכן מהשרת/;
   await goV(pg, 'oxOrd', 'o1');
   check('2ב כרטיס ההזמנה מוצג מיד מהעותק השמור', (await has(pg, /לקוח א/)) && !(ANS.ord), (await main(pg)).slice(0, 200));
   const sc2 = await pg.evaluate(() => !!(window.__ox && window.__ox.sc));
+  // תיקון בדיקה 1: פעולות אחרות באפליקציה (ייבוא CSV של הוצאות, בקשות לעדכון) לא נחסמות כשמוצג עותק של ההזמנות
+  const un = await pg.evaluate(() => { const A = ['impNo', 'impTpl', 'impCancel', 'impGo', 'impUndo', 'arF', 'arRefresh', 'arSt', 'arDel', 'arImg', 'arPicDel'], Fm = ['impMap', 'arAdd', 'arSt'];
+    return { have: A.filter((k) => typeof ACT[k] === 'function').length + Fm.filter((k) => typeof FRM[k] === 'function').length, wrapped: A.filter((k) => ACT[k] && ACT[k].scg).concat(Fm.filter((k) => FRM[k] && FRM[k].scg).map((k) => 'FRM.' + k)),
+      ord: ['oxStat', 'oxSave', 'ocNew', 'arIss', 'hsOrdSel'].filter((k) => !(ACT[k] && ACT[k].scg)).concat(['oxPaidF', 'arPaidF'].filter((k) => !(FRM[k] && FRM[k].scg))), chg: !!(CHG.oxNc && CHG.oxNc.scg) }; });
+  check('2-1 בזמן עותק שמור של ההזמנות: ייבוא הוצאות (impGo, impMap…) ובקשות לעדכון (arAdd, arF…) לא נחסמים; פעולות ההזמנות כן', sc2 && un.have >= 10 && un.wrapped.length === 0 && un.ord.length === 0 && un.chg, un);
+  const ar0 = await pg.evaluate(() => { const t0 = document.querySelectorAll('.toast').length; try { ACT.arF({ dataset: { v: 'all' } }); } catch (e) { /* */ } const T = [...document.querySelectorAll('.toast')].slice(t0).map((x) => x.innerText).join('|'); return T; });
+  check('2-2 לחיצה על סינון בקשות לעדכון (arF) בזמן עותק שמור – בלי "מעדכן מהשרת"', !WAIT.test(ar0), ar0);
+  await pg.evaluate(() => { const s = document.createElement('select'); s.innerHTML = '<option value="zero">z</option>'; s.value = 'zero'; CHG.oxNc(s); });
+  await sleep(150);
+  check('2-3 שינוי "מוצר שנגמר" (CHG.oxNc) על עותק שמור – לא נשלח לשרת', !WR.includes('fn setOrderCfg'), WR);
   await act(pg, 'oxStat', { id: 'o1', s: 'work' }); await act(pg, 'oxPaid', { id: 'o1' }); await act(pg, 'oxSave', {}); await act(pg, 'oxCancel', { id: 'o1' }); await act(pg, 'oxWs', {});
   await act(pg, 'oxPaidF', { id: 'o1' }, 1); await act(pg, 'oxEdit', { id: 'o1' });
   await sleep(150); const tt2 = await toasts(pg); const dl2 = await dlgOpen(pg);
@@ -139,7 +150,10 @@ const WAIT = /מעדכן מהשרת/;
   await goV(pg, 'ocList');
   const t3 = await waitFor(() => has(pg, /לקוחה א/), 2500); const a3 = ANS.cust || 0;
   check('3 רשימת הלקוחות אחרי טעינה מחדש: מוצגת מיד מהעותק השמור', t3 >= 0 && a3 === 0, { t3, a3, m: (await main(pg)).slice(0, 200) });
-  await act(pg, 'ocNew'); await act(pg, 'ocWs', { id: 'c1' }); await sleep(150);
+  await act(pg, 'ocNew'); await act(pg, 'ocWs', { id: 'c1' });
+  const hc = await pg.evaluate(() => { const sc = !!(window.__oc && window.__oc.sc); if (typeof HS !== 'undefined') HS.f = HS.f || null; const t0 = document.querySelectorAll('.toast').length; ACT.hsCustSel({ dataset: { id: 'c1' } }); return { sc, t: [...document.querySelectorAll('.toast')].slice(t0).map((x) => x.innerText).join('|') }; });
+  check('3-1 חוסרים: בחירת לקוח מרשימה שהיא עותק שמור (hsCustSel) מחכה לשרת', hc.sc && WAIT.test(hc.t), hc);
+  await sleep(150);
   const dl3 = await dlgOpen(pg);
   check('3א על עותק שמור: לקוח חדש וסימון לקוח עסקי לא נפתחים ולא נשלחים', !dl3 && WR.length === 0 && WAIT.test(await toasts(pg)), { dl3, WR });
   check('3ב אחר כך הלקוחות מתעדכנים מהשרת', await waitFor(() => has(pg, /לקוחה ג/), 5000) >= 0 && !(await has(pg, /לקוחה א/)), (await main(pg)).slice(0, 200));
@@ -207,6 +221,8 @@ const WAIT = /מעדכן מהשרת/;
   check('6 403 על ההזמנות: העותק השמור מוצג ואז יורד מהמסך (כמו היום, בלי העותק)', s6 >= 0 && e6 >= 0 && !(await has(pg, /#12|לקוח/)) && !(await pg.evaluate(() => !!window.__ox.sc)), { s6, e6, m: (await main(pg)).slice(0, 200) });
   await goV(pg, 'zc'); await waitFor(async () => (ANS.zq || 0) > 0, 6000); await sleep(300);
   check('6א 403 על הסגירות לאישור: העותק השמור יורד מהמסך', !(await has(pg, /סוגר ה/)) && (await has(pg, /אין הרשאה/)), (await main(pg)).slice(0, 300));
+  await sleep(300); const k6 = await scKeys(pg);
+  check('6ב 403: העותק נמחק גם מהמכשיר (ox, zq), לא רק מהמסך', !k6.includes('acme|ma|SCR|ox') && !k6.includes('acme|ma|SCR|zq') && k6.includes('acme|ma|SCR|oc'), k6);
   ERR = ''; DELAY = 0;
 
   // 7. יציאה מהחשבון מוחקת את עותקי התצוגה

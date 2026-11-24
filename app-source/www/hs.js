@@ -313,7 +313,9 @@ ACT.hsCustPick=async()=>{const oc=window.__oc;if(!oc||typeof window.__ocLoad!=='
  if(!oc.L){toast('טוען לקוחות…');try{await window.__ocLoad()}catch(e){}}if(!oc.L)return toast('רשימת הלקוחות לא נטענה');HS.cq='';
  dlg(`<h3>בחירת לקוח</h3><label class="f"><span>חיפוש</span><input data-i="hsCq" placeholder="שם או טלפון" autocomplete="off"></label><div id="hsCl" style="max-height:50vh;overflow:auto">${custRows()}</div><button type="button" class="btn g w" data-a="closeDlg" style="margin-top:8px">ביטול</button>`)};
 INP.hsCq=el=>{HS.cq=el.value;const e=document.getElementById('hsCl');if(e)e.innerHTML=custRows()};
-ACT.hsCustSel=el=>{const f=HS.f,c=((window.__oc&&window.__oc.L)||[]).find(x=>x.id===el.dataset.id);if(!f||!c)return;
+/* B2b (בדיקה): רשימת הלקוחות היא עותק שמור (window.__oc.sc) – לא בוחרים לקוח ממנה עד שתיטען מהשרת. כך לקוח מהעותק לא נכנס לטופס, ו-hsSave שומר רק לקוח שנבחר מרשימה עדכנית (או מהזמנה – hsOrdSel חסום ב-O.sc) */
+const ocSc=()=>!!(window.__oc&&window.__oc.sc);
+ACT.hsCustSel=el=>{if(ocSc())return scWait();const f=HS.f,c=((window.__oc&&window.__oc.L)||[]).find(x=>x.id===el.dataset.id);if(!f||!c)return;
  f.cust={nm:String(c.name||'').slice(0,60),ph:digits(c.phone).slice(0,15)};if(idOk(c.id))f.cust.cid=c.id;f.custOn=true;closeDlg();rerender()};
 /* קישור להזמנת לקוח פתוחה */
 const OPEN=['new','work','wait_pay'];

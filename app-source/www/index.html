@@ -5002,7 +5002,7 @@ async function zcPull(){if(!ZQ||!isA()||zcPull.b)return 0;zcPull.b=1;ZQ.at=Date.
   if(!it.need.length&&zcIns(it,ap)){n++;await coAssign(id);try{await zcMark(id,'ok','')}catch(e){}continue}
   L.push(it)}
  ZQ.L=L.sort((a,b)=>a.t-b.t);ZQ.err='';ZQ.sL=null;DC.sput('zq',ZQ.L);if(n)toast('סגירת קופה: '+(n===1?'סגירה אחת נרשמה':n+' סגירות נרשמו')+' בהכנסות')}
- catch(e){ZQ.err=e.offline?e.message:(e.code===403?'אין הרשאה לסגירות הקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message);cashOff(ZQ,e)}
+ catch(e){ZQ.err=e.offline?e.message:(e.code===403?'אין הרשאה לסגירות הקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message);cashOff(ZQ,e,'zq')}
  finally{zcPull.b=0}return n}
 /* לפני הכנסה אוטומטית: כל חלקי הצילומים קיימים בענן (בלי להוריד את התוכן – mask) */
 async function zcHasPics(id,np){if(!(np>=1))return false;try{for(let k=0;k<np;k++)await fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x');return true}catch(e){return false}}
@@ -5196,7 +5196,7 @@ var COIN=[],ZL={},ZQP=[],COQ={L:null,at:0,b:0,err:''},DPQ={L:null,at:0,b:0,err:'
    בלי חיבור – העותק נשאר עם שורת "אין חיבור"; 403/שגיאת שרת – העותק יורד. zlast ורשימת ההוצאות מקופה (COQ) לא נשמרים – הם משמשים לבדיקת הסגירה */
 function cashFill(){const f=(Q,n,re)=>{if(!Q.L)DC.sfill(n,(v,t)=>{if(Q.L||!Array.isArray(v))return;Q.sL=v;Q.sct=t;re()})};if(isA()&&bzF('cashClose')){f(ZQ,'zq',zcRe);f(DQ,'dq',dpRe)}if(fbRole()&&bzF('cashClose'))f(DPQ,'dpq',dpRe)}
 const cashSc=Q=>!Q.L&&!!Q.sL;
-function cashOff(Q,e){if(!Q.sL)return;if(e&&e.offline)DC.soff(e,Q.sct);else Q.sL=null}
+function cashOff(Q,e,n){if(e&&e.code===403&&n)DC.sdel(n);if(!Q.sL)return;if(e&&e.offline)DC.soff(e,Q.sct);else Q.sL=null}
 const dv=v=>({doubleValue:+v});
 const gn=(d,k)=>{const f=d&&d.fields&&d.fields[k];if(!f)return NaN;return f.doubleValue!=null?+f.doubleValue:f.integerValue!=null?+f.integerValue:NaN};
 const docName=p=>'projects/'+FB.projectId+'/databases/(default)/documents/'+(bzB()?'b/'+SY.bizId+'/':'')+p;
@@ -5415,7 +5415,7 @@ async function coAssign(zid){const z=((S&&S.zc)||[]).find(x=>x.id===zid);if(!z||
  if(COQ.L)COQ.L=COQ.L.filter(x=>!(z.co.ids||[]).includes(x.id));if(ok){z.co.done=1;save()}}
 async function coAssignPending(){for(const z of((S&&S.zc)||[]).filter(x=>x&&x.co&&!x.co.done))await coAssign(z.id)}
 /* ===== הפקדות ===== */
-function dpLoad(){if(DPQ.b)return DPQ.b;DPQ.b=(async()=>{try{await DC.swait('dpq');DPQ.L=(await coQ({compositeFilter:{op:'AND',filters:[coEq('dep','1'),coEq('dp','')]}})).sort((a,b)=>a.d.localeCompare(b.d)||a.t-b.t);DPQ.err='';DPQ.sL=null;DC.sput('dpq',DPQ.L)}catch(e){DPQ.err=coErrT(e);cashOff(DPQ,e);throw e}finally{DPQ.at=Date.now();DPQ.b=0}})();return DPQ.b}
+function dpLoad(){if(DPQ.b)return DPQ.b;DPQ.b=(async()=>{try{await DC.swait('dpq');DPQ.L=(await coQ({compositeFilter:{op:'AND',filters:[coEq('dep','1'),coEq('dp','')]}})).sort((a,b)=>a.d.localeCompare(b.d)||a.t-b.t);DPQ.err='';DPQ.sL=null;DC.sput('dpq',DPQ.L)}catch(e){DPQ.err=coErrT(e);cashOff(DPQ,e,'dpq');throw e}finally{DPQ.at=Date.now();DPQ.b=0}})();return DPQ.b}
 const dpOpen=()=>(DPQ.L||[]).filter(x=>!x.dp&&x.dep==='1');
 const dpOpenV=()=>cashSc(DPQ)?DPQ.sL.filter(x=>x&&!x.dp&&x.dep==='1'):dpOpen();/* B2b: לתצוגה בלבד (באנר ורשימה) – כולל העותק השמור */
 /* תזכורת קבועה (בית, הוצאות, סגירת קופה): נטען לכל היותר פעם בשתי דקות */
@@ -5511,7 +5511,7 @@ async function dqPull(){if(!isA()||dqPull.b||!bzF('cashClose'))return 0;dqPull.b
   if(!it.need.length){try{await dpMark(it.id,'ok','');n++;continue}catch(e){it.need.push('האישור האוטומטי נכשל: '+tkErr(e))}}
   Q.push(it)}
  DQ.L=Q;DQ.err='';DQ.sL=null;DC.sput('dq',Q);if(n)toast('הפקדות: '+(n===1?'אישור אחד תואם ואושר':n+' אישורים תואמים ואושרו'))}
- catch(e){DQ.err=e.offline?e.message:(e.code===403?'אין הרשאה להפקדות (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message);cashOff(DQ,e)}
+ catch(e){DQ.err=e.offline?e.message:(e.code===403?'אין הרשאה להפקדות (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message);cashOff(DQ,e,'dq')}
  finally{dqPull.b=0}return n}
 function dqN(){if(!isA()||!bzF('cashClose'))return 0;if(!dqPull.b&&Date.now()-DQ.at>60000)dqPull().then(dpRe).catch(()=>{});return DQ.L?DQ.L.length:0}
 function dqH(){if(!isA())return '';const L=DQ.L||DQ.sL;
@@ -5577,7 +5577,7 @@ function zsLoad(m){if(!isA())return Promise.resolve();if(ZS.b)return ZS.b;zsFill
  ((S&&S.zc)||[]).forEach(x=>{if(!x||!x.d||x.d.slice(0,7)!==m||L.some(z=>z.id===x.id)||!zcRegOk(x.reg))return;const T=S.tx.filter(t=>(x.tx||[]).includes(t.id)),cs=x.cash||{};
   L.push({id:x.id,reg:x.reg,by:x.by||'',t:x.at||0,np:0,f:Object.assign(zcEmpty(),{d:x.d,no:x.no||''}),c:{tot:null,inc:rnd(sum(T,t=>num(t.amt))),c:cs.c,o:cs.o,a:cs.a,p:cs.p,lvl:null,sumOk:true,dateWarn:false},st:'ok',tm:x.tm||'',cz:x.co?zsNum(x.co.z):null,cs:x.co?zsNum(x.co.s):null,self:1,local:1,why:'',dw:'',cw:'',stBy:'',stAt:0,note:''})});
  D.L=L.sort((a,b)=>b.f.d.localeCompare(a.f.d)||(b.tm||'').localeCompare(a.tm||'')||b.t-a.t);DC.sput('zs|'+m,{L:D.L,C:D.C,P:D.P,DC:D.DC})}
- catch(e){off=!!(e&&e.offline);D.err=e.offline?e.message:(e.code===403?'אין הרשאה לסגירות הקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
+ catch(e){off=!!(e&&e.offline);if(e&&e.code===403)DC.sdel('zs|'+m);D.err=e.offline?e.message:(e.code===403?'אין הרשאה לסגירות הקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
  finally{const o=ZS.D[m];if(off&&o&&o.sc){o.off=1;DC.soff({offline:1},o.sct)}else ZS.D[m]=D;ZS.b=0}})();return ZS.b}
 /* חישובים לסגירה אחת */
 /* "אושרה אוטומטית": לפי ההפקדה עצמה, כמו ב-dqPull – אושרה, בלי סיבת עובד, כל ההוצאות שבה מסומנות בה (dp), הסכום תואם והזיהוי מהצילום תואם */
