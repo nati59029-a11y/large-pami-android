@@ -157,6 +157,8 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   let tm = await open('m2-r4b', 'm@x.co'); let tp = tm.page;
   await tp.evaluate(() => { TKT = 'my'; go('tk'); }); await sleep(900);
   await tp.evaluate(() => { const f = document.querySelector('[data-a=tkwFold]'); if (f) f.click(); }); await sleep(400);
+  // התבניות עברו לקטע המתקפל "הגדרות נוספות" (1f7a255) – פותחים אותו קודם
+  await tp.evaluate(() => { const a = document.querySelector('[data-a=tkAdv]'); if (a && a.getAttribute('aria-expanded') !== 'true') a.click(); }); await sleep(400);
   const openTpl = () => tp.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; return !!d; });
   check('11 מנהל: ההגדרות נטענות מהענן (GET של tkt) והסעיף "תבניות" קיים', (await openTpl()) && LOG.some((l) => l.col === 'tkt' && l.list), LOG.filter((l) => l.col === 'tkt'));
   await tp.fill('form[data-f=tkAdd] textarea', 'לנקות את המקרר היטב');
@@ -194,6 +196,7 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   let om = await open('m3-r4b', 'm@x.co'); let op = om.page;
   await op.evaluate(() => { TKT = 'my'; go('tk'); }); await sleep(1000);
   await op.evaluate(() => { const f = document.querySelector('[data-a=tkwFold]'); if (f) f.click(); }); await sleep(400);
+  await op.evaluate(() => { const a = document.querySelector('[data-a=tkAdv]'); if (a && a.getAttribute('aria-expanded') !== 'true') a.click(); }); await sleep(300);
   await op.evaluate(() => { TKN.imgs = []; localStorage.setItem(LK('lp-tk-tpl'), JSON.stringify([{ txt: 'ישנה', to: [], np: 0 }])); tkRe(); }); await sleep(600);
   await op.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; });
   let bt = await op.evaluate(() => document.body.innerText);
@@ -205,6 +208,7 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   K403 = false; let om2 = await open('m4-r4b', 'm@x.co'); let op2 = om2.page;
   await op2.evaluate(() => { TKT = 'my'; go('tk'); }); await sleep(1000);
   await op2.evaluate(() => { const f = document.querySelector('[data-a=tkwFold]'); if (f) f.click(); }); await sleep(300);
+  await op2.evaluate(() => { const a = document.querySelector('[data-a=tkAdv]'); if (a && a.getAttribute('aria-expanded') !== 'true') a.click(); }); await sleep(300);
   K403 = true; await op2.fill('form[data-f=tkAdd] textarea', 'שמירה מול 403'); await op2.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; });
   await op2.click('[data-a=tkwTplSave]'); await sleep(800);
   const tt = await op2.evaluate(() => (document.getElementById('toast') || document.querySelector('.toast') || {}).innerText || '');
