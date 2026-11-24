@@ -148,11 +148,16 @@ function secFin(o){o=o||{};
  const sB=BRSEL,sP=P;BRSEL=[];
  try{const now=Date.now(),m0=NOWM(),td=today(),L=live(),f={v:1,at:now,months:{},open:[],sups:[],late:{sum:0,n:0},due:null,cf:[],wk:null,chk:[]};
   const cs=catsOf('inc').concat(catsOf('exp').filter(c=>c&&c.id!=='e_dep'));/* הפקדה לבנק – העברה, לא הוצאה (20.11) */
+  /* 24.11.2026 (סבב 4 חלק ב, מגמות): סכום הוצאות לכל ספק בחודש – כמו monthExpense (לפי תאריך, בלי הפקדה לבנק / משיכות בעלים שלא נספרות), רק ספקים (sup/fixed).
+     14 חודשים (לחודש שהסתיים מול אשתקד), 40 הגדולים לחודש; supT=1 – הרשימה קוצרה. השרת מקבל גם מראה ישנה בלי השדה */
+  const SB=new Map(S.subs.filter(x=>x&&['sup','fixed'].includes((cat(x.cat)||{}).beh)).map(x=>[x.id,String(x.name||'').slice(0,60)])),SM={},m14=addMon(m0,-13);
+  L.forEach(t=>{if(t.t!=='exp'||ownOut(t)||!SB.has(t.sub)||typeof t.date!=='string')return;const m=t.date.slice(0,7);if(m<m14||m>m0)return;const g=SM[m]||(SM[m]={}),n=SB.get(t.sub);g[n]=rnd((g[n]||0)+num(t.amt))});
   for(let i=0;i<=MONTHS;i++){const m=addMon(m0,-i);
    P={mode:'month',months:[m],years:[],from:'',to:'',y:+m.slice(0,4),open:false};/* catTotal = הסכום שמסך ההכנסות/ההוצאות מציג לקטגוריה בחודש הזה */
    const cats=cs.map(c=>[String(c.name).slice(0,40),c.kind==='inc'?'i':'e',catTotal(c,L)]).filter(x=>Math.abs(x[2])>0.004);
    const inc=monthIncome(m),exp=monthExpense(m),own=monthOwner(m);
-   if(cats.length||Math.abs(inc)>0.004||Math.abs(exp)>0.004||Math.abs(own)>0.004)f.months[m]={inc,exp,own,cats}}
+   if(cats.length||Math.abs(inc)>0.004||Math.abs(exp)>0.004||Math.abs(own)>0.004){f.months[m]={inc,exp,own,cats};
+    if(i<=13){const r=Object.entries(SM[m]||{}).filter(x=>Math.abs(x[1])>0.004).sort((x,y)=>Math.abs(y[1])-Math.abs(x[1]));f.months[m].sups=r.slice(0,40);if(r.length>40)f.months[m].supT=1}}}
   P=sP;
   const op=inv().filter(t=>bal(t)>0.004).sort((x,y)=>dueOf(x).localeCompare(dueOf(y)));
   f.open=op.slice(0,400).map(t=>[String(subName(t)).slice(0,60),String(t.inv||'').slice(0,30),t.date||'',dueOf(t),rnd(t.amt),bal(t)]);
@@ -189,6 +194,8 @@ function secFin(o){o=o||{};
   if(o.notes&&Array.isArray(S.enotes)){const nm=id=>{const s=typeof subById==='function'?subById(id):null;return s?String(s.name||'').slice(0,60).trim():''};
    f.notes=S.enotes.filter(n=>n&&typeof n.t==='string'&&n.t.trim()&&nm(n.sub)).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||''))||String(b.at||'').localeCompare(String(a.at||''))).slice(0,60)
     .map(n=>[nm(n.sub),/^\d{4}-\d{2}-\d{2}$/.test(String(n.d||''))?n.d:'',n.t.trim().slice(0,500)])}
+  /* סכומי הספקים לא יגרמו לשרת לדחות את הנתונים (FIN_MAX 400KB): קרוב לגבול – נשלחים בלעדיהם (ההשוואה לספקים לא מוצגת) */
+  try{if(new TextEncoder().encode(JSON.stringify(f)).length>380000)Object.values(f.months).forEach(x=>{delete x.sups;delete x.supT})}catch(e){}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
  finally{BRSEL=sB;P=sP}}

@@ -8,7 +8,8 @@
 const T = require('./tenant');
 const { guideFor } = require('./sec-methods');
 const KT = require('./sec-know-tools'); // שלב 3: מידע על העסק, מידע רגיש, יומן
-const BT = require('./sec-biz-tools');  // 23.11.2026: בקשות עובדים, ממתין לטיפול, משמרות, מלאי + הצעת משימה/תזכורת (כרטיס)
+const BT = require('./sec-biz-tools');
+const AN = require('./sec-an');         // 24.11.2026 (סבב 4 חלק ב): מגמות והוצאות חריגות – חישוב טהור  // 23.11.2026: בקשות עובדים, ממתין לטיפול, משמרות, מלאי + הצעת משימה/תזכורת (כרטיס)
 const TKT = require('./tk-time');        // tkDl / tkLateAt – היעד בפועל של משימה, כמו באפליקציה (22.11.2026)
 const fs = require('fs');
 const path = require('path');
@@ -49,7 +50,7 @@ const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f
 const N = (v) => (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e10 ? rnd(v) : null);
 
 // ---------- בדיקת המבנה של נתוני הכספים (מהמכשיר או למראה). מה שלא מוכר – נזרק ----------
-const LIM = { months: 26, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120, rec: 80, notes: 60, noteT: 500 };
+const LIM = { months: 26, supsM: 40, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120, rec: 80, notes: 60, noteT: 500 };
 // o.notes === true – רק בצ'אט, כשלמנהל יש הרשאה למידע רגיש (sensOn ב-secretary.js). אחרת הערות העובדים נזרקות (גם במראה ובתזכורות)
 function cleanFin(x, o) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || x.v !== 1 || !Number.isInteger(x.at)) return null;
@@ -59,6 +60,11 @@ function cleanFin(x, o) {
     const m = x.months[k] || {};
     const cats = (Array.isArray(m.cats) ? m.cats : []).filter((c) => Array.isArray(c) && N(c[2]) !== null && ['i', 'e'].includes(c[1])).slice(0, LIM.cats).map((c) => [clean(c[0], 40), c[1], N(c[2])]);
     f.months[k] = { inc: N(m.inc) || 0, exp: N(m.exp) || 0, own: N(m.own) || 0, cats };
+    // 24.11.2026 (סבב 4 חלק ב): סכומי ספקים לחודש [שם, סכום] (עד 40 הגדולים; supT = הרשימה קוצרה). אפליקציה ישנה בלי השדה – אין sups (ההשוואה לספקים לא מוצגת)
+    if (Array.isArray(m.sups)) {
+      f.months[k].sups = m.sups.filter((r) => Array.isArray(r) && N(r[1]) !== null).slice(0, LIM.supsM).map((r) => [clean(r[0], 60), N(r[1])]);
+      if (m.supT === 1 || m.sups.length > LIM.supsM) f.months[k].supT = 1;
+    }
   }
   f.open = (Array.isArray(x.open) ? x.open : []).filter((r) => Array.isArray(r) && N(r[5]) !== null).slice(0, LIM.open)
     .map((r) => [clean(r[0], 60), clean(r[1], 30), DAY_RE.test(r[2]) ? r[2] : '', DAY_RE.test(r[3]) ? r[3] : '', N(r[4]) || 0, N(r[5])]);
@@ -105,6 +111,7 @@ const DECL = {
   getCashflowForecast: { description: 'צפי תזרים ל-13 שבועות: יציאות צפויות (צ\'קים, חשבוניות, אשראי, הלוואות) וטווח הכנסות לפי העבר. עם יתרת פתיחה – יתרה צפויה לכל שבוע וסף התראה.', parameters: S({ startBalance: numP('יתרת הבנק היום, אם המנהל מסר') }) },
   simulateScenario: { description: 'תרחיש "מה אם": מוסיף הוצאה או הכנסה חד־פעמית בשבוע מסוים ומחשב מחדש את הצפי. לא נשמר.', parameters: S({ amount: numP('סכום בש"ח'), week: numP('מספר שבוע 1 עד 13'), direction: { type: 'string', enum: ['out', 'in'], description: 'out = הוצאה, in = הכנסה' }, startBalance: numP('יתרת פתיחה, אם ידועה') }, ['amount', 'week', 'direction']) },
   loanCalc: { description: 'חישוב הלוואה משוער: החזר חודשי וסך הריבית לפי ההנחות. לא ייעוץ פיננסי.', parameters: S({ principal: numP('סכום ההלוואה'), annualRatePct: numP('ריבית שנתית באחוזים'), months: numP('מספר חודשים'), type: { type: 'string', enum: ['spitzer', 'equal'], description: 'שפיצר או קרן שווה' } }, ['principal', 'annualRatePct', 'months']) },
+  getTrends: { description: 'מגמות והוצאות חריגות (מחושב בשרת, בלי ניחוש): החודש האחרון שהסתיים מול החודש הקודם ומול אותו חודש אשתקד – הכנסות, הוצאות, הוצאות לפי קטגוריה וספקים; החודש הנוכחי עד היום (חלקי); וקטגוריות/ספקים שההוצאה עליהם חריגה מול ממוצע 3 החודשים הקודמים לפי הספים שמנהל־העל קבע. להפעיל בשאלות כמו "מה המגמות", "יש הוצאה חריגה", "איך החודש לעומת שעבר".', parameters: S({}) },
   getImprovementIdeas: { description: 'רעיונות לשיפור מבוססי נתונים (קטגוריה שעלתה, חשבוניות באיחור, חודש הפסדי), בלי רעיונות שסומנו "לא רלוונטי".', parameters: S({}) },
   getTasks: { description: 'משימות עובדים מהענף: כמה פתוחות, בוצעו, באיחור, לפי עובד.', parameters: S({ employee: str('שם עובד (לא חובה)'), status: { type: 'string', enum: ['open', 'done', 'late', 'all'] }, days: numP('כמה ימים אחורה, ברירת מחדל 30') }) },
   getCashClosings: { description: 'סגירות קופה בטווח תאריכים.', parameters: S({ from: str('מתאריך YYYY-MM-DD'), to: str('עד תאריך YYYY-MM-DD') }) },
@@ -117,7 +124,7 @@ const DECL = {
   getAppHelp: { description: 'מדריך העזרה של האפליקציה: איך עושים פעולה, איפה נמצא מסך או כפתור, מה המשמעות של שדה, ופתרון תקלות (סנכרון, עדכון, סריקה, כניסה, התראות, גיבוי ועוד). להפעיל בכל שאלה על השימוש באפליקציה או על תקלה בה.', parameters: S({ question: str('השאלה או הנושא, במילים של המנהל') }, ['question']) },
   refuseOffTopic: { description: 'להפעיל רק כשהשאלה אינה קשורה בשום צורה לעסק או לאפליקציה (למשל נושא אישי, בידור או פוליטיקה).', parameters: S({}) },
 };
-const FIN_TOOLS = ['getMonthSummary', 'getRecentEntries', 'getOpenInvoices', 'getSupplierBalance', 'getCashflowForecast', 'simulateScenario', 'getImprovementIdeas'];
+const FIN_TOOLS = ['getMonthSummary', 'getRecentEntries', 'getOpenInvoices', 'getSupplierBalance', 'getCashflowForecast', 'simulateScenario', 'getImprovementIdeas', 'getTrends'];
 
 // ---------- אילו כלים בכל ערוץ (5.5) – נקבע כאן בלבד, לא לפי בקשת המודל ----------
 // app = צ'אט באפליקציה (מנהל מחובר); wa = ווצאפ ממספר המנהל (שלב 5: רק יומן/תזכורות – כאן ריק); in = הודעה נכנסת מבחוץ (בלי כלי קריאה)
@@ -143,19 +150,18 @@ function toolsFor(ch, o) {
 const declsOf = (names) => names.map((n) => Object.assign({ name: n }, DECL[n]));
 
 // ---------- ביצוע ----------
-const SCREEN = { ...KT.SCREEN, ...BT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
+const SCREEN = { ...KT.SCREEN, ...BT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTrends: '', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
 const LABEL = {
   ...KT.LABEL,
   ...BT.LABEL,
   getMonthSummary: (a) => 'סיכום חודש ' + (a.month || ''), getRecentEntries: () => 'פעולות אחרונות שנרשמו', getOpenInvoices: () => 'חשבוניות לתשלום', getSupplierBalance: (a) => 'כרטיס ספק – ' + (a.supplier || ''),
-  getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים',
+  getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים', getTrends: () => 'מגמות והוצאות חריגות',
   getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (MON_RE.test(a.from) || MON_RE.test(a.to) ? ' ' + (a.from || '') + '–' + (a.to || '') : a.month ? ' ' + a.month : ''),
   getEmployeeActivity: (a) => 'נתוני עובד – ' + (a.employee || ''), loanCalc: () => 'חישוב הלוואה (לפי ההנחות)', getAppHelp: () => 'מדריך העזרה של האפליקציה',
   getEmployeeNotes: () => 'הערות על עובדים (מוצפן)',
 };
 const match = (name, q) => { const a = clean(String(name || ''), 80).toLowerCase(), b = clean(String(q || ''), 80).toLowerCase(); return !!b && (a.includes(b) || b.includes(a)); };
-const prevYear = (m) => (Number(m.slice(0, 4)) - 1) + m.slice(4);
-const pct = (a, b) => (b ? Math.round(((a - b) / Math.abs(b)) * 100) : null);
+const { prevYear, pct } = AN; // 24.11.2026 (סבב 4 חלק ב): אותם כלים, ממודול החישוב המשותף lib/sec-an.js (ideas – אותן תוצאות)
 const addDays = (d, k) => { const [y, m, x] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, x + k)).toISOString().slice(0, 10); };
 
 function noFin(ctx) {
@@ -305,6 +311,17 @@ async function runTool(name, args, ctx) {
       if (!fin) return noFin(ctx);
       const L = ideas(fin, ctx.nr, now);
       return { ideas: L, count: L.length, note: L.length ? '' : 'לא מצאתי כרגע משהו בולט בנתונים.' };
+    }
+    case 'getTrends': {
+      if (!fin) return noFin(ctx);
+      // הספים מ-sec_cfg/perm (מנהל־העל, lib/sec-perm.js); בלי גישה למסד – ברירת המחדל 30% / 200 ₪
+      let P = null; try { P = await require('./sec-perm').readPerm(T.tdb()); } catch (e) { P = null; }
+      const tr = AN.trends(fin, P || {});
+      if (!tr.ok || !tr.has) return { error: 'no-month', note: 'אין נתונים לחודש האחרון שהסתיים.', notes: tr.notes || [] };
+      return { lastMonth: tr.last, previousMonth: tr.prev, sameMonthLastYear: tr.py, income: tr.inc, expenses: tr.exp, byCategory: tr.cats, bySupplier: tr.sups, currentMonthPartial: tr.part,
+        unusual: tr.anoms.map((a) => ({ kind: a.k === 'sup' ? 'ספק' : 'קטגוריה', name: a.n, month: a.m, amount: a.v, avg3Months: a.avg, diff: a.diff, pct: a.pct, partialMonth: !!a.part })),
+        rule: 'חריגה = לפחות ' + tr.P.anPct + '% מעל ממוצע 3 החודשים הקודמים וגם לפחות ' + tr.P.anMin + ' ₪', historyEnough: tr.hist, notes: tr.notes,
+        note: 'v = החודש, prev = החודש הקודם, py = אותו חודש אשתקד, dPrev/dPy = שינוי באחוזים (null = אין נתון להשוואה). currentMonthPartial – רק עד היום, לא להשוות אותו לחודש מלא.' };
     }
     case 'getTasks': {
       const db = T.tdb();

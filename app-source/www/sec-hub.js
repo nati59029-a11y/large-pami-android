@@ -60,7 +60,7 @@ function mergeAttention(eyes,extra){
  return out}
 /* יומן: סוג לפי שם הפעולה */
 const LT=[['facts','מידע על העסק',/^(fact|fixed|price|sens|rule|bank|import)/],['cal','יומן ותזכורות',/^(cal|rem)/],['rep','דוחות והתראות',/^(report|insight|notify|empAlert|daySum)/],
- ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['perm','הרשאות של גיטי',/^perm/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap|grp)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
+ ['chat','שיחה והיסטוריה',/^(readChat|hist|retention)/],['perm','הרשאות של גיטי',/^perm/],['od','הזמנות מספקים (טיוטות של גיטי)',/^od[A-Z]/],['set','הגדרות והסכמה',/^(consent|setup|cfg|mirror|stop|cap|grp)/],['nf','התראות מהטלפון (במכשיר)',/^nf:/],['ml','נשלח לבד (כללים אישיים)',/^ml:/]];
 const logType=a=>{a=String(a||'');const m=LT.find(x=>x[2].test(a));return m?m[0]:'other'};
 const logTypes=()=>LT.map(x=>[x[0],x[1]]).concat([['other','אחר']]);
 const WHO={mgr:'מנהל העסק',sa:'מנהל המערכת',auto:'פעולה אוטומטית',sec:'המזכירה'};
@@ -178,7 +178,7 @@ function top(){if(!H.at&&!H.b)hubLoad(false);else if(H.at&&Date.now()-H.at>60000
  const at=Math.max(H.at||0,X.ey&&X.ey.now||0);
  return `<div class="card sechub" id="secHub"><div class="eyh"><div><b>גיטי – המנהלת העסקית הדיגיטלית</b><small class="note" style="display:block">${at?'עודכן לאחרונה: '+esc(tmF(at)):'טוען…'}</small></div><span><button class="chip" data-a="hubRe" style="min-height:44px">רענון</button> <button class="chip" data-a="secSet" style="min-height:44px">הגדרות</button></span></div>
  <h3 style="margin:10px 0 2px;font-size:1rem">מצב חיבורים</h3><div id="secHubConn">${connsH()}</div>
- <h3 style="margin:10px 0 6px;font-size:1rem">פעולות מהירות</h3>${quickH()}</div>
+ <h3 style="margin:10px 0 6px;font-size:1rem">פעולות מהירות</h3>${quickH()}</div>${typeof window.__secAnH==='function'?window.__secAnH():''/* 24.11.2026 (סבב 4 חלק ב): מגמות וחריגות – sec-an.js */}
  <h3 style="margin:12px 0 4px;font-size:1rem">אישורים וטיפול</h3><div class="secrow" style="margin:0 0 8px"><button class="chip" data-a="secTab" data-v="appr" style="min-height:44px">מרכז אישורים</button><button class="chip" data-a="secTab" data-v="hlog" style="min-height:44px">יומן פעולות מלא</button></div>`}
 ACT.hubCx=()=>{try{if(typeof window.cxBotReset==='function')window.cxBotReset();go('cxSync')}catch(e){}};
 ACT.hubRe=()=>{H.at=0;hubLoad(true);try{ACT.secEyRe()}catch(e){}};
@@ -195,6 +195,7 @@ function apprH(){const R=X.ey;
   +grp('טיוטות תשובה (ווצאפ ומייל)',O.filter(x=>x.k==='draft'),x=>row(x))
   +grp('חשבוניות שמחכות לאישור',O.filter(x=>x.k==='inv'),x=>row(x))
   +(typeof window.__secCmtH==='function'?window.__secCmtH():''/* 24.11.2026: התחייבויות מהודעות – sec-cmt.js */)
+  +(typeof window.__secOdH==='function'?window.__secOdH():''/* 24.11.2026 (סבב 4 חלק ב): טיוטות הזמנה מספקים – sec-an.js */)
   +grp('משימות שממתינות לאישור',M.filter(x=>x.ap),x=>`<div class="secli"><button type="button" class="secnb" data-a="hubGo" data-k="tk" data-s="wait"><p><b>${esc(x.title)}</b></p><small class="note">${esc(x.sub||'')}</small></button><div class="secrow"><button class="chip" data-a="tkOk" data-id="${esc(x.tid)}">אשר</button><button class="chip" data-a="hubGo" data-k="tk" data-s="wait">פתיחה</button></div></div>`);
  return `<div class="card"><b>מה ממתין לאישור שלך</b><p class="note" style="margin:4px 0 0">כל כפתור כאן מבצע אותה פעולה כמו במסך המקורי.</p></div>${h||'<div class="empty">אין כרגע משהו שממתין לאישור ✓</div>'}`}
 

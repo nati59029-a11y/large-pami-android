@@ -27,6 +27,8 @@ const T = require('./lib/tenant');
 const ST = require('./lib/sec-tools');
 const K = require('./lib/sec-know');
 const R = require('./lib/sec-remind');
+const AN = require('./lib/sec-an');   // 24.11.2026 (סבב 4 חלק ב): מגמות והוצאות חריגות (טהור)
+const OD = require('./lib/sec-od');   // 24.11.2026 (סבב 4 חלק ב): טיוטות הזמנה מספקים (sec_an)
 // מפתחות התראה (notifyMgrs) שמקורם במייל – ראו secretary-google.js
 const MAIL_KEYS = new Set(['gmailon', 'mailover', 'maillag', 'mailgap', 'mailskip', 'mailerr', 'mailheld', 'draftcap', 'mailask', 'ordre', 'ordauto', 'ordautono', 'ordauto-sent', 'clean', 'histcap']);
 const C = require('./secretary')._core;
@@ -212,7 +214,11 @@ async function remindBiz(opts) {
       q(db.collection('sec_cal').where('st', '==', 'prop').limit(50)),
       q(db.collection('sec_log').where('t', '>=', dayStart).limit(1000))]);
     const acts = { ok: lg.filter((l) => l.res === 'ok').length, fail: lg.filter((l) => l.res === 'fail').length };
-    return { dayStart, F, tasks, cal, calNext, inv, draft: dr.filter((x) => x.auto !== true).length, facts, prop, acts };
+    // סבב 4 חלק ב: שורת מגמות וחריגות (מהמראה, בלי AI) וטיוטות הזמנה ממתינות. תקלה כאן לא עוצרת את הסיכום
+    let an = '', od = 0;
+    try { if (F) { const P = await require('./lib/sec-perm').readPerm(db); an = AN.anLine(AN.trends(F.fin, P)); } } catch (e) { an = ''; }
+    try { od = await OD.pendN(db); } catch (e) { od = 0; }
+    return { dayStart, F, tasks, cal, calNext, inv, draft: dr.filter((x) => x.auto !== true).length, facts, prop, acts, an, od };
   })());
 
   // 0. שלב 5: הודעות ווצאפ שלא עובדו (טריגר שנכשל / נקטע) – חוזרות לתור, ואחרי 3 ניסיונות – סימון והתראה. תקלה כאן לא עוצרת את התזכורות
@@ -322,6 +328,17 @@ async function remindBiz(opts) {
     }
   }
 
+  // 3ב. 24.11.2026 (סבב 4 חלק ב, החלטה 9): טיוטות הזמנה מספקים – פעם ביום עסקים, מ-07:00, רק כשיש מנהל פעיל במזכירה.
+  // טיוטה בלבד במרכז האישורים (בלי התראה קופצת); "טיוטת הזמנה מספק: אסור" – לא נוצר כלום (lib/sec-od.js). תקלה כאן לא עוצרת את שאר הריצה
+  if (biz && P.hm >= '07:00' && ck.odDay !== today && mgrs.length) {
+    upd.odDay = today;
+    try {
+      const r = await OD.daily(db, now);
+      if (r.made) { out.od = r.made; logs.push(logData('', 'auto', 'odNew', { note: r.made + (r.made === 1 ? ' ספק' : ' ספקים') })); }
+      if (r.timeout) logger.warn('secretary: order drafts timeout', { bizId: scope.bizId });
+    } catch (e) { logger.warn('secretary: order drafts failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code }); }
+  }
+
   // 4. דוחות שבועי וחודשי (66–68) – ביום ובשעה שהמנהל קבע; באפליקציה בלבד. מנהל עם הגבלת סניפים – אין (נתוני כל העסק)
   for (const m of mgrs) {
     if (m.br || !biz) continue;
@@ -365,7 +382,7 @@ async function remindBiz(opts) {
       const mine = (e) => e.st === 'ok' && (!e.uid || e.uid === m.uid);
       const sm = R.daySum({ kind, today, now, dayStart: S.dayStart, fin: S.F && S.F.fin, tasks: S.tasks,
         cal: S.cal.filter(mine), calNext: S.calNext.filter(mine).length,
-        wait: { tk: S.tasks.filter((t) => t.st === 'wait').length, inv: S.inv, draft: S.draft, prop: S.facts + S.prop.filter((e) => e.uid === m.uid).length }, acts: S.acts });
+        wait: { tk: S.tasks.filter((t) => t.st === 'wait').length, inv: S.inv, draft: S.draft, prop: S.facts + S.prop.filter((e) => e.uid === m.uid).length, od: m.br ? 0 : S.od }, acts: S.acts, an: m.br ? '' : S.an });
       if (await addNote(db, m, { k: 'dig', typ: kind, key, title: sm.title, body: sm.body }, now, true)) logs.push(logData('', 'auto', 'daySum', { tgt: m.uid, note: kind + ' ' + today }));
     }
   }
@@ -572,14 +589,26 @@ async function secNotes(request) {
   return { ok: true, id };
 }
 
+// 24.11.2026 (סבב 4 חלק ב): כרטיס "מגמות וחריגות" במרכז השליטה + טיוטות הזמנה במרכז האישורים – קריאה בלבד.
+//   מגמות: מחושבות עכשיו ממראה הכספים בענן (AN.trends, בלי AI), "עודכן לאחרונה" = זמן המראה. מנהל עם הגבלת סניפים – בלי נתוני כל העסק.
+//   טיוטות: רק כש"טיוטת הזמנה מספק" אינה "אסור" (אחרת od: null – לא מוצג).
+async function anState(db, cfg, brLimited, now) {
+  if (brLimited) return { ok: true, brLimited: true, an: null, od: null };
+  const [P, F] = await Promise.all([require('./lib/sec-perm').readPerm(db), loadFin(db, cfg)]);
+  const an = F ? AN.trends(F.fin, P) : { ok: false, err: cfg.mirror ? 'no-fin' : 'mirror-off' };
+  const can = require('./lib/sec-perm').canPropose(P, 'ord');
+  return { ok: true, an, at: F ? F.at : 0, src: 'מראה הכספים בענן', odLv: P.t.ord, od: can ? await OD.list(db, now) : null };
+}
+
 // =====================================================================================
 // secReports – "דוחות ותובנות" (8.2 מסך 7): הדוחות של המנהל עצמו; "סמן כטופל" לתובנה. "לא רלוונטי" – secPrefs op:'notRelevant' (56, 90 יום)
 // =====================================================================================
 async function secReports(request) {
   const input = inputObject(request);
-  const op = ['list', 'get', 'done'].includes(input.op) ? input.op : null;
+  const op = ['list', 'get', 'done', 'an'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
-  const { who, db } = await gate(request, { consent: true });
+  const { who, db, cfg, brLimited } = await gate(request, { consent: true });
+  if (op === 'an') return anState(db, cfg, brLimited, Date.now());
   if (op === 'list') {
     const s = await db.collection('sec_rep').where('uid', '==', who.uid).limit(300).get();
     const L = s.docs.map((d) => ({ id: d.id, kind: d.get('kind'), title: d.get('title') || '', key: d.get('key') || '', t: d.get('t') || 0, why: d.get('why') || '' })).sort((a, b) => b.t - a.t).slice(0, 100);

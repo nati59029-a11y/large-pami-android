@@ -71,7 +71,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq']); // sec_cmt – הצעות התחייבות, sec_cmtq – תור הזיהוי (24.11.2026, lib/sec-cmt.js; שרת בלבד); sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq', 'sec_an']); // sec_an – טיוטות הזמנה מספקים (24.11.2026, סבב 4 חלק ב, lib/sec-od.js; שרת בלבד); // sec_cmt – הצעות התחייבות, sec_cmtq – תור הזיהוי (24.11.2026, lib/sec-cmt.js; שרת בלבד); sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -557,6 +557,19 @@ async function secPrefs(request) {
     });
     if (r.already) return { ok: true, st: r.st, ref: r.ref, already: true };
     out = { st: r.st, ref: r.ref || '' };
+  } else if (input.op === 'od') {
+    // 24.11.2026 (סבב 4 חלק ב, החלטה 9): טיוטת הזמנה מספק (sec_an) במרכז האישורים – אישור (עם הכמויות אחרי עריכה) נכנס ל"להזמין מספקים"
+    // הקיים (supord, לא נשלח לספק); דחייה – סימון. נתוני כל העסק – לא למנהל עם הגבלת סניפים. הכול בטרנזקציה אחת (lib/sec-od.js)
+    if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא מאשר הזמנות לכל העסק');
+    let r;
+    try { r = await require('./lib/sec-od').decide(db, who.uid, input, t, logData); } catch (e) {
+      if (e && e.odBad) throw bad(e.odBad, e.message);
+      if (e && e.odPre) throw pre(e.odPre, e.message);
+      if (e && e.odDeny) throw deny(e.odDeny, e.message);
+      throw e;
+    }
+    if (r.already) return { ok: true, st: r.st, already: true };
+    out = r;
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);

@@ -1443,6 +1443,10 @@ service cloud.firestore {
     match /sec_cmtq/{id} {
       allow read, create, update, delete: if false;
     }
+    // טיוטות הזמנה מספקים (24.11.2026, גיטי סבב 4 חלק ב): רק דרך השרת (lib/sec-od.js, secReports op:'an', secPrefs op:'od') – אף אחד מהאפליקציה
+    match /sec_an/{id} {
+      allow read, create, update, delete: if false;
+    }
 
     // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
     function s3Uid(v) { return v is string && v.matches('^[A-Za-z0-9_-]{6,128}$'); }
@@ -2742,6 +2746,10 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
       match /sec_cmtq/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // טיוטות הזמנה מספקים (24.11.2026): רק דרך השרת
+      match /sec_an/{id} {
         allow read, create, update, delete: if false;
       }
 

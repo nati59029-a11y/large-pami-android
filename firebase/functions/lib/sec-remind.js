@@ -336,7 +336,9 @@ function daySum(o) {
     L.push('חשבוניות לתשלום ' + (o.kind === 'am' ? 'היום' : 'היום ומחר') + ': ' + (due.length ? due.length + ', סך ' + ils(sum(due, (r) => r[5])) : 'אין'));
     if (fin.late && fin.late.n) L.push('חשבוניות באיחור: ' + fin.late.n + ', סך ' + ils(fin.late.sum));
   } else L.push('חשבוניות לתשלום: אין נתוני כספים (מראה הכספים כבוי או שלא עודכן)');
-  const w = o.wait || {}, wl = [[w.tk, 'משימות'], [w.inv, 'חשבוניות שהתקבלו'], [w.draft, 'טיוטות תשובה'], [w.prop, 'הצעות של המזכירה']].filter((x) => x[0] > 0);
+  // 24.11.2026 (סבב 4 חלק ב, החלטה 8): שורה אחת על מגמות וחריגות – רק בסיכום הבוקר (AN.anLine; ריק = אין נתונים, השורה לא מופיעה)
+  if (o.kind === 'am' && typeof o.an === 'string' && o.an) L.push(o.an.slice(0, 400));
+  const w = o.wait || {}, wl = [[w.tk, 'משימות'], [w.inv, 'חשבוניות שהתקבלו'], [w.draft, 'טיוטות תשובה'], [w.prop, 'הצעות של המזכירה'], [w.od, 'טיוטות הזמנה מספקים']].filter((x) => x[0] > 0);
   L.push('ממתין לאישור שלך: ' + (wl.length ? wl.map((x) => x[0] + ' ' + x[1]).join(', ') : 'אין'));
   if (o.kind === 'pm') L.push('מחר ביומן: ' + (o.calNext || 'אין'));
   return { title: (o.kind === 'am' ? 'סיכום בוקר – ' : 'סיכום ערב – ') + dayHm(o.today), body: L.join('\n') };

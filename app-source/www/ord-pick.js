@@ -171,8 +171,8 @@ V.oxSup=()=>{const T='להזמין מספקים';if(!on())return{t:T,h:'<div cla
  const G=new Map();SO.L.forEach(x=>{const k=supK(x.sup);if(!G.has(k))G.set(k,{n:x.sup,L:[]});G.get(k).L.push(x)});
  const gs=[...G.values()].sort((a,b)=>String(a.n).localeCompare(String(b.n),'he'));
  const b=(x,st,t)=>`<button type="button" class="btn g s grow" data-a="oxSoSt" data-id="${esc(x.id)}" data-s="${st}">${t}</button>`;
- const row=x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.n)}</b><small>כמות ${n3(x.qty)} · הזמנה #${x.no}${x.cust?' · '+esc(x.cust):''}${x.eta?' · צפי '+dmy(x.eta):''}${hasBr()&&x.br&&x.br!==NB?' · '+esc(brNm(x.br)):''}</small></div><span class="tag${x.st==='ord'?' t1':''}">${x.st==='ord'?'הוזמן':'להזמין'}</span>
-  <div class="row" style="width:100%;gap:6px">${x.st==='open'?b(x,'ord','הוזמן'):''}${b(x,'done','הגיע')}<button type="button" class="btn g s grow" data-a="go" data-v="oxOrd" data-arg="${esc(x.ord)}">להזמנה</button>${b(x,'void','לא צריך')}</div></div>`;
+ const row=x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.n)}</b><small>כמות ${n3(x.qty)} · ${x.src==='sec'?'הצעת גיטי (אושרה)':'הזמנה #'+x.no}${x.cust?' · '+esc(x.cust):''}${x.eta?' · צפי '+dmy(x.eta):''}${hasBr()&&x.br&&x.br!==NB?' · '+esc(brNm(x.br)):''}</small></div><span class="tag${x.st==='ord'?' t1':''}">${x.st==='ord'?'הוזמן':'להזמין'}</span>
+  <div class="row" style="width:100%;gap:6px">${x.st==='open'?b(x,'ord','הוזמן'):''}${b(x,'done','הגיע')}${x.ord?`<button type="button" class="btn g s grow" data-a="go" data-v="oxOrd" data-arg="${esc(x.ord)}">להזמנה</button>`:''}${b(x,'void','לא צריך')}</div></div>`;
  return{t:T,s:SO.L.length+' פריטים',h:`<p class="note">רשימה פנימית – לא נשלחת לספק. כשהסחורה מגיעה מסמנים "הגיע", ומכניסים אותה למלאי ב"הכנסת מלאי".</p>
  ${gs.length?gs.map(g=>`<div class="sec"><h3>${esc(g.n)} (${g.L.length})</h3></div>${g.L.map(row).join('')}`).join(''):'<div class="empty">אין מוצרים להזמין</div>'}
  <button type="button" class="btn g s w" data-a="oxSoRe" style="margin-top:8px">רענן</button>`}};
