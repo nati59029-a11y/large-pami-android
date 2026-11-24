@@ -46,6 +46,106 @@ service cloud.firestore {
         || get(/databases/$(database)/documents/b/largpeami).data.get('dataRoot', '') == 'legacy';
     }
 
+    // 24.11.2026: פונקציות משותפות לשורש ול-b/{bizId} (הקטנת הקוד המהודר – אותן בדיקות בדיוק).
+    function nw() { return request.resource.data; }
+    function od() { return resource.data; }
+    function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+    // תמונה מצורפת (p/1 בבקשות, משימות, קבוצות, חוסרים וכו'): { img, t, uid }.
+    function imgOk() {
+      return nw().keys().hasAll(['img', 't', 'uid'])
+        && nw().keys().hasOnly(['img', 't', 'uid'])
+        && nw().uid == request.auth.uid
+        && nowOk(nw().t)
+        && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+        && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+    }
+    // קבוצות (grp): last / pin = { mid, txt <= 120, byN, t, k }; re = ציטוט קצר של הודעה; fw: true = הודעה שהועברה.
+    function lastOk(d) {
+      return !d.keys().hasAny(['last'])
+        || (d.last is map && d.last.keys().hasOnly(['txt', 'byN', 't', 'k'])
+          && d.last.get('txt', '') is string && d.last.get('txt', '').size() <= 120
+          && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
+          && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
+    }
+    function pinOk(d) {
+      return !d.keys().hasAny(['pin'])
+        || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
+          && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+          && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
+          && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
+          && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
+    }
+    function grpOk(d) {
+      return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
+        && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+        && d.mem is list && d.mem.size() <= 300
+        && d.ao is bool && d.md is bool
+        && d.by is string && d.t is int
+        && lastOk(d) && pinOk(d);
+    }
+    function txtOk(d, need) {
+      return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
+        : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
+    }
+    function reOk(d) {
+      return !d.keys().hasAny(['re'])
+        || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
+          && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+          && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
+          && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
+          && d.re.get('k', 't') in ['t', 'img', 'vid']);
+    }
+    // הודעה בקבוצה. vp = הנתיב הצפוי של הסרטון. הבדיקה "md == true" (תמונה/סרטון) נשארת אצל הקורא (צריך את מסמך הקבוצה).
+    function msgOk(d, vp) {
+      return d.keys().hasAll(['by', 'byN', 't', 'k'])
+        && d.by == request.auth.uid
+        && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+        && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
+        && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
+          || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false))
+          || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
+            && txtOk(d, false)
+            && d.vp == vp
+            && d.vs is int && d.vs >= 1 && d.vs <= 60
+            && d.vb is int && d.vb >= 1 && d.vb <= 31457280));
+    }
+    // סימון (אימוג'י). הבדיקה שההודעה קיימת נשארת אצל הקורא.
+    function xOk(d, xid) {
+      return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
+        && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+        && xid == d.mid + '_' + request.auth.uid
+        && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
+        && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t);
+    }
+    // מצב קריאה: { t, mu (רק false), d, u, n } – כולם רשות.
+    function rOk(d) {
+      return d.keys().hasOnly(['t', 'mu', 'd', 'u', 'n'])
+        && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
+        && (!d.keys().hasAny(['mu']) || d.mu == false)
+        && (!d.keys().hasAny(['d']) || (d.d is int && d.d >= 0 && d.d <= request.time.toMillis() + 120000))
+        && (!d.keys().hasAny(['u']) || nowOk(d.u))
+        && (!d.keys().hasAny(['n']) || (d.n is string && d.n.size() <= 100 && isMyName(d.n)));
+    }
+    // נוכחות: { on, t, n?, e? }. הבדיקה שהשם n הוא שלו (isMyName או השם ב-staff) נשארת אצל הקורא (נתיב staff שונה).
+    function presOk(d) {
+      return d.keys().hasAll(['on', 't']) && d.keys().hasOnly(['on', 't', 'n', 'e'])
+        && d.on is bool && nowOk(d.t)
+        && (!d.keys().hasAny(['n']) || (d.n is string && d.n.size() <= 100))
+        && (!d.keys().hasAny(['e']) || isMyName(d.e));
+    }
+    // יומן שימוש act/{uid}_{YYYY-MM-DD}.
+    function actOk(d, aid) {
+      return d.keys().hasAll(['uid', 'n', 'day', 's', 'v', 't']) && d.keys().hasOnly(['uid', 'n', 'day', 's', 'v', 't'])
+        && d.uid == request.auth.uid
+        && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && aid == d.uid + '_' + d.day
+        && d.n is string && d.n.size() <= 100
+        && d.s is list && d.s.size() <= 300
+        && d.v is list && d.v.size() <= 3000
+        && nowOk(d.t);
+    }
+
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
 
     // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
@@ -56,20 +156,20 @@ service cloud.firestore {
 
     // cfg: קריאה – עובד פעיל או מנהל. כתיבה – מנהל.
     function zcCfgOk() {
-      return request.resource.data.keys().hasAll(['thr'])
-        && request.resource.data.keys().hasOnly(['thr', 'by', 'at'])
-        && (request.resource.data.thr is int || request.resource.data.thr is float)
-        && request.resource.data.thr >= 0 && request.resource.data.thr <= 1000000
-        && request.resource.data.get('by', '') is string && request.resource.data.get('by', '').size() <= 100
-        && request.resource.data.get('at', 0) is int;
+      return nw().keys().hasAll(['thr'])
+        && nw().keys().hasOnly(['thr', 'by', 'at'])
+        && (nw().thr is int || nw().thr is float)
+        && nw().thr >= 0 && nw().thr <= 1000000
+        && nw().get('by', '') is string && nw().get('by', '').size() <= 100
+        && nw().get('at', 0) is int;
     }
     // 23.11.2026: cfg/act = מתג יומן השימוש { on (bool), by? (שם המנהל, עד 100), at? (זמן) }. קריאה (get) – הצוות (כמו cfg/main), כתיבה – מנהל.
     function actCfgOk() {
-      return request.resource.data.keys().hasAll(['on'])
-        && request.resource.data.keys().hasOnly(['on', 'by', 'at'])
-        && request.resource.data.on is bool
-        && request.resource.data.get('by', '') is string && request.resource.data.get('by', '').size() <= 100
-        && request.resource.data.get('at', 0) is int;
+      return nw().keys().hasAll(['on'])
+        && nw().keys().hasOnly(['on', 'by', 'at'])
+        && nw().on is bool
+        && nw().get('by', '') is string && nw().get('by', '').size() <= 100
+        && nw().get('at', 0) is int;
     }
     match /cfg/{docId} {
       allow get: if isStaff() && (docId != 'zc' || isManager());
@@ -177,9 +277,6 @@ service cloud.firestore {
 
     // ---------- משימות (tasks) ----------
     match /tasks/{id} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function hasNc() { return od().get('nc', '') == '1'; }
       function npOf() { return od().get('np', 0); }
       function isNew() { return od().keys().hasAny(['to']); }
@@ -374,14 +471,6 @@ service cloud.firestore {
               || (isActiveEmployee() && isMyName(task().get('doneBy', '')))
               || isSender(task()));
         }
-        function imgOk() {
-          return nw().keys().hasAll(['img', 't', 'uid'])
-            && nw().keys().hasOnly(['img', 't', 'uid'])
-            && nw().uid == request.auth.uid
-            && nowOk(nw().t)
-            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-        }
         function workOk() {
           return hasTask() && task().get('ow', '') == request.auth.uid && task().st == 'open'
             && ((pid == 'w1' && task().get('np', 0) >= 1)
@@ -397,9 +486,6 @@ service cloud.firestore {
 
     // ---------- משימות פרטיות (ptk), משימות קבועות (rtk), בקשות למנהל (rq) – 12.11.2026 ----------
     match /ptk/{id} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function mine(d) { return isManager() || (isActiveEmployee() && d.owner == request.auth.uid); }
       function updOk() {
         return nw().diff(od()).affectedKeys().hasOnly(['st', 'sub', 'late', 'txt', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd'])
@@ -430,9 +516,6 @@ service cloud.firestore {
 
     // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
     match /rtk/{id} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function ruleOk() {
         return nw().keys().hasAll(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'hh', 'mm', 'hol', 'on', 'cr', 'ed'])
           && nw().keys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'cr', 'ed', 'last', 'n', 'err'])
@@ -463,9 +546,6 @@ service cloud.firestore {
 
     // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
     match /rq/{id} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function aff() { return nw().diff(od()).affectedKeys(); }
       // סימון "תגובה חדשה" (כמו commentMark במשימות)
       function cmOk() {
@@ -533,14 +613,6 @@ service cloud.firestore {
         // תמונות בתגובה (17.11.2026): rq/{id}/c/{cid}/p/1..3, מסמך {img, t, uid} (כמו p של הבקשה).
         match /p/{pid} {
           function cmt() { return get(/databases/$(database)/documents/rq/$(id)/c/$(cid)).data; }
-          function imgOk() {
-            return nw().keys().hasAll(['img', 't', 'uid'])
-              && nw().keys().hasOnly(['img', 't', 'uid'])
-              && nw().uid == request.auth.uid
-              && nowOk(nw().t)
-              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-          }
           allow read: if canRead();
           allow create: if lpW() && (canRead() && imgOk()
             && exists(/databases/$(database)/documents/rq/$(id)/c/$(cid))
@@ -559,14 +631,6 @@ service cloud.firestore {
           return exists(/databases/$(database)/documents/rq/$(id))
             && (isManager() || (isActiveEmployee() && req().owner == request.auth.uid));
         }
-        function imgOk() {
-          return nw().keys().hasAll(['img', 't', 'uid'])
-            && nw().keys().hasOnly(['img', 't', 'uid'])
-            && nw().uid == request.auth.uid
-            && nowOk(nw().t)
-            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-        }
         allow read: if canRead();
         allow create: if lpW() && (canRead() && imgOk()
           && req().owner == request.auth.uid
@@ -580,8 +644,6 @@ service cloud.firestore {
 
     // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
     match /tkt/{id} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function tOk() {
         return nw().keys().hasAll(['txt', 't'])
           && nw().keys().hasOnly(['txt', 't', 'to', 'np', 'dk', 'pri', 'cat', 'est', 'ck', 'im', 'by'])
@@ -602,14 +664,6 @@ service cloud.firestore {
       allow create, update: if lpW() && (isManager() && tOk());
       allow delete: if lpW() && (isManager());
       match /p/{pid} {
-        function imgOk() {
-          return nw().keys().hasAll(['img', 't', 'uid'])
-            && nw().keys().hasOnly(['img', 't', 'uid'])
-            && nw().uid == request.auth.uid
-            && nowOk(nw().t)
-            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-        }
         allow read: if isManager();
         allow create: if lpW() && (isManager() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/tkt/$(id)));
         allow update: if false;
@@ -619,34 +673,7 @@ service cloud.firestore {
 
     // ---------- קבוצות התכתבות (grp) – סבב 3, 17.11.2026 ----------
     match /grp/{gid} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-      function lastOk(d) {
-        return !d.keys().hasAny(['last'])
-          || (d.last is map && d.last.keys().hasOnly(['txt', 'byN', 't', 'k'])
-            && d.last.get('txt', '') is string && d.last.get('txt', '').size() <= 120
-            && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
-            && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
-      }
       // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
-      function pinOk(d) {
-        return !d.keys().hasAny(['pin'])
-          || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
-            && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
-            && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
-            && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
-            && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
-      }
-      function grpOk(d) {
-        return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
-          && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
-          && d.name is string && d.name.size() > 0 && d.name.size() <= 60
-          && d.mem is list && d.mem.size() <= 300
-          && d.ao is bool && d.md is bool
-          && d.by is string && d.t is int
-          && lastOk(d) && pinOk(d);
-      }
       allow read: if (isManager() || (isActiveEmployee() && request.auth.uid in resource.data.mem));
       allow create: if lpW() && (isManager() && grpOk(nw()) && nw().by == request.auth.uid && nowOk(nw().t));
       allow update: if lpW() && (isManager() && grpOk(nw()) && nw().by == od().by && nw().t == od().t);
@@ -658,48 +685,15 @@ service cloud.firestore {
         function hasG() { return exists(/databases/$(database)/documents/grp/$(gid)); }
         function isMem() { return isActiveEmployee() && request.auth.uid in g().mem; }
         function canRead() { return hasG() && (isManager() || isMem()); }
-        function txtOk(d, need) {
-          return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
-            : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
-        }
         // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
-        function reOk(d) {
-          return !d.keys().hasAny(['re'])
-            || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
-              && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
-              && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
-              && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
-              && d.re.get('k', 't') in ['t', 'img', 'vid']);
-        }
-        function msgOk(d) {
-          return d.keys().hasAll(['by', 'byN', 't', 'k'])
-            && d.by == request.auth.uid
-            && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-            && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
-            && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
-              || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false) && g().md == true)
-              || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
-                && txtOk(d, false) && g().md == true
-                && d.vp == 'grpv/' + gid + '/' + mid
-                && d.vs is int && d.vs >= 1 && d.vs <= 60
-                && d.vb is int && d.vb >= 1 && d.vb <= 31457280));
-        }
         allow read: if (canRead());
-        allow create: if lpW() && (hasG() && (isManager() || (isMem() && g().get('ao', false) != true)) && msgOk(nw()));
+        allow create: if lpW() && (hasG() && (isManager() || (isMem() && g().get('ao', false) != true)) && msgOk(nw(), 'grpv/' + gid + '/' + mid) && (nw().k == 't' || g().md == true));
         allow update: if false;
         allow delete: if lpW() && (isManager());
 
         // תמונה בהודעה: grp/{gid}/m/{mid}/p/1 = { img, t, uid } – אותו מבנה ואותה הגבלה כמו תמונות בבקשות (rq/{id}/p):
         match /p/{pid} {
           function msg() { return get(/databases/$(database)/documents/grp/$(gid)/m/$(mid)).data; }
-          function imgOk() {
-            return nw().keys().hasAll(['img', 't', 'uid'])
-              && nw().keys().hasOnly(['img', 't', 'uid'])
-              && nw().uid == request.auth.uid
-              && nowOk(nw().t)
-              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-          }
           allow read: if (canRead());
           allow create: if lpW() && (pid == '1' && canRead() && imgOk()
             && exists(/databases/$(database)/documents/grp/$(gid)/m/$(mid))
@@ -716,16 +710,8 @@ service cloud.firestore {
           return exists(/databases/$(database)/documents/grp/$(gid))
             && (isManager() || (isActiveEmployee() && request.auth.uid in g().mem));
         }
-        function xOk(d) {
-          return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
-            && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
-            && xid == d.mid + '_' + request.auth.uid
-            && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-            && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t)
-            && exists(/databases/$(database)/documents/grp/$(gid)/m/$(d.mid));
-        }
         allow read: if (canRead());
-        allow create, update: if lpW() && (canRead() && xOk(nw()));
+        allow create, update: if lpW() && (canRead() && xOk(nw(), xid) && exists(/databases/$(database)/documents/grp/$(gid)/m/$(nw().mid)));
         allow delete: if lpW() && (isManager() || (canRead() && resource.data.uid == request.auth.uid));
       }
 
@@ -736,14 +722,6 @@ service cloud.firestore {
           return exists(/databases/$(database)/documents/grp/$(gid))
             && (isManager() || (isActiveEmployee() && request.auth.uid in g().mem));
         }
-        function rOk(d) {
-          return d.keys().hasOnly(['t', 'mu', 'd', 'u', 'n'])
-            && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
-            && (!d.keys().hasAny(['mu']) || d.mu == false)
-            && (!d.keys().hasAny(['d']) || (d.d is int && d.d >= 0 && d.d <= request.time.toMillis() + 120000))
-            && (!d.keys().hasAny(['u']) || nowOk(d.u))
-            && (!d.keys().hasAny(['n']) || (d.n is string && d.n.size() <= 100 && isMyName(d.n)));
-        }
         allow read: if (canRead());
         allow create, update: if lpW() && (isSelf(uid) && canRead() && rOk(nw()));
         allow delete: if lpW() && (isManager());
@@ -752,47 +730,21 @@ service cloud.firestore {
 
     // ---------- נוכחות (pres) ויומן שימוש (act) – 23.11.2026 ----------
     match /pres/{uid} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-      function nmOk(n) {
-        return n is string && n.size() <= 100
-          && (isMyName(n) || (exists(/databases/$(database)/documents/staff/$(uid)) && get(/databases/$(database)/documents/staff/$(uid)).data.get('name', '') == n));
-      }
-      function presOk(d) {
-        return d.keys().hasAll(['on', 't']) && d.keys().hasOnly(['on', 't', 'n', 'e'])
-          && d.on is bool && nowOk(d.t)
-          && (!d.keys().hasAny(['n']) || nmOk(d.n))
-          && (!d.keys().hasAny(['e']) || isMyName(d.e));
-      }
       allow read: if isStaff();
-      allow create, update: if lpW() && (isSelf(uid) && isStaff() && presOk(nw()));
+      allow create, update: if lpW() && (isSelf(uid) && isStaff() && presOk(nw())
+        && (!nw().keys().hasAny(['n']) || isMyName(nw().n) || (exists(/databases/$(database)/documents/staff/$(uid)) && get(/databases/$(database)/documents/staff/$(uid)).data.get('name', '') == nw().n)));
       allow delete: if false;
     }
 
     // act/{uid}_{YYYY-MM-DD}: { uid, n (השם, עד 100), day, s (כניסות-יציאות, עד 300), v (מסכים, עד 3000), t (זמן אמת) }.
     match /act/{aid} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-      function actOk(d) {
-        return d.keys().hasAll(['uid', 'n', 'day', 's', 'v', 't']) && d.keys().hasOnly(['uid', 'n', 'day', 's', 'v', 't'])
-          && d.uid == request.auth.uid
-          && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          && aid == d.uid + '_' + d.day
-          && d.n is string && d.n.size() <= 100
-          && d.s is list && d.s.size() <= 300
-          && d.v is list && d.v.size() <= 3000
-          && nowOk(d.t);
-      }
       allow get, list: if isManager();
-      allow create, update: if lpW() && (isActiveEmployee() && !isManager() && actOk(nw()));
+      allow create, update: if lpW() && (isActiveEmployee() && !isManager() && actOk(nw(), aid));
       allow delete: if false;
     }
 
     // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 ----------
     match /hsr/{id} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       // 19.11.2026 (בדיקת אבטחה): כל איבר ב-sups הוא מזהה בתבנית מותרת וכל איבר ב-supN שם עד 60 תווים – בדיקה לפי אינדקס (עד 10).
       function sidOk(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^[A-Za-z0-9_-]{1,80}$')); }
       function snOk(l, i) { return l.size() <= i || (l[i] is string && l[i].size() <= 60); }
@@ -886,14 +838,6 @@ service cloud.firestore {
       allow delete: if lpW() && (isManager());
 
       match /p/{pid} {
-        function imgOk() {
-          return request.resource.data.keys().hasAll(['img', 't', 'uid'])
-            && request.resource.data.keys().hasOnly(['img', 't', 'uid'])
-            && request.resource.data.uid == request.auth.uid
-            && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000
-            && request.resource.data.img is string && request.resource.data.img.size() >= 100 && request.resource.data.img.size() <= 900000
-            && request.resource.data.img.matches('^data:image/(jpeg|png|webp);base64,.*');
-        }
         allow read: if (isStaff());
         allow create: if lpW() && (isStaff() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/hsr/$(id)));
         allow update: if false;
@@ -941,8 +885,6 @@ service cloud.firestore {
 
     // ---------- בקשות לעדכון האפליקציה (appreq) ----------
     match /appreq/{id} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isStaff();
       allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
@@ -981,8 +923,6 @@ service cloud.firestore {
 
     // ---------- תור "נשלח למנהל לטיפול" (mq) – סריקה אחידה, שלב 6 ----------
     match /mq/{id} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.uid == request.auth.uid);
       allow create: if lpW() && (isActiveEmployee() && !isManager()
@@ -1023,8 +963,6 @@ service cloud.firestore {
 
     // ---------- סגירת קופה (closings) ----------
     match /closings/{id} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isManager();
       allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
@@ -1071,9 +1009,6 @@ service cloud.firestore {
 
     // ---------- הוצאות מקופה (cashout) ----------
     match /cashout/{id} {
-      function nw() { return request.resource.data; }
-      function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function idStr(v) { return v is string && (v == '' || v.matches('^[A-Za-z0-9_-]{1,120}$')); }
       function amtOk(a) { return (a is int || a is float) && a > 0 && a <= 1000000; }
       function depRe() {
@@ -1133,8 +1068,6 @@ service cloud.firestore {
 
     // ---------- אישורי הפקדה (deposits) ----------
     match /deposits/{id} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isStaff();
       allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
@@ -1177,8 +1110,6 @@ service cloud.firestore {
 
     // ---------- הסגירה האחרונה של כל קופה (zlast) ----------
     match /zlast/{reg} {
-      function nw() { return request.resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function cl() { return getAfter(/databases/$(database)/documents/closings/$(nw().id)).data; }
       function fwd() {
         return resource == null || nw().d > resource.data.d
@@ -1480,7 +1411,6 @@ service cloud.firestore {
     }
 
     // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
-    function s3Now(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
     function s3Uid(v) { return v is string && v.matches('^[A-Za-z0-9_-]{6,128}$'); }
     function s3Str(v, a, b) { return v is string && v.size() >= a && v.size() <= b; }
     function s3Int(v, a, b) { return v is int && v >= a && v <= b; }
@@ -1502,7 +1432,7 @@ service cloud.firestore {
         && d.sub in ['fixed', 'manual', 'any']
         && (!d.keys().hasAny(['subU']) || d.subU == '' || s3Uid(d.subU))
         && s3Int(d.due, 1, 14) && d.numDir in ['rtl', 'ltr']
-        && s3Now(d.upd) && d.by == request.auth.uid;
+        && nowOk(d.upd) && d.by == request.auth.uid;
     }
     // smap/{mapId}/bay/{bayId} – נתוני מקטע שהמנהל כותב (חוזה 4.5). catSug/catConf – רק השרת. תוכן האיברים ברשימות – השרת מנקה.
     function s3BayIds(mapId, bayId) {
@@ -1512,7 +1442,7 @@ service cloud.firestore {
       return (!d.keys().hasAny(['cat']) || s3Str(d.cat, 0, 30))
         && (!d.keys().hasAny(['exp']) || (d.exp is list && d.exp.size() <= 60))
         && (!d.keys().hasAny(['notes']) || (d.notes is list && d.notes.size() <= 20))
-        && s3Now(d.upd) && d.by == request.auth.uid;
+        && nowOk(d.upd) && d.by == request.auth.uid;
     }
     // בעדכון (sround, bay) upd חייב להשתנות – כדי שעדכון לא ישתמש שוב בזמן של עדכון קודם.
     function s3FOk(f) {
@@ -1534,7 +1464,7 @@ service cloud.firestore {
         && (!d.keys().hasAny(['sub']) || d.sub in ['fixed', 'manual', 'any'])
         && (!d.keys().hasAny(['subU']) || d.subU == '' || s3Uid(d.subU))
         && (!d.keys().hasAny(['due']) || s3Int(d.due, 1, 14))
-        && d.on is bool && s3Now(d.upd) && d.by == request.auth.uid;
+        && d.on is bool && nowOk(d.upd) && d.by == request.auth.uid;
     }
     function s3RoundNew(d) {
       return d.keys().hasOnly(['br', 'map', 'name', 'f', 'asg', 'sub', 'subU', 'due', 'on', 'upd', 'by']) && s3RoundOk(d);
@@ -1543,7 +1473,7 @@ service cloud.firestore {
     function s3DelChg(nw, od) {
       return !nw.diff(od).affectedKeys().hasAny(['del', 'delAt', 'delBy'])
         || (od.get('del', 0) != 1 && nw.get('del', 0) is int && nw.get('del', 0) == 1
-            && s3Now(nw.get('delAt', 0)) && nw.get('delBy', '') == request.auth.uid)
+            && nowOk(nw.get('delAt', 0)) && nw.get('delBy', '') == request.auth.uid)
         || (od.get('del', 0) == 1 && nw.get('del', 1) is int && nw.get('del', 1) == 0
             && od.get('delAt', 0) is int && request.time.toMillis() < od.get('delAt', 0) + 2592000000
             && (!nw.diff(od).affectedKeys().hasAny(['delAt', 'delBy']) || !nw.keys().hasAny(['delAt', 'delBy'])));
@@ -1562,13 +1492,13 @@ service cloud.firestore {
         && d.run is string && d.run.matches(s3RunRe())
         && d.slot is string && d.slot.matches(s3SlotRe())
         && d.ik is string && d.ik.matches('^([0-9]{1,2}|all)$')
-        && d.by == request.auth.uid && s3Now(d.at) && d.st == 'open' && s3Str(d.txt, 1, 300)
+        && d.by == request.auth.uid && nowOk(d.at) && d.st == 'open' && s3Str(d.txt, 1, 300)
         && aid == d.run + '__' + d.slot + '__' + d.ik;
     }
     function s3ApDec(nw, od) {
       return nw.diff(od).affectedKeys().hasOnly(['st', 'dec', 'decBy', 'decAt', 'note'])
         && od.get('st', '') == 'open' && nw.st in ['acc', 'rej']
-        && nw.get('decBy', '') == request.auth.uid && s3Now(nw.get('decAt', 0))
+        && nw.get('decBy', '') == request.auth.uid && nowOk(nw.get('decAt', 0))
         && (!nw.keys().hasAny(['dec']) || s3Str(nw.dec, 0, 300))
         && (!nw.keys().hasAny(['note']) || nw.note is bool);
     }
@@ -1577,7 +1507,7 @@ service cloud.firestore {
       return nw.diff(od).affectedKeys().hasOnly(['st', 'drop', 'okBy', 'okAt'])
         && od.get('st', 'draft') == 'draft' && nw.st in ['ok', 'no']
         && (!nw.keys().hasAny(['drop']) || (nw.drop is list && nw.drop.size() <= 200))
-        && nw.get('okBy', '') == request.auth.uid && s3Now(nw.get('okAt', 0));
+        && nw.get('okBy', '') == request.auth.uid && nowOk(nw.get('okAt', 0));
     }
 
     // מסלול השורש – רק ללארג' פעמי במצב legacy, כמו sOn() של המזכירה: b/largpeami קיים, dataRoot legacy, פעיל, ו-features.store3d.
@@ -1737,7 +1667,6 @@ service cloud.firestore {
       function expOwn() { return bMgr() || (bEmp() && (pv('expR') == true || pv('expR') == 'own')); }
       function feat(k) { return bizDoc().get('features', {}).get(k, false) == true; }
 
-      function nowMs(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       // brand (שם תצוגה, לוגו, צבעים): אף אחד לא כותב מהאפליקציה – רק השרת (setBusinessBrand, מנהל־על בלבד, עם audit).
       function aff() { return request.resource.data.diff(resource.data).affectedKeys(); }
       // מנהל־על כותב מהאפליקציה רק migrationTarget. status, features, adv, brand, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
@@ -1766,7 +1695,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasAll(['by', 't', 'act'])
           && request.resource.data.keys().hasOnly(['by', 't', 'act', 'note'])
           && request.resource.data.by == request.auth.uid
-          && nowMs(request.resource.data.t)
+          && nowOk(request.resource.data.t)
           && request.resource.data.act is string && request.resource.data.act.size() > 0 && request.resource.data.act.size() <= 60
           && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 500;
         allow update, delete: if false;
@@ -1890,9 +1819,6 @@ service cloud.firestore {
 
       // tasks: העתק של הכלל בשורש (תוספת 'tasks'). שדרוג 2026-11-09 – ראו ההסבר בשורש.
       match /tasks/{id} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function hasNc() { return od().get('nc', '') == '1'; }
         function npOf() { return od().get('np', 0); }
         function isNew() { return od().keys().hasAny(['to']); }
@@ -2068,14 +1994,6 @@ service cloud.firestore {
                 || (bEmp() && isMyName(task().get('doneBy', '')))
                 || isSender(task()));
           }
-          function imgOk() {
-            return nw().keys().hasAll(['img', 't', 'uid'])
-              && nw().keys().hasOnly(['img', 't', 'uid'])
-              && nw().uid == request.auth.uid
-              && nowOk(nw().t)
-              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-          }
           function workOk() {
             return hasTask() && task().get('ow', '') == request.auth.uid && task().st == 'open'
               && ((pid == 'w1' && task().get('np', 0) >= 1)
@@ -2091,9 +2009,6 @@ service cloud.firestore {
 
       // ptk, rtk, rq (+ rq/{id}/c): העתק של הכללים בשורש (תוספת 'tasks'), 12.11.2026
       match /ptk/{id} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function mine(d) { return bMgr() || (bEmp() && d.owner == request.auth.uid); }
         function updOk() {
           return nw().diff(od()).affectedKeys().hasOnly(['st', 'sub', 'late', 'txt', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd'])
@@ -2124,9 +2039,6 @@ service cloud.firestore {
 
       // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
       match /rtk/{id} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function ruleOk() {
           return nw().keys().hasAll(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'hh', 'mm', 'hol', 'on', 'cr', 'ed'])
             && nw().keys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'cr', 'ed', 'last', 'n', 'err'])
@@ -2157,9 +2069,6 @@ service cloud.firestore {
 
       // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
       match /rq/{id} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function aff() { return nw().diff(od()).affectedKeys(); }
         // סימון "תגובה חדשה" (כמו commentMark במשימות)
         function cmOk() {
@@ -2227,14 +2136,6 @@ service cloud.firestore {
           // תמונות בתגובה (17.11.2026): rq/{id}/c/{cid}/p/1..3, מסמך {img, t, uid} (כמו p של הבקשה).
           match /p/{pid} {
             function cmt() { return get(/databases/$(database)/documents/b/$(bizId)/rq/$(id)/c/$(cid)).data; }
-            function imgOk() {
-              return nw().keys().hasAll(['img', 't', 'uid'])
-                && nw().keys().hasOnly(['img', 't', 'uid'])
-                && nw().uid == request.auth.uid
-                && nowOk(nw().t)
-                && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-                && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-            }
             allow read: if feat('tasks') && (canRead());
             allow create: if feat('tasks') && (canRead() && imgOk()
               && exists(/databases/$(database)/documents/b/$(bizId)/rq/$(id)/c/$(cid))
@@ -2253,14 +2154,6 @@ service cloud.firestore {
             return exists(/databases/$(database)/documents/b/$(bizId)/rq/$(id))
               && (bMgr() || (bEmp() && req().owner == request.auth.uid));
           }
-          function imgOk() {
-            return nw().keys().hasAll(['img', 't', 'uid'])
-              && nw().keys().hasOnly(['img', 't', 'uid'])
-              && nw().uid == request.auth.uid
-              && nowOk(nw().t)
-              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-          }
           allow read: if feat('tasks') && (canRead());
           allow create: if feat('tasks') && (canRead() && imgOk()
             && req().owner == request.auth.uid
@@ -2274,8 +2167,6 @@ service cloud.firestore {
 
       // תבניות משימה בענן (18.11.2026): tkt/{id} = { txt, t, to, np, dk, pri, cat, est, ck, im, by } ועוד תמונת דוגמה אחת ב-tkt/{id}/p/1.
       match /tkt/{id} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function tOk() {
           return nw().keys().hasAll(['txt', 't'])
             && nw().keys().hasOnly(['txt', 't', 'to', 'np', 'dk', 'pri', 'cat', 'est', 'ck', 'im', 'by'])
@@ -2296,14 +2187,6 @@ service cloud.firestore {
         allow create, update: if feat('tasks') && (bMgr() && tOk());
         allow delete: if feat('tasks') && (bMgr());
         match /p/{pid} {
-          function imgOk() {
-            return nw().keys().hasAll(['img', 't', 'uid'])
-              && nw().keys().hasOnly(['img', 't', 'uid'])
-              && nw().uid == request.auth.uid
-              && nowOk(nw().t)
-              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-          }
           allow read: if feat('tasks') && (bMgr());
           allow create: if feat('tasks') && (bMgr() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/b/$(bizId)/tkt/$(id)));
           allow update: if false;
@@ -2313,34 +2196,7 @@ service cloud.firestore {
 
       // grp: העתק של הכלל בשורש (תוספת 'groups' – מתג 'קבוצות התכתבות' של מנהל־העל), עם התפקידים של העסק (bMgr / bEmp)
       match /grp/{gid} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-        function lastOk(d) {
-          return !d.keys().hasAny(['last'])
-            || (d.last is map && d.last.keys().hasOnly(['txt', 'byN', 't', 'k'])
-              && d.last.get('txt', '') is string && d.last.get('txt', '').size() <= 120
-              && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
-              && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
-        }
         // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
-        function pinOk(d) {
-          return !d.keys().hasAny(['pin'])
-            || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
-              && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
-              && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
-              && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
-              && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
-        }
-        function grpOk(d) {
-          return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
-            && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
-            && d.name is string && d.name.size() > 0 && d.name.size() <= 60
-            && d.mem is list && d.mem.size() <= 300
-            && d.ao is bool && d.md is bool
-            && d.by is string && d.t is int
-            && lastOk(d) && pinOk(d);
-        }
         allow read: if feat('groups') && (bMgr() || (bEmp() && request.auth.uid in resource.data.mem));
         allow create: if feat('groups') && (bMgr() && grpOk(nw()) && nw().by == request.auth.uid && nowOk(nw().t));
         allow update: if feat('groups') && (bMgr() && grpOk(nw()) && nw().by == od().by && nw().t == od().t);
@@ -2352,48 +2208,15 @@ service cloud.firestore {
           function hasG() { return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)); }
           function isMem() { return bEmp() && request.auth.uid in g().mem; }
           function canRead() { return hasG() && (bMgr() || isMem()); }
-          function txtOk(d, need) {
-            return need ? (d.get('txt', '') is string && d.get('txt', '').size() > 0 && d.get('txt', '').size() <= 2000)
-              : (!d.keys().hasAny(['txt']) || (d.txt is string && d.txt.size() <= 2000));
-          }
           // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
-          function reOk(d) {
-            return !d.keys().hasAny(['re'])
-              || (d.re is map && d.re.keys().hasAll(['mid']) && d.re.keys().hasOnly(['mid', 'txt', 'byN', 'k'])
-                && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
-                && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
-                && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
-                && d.re.get('k', 't') in ['t', 'img', 'vid']);
-          }
-          function msgOk(d) {
-            return d.keys().hasAll(['by', 'byN', 't', 'k'])
-              && d.by == request.auth.uid
-              && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-              && nowOk(d.t) && reOk(d) && (!d.keys().hasAny(['fw']) || d.fw == true)
-              && ((d.k == 't' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, true))
-                || (d.k == 'img' && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 're', 'fw']) && txtOk(d, false) && g().md == true)
-                || (d.k == 'vid' && d.keys().hasAll(['vp', 'vs', 'vb']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'vp', 'vs', 'vb', 're', 'fw'])
-                  && txtOk(d, false) && g().md == true
-                  && d.vp == 'b/' + bizId + '/grpv/' + gid + '/' + mid
-                  && d.vs is int && d.vs >= 1 && d.vs <= 60
-                  && d.vb is int && d.vb >= 1 && d.vb <= 31457280));
-          }
           allow read: if feat('groups') && (canRead());
-          allow create: if feat('groups') && (hasG() && (bMgr() || (isMem() && g().get('ao', false) != true)) && msgOk(nw()));
+          allow create: if feat('groups') && (hasG() && (bMgr() || (isMem() && g().get('ao', false) != true)) && msgOk(nw(), 'b/' + bizId + '/grpv/' + gid + '/' + mid) && (nw().k == 't' || g().md == true));
           allow update: if false;
           allow delete: if feat('groups') && (bMgr());
 
           // תמונה בהודעה: grp/{gid}/m/{mid}/p/1 = { img, t, uid } – אותו מבנה ואותה הגבלה כמו תמונות בבקשות (rq/{id}/p):
           match /p/{pid} {
             function msg() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(mid)).data; }
-            function imgOk() {
-              return nw().keys().hasAll(['img', 't', 'uid'])
-                && nw().keys().hasOnly(['img', 't', 'uid'])
-                && nw().uid == request.auth.uid
-                && nowOk(nw().t)
-                && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
-                && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
-            }
             allow read: if feat('groups') && (canRead());
             allow create: if feat('groups') && (pid == '1' && canRead() && imgOk()
               && exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(mid))
@@ -2410,16 +2233,8 @@ service cloud.firestore {
             return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid))
               && (bMgr() || (bEmp() && request.auth.uid in g().mem));
           }
-          function xOk(d) {
-            return d.keys().hasAll(['mid', 'uid', 'byN', 'e', 't']) && d.keys().hasOnly(['mid', 'uid', 'byN', 'e', 't'])
-              && d.uid == request.auth.uid && d.mid is string && d.mid.matches('^[A-Za-z0-9_-]{1,128}$')
-              && xid == d.mid + '_' + request.auth.uid
-              && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
-              && d.e in ['', '👍', '❤️', '😂', '😮', '😢', '🙏'] && nowOk(d.t)
-              && exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(d.mid));
-          }
           allow read: if feat('groups') && (canRead());
-          allow create, update: if feat('groups') && (canRead() && xOk(nw()));
+          allow create, update: if feat('groups') && (canRead() && xOk(nw(), xid) && exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)/m/$(nw().mid)));
           allow delete: if feat('groups') && (bMgr() || (canRead() && resource.data.uid == request.auth.uid));
         }
 
@@ -2430,14 +2245,6 @@ service cloud.firestore {
             return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid))
               && (bMgr() || (bEmp() && request.auth.uid in g().mem));
           }
-          function rOk(d) {
-            return d.keys().hasOnly(['t', 'mu', 'd', 'u', 'n'])
-              && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
-              && (!d.keys().hasAny(['mu']) || d.mu == false)
-              && (!d.keys().hasAny(['d']) || (d.d is int && d.d >= 0 && d.d <= request.time.toMillis() + 120000))
-              && (!d.keys().hasAny(['u']) || nowOk(d.u))
-              && (!d.keys().hasAny(['n']) || (d.n is string && d.n.size() <= 100 && isMyName(d.n)));
-          }
           allow read: if feat('groups') && (canRead());
           allow create, update: if feat('groups') && (isSelf(uid) && canRead() && rOk(nw()));
           allow delete: if feat('groups') && (bMgr());
@@ -2446,47 +2253,21 @@ service cloud.firestore {
 
       // ---------- נוכחות (pres) ויומן שימוש (act) – 23.11.2026 – העתק של הכלל בשורש (בלי מתג תוספת), עם התפקידים של העסק ----------
       match /pres/{uid} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-        function nmOk(n) {
-          return n is string && n.size() <= 100
-            && (isMyName(n) || (exists(/databases/$(database)/documents/b/$(bizId)/staff/$(uid)) && get(/databases/$(database)/documents/b/$(bizId)/staff/$(uid)).data.get('name', '') == n));
-        }
-        function presOk(d) {
-          return d.keys().hasAll(['on', 't']) && d.keys().hasOnly(['on', 't', 'n', 'e'])
-            && d.on is bool && nowOk(d.t)
-            && (!d.keys().hasAny(['n']) || nmOk(d.n))
-            && (!d.keys().hasAny(['e']) || isMyName(d.e));
-        }
         allow read: if bStaff();
-        allow create, update: if (isSelf(uid) && bStaff() && presOk(nw()));
+        allow create, update: if (isSelf(uid) && bStaff() && presOk(nw())
+          && (!nw().keys().hasAny(['n']) || isMyName(nw().n) || (exists(/databases/$(database)/documents/b/$(bizId)/staff/$(uid)) && get(/databases/$(database)/documents/b/$(bizId)/staff/$(uid)).data.get('name', '') == nw().n)));
         allow delete: if false;
       }
 
       // act/{uid}_{YYYY-MM-DD}: { uid, n (השם, עד 100), day, s (כניסות-יציאות, עד 300), v (מסכים, עד 3000), t (זמן אמת) }.
       match /act/{aid} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-        function actOk(d) {
-          return d.keys().hasAll(['uid', 'n', 'day', 's', 'v', 't']) && d.keys().hasOnly(['uid', 'n', 'day', 's', 'v', 't'])
-            && d.uid == request.auth.uid
-            && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-            && aid == d.uid + '_' + d.day
-            && d.n is string && d.n.size() <= 100
-            && d.s is list && d.s.size() <= 300
-            && d.v is list && d.v.size() <= 3000
-            && nowOk(d.t);
-        }
         allow get, list: if bMgr();
-        allow create, update: if (bEmp() && !bMgr() && actOk(nw()));
+        allow create, update: if (bEmp() && !bMgr() && actOk(nw(), aid));
         allow delete: if false;
       }
 
       // ---------- חוסרים (hsr, hsph, hsx) – 18.11.2026, שלב 1 – העתק של הכלל בשורש (תוספת 'suppliers'), עם התפקידים של העסק ----------
       match /hsr/{id} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         // 19.11.2026 (בדיקת אבטחה): כל איבר ב-sups הוא מזהה בתבנית מותרת וכל איבר ב-supN שם עד 60 תווים – בדיקה לפי אינדקס (עד 10).
         function sidOk(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^[A-Za-z0-9_-]{1,80}$')); }
         function snOk(l, i) { return l.size() <= i || (l[i] is string && l[i].size() <= 60); }
@@ -2580,14 +2361,6 @@ service cloud.firestore {
         allow delete: if feat('suppliers') && (bMgr());
 
         match /p/{pid} {
-          function imgOk() {
-            return request.resource.data.keys().hasAll(['img', 't', 'uid'])
-              && request.resource.data.keys().hasOnly(['img', 't', 'uid'])
-              && request.resource.data.uid == request.auth.uid
-              && request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000
-              && request.resource.data.img is string && request.resource.data.img.size() >= 100 && request.resource.data.img.size() <= 900000
-              && request.resource.data.img.matches('^data:image/(jpeg|png|webp);base64,.*');
-          }
           allow read: if feat('suppliers') && (bStaff());
           allow create: if feat('suppliers') && (bStaff() && pid == '1' && imgOk() && exists(/databases/$(database)/documents/b/$(bizId)/hsr/$(id)));
           allow update: if false;
@@ -2635,8 +2408,6 @@ service cloud.firestore {
 
       // appreq: העתק של הכלל בשורש (תוספת 'requests')
       match /appreq/{id} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         allow read: if feat('requests') && (bStaff());
         allow create: if feat('requests') && (bStaff()
           && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
@@ -2674,8 +2445,6 @@ service cloud.firestore {
 
       // mq: העתק של הכלל בשורש (תור "נשלח למנהל לטיפול", שלב 6). בלי תוספת – כל עסק
       match /mq/{id} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         allow read: if bMgr()
           || (bEmp() && resource.data.uid == request.auth.uid);
         allow create: if bEmp() && !bMgr()
@@ -3185,8 +2954,6 @@ service cloud.firestore {
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')
       match /closings/{id} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         allow read: if feat('cashClose') && (bMgr());
         allow create: if feat('cashClose') && (bStaff() && perm('incW')
           && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
@@ -3230,9 +2997,6 @@ service cloud.firestore {
 
       // cashout: העתק של הכלל בשורש (תוספת 'cashClose')
       match /cashout/{id} {
-        function nw() { return request.resource.data; }
-        function od() { return resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function idStr(v) { return v is string && (v == '' || v.matches('^[A-Za-z0-9_-]{1,120}$')); }
         function amtOk(a) { return (a is int || a is float) && a > 0 && a <= 1000000; }
         function depRe() {
@@ -3293,8 +3057,6 @@ service cloud.firestore {
 
       // deposits: העתק של הכלל בשורש (תוספת 'cashClose')
       match /deposits/{id} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         allow read: if feat('cashClose') && (bMgr() || perm('incW'));
         allow create: if feat('cashClose') && (bStaff() && perm('incW')
           && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
@@ -3336,8 +3098,6 @@ service cloud.firestore {
 
       // zlast: העתק של הכלל בשורש (תוספת 'cashClose')
       match /zlast/{reg} {
-        function nw() { return request.resource.data; }
-        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function cl() { return getAfter(/databases/$(database)/documents/b/$(bizId)/closings/$(nw().id)).data; }
         function fwd() {
           return resource == null || nw().d > resource.data.d

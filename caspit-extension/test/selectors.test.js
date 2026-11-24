@@ -414,6 +414,10 @@ test('queueRows (0.1.17): "טעינות קודמות" לעולם לא נקראת
     ['E2: כותרת ב-visibility:hidden, תור גלוי עם קובץ זר', `${PICK}<div><h4 style="visibility:hidden">ממתין לטעינה</h4></div>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
     ['טבלת תור ריקה', `${PICK}<h4>ממתין לטעינה</h4>${QT('')}<div>${HIST}</div>`, [], true],
     ['קובץ זר בתור', `${PICK}<h4>ממתין לטעינה</h4>${QT('<tr><td>someone-else.csv</td><td>עדכון פריטים</td><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
+    // 0.1.18 – כמו בכספית האמיתית (23.11): שם וסוג בתאי th, פעולות ב-td
+    ['קובץ זר בתור, שם וסוג ב-th', `${PICK}<h4>ממתין לטעינה</h4>${QT('<tr><th>someone-else.csv</th><th>עדכון פריטים</th><td><button>הסר</button></td></tr>')}<div>${HIST}</div>`, [['someone-else.csv', 'עדכון פריטים', 'הסר']], false],
+    ['כותרת ב-th בתוך tbody (בלי thead), שורה עם th – נספרת', `${PICK}<h4>ממתין לטעינה</h4><table><tbody><tr><th>שם</th><th>סוג קובץ</th><th>פעולות</th></tr><tr><th>x.csv</th><th>עדכון</th><td>הסר</td></tr></tbody></table><div>${HIST}</div>`, [['x.csv', 'עדכון', 'הסר']], false],
+    ['כותרת th+td בתוך tbody לא נספרת', `${PICK}<h4>ממתין לטעינה</h4><table><tbody><tr><th>שם</th><th>סוג קובץ</th><td>פעולות</td></tr></tbody></table><div>${HIST}</div>`, [], true],
     ['קובץ זר בתור, כותרת td', `${PICK}<h4>ממתין לטעינה</h4><table><tbody><tr><td>שם</td><td>סוג קובץ</td><td>פעולות</td></tr><tr><td>x.csv</td><td>עדכון</td><td>הסר</td></tr></tbody></table><div>${HIST}</div>`, [['x.csv', 'עדכון', 'הסר']], false],
   ];
   for (const [name, body, rows, empty] of C) {

@@ -584,6 +584,36 @@ test('ייבוא: בתור "ממתין לטעינה" כבר יש קובץ של �
   await cp.evaluate(() => localStorage.removeItem('preq'));
 });
 
+// 0.1.18 – התקלה של 23.11 (03:02): בכספית שורת הקובץ בתור היא <th>שם</th><th>סוג</th><td>פעולות</td>. הקובץ נכנס לתור, אבל התוסף
+// ספר את השורה ככותרת, חשב שהתור ריק וניסה שוב ושוב (הקובץ נכנס פעמיים). עכשיו: נקלט מהניסיון הראשון ומועלה פעם אחת
+test('0.1.18 העלאה: שורת קובץ בתאי th (כמו בכספית) → נקלטת בניסיון הראשון; מועלה פעם אחת', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.removeItem('preq'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.removeItem('qtdhead'); localStorage.setItem('qthrow', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  await cp.evaluate(() => localStorage.removeItem('qthrow'));
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  assert.equal(imports.at(-1).type, 'price');
+});
+
+// 0.1.18 – אותו מבנה, וקובץ של מישהו אחר כבר בתור → עוצרים, לא מעלים
+test('0.1.18 העלאה: קובץ זר בתור בתאי th → עוצרים לפני הבחירה', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { localStorage.removeItem('redir'); localStorage.removeItem('redirLoad'); localStorage.removeItem('imperr'); localStorage.removeItem('imphang'); localStorage.setItem('qthrow', '1'); localStorage.setItem('preq', 'someone-else.csv'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 0; srv.exportN.price = 2;
+  const nImp = imports.length, t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  const s = await waitRun(t0);
+  await cp.evaluate(() => { localStorage.removeItem('preq'); localStorage.removeItem('qthrow'); });
+  assert.equal(imports.length, nImp, 'שום קובץ לא הועלה');
+  assert.match(JSON.stringify(s.st.lastRun), /import-queue-not-empty|כבר ממתינים/);
+});
+
 // 0.1.16 – התקלה של 22.11 (15:02): בכספית שורת הכותרת של התור היא td רגיל – לא נספרת כשורת קובץ; הקובץ שלנו מועלה פעם אחת
 test('0.1.16 העלאה: כותרת התור בתאי td (כמו בכספית) → לא נחשבת קובץ נוסף; מועלה פעם אחת', async () => {
   const cp = caspitPage();

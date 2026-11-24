@@ -1599,6 +1599,18 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     await call('secMail', M1, { op: 'draft', id });
     assert.equal((await coll(`b/${A}/tasks`)).length, 1);
     assert.equal(GO.state.sent.length, 0, 'שום דבר לא נשלח');
+    // 24.11.2026: חשבונית בקובץ מצורף – לקליטת החשבוניות, בלי משימה; מסמך אחר עם קובץ – כן משימה (עם "יש קובץ מצורף"); "get" מחזיר את רשימת הקבצים השמורים
+    AIR = Object.assign({}, AIR, { task: { title: 'בדיקת חשבונית מס 1033', why: 'התקבלה חשבונית מספק' } });
+    const idI = await mail({ subject: 'חשבונית', text: 'מצורפת', files: ['inv-1033.pdf'] });
+    await work(idI);
+    assert.equal(await get(`b/${A}/tasks/m-${idI}`), null, 'חשבונית – בלי משימה');
+    AIR = Object.assign({}, AIR, { task: { title: 'לחתום על ההסכם', why: 'מסמך לחתימה' } });
+    const idS = await mail({ subject: 'הסכם', text: 'מצורף לחתימה', files: ['contract.pdf'] });
+    await work(idS);
+    const tS = await get(`b/${A}/tasks/m-${idS}`);
+    assert.ok(tS && /יש קובץ מצורף/.test(tS.txt), 'מסמך שאינו חשבונית – משימה');
+    const gS = await call('secMail', M1, { op: 'get', id: idS });
+    assert.ok(gS.ok, gS.msg); assert.ok(Array.isArray(gS.r.mail.inv));
     // עסק בלי תוספת המשימות
     await prep((d) => d.doc('b/' + A).update({ 'features.tasks': false }));
     const id2 = await mail({ subject: 'עוד משלוח' });
