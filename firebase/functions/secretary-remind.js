@@ -469,7 +469,8 @@ async function dailyBiz(opts) {
   const out = { chat: 0, notes: 0, log: 0 };
   for (const p of await db.collection('sec_chat').listDocuments()) out.chat += await delWhere(db, `sec_chat/${p.id}/m`, c12);
   for (const p of await db.collection('sec_note').listDocuments()) out.notes += await delWhere(db, `sec_note/${p.id}/n`, c12);
-  out.notes += await delWhere(db, 'sec_cmt', c12); // 24.11.2026: הצעות התחייבות (עם קטע מההודעה) – 12 חודשים, כמו ההתראות
+  out.notes += await delWhere(db, 'sec_cmt', c12);
+  await delWhere(db, 'sec_cmtq', now - require('./lib/sec-cmt').Q_TTL); // תור הזיהוי – מה שלא עובד תוך 3 ימים // 24.11.2026: הצעות התחייבות (עם קטע מההודעה) – 12 חודשים, כמו ההתראות
   out.log = await delWhere(db, 'sec_log', c24);
   out.log += await delWhere(db, 'sec_mlog', c24); // 15.11.2026: יומן "נשלח לבד" – כמו sec_log, 24 חודשים
   out.inbox = await require('./secretary-wa')._core.shrinkOld(db, c12); // שלב 5: הודעות ווצאפ וטיוטות בנות יותר מ-12 חודשים – רק תקציר (9.5)
@@ -640,8 +641,11 @@ exports.secNotes = onCall(wrap('secNotes', secNotes));
 exports.secReports = onCall(wrap('secReports', secReports));
 exports.secHistory = onCall(wrap('secHistory', secHistory));
 // מתוזמנות – אזור אחד בלבד (ריצה כפולה = התראות כפולות), כמו secBackupDaily
-exports.secRemind = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 minutes', timeZone: R.TZ, timeoutSeconds: 300, memory: '256MiB' }, async () => {
+// 24.11.2026 (גיטי, סבב 3 חלק ב): אחרי התזכורות – תור זיהוי ההתחייבויות (lib/sec-cmt.js), בתקציב זמן כולל. לכן המפתח של ה-AI כאן
+const runCmt = (opts) => forAll((o) => require('./lib/sec-cmt').runSafe(T.tdb(), o), Object.assign({ deadline: Date.now() + require('./lib/sec-cmt').BUDGET_MS }, opts), 'cmt');
+exports.secRemind = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 minutes', timeZone: R.TZ, timeoutSeconds: 300, memory: '256MiB', secrets: [require('./lib/sec-ai').GEMINI_API_KEY] }, async () => {
   const r = await runRemind({});
+  try { await runCmt({}); } catch (e) { logger.warn('secretary: commitments queue failed', { name: e && e.name, code: e && e.code }); }
   logger.info('secretary: remind done', { bizzes: Object.keys(r.res).length, errors: r.errors.length });
   if (r.errors.length) throw new Error('secretary remind: ' + r.errors.length + ' errors');
 });
@@ -653,4 +657,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, ACT_DAYS, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, runCmt, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, ACT_DAYS, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js

@@ -7,7 +7,7 @@
 //     מצב: מייל – "טופל" (hd / נענה); ווצאפ – נענה / סומן טופל; קבוצה – "לא נקרא" לפי מצב הקריאה של המנהל (grp/{gid}/r/{uid}). st:'open' = רק מה שפתוח.
 //     התראות מהטלפון לא כאן: הן נשמרות רק במכשיר ומתמזגות בפיד באפליקציה (sec-comm.js), בלי לעלות לשרת.
 //   secComm({ op:'groups' }) – קבוצות העסק עם מצב ההרשאה, למסך ההגדרות. השינוי עצמו – secPrefs op:'grp' (secretary.js).
-//   secComm({ op:'cmts' }) – 24.11.2026 (סבב 3 חלק ב): הצעות התחייבות שממתינות לאישור (sec_cmt st:'pend', עד 30, מהחדשה לישנה) – למרכז האישורים.
+//   secComm({ op:'cmts' }) – 24.11.2026 (סבב 3 חלק ב): הצעות התחייבות שממתינות לאישור (sec_cmt st:'pend'/'act', עד 30, מהחדשה לישנה) – למרכז האישורים.
 //   secComm({ op:'src', cid }) – לאן מוביל הקישור "ההודעה המקורית" של הצעה (גם אחרי שאושרה – מתפריט המשימה): { ch, ref } כמו בפיד.
 //     מנהל עם הגבלת סניפים – רק הצעות מקבוצות פנימיות (מייל וווצאפ הם ערוצים של כל העסק). השינוי עצמו – secPrefs op:'cmt'.
 // הרשאה: אותו שער כמו כל המזכירה (gate + הסכמה). מייל וווצאפ – כמו secMail list / secInbox list. קבוצות – רק כשתוספת הקבוצות פעילה.
@@ -112,8 +112,12 @@ function cmtItem(id, x) {
 const CMT_MAX = 30;
 async function cmts(db, brLimited) {
   // בלי אינדקס מורכב: לפי מצב בלבד, ומיון בזיכרון
-  const s = await db.collection('sec_cmt').where('st', '==', 'pend').limit(CMT_MAX * 3).get();
-  const L = s.docs.map((d) => cmtItem(d.id, d.data())).filter((x) => !brLimited || x.ch === 'grp').sort((a, b) => b.t - a.t);
+  // ממתינות (pend) ובאמצע אישור (act – אם האישור נתקע, אפשר להמשיך). מנהל עם הגבלת סניפים – רק מקבוצות, כבר בשאילתה
+  // (הגבלת סניפים: שתי שאילתות של שוויון בלבד – בלי אינדקס מורכב)
+  const col = db.collection('sec_cmt');
+  const qs = brLimited ? ['pend', 'act'].map((st) => col.where('st', '==', st).where('ch', '==', 'grp').limit(CMT_MAX * 3).get()) : [col.where('st', 'in', ['pend', 'act']).limit(CMT_MAX * 3).get()];
+  const docs = [].concat(...(await Promise.all(qs)).map((s) => s.docs));
+  const L = docs.map((d) => cmtItem(d.id, d.data())).sort((a, b) => b.t - a.t);
   return { ok: true, items: L.slice(0, CMT_MAX), n: L.length };
 }
 

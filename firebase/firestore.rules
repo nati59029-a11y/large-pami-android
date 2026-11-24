@@ -1471,8 +1471,11 @@ service cloud.firestore {
     match /sec_mlog/{id} {
       allow read, create, update, delete: if false;
     }
-    // הצעות התחייבות (24.11.2026, גיטי סבב 3 חלק ב): רק דרך השרת (lib/sec-cmt.js, secComm op:'cmts', secPrefs op:'cmt') – אף אחד מהאפליקציה
+    // הצעות התחייבות ותור הזיהוי (24.11.2026, גיטי סבב 3 חלק ב): רק דרך השרת (lib/sec-cmt.js, secComm op:'cmts', secPrefs op:'cmt') – אף אחד מהאפליקציה
     match /sec_cmt/{id} {
+      allow read, create, update, delete: if false;
+    }
+    match /sec_cmtq/{id} {
       allow read, create, update, delete: if false;
     }
 
@@ -2922,6 +2925,9 @@ service cloud.firestore {
       }
       // הצעות התחייבות (24.11.2026): רק דרך השרת
       match /sec_cmt/{id} {
+        allow read, create, update, delete: if false;
+      }
+      match /sec_cmtq/{id} {
         allow read, create, update, delete: if false;
       }
 

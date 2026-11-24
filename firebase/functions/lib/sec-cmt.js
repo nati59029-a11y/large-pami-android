@@ -3,9 +3,12 @@
 //   "אחזור אליך מחר", "הספק ישלח ביום ג'" – בהודעות חדשות בלבד, בערוצים המורשים:
 //     מייל (sec_in ch:'mail', מייל מאדם – secretary-google.js saveMail), ווצאפ עסקי (sec_in ch:'wa', own:'sec' – secretary-wa.js workIn),
 //     וקבוצות פנימיות שפתוחות לגיטי (grp-notify.js onMsg – ההרשאה נבדקת ברגע ההודעה). התראות מהטלפון נשארות במכשיר – לא נסרקות.
-//   כל התנאים, לפי הסדר (הזול קודם): סינון מקומי (אורך, פרסומת/קישורים, תוכן חשוד, מילות מפתח) ← המתג sec_cfg/main.cmt (כבוי כברירת מחדל)
-//     ← קבוצה פתוחה לגיטי (רק בקבוצות) ← "עצור הכל" (sec_cfg/wa.stop) ← הצעה קיימת לאותה הודעה ← תקרה יומית (CAP_DAY סריקות לעסק, דרך קצב המונה)
-//     ← תקרת העלות החודשית/היומית של המזכירה (meter/settle) ← המודל המהיר של המזכירה (fast, בלי "חשיבה").
+//   שני שלבים, כדי שהקליטה לא תחכה ל-AI:
+//     1. בקליטה (enqueue): סינון מקומי (אורך, פרסומת/קישורים, תוכן חשוד, מילות מפתח) ← המתג sec_cfg/main.cmt (כבוי כברירת מחדל)
+//        ← קבוצה פתוחה לגיטי (רק בקבוצות) ← פריט בתור sec_cmtq/{cid} (create – פעם אחת לכל הודעה). בלי AI.
+//     2. secRemind (כל 15 דקות, secretary-remind.js – הפונקציה היחידה שקוראת ל-AI כאן, עם המפתח) מעבד את התור: תקציב זמן BUDGET_MS לריצה,
+//        עד RUN_MAX פריטים לעסק, "עצור הכל", ההרשאה לקבוצה נקראת מחדש, תפיסה בטרנזקציה (lk), ורק ממש לפני הקריאה למודל –
+//        התקרה היומית (CAP_DAY, דרך קצב המונה) ותקרת העלות (meter/settle). בלי מפתח – לא נוגעים בתקרה.
 //   התוצאה: הצעה בלבד – sec_cmt/{cid} { t, ch, src, from, who: 'me'|'them', what, d, prev, st:'pend' }. שום משימה לא נוצרת בלי אישור.
 //     cid = 'cm' + 16 תווי hex מ-sha256 של מקור ההודעה – הצעה אחת לכל הודעה (create), ואותו מזהה משמש למשימה (tasks/sec<cid>)
 //     או לתזכורת (sec_cal/sec<cid>) שנוצרות באישור – אישור חוזר לא יוצר שנייה.
@@ -15,6 +18,9 @@ const crypto = require('node:crypto');
 const logger = require('firebase-functions/logger');
 
 const CAP_DAY = 100;           // סריקות AI ביום לעסק (הנחה)
+const Q_TTL = 3 * 864e5;       // פריט בתור שלא עובד תוך 3 ימים – נמחק (וגם ב-secDaily)
+const RUN_MAX = 20, TRIES = 3, LOCK_MS = 5 * 60000, AI_MS = 20000;
+const BUDGET_MS = 60000;       // תקציב זמן לכל ריצה של secRemind (כל העסקים יחד)
 const MIN_LEN = 12, MAX_IN = 1500, WHAT_MAX = 200, PREV = 160;
 const CID_RE = /^cm[0-9a-f]{16}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,57 +64,107 @@ function parseOut(text, today) {
 // "אני/העסק" או "הצד השני": במייל ובווצאפ הכותב הוא מחוץ לעסק; בקבוצה פנימית הכותב הוא איש צוות
 const whoOf = (ch, by) => (by === 'other' ? 'them' : by === 'reader' ? 'me' : ch === 'grp' ? 'me' : 'them');
 
-// הזיהוי עצמו. db – בתוך העסק (T.tdb). s = { ch, id? , wa?, gid?, mid?, from, text, side? }. o = { ai, now, biz }
-async function detect(db, s, o) {
+// ---------- 1. בקליטה: סינון מקומי + תור (בלי AI, בלי המתנה ל-AI) ----------
+// db – בתוך העסק (T.tdb). s = { ch, id?, wa?, gid?, mid?, from, text, grp? }. o = { now, biz }
+// מחזיר { q: cid } כשנכנס לתור, או { skip }. מזהה התור = מזהה ההצעה (cid) – הודעה נכנסת לתור פעם אחת בלבד (create)
+async function enqueue(db, s, o) {
   const opt = o || {};
   const why = preOf(s.text);
   if (why) return { skip: why };
   if (opt.biz && !(opt.biz.features && opt.biz.features.secretary === true)) return { skip: 'biz' };
-  const C = require('../secretary')._core;
-  const AI = require('./sec-ai');
   const now = opt.now || Date.now();
-  const [ms, ws] = await Promise.all([db.doc('sec_cfg/main').get(), db.doc('sec_cfg/wa').get()]);
+  const ms = await db.doc('sec_cfg/main').get();
   const main = ms.exists ? ms.data() || {} : {};
   if (main.cmt !== true) return { skip: 'off' };
   if (s.ch === 'grp' && !require('./sec-grp').allowedOf(main).includes(s.gid)) return { skip: 'grp-off' }; // ההרשאה ברגע ההודעה
-  const st = ws.exists && ws.get('stop') && typeof ws.get('stop') === 'object' ? ws.get('stop') : {};
-  if (st.on === true) return { skip: 'stop' };
   const cid = cidOf(s);
-  const ref = db.doc('sec_cmt/' + cid);
-  if ((await ref.get()).exists) return { skip: 'dup', cid };
-  // תקרה יומית: קצב המונה הקיים (sec_cfg/use.r._cmt, לפי יום בשעון ישראל) – CAP_DAY סריקות ביום לעסק. ואז שמירה מראש בתקרת העלות
+  const q = { t: now, exp: now + Q_TTL, n: 0, ch: s.ch, from: clean(s.from, 60), text: clean(s.text, MAX_IN) };
+  if (s.ch === 'grp') Object.assign(q, { gid: s.gid, mid: s.mid }, s.grp ? { grp: clean(s.grp, 60) } : {});
+  else Object.assign(q, { id: s.id }, s.ch === 'wa' ? { wa: clean(s.wa, 30) } : {});
+  try { await db.doc('sec_cmtq/' + cid).create(q); } catch (e) { if (e && e.code === 6) return { skip: 'dup', cid }; throw e; }
+  return { q: cid };
+}
+// עטיפה לנקודות הקליטה: תקלה כאן לא פוגעת בקליטת ההודעה (נבלעת ונרשמת ביומן השרת)
+async function safe(db, s, o) {
+  try { return await enqueue(db, s, o); } catch (e) { logger.warn('sec-cmt: enqueue failed', { ch: s && s.ch, reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); return { err: true }; }
+}
+
+// ---------- 2. העובד: secRemind (כל 15 דקות) מעבד את התור, בתקציב זמן ----------
+const hasKey = () => { try { return !!require('./sec-ai').GEMINI_API_KEY.value(); } catch (e) { return false; } };
+// פריט אחד מהתור. מחזיר 'done' | 'none' | 'drop' | 'retry' | 'cap' | 'saving' | 'stop' | 'nokey' | 'busy'
+async function processOne(db, qref, ctx, o) {
+  const C = require('../secretary')._core;
+  const AI = require('./sec-ai');
+  const now = o.now || Date.now();
+  const ref = db.doc('sec_cmt/' + qref.id);
+  // תפיסה בטרנזקציה: עובד אחר שתפס (lk טרי) – מדלגים; הצעה כבר קיימת / פג תוקף / הקבוצה נסגרה – נמחק מהתור
+  const x = await db.runTransaction(async (tx) => {
+    const [qs, cs] = await Promise.all([tx.get(qref), tx.get(ref)]);
+    if (!qs.exists) return null;
+    const v = qs.data() || {};
+    if (cs.exists || (v.exp || 0) < now || (v.ch === 'grp' && !ctx.grp.includes(v.gid))) { tx.delete(qref); return { drop: true }; }
+    if ((v.lk || 0) > now - LOCK_MS) return null;
+    tx.update(qref, { lk: now });
+    return v;
+  });
+  if (!x) return 'busy';
+  if (x.drop) return 'drop';
+  if (!o.ai && !hasKey()) { await qref.update({ lk: 0 }).catch(() => {}); return 'nokey'; } // בלי מפתח – לא נוגעים בתקרה
+  // התקרה היומית והשמירה מראש בתקרת העלות – רק עכשיו, ממש לפני הקריאה למודל
   let mt;
   try { mt = await C.meter(db, '_cmt', 'fast', true, { hour: CAP_DAY, day: CAP_DAY }, AI.costMc('fast', { in: 4000, out: 600 })); } catch (e) {
+    await qref.update({ lk: 0 }).catch(() => {});
     if (e && e.details && e.details.reason === 'rate-limit') {
       await db.collection('sec_log').doc('cmtcap_' + C.dayKey(now)).create(C.logData('', 'auto', 'cmtCap', { note: String(CAP_DAY) })).catch(() => {});
-      return { skip: 'cap' };
+      return 'cap';
     }
     throw e;
   }
-  if (mt.saving) { await C.settle(db, '_cmt', mt, -mt.reserved, false).catch(() => {}); return { skip: 'saving' }; }
+  if (mt.saving) { await C.settle(db, '_cmt', mt, -mt.reserved, false).catch(() => {}); await qref.update({ lk: 0 }).catch(() => {}); return 'saving'; }
   const today = C.dayKey(now);
-  const payload = { today, channel: s.ch === 'mail' ? 'email' : s.ch === 'wa' ? 'whatsapp' : 'internal-group', writer: s.ch === 'grp' ? 'team-member' : 'outside-person', from: clean(s.from, 60), message: clean(s.text, MAX_IN) };
+  const payload = { today, channel: x.ch === 'mail' ? 'email' : x.ch === 'wa' ? 'whatsapp' : 'internal-group', writer: x.ch === 'grp' ? 'team-member' : 'outside-person', from: clean(x.from, 60), message: clean(x.text, MAX_IN) };
   let r;
-  try { r = await (opt.ai || AI.chat)({ tier: 'fast', system: SYS, turns: [{ role: 'u', text: JSON.stringify(payload) }], timeoutMs: 20000 }); } catch (e) {
+  try { r = await (o.ai || AI.chat)({ tier: 'fast', system: SYS, turns: [{ role: 'u', text: JSON.stringify(payload) }], timeoutMs: AI_MS }); } catch (e) {
     await C.settle(db, '_cmt', mt, -mt.reserved, false).catch(() => {});
     logger.warn('sec-cmt: ai failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
-    return { skip: 'ai' };
+    if ((x.n || 0) + 1 >= TRIES) await qref.delete().catch(() => {}); else await qref.update({ n: (x.n || 0) + 1, lk: 0 }).catch(() => {});
+    return 'retry';
   }
   await C.settle(db, '_cmt', mt, AI.costMc('fast', (r && r.usage) || {}) - mt.reserved, false).catch(() => {});
   const p = parseOut(r && r.text, today);
-  if (!p) return { none: true };
-  const src = s.ch === 'grp' ? { gid: s.gid, mid: s.mid } : s.ch === 'wa' ? { id: s.id, wa: clean(s.wa, 30) } : { id: s.id };
-  const doc = { t: now, ch: s.ch, src, from: clean(s.from, 60) || 'שולח לא ידוע', who: whoOf(s.ch, p.by), what: p.what, d: p.d, prev: clean(s.text, PREV), st: 'pend' };
-  if (s.ch === 'grp' && s.grp) doc.grp = clean(s.grp, 60);
   const b = db.batch();
-  b.create(ref, doc);
-  b.set(db.collection('sec_log').doc(), C.logData('', 'auto', 'cmtNew', { tgt: cid, note: s.ch }));
-  try { await b.commit(); } catch (e) { if (e && e.code === 6) return { skip: 'dup', cid }; throw e; }
-  return { cid, doc };
+  b.delete(qref);
+  if (p) {
+    const src = x.ch === 'grp' ? { gid: x.gid, mid: x.mid } : x.ch === 'wa' ? { id: x.id, wa: clean(x.wa, 30) } : { id: x.id };
+    const doc = { t: now, ch: x.ch, src, from: clean(x.from, 60) || 'שולח לא ידוע', who: whoOf(x.ch, p.by), what: p.what, d: p.d, prev: clean(x.text, PREV), st: 'pend' };
+    if (x.ch === 'grp' && x.grp) doc.grp = clean(x.grp, 60);
+    b.create(ref, doc);
+    b.set(db.collection('sec_log').doc(), C.logData('', 'auto', 'cmtNew', { tgt: qref.id, note: x.ch }));
+  }
+  try { await b.commit(); } catch (e) { if (e && e.code === 6) { await qref.delete().catch(() => {}); return 'drop'; } throw e; }
+  return p ? 'done' : 'none';
 }
-// עטיפה לנקודות הקליטה: תקלה כאן לא פוגעת בקליטת ההודעה
-async function safe(db, s, o) {
-  try { return await detect(db, s, o); } catch (e) { logger.warn('sec-cmt: detect failed', { ch: s && s.ch, reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); return { err: true }; }
+// כל התור של עסק אחד (בתוך T.runInBiz). o = { ai, now, deadline (ms), max }. מחזיר ספירה לפי תוצאה
+async function runQueue(db, o) {
+  const opt = o || {};
+  const out = {};
+  const add = (k) => { out[k] = (out[k] || 0) + 1; };
+  const s = await db.collection('sec_cmtq').orderBy('t').limit(opt.max || RUN_MAX).get();
+  if (s.empty) return out;
+  const [ms, ws] = await Promise.all([db.doc('sec_cfg/main').get(), db.doc('sec_cfg/wa').get()]);
+  const main = ms.exists ? ms.data() || {} : {};
+  if (main.cmt !== true) { const b = db.batch(); s.docs.forEach((d) => b.delete(d.ref)); await b.commit(); out.off = s.size; return out; } // כובה – התור מתרוקן
+  const st = ws.exists && ws.get('stop') && typeof ws.get('stop') === 'object' ? ws.get('stop') : {};
+  if (st.on === true) { out.stop = s.size; return out; } // "עצור הכל" – לא מעבדים (התור נשמר עד שפג תוקפו)
+  const ctx = { grp: require('./sec-grp').allowedOf(main) }; // ההרשאה נקראת מחדש – קבוצה שנסגרה לא נסרקת
+  for (const d of s.docs) {
+    if (opt.deadline && Date.now() > opt.deadline - AI_MS) { add('later'); continue; } // תקציב הזמן – בריצה הבאה
+    const r = await processOne(db, d.ref, ctx, opt);
+    add(r);
+    if (r === 'cap' || r === 'saving' || r === 'nokey') break;
+  }
+  return out;
 }
+const runSafe = async (db, o) => { try { return await runQueue(db, o); } catch (e) { logger.warn('sec-cmt: queue failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); return { err: 1 }; } };
 
-module.exports = { CAP_DAY, CID_RE, KW, preOf, cidOf, keyOf, parseOut, whoOf, detect, safe, SYS };
+module.exports = { CAP_DAY, CID_RE, KW, RUN_MAX, Q_TTL, BUDGET_MS, preOf, cidOf, keyOf, parseOut, whoOf, enqueue, safe, processOne, runQueue, runSafe, SYS };

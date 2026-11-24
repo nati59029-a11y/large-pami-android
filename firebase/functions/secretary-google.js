@@ -513,7 +513,7 @@ async function saveMail(db, c, ctx, gid, now, o) {
     }
   }
   // 24.11.2026 (גיטי, סבב 3 חלק ב): זיהוי התחייבויות – רק מייל חדש מאדם (לא היסטוריה, לא פרסומת, לא חשוד). lib/sec-cmt.js בודק את המתג,
-  // "עצור הכל", התקרות והכפילות; תקלה שם לא פוגעת בקליטת המייל
+  // ו"עצור הכל" בעובד (secRemind); כאן רק סינון מקומי ופריט בתור, בלי AI. תקלה שם לא פוגעת בקליטת המייל
   if (doc.hum && !sus && !o.hist) await require('./lib/sec-cmt').safe(db, { ch: 'mail', id: ref.id, from: p.name || p.from, text: (p.subj ? p.subj + '\n' : '') + (doc.text || '') }, { ai: o.ai, now });
   return sus ? 'sus' : 'saved';
 }

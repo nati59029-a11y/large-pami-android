@@ -13,7 +13,8 @@
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
 //   sec_cfg/main   + 23.11.2026 (גיטי, סבב 3): grp [gid...] – קבוצות פנימיות שגיטי רשאית לקרוא (אין שדה = אף קבוצה). secPrefs op:'grp' בלבד (lib/sec-grp.js)
 //   sec_cfg/main   + 24.11.2026 (גיטי, סבב 3 חלק ב): cmt – זיהוי התחייבויות (true = פעיל; ברירת מחדל כבוי). secPrefs op:'cmtOn'
-//   sec_cmt/{cid}  { t, ch, src, from, who, what, d, prev, st:'pend'|'ok'|'no', kind?, ref?, stBy?, stAt? } – הצעות התחייבות (lib/sec-cmt.js). השרת בלבד
+//   sec_cmt/{cid}  { t, ch, src, from, who, what, d, prev, st:'pend'|'act'|'ok'|'no', actBy?, actAt?, kind?, ref?, stBy?, stAt? } – הצעות התחייבות (lib/sec-cmt.js). השרת בלבד
+//   sec_cmtq/{cid} { t, exp, n, lk?, ch, id?|gid,mid, wa?, from, text, grp? } – תור הזיהוי (נכתב בקליטה, מעובד ב-secRemind). השרת בלבד
 //   sec_cfg/use    { m, mc, d, dmc, w80, w100, r: { <uid>: { h, n, d, dn } }, mp: { h, n } } – מונה עלות במילי־סנט + קצב. מנהל־על בלבד (83)
 //   sec_usage/{YYYY-MM} { msgs, deep, pct, saving, upd }               – מספרים בלבד; מנהל העסק רואה אחוז ניצול
 //   sec_mirror/fin { v, fin, at, devAt, by } ; sec_mirror/pay { pay, at, by } – מראה הכספים (5.2, 41–45). השרת בלבד
@@ -68,7 +69,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog', 'sec_cmt']); // sec_cmt – הצעות התחייבות (24.11.2026, lib/sec-cmt.js; שרת בלבד); sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq']); // sec_cmt – הצעות התחייבות, sec_cmtq – תור הזיהוי (24.11.2026, lib/sec-cmt.js; שרת בלבד); sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -345,12 +346,13 @@ async function secMirrorPut(request) {
 
 // secPrefs – הגדרות של מנהל העסק: מתג המראה (45), אישור סף התזרים (51), "לא רלוונטי" לרעיון (56)
 const NR_DAYS = 90, NR_MAX = 200, PREFS_HOUR = 30;
+const CMT_ACT_MS = 10 * 60000; // תפיסת הצעת התחייבות (claim) בתוקף 10 דקות – אחר כך מנהל אחר יכול לתפוס / לדחות
 async function secPrefs(request) {
   const input = inputObject(request);
   const { who, cfg, me, db, brLimited } = await gate(request, { consent: true });
   const t = Date.now();
-  // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל
-  await db.runTransaction(async (tx) => {
+  // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל. תפיסת הצעת התחייבות (cmt claim) – לא נרשמת ולא נספרת
+  if (!(input.op === 'cmt' && input.st === 'claim')) await db.runTransaction(async (tx) => {
     const ref = db.doc('sec_cfg/use');
     const us = await tx.get(ref);
     const pp = us.exists && us.get('pp') && typeof us.get('pp') === 'object' && us.get('pp')[who.uid] ? us.get('pp')[who.uid] : {};
@@ -461,36 +463,45 @@ async function secPrefs(request) {
     b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', input.on ? 'cmtOn' : 'cmtOff'));
     out = { cmt: input.on };
   } else if (input.op === 'cmt') {
-    // 24.11.2026 (גיטי, החלטה 4): הצעת התחייבות (sec_cmt) הוכרעה במרכז האישורים. כמו tkCard: היצירה נעשתה במנגנון הקיים –
-    // משימה: האפליקציה כותבת ל-tasks/sec<cid> לפי החוקים; תזכורת: secCal op:'add' rem:true cid. כאן בודקים שהיא באמת נוצרה ע"י המנהל הזה,
-    // מסמנים את ההצעה ורושמים ביומן – בטרנזקציה אחת (שתי לחיצות לא רושמות פעמיים). דחייה – סימון ורישום בלבד.
+    // 24.11.2026 (גיטי, החלטה 4): הצעת התחייבות (sec_cmt) במרכז האישורים. שלושה שלבים, כדי שלא תיפתח משימה מהצעה שכבר הוכרעה:
+    //   st:'claim' – תפיסה: pend → act (actBy, actAt). רק אם התפיסה הצליחה האפליקציה יוצרת את המשימה / התזכורת. בלי רישום ביומן ובלי מונה הקצב.
+    //     תפיסה של מנהל אחר שעדיין בתוקף (ACT_MS) – busy. הצעה שכבר הוכרעה – already עם המצב (והאפליקציה לא יוצרת כלום).
+    //   st:'ok' – כמו tkCard: בודקים שהמשימה tasks/sec<cid> או התזכורת sec_cal/sec<cid> באמת נוצרה ע"י המנהל הזה, מסמנים ורושמים ביומן.
+    //   st:'no' – דחייה: רק כשאין משימה / תזכורת במזהה של ההצעה (אחרת not-allowed – לא נשארת משימה פעילה מהצעה שנדחתה),
+    //     ולא בזמן שמנהל אחר באמצע אישור (busy). הכול בטרנזקציה אחת.
     // מנהל עם הגבלת סניפים – רק הצעות מקבוצות פנימיות (מייל וווצאפ הם ערוצים של כל העסק)
     const cid = typeof input.cid === 'string' && /^cm[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
-    if (!cid || !['ok', 'no'].includes(input.st)) throw bad('bad-input', 'ערך לא תקין');
+    if (!cid || !['claim', 'ok', 'no'].includes(input.st)) throw bad('bad-input', 'ערך לא תקין');
     const cRef = db.doc('sec_cmt/' + cid);
+    const ref = 'sec' + cid;
     const r = await db.runTransaction(async (tx) => {
       const cs = await tx.get(cRef);
       if (!cs.exists || (brLimited && cs.get('ch') !== 'grp')) throw pre('not-found', 'ההצעה לא נמצאה');
-      if (cs.get('st') !== 'pend') return { st: cs.get('st'), ref: cs.get('ref') || '', already: true };
+      const st = cs.get('st');
+      if (st !== 'pend' && st !== 'act') return { st, ref: cs.get('ref') || '', already: true };
+      const other = st === 'act' && cs.get('actBy') !== who.uid && (cs.get('actAt') || 0) > t - CMT_ACT_MS;
+      if (input.st === 'claim') {
+        if (other) throw pre('busy', 'מנהל אחר מאשר את ההצעה הזו עכשיו');
+        tx.update(cRef, { st: 'act', actBy: who.uid, actAt: t });
+        return { st: 'act' };
+      }
+      const [ts, es] = await Promise.all([tx.get(db.doc('tasks/' + ref)), tx.get(db.doc('sec_cal/' + ref))]);
       let patch;
       if (input.st === 'ok') {
         const kind = input.kind === 'rem' ? 'rem' : 'task';
-        const ref = 'sec' + cid;
-        if (kind === 'task') {
-          const ts = await tx.get(db.doc('tasks/' + ref));
-          if (!ts.exists || ts.get('owner') !== who.uid) throw pre('not-done', 'המשימה לא נמצאה');
-        } else {
-          const es = await tx.get(db.doc('sec_cal/' + ref));
-          if (!es.exists || es.get('by') !== who.uid || es.get('rem') !== true) throw pre('not-done', 'התזכורת לא נמצאה');
-        }
+        if (kind === 'task' ? !ts.exists || ts.get('owner') !== who.uid : !es.exists || es.get('by') !== who.uid || es.get('rem') !== true) throw pre('not-done', kind === 'task' ? 'המשימה לא נמצאה' : 'התזכורת לא נמצאה');
         patch = { st: 'ok', kind, ref };
-      } else patch = { st: 'no' };
+      } else {
+        if (other) throw pre('busy', 'מנהל אחר מאשר את ההצעה הזו עכשיו');
+        if (ts.exists || es.exists) throw pre('not-allowed', 'כבר נוצרה משימה או תזכורת מההצעה הזו. אשרו אותה כדי לסיים');
+        patch = { st: 'no' };
+      }
       tx.update(cRef, Object.assign({ stBy: who.uid, stAt: t }, patch));
-      tx.set(db.collection('sec_log').doc(), input.st === 'ok' ? logData(who.uid, 'mgr', 'cmtOk', { tgt: patch.ref, note: patch.kind + ':' + cs.get('ch'), res: 'ok' }) : logData(who.uid, 'mgr', 'cmtNo', { tgt: cid, note: String(cs.get('ch') || ''), res: 'ok' }));
+      tx.set(db.collection('sec_log').doc(), input.st === 'ok' ? logData(who.uid, 'mgr', 'cmtOk', { tgt: ref, note: patch.kind + ':' + cs.get('ch'), res: 'ok' }) : logData(who.uid, 'mgr', 'cmtNo', { tgt: cid, note: String(cs.get('ch') || ''), res: 'ok' }));
       return { st: patch.st, ref: patch.ref || '' };
     });
     if (r.already) return { ok: true, st: r.st, ref: r.ref, already: true };
-    out = { st: r.st, ref: r.ref };
+    out = { st: r.st, ref: r.ref || '' };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);

@@ -106,7 +106,8 @@ async function onMsg(bizId, gid, mid, m, opts) {
         logger.warn('grpMsg: push failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code });
       }
     }
-    // 24.11.2026 (גיטי, סבב 3 חלק ב): זיהוי התחייבויות – רק טקסט, רק אם הקבוצה פתוחה לגיטי ברגע הזה והמתג פעיל (lib/sec-cmt.js בודק הכול).
+    // 24.11.2026 (גיטי, סבב 3 חלק ב): זיהוי התחייבויות – רק טקסט, רק אם הקבוצה פתוחה לגיטי ברגע הזה והמתג פעיל: סינון מקומי ופריט בתור בלבד,
+    // בלי AI כאן (secRemind מעבד את התור – lib/sec-cmt.js).
     // תקלה כאן לא משפיעה על ההתראות (כבר נשלחו). o.cmt === false – בלי זיהוי (בדיקות של ההתראות בלבד)
     let cmt = null;
     if (o.cmt !== false && clean(m.txt)) cmt = await require('./lib/sec-cmt').safe(db, { ch: 'grp', gid, mid, from: name, grp: clean(g.name).slice(0, 60), text: m.txt }, { biz, ai: o.ai, now: o.now });

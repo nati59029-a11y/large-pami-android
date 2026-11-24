@@ -280,7 +280,7 @@ async function workIn(id, o) {
     // עיבוד שהצליח (בלי שליחה שנכשלה בו) מאפס את מונה "שגיאות ברצף" – רק שגיאות רצופות עוצרות (33; ליקוי 5)
     if (!r.saving && !oo.sendFail) await errMark(db, true, now).catch(() => {});
     // 24.11.2026 (גיטי, סבב 3 חלק ב): זיהוי התחייבויות בהודעת לקוח/ספק חדשה (לא "מספר המנהל", לא קובץ, לא בחיסכון). הודעה קולית – לפי התמליל.
-    // lib/sec-cmt.js בודק את המתג, "עצור הכל", התקרות והכפילות; תקלה שם לא פוגעת בעיבוד ההודעה
+    // כאן רק סינון מקומי ופריט בתור (lib/sec-cmt.js), בלי AI – secRemind מעבד את התור. תקלה שם לא פוגעת בעיבוד ההודעה
     if (x.own !== 'mgr' && !r.saving && !r.file) {
       let text = x.text || '';
       if (!text && x.type === 'audio') text = await ref.get().then((s) => (s.exists && typeof s.get('tr') === 'string' ? s.get('tr') : '')).catch(() => '');
