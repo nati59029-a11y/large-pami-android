@@ -1,0 +1,46 @@
+/* שלב B1 (24.11.2026): מטמון מכשיר משותף – כל מסך מציג את המידע האחרון שהתקבל כשאין אינטרנט.
+   window.DC = { get, put, del, out, key, rd, fnOk, mark, ok, stale }
+   - IndexedDB 'lp-cache', מפתחות: bizId|uid|... (כמו groups.js). כל שגיאה = "אין מטמון" – לא זורק ולא עוצר את האפליקציה.
+   - כל ערך נשמר כמחרוזת JSON (בדיוק התשובה מהשרת), עם זמן השמירה. ערך מעל 3MB לא נשמר. עד 400 ערכים; מעבר לזה נמחק הישן ביותר בשימוש (LRU).
+   - out() מוחק את כל המסד – נקרא ביציאה (syOut), ליד GRP.out().
+   - fsx ו-fnCall (index.html) משתמשים בזה רק לקריאות: GET, :runQuery, :runAggregationQuery, :batchGet, ופונקציות שרת מרשימה סגורה (FNR).
+     כתיבה (PATCH, DELETE, POST יצירה, :commit) לא נשמרת ולא מזויפת.
+   - לא נשמר ולא מוחזר מהמטמון (NO): תורי קליטה וסנכרון שמייבאים נתונים למכשיר (inbox, chunks, deposits, closings, supinv, site_income_daily,
+     cashout, ordpay, wv, shelf, fb) – מידע ישן היה נקלט שוב; קבוצות ונוכחות (grp, pres) – ל-groups.js מטמון משלו; קופה (pos*) – לקופה מצב לא-מקוון משלה. */
+(function(){'use strict';
+const DBN='lp-cache',ST='k',MAXB=3*1024*1024,MAXN=400;
+const NO_C='inbox|chunks|deposits|closings|supinv|site_income_daily|cashout|ordpay|wv|shelf|fb|grp|pres|pos[A-Za-z_]*';
+const NO=new RegExp('(^|/)('+NO_C+')(/|\\?|:|$)|"collectionId":"('+NO_C+')"');
+/* פונקציות שרת לקריאה בלבד: true = כל הקריאה; מערך = רק ה-op האלה */
+const FNR={getCosts:1,ordProfit:1,arImpList:1,cxHist:1,cxCfg:1,tkStaffNames:1,secChatLoad:1,secState:1,secAdminGet:1,
+ incAll:['get','day'],shApi:['cfg'],secMail:['list','get'],secReports:['list','get'],secSens:['list'],secRules:['list'],secWaCfg:['get'],secGoogle:['status'],cxBotTok:['info']};
+let P=null,D=null,GEN=0;
+const db=()=>P||(P=new Promise((res,rej)=>{const r=indexedDB.open(DBN,1);r.onupgradeneeded=()=>{const s=r.result.createObjectStore(ST);s.createIndex('a','a')};r.onsuccess=()=>{D=r.result;D.onversionchange=()=>{try{D.close()}catch(e){}D=null;P=null};res(D)};r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('blocked'))}).catch(e=>{P=null;throw e}));
+const who=()=>{try{return SY&&SY.uid?(SY.bizId||'')+'|'+SY.uid:''}catch(e){return ''}};
+/* hash קצר לגוף ארוך (cyrb53) */
+const hs=s=>{let a=0xdeadbeef,b=0x41c6ce57;for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);a=Math.imul(a^c,2654435761);b=Math.imul(b^c,1597334677)}a=Math.imul(a^(a>>>16),2246822507)^Math.imul(b^(b>>>13),3266489909);b=Math.imul(b^(b>>>16),2246822507)^Math.imul(a^(a>>>13),3266489909);return (b>>>0).toString(36)+(a>>>0).toString(36)+'.'+s.length};
+/* מפתח מלא: עסק|משתמש|שיטה|כתובת|גוף. '' = אין משתמש (לא שומרים) */
+function key(m,url,body){const w=who();if(!w)return '';const b=body==null?'':String(body);return w+'|'+m+'|'+url+(b?'|'+(b.length>200?hs(b):b):'')}
+/* האם בקשת Firestore היא קריאה שמותר לשמור. path = החלק אחרי /documents (כמו ב-fsx) */
+function rd(path,opt){try{const m=String(opt&&opt.method||'GET').toUpperCase();const p=String(path||'');let ok=false;
+ if(m==='GET')ok=true;else if(m==='POST')ok=/:(runQuery|runAggregationQuery|batchGet)$/.test(p.split('?')[0]);
+ if(!ok)return false;if(NO.test(p.split('?')[0]))return false;if(m==='POST'&&NO.test(String(opt.body||'')))return false;return true}catch(e){return false}}
+function fnOk(name,data){try{const r=FNR[name];if(!r||!Object.prototype.hasOwnProperty.call(FNR,name))return false;if(r===1)return true;return !!(data&&typeof data==='object'&&r.includes(data.op))}catch(e){return false}}
+async function get(k){try{if(!k||!who()||k.indexOf(who()+'|')!==0)return null;const g=GEN,d=await db();if(g!==GEN)return null;return await new Promise(res=>{const t=d.transaction(ST,'readwrite'),o=t.objectStore(ST),r=o.get(k);r.onsuccess=()=>{const v=r.result;if(!v||typeof v.v!=='string'){res(null);return}try{v.a=Date.now();o.put(v,k)}catch(e){}res({v:v.v,t:+v.t||0})};r.onerror=()=>res(null);t.onabort=()=>res(null)})}catch(e){return null}}
+async function put(k,txt){try{if(!k||typeof txt!=='string'||k.indexOf(who()+'|')!==0||!who())return;if(txt.length>MAXB){del(k);return}const g=GEN,d=await db();if(g!==GEN||k.indexOf(who()+'|')!==0)return;
+ await new Promise(res=>{const t=d.transaction(ST,'readwrite'),o=t.objectStore(ST),n=Date.now();o.put({v:txt,t:n,a:n},k);const c=o.count();c.onsuccess=()=>{let x=c.result-MAXN;if(x<=0)return;const q=o.index('a').openCursor();q.onsuccess=()=>{const cu=q.result;if(!cu||x<=0)return;if(cu.primaryKey!==k){cu.delete();x--}cu.continue()}};t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
+async function del(k){try{if(!k)return;const d=await db();await new Promise(res=>{const t=d.transaction(ST,'readwrite');t.objectStore(ST).delete(k);t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
+/* ---- שורת "אין חיבור" ---- */
+let st0=0;
+function css(){if(st0)return;st0=1;try{const s=document.createElement('style');s.textContent='#dcnet{position:fixed;inset-inline:0;bottom:calc(84px + env(safe-area-inset-bottom));z-index:25;margin:0 auto;width:max-content;max-width:calc(100% - 28px);background:var(--card);color:var(--ink);border:1px solid var(--line);border-inline-start:4px solid var(--acc);border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:600;text-align:center;box-shadow:var(--elev-1,0 2px 6px rgba(0,0,0,.3));pointer-events:none}';document.head.appendChild(s)}catch(e){}}
+const p2=n=>String(n).padStart(2,'0');
+function tm(t){const d=new Date(t),n=new Date();const h=p2(d.getHours())+':'+p2(d.getMinutes());return d.toDateString()===n.toDateString()?h:p2(d.getDate())+'/'+p2(d.getMonth()+1)+' '+h}
+function paint(){try{let e=document.getElementById('dcnet');if(!DC.stale){if(e)e.remove();return}if(!document.body)return;css();if(!e){e=document.createElement('div');e.id='dcnet';e.setAttribute('role','status');e.setAttribute('dir','rtl');document.body.appendChild(e)}e.textContent='📴 אין חיבור – מוצג מידע שמור מ-'+tm(DC.stale)}catch(e){}}
+/* הוצג מידע שמור מזמן t (הישן מבין כמה) */
+function mark(t){try{t=+t||Date.now();if(!DC.stale||t<DC.stale)DC.stale=t;paint()}catch(e){}}
+/* קריאה הצליחה מהשרת – השורה נעלמת */
+function ok(){if(DC.stale){DC.stale=0;paint()}}
+function out(){GEN++;DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
+const DC={get,put,del,out,key,rd,fnOk,mark,ok,stale:0};
+window.DC=DC;
+})();
