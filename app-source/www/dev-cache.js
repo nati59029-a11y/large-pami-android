@@ -1,21 +1,23 @@
 /* שלב B1 (24.11.2026): מטמון מכשיר משותף – כל מסך מציג את המידע האחרון שהתקבל כשאין אינטרנט.
    window.DC = { get, put, del, out, key, rd, fnOk, mark, ok, stale }
    - IndexedDB 'lp-cache', מפתחות: bizId|uid|... (כמו groups.js). כל שגיאה = "אין מטמון" – לא זורק ולא עוצר את האפליקציה.
-   - כל ערך נשמר כמחרוזת JSON (בדיוק התשובה מהשרת), עם זמן השמירה. ערך מעל 3MB לא נשמר. עד 400 ערכים; מעבר לזה נמחק הישן ביותר בשימוש (LRU).
+   - כל ערך נשמר כמחרוזת JSON (בדיוק התשובה מהשרת), עם זמן השמירה. ערך מעל 3MB לא נשמר. עד 400 ערכים ועד 40MB בסך הכול; מעבר לזה (או כשהמקום בטלפון נגמר) נמחק הישן ביותר בשימוש (LRU).
+   - 403/404 מהשרת מוחקים את העותק השמור (הרשאה שבוטלה / מסמך שנמחק לא יוצגו מהמטמון). תשובה זהה לקודמת לא נכתבת שוב.
    - out() מוחק את כל המסד – נקרא ביציאה (syOut), ליד GRP.out().
    - fsx ו-fnCall (index.html) משתמשים בזה רק לקריאות: GET, :runQuery, :runAggregationQuery, :batchGet, ופונקציות שרת מרשימה סגורה (FNR).
      כתיבה (PATCH, DELETE, POST יצירה, :commit) לא נשמרת ולא מזויפת.
    - לא נשמר ולא מוחזר מהמטמון (NO): תורי קליטה וסנכרון שמייבאים נתונים למכשיר (inbox, chunks, deposits, closings, supinv, site_income_daily,
      cashout, ordpay, wv, shelf, fb) – מידע ישן היה נקלט שוב; קבוצות ונוכחות (grp, pres) – ל-groups.js מטמון משלו; קופה (pos*) – לקופה מצב לא-מקוון משלה. */
 (function(){'use strict';
-const DBN='lp-cache',ST='k',MAXB=3*1024*1024,MAXN=400;
-const NO_C='inbox|chunks|deposits|closings|supinv|site_income_daily|cashout|ordpay|wv|shelf|fb|grp|pres|pos[A-Za-z_]*';
+const DBN='lp-cache',ST='k',SZ='z',MAXB=3*1024*1024,MAXN=400,MAXT=40*1024*1024;
+/* 24.11 (בדיקה עצמאית): נוספו ardoc/arcfg (arInc כותב ליומן לפיהם), bk (שחזור גיבוי), admins/superadmins (הרשאות – לא מקבלים הרשאה ממידע ישן) */
+const NO_C='inbox|chunks|deposits|closings|supinv|site_income_daily|cashout|ordpay|wv|shelf|fb|grp|pres|pos[A-Za-z_]*|ardoc|arcfg|bk|admins|superadmins';
 const NO=new RegExp('(^|/)('+NO_C+')(/|\\?|:|$)|"collectionId":"('+NO_C+')"');
 /* פונקציות שרת לקריאה בלבד: true = כל הקריאה; מערך = רק ה-op האלה */
 const FNR={getCosts:1,ordProfit:1,arImpList:1,cxHist:1,cxCfg:1,tkStaffNames:1,secChatLoad:1,secState:1,secAdminGet:1,
  incAll:['get','day'],shApi:['cfg'],secMail:['list','get'],secReports:['list','get'],secSens:['list'],secRules:['list'],secWaCfg:['get'],secGoogle:['status'],cxBotTok:['info']};
 let P=null,D=null,GEN=0;
-const db=()=>P||(P=new Promise((res,rej)=>{const r=indexedDB.open(DBN,1);r.onupgradeneeded=()=>{const s=r.result.createObjectStore(ST);s.createIndex('a','a')};r.onsuccess=()=>{D=r.result;D.onversionchange=()=>{try{D.close()}catch(e){}D=null;P=null};res(D)};r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('blocked'))}).catch(e=>{P=null;throw e}));
+const db=()=>P||(P=new Promise((res,rej)=>{const r=indexedDB.open(DBN,2);r.onupgradeneeded=()=>{const x=r.result;if(x.objectStoreNames.contains(ST))x.deleteObjectStore(ST);if(x.objectStoreNames.contains(SZ))x.deleteObjectStore(SZ);x.createObjectStore(ST);x.createObjectStore(SZ).createIndex('a','a')};r.onsuccess=()=>{D=r.result;D.onversionchange=()=>{try{D.close()}catch(e){}D=null;P=null};res(D)};r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('blocked'))}).catch(e=>{P=null;throw e}));
 const who=()=>{try{return SY&&SY.uid?(SY.bizId||'')+'|'+SY.uid:''}catch(e){return ''}};
 /* hash קצר לגוף ארוך (cyrb53) */
 const hs=s=>{let a=0xdeadbeef,b=0x41c6ce57;for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);a=Math.imul(a^c,2654435761);b=Math.imul(b^c,1597334677)}a=Math.imul(a^(a>>>16),2246822507)^Math.imul(b^(b>>>13),3266489909);b=Math.imul(b^(b>>>16),2246822507)^Math.imul(a^(a>>>13),3266489909);return (b>>>0).toString(36)+(a>>>0).toString(36)+'.'+s.length};
@@ -26,10 +28,23 @@ function rd(path,opt){try{const m=String(opt&&opt.method||'GET').toUpperCase();c
  if(m==='GET')ok=true;else if(m==='POST')ok=/:(runQuery|runAggregationQuery|batchGet)$/.test(p.split('?')[0]);
  if(!ok)return false;if(NO.test(p.split('?')[0]))return false;if(m==='POST'&&NO.test(String(opt.body||'')))return false;return true}catch(e){return false}}
 function fnOk(name,data){try{const r=FNR[name];if(!r||!Object.prototype.hasOwnProperty.call(FNR,name))return false;if(r===1)return true;return !!(data&&typeof data==='object'&&r.includes(data.op))}catch(e){return false}}
-async function get(k){try{if(!k||!who()||k.indexOf(who()+'|')!==0)return null;const g=GEN,d=await db();if(g!==GEN)return null;return await new Promise(res=>{const t=d.transaction(ST,'readwrite'),o=t.objectStore(ST),r=o.get(k);r.onsuccess=()=>{const v=r.result;if(!v||typeof v.v!=='string'){res(null);return}try{v.a=Date.now();o.put(v,k)}catch(e){}res({v:v.v,t:+v.t||0})};r.onerror=()=>res(null);t.onabort=()=>res(null)})}catch(e){return null}}
-async function put(k,txt){try{if(!k||typeof txt!=='string'||k.indexOf(who()+'|')!==0||!who())return;if(txt.length>MAXB){del(k);return}const g=GEN,d=await db();if(g!==GEN||k.indexOf(who()+'|')!==0)return;
- await new Promise(res=>{const t=d.transaction(ST,'readwrite'),o=t.objectStore(ST),n=Date.now();o.put({v:txt,t:n,a:n},k);const c=o.count();c.onsuccess=()=>{let x=c.result-MAXN;if(x<=0)return;const q=o.index('a').openCursor();q.onsuccess=()=>{const cu=q.result;if(!cu||x<=0)return;if(cu.primaryKey!==k){cu.delete();x--}cu.continue()}};t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
-async function del(k){try{if(!k)return;const d=await db();await new Promise(res=>{const t=d.transaction(ST,'readwrite');t.objectStore(ST).delete(k);t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
+/* ST: k → {v,t}; SZ: k → {n (אורך), a (שימוש אחרון)} – בשביל תקרת הנפח הכוללת (MAXT) ו-LRU בלי לקרוא את הערכים עצמם */
+const LH=new Map();/* k → טביעה של הטקסט האחרון שנכתב בהפעלה הזו: תשובה זהה לא נכתבת שוב */
+async function get(k){try{if(!k||!who()||k.indexOf(who()+'|')!==0)return null;const g=GEN,d=await db();if(g!==GEN)return null;return await new Promise(res=>{const t=d.transaction([ST,SZ],'readwrite'),r=t.objectStore(ST).get(k);r.onsuccess=()=>{const v=r.result;if(!v||typeof v.v!=='string'){res(null);return}try{t.objectStore(SZ).put({n:v.v.length,a:Date.now()},k)}catch(e){}res({v:v.v,t:+v.t||0})};r.onerror=()=>res(null);t.onabort=()=>res(null)})}catch(e){return null}}
+/* מפנה ערכים (הישנים בשימוש קודם) עד שיש פחות מ-MAXN ופחות מ-MAXT; force = כמות לפנות בכל מקרה (המקום בטלפון נגמר) */
+function trim(t,keep,force){const z=t.objectStore(SZ),o=t.objectStore(ST);let tot=0,cnt=0;const c=z.openCursor();
+ c.onsuccess=()=>{const cu=c.result;if(cu){tot+=+(cu.value&&cu.value.n)||0;cnt++;cu.continue();return}
+  let xn=Math.max(cnt-MAXN,force||0),xt=tot-MAXT;if(xn<=0&&xt<=0)return;const q=z.index('a').openCursor();
+  q.onsuccess=()=>{const cu=q.result;if(!cu||(xn<=0&&xt<=0))return;if(cu.primaryKey!==keep){o.delete(cu.primaryKey);xt-=+(cu.value&&cu.value.n)||0;xn--;cu.delete()}cu.continue()}}}
+async function put(k,txt){try{if(!k||typeof txt!=='string'||k.indexOf(who()+'|')!==0||!who())return;if(txt.length>MAXB){del(k);return}
+ const h=hs(txt);if(LH.get(k)===h)return;const g=GEN,d=await db();if(g!==GEN||k.indexOf(who()+'|')!==0)return;
+ const wr=force=>new Promise(res=>{let t;try{t=d.transaction([ST,SZ],'readwrite')}catch(e){return res(false)}const n=Date.now();
+  if(force)trim(t,'',force);else{t.objectStore(ST).put({v:txt,t:n},k);t.objectStore(SZ).put({n:txt.length,a:n},k);trim(t,k,0)}
+  t.oncomplete=()=>res(true);t.onerror=()=>res(false);t.onabort=()=>res(false)});
+ if(await wr(0)){LH.set(k,h);return}
+ /* נכשל (בדרך כלל: אין מקום) – מפנים רבע מהערכים וממשיכים פעם אחת */
+ await wr(Math.max(20,Math.ceil(MAXN/4)));if(g===GEN&&await wr(0))LH.set(k,h)}catch(e){}}
+async function del(k){try{if(!k)return;LH.delete(k);const d=await db();await new Promise(res=>{const t=d.transaction([ST,SZ],'readwrite');t.objectStore(ST).delete(k);t.objectStore(SZ).delete(k);t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
 /* ---- שורת "אין חיבור" ---- */
 let st0=0;
 function css(){if(st0)return;st0=1;try{const s=document.createElement('style');s.textContent='#dcnet{position:fixed;inset-inline:0;bottom:calc(84px + env(safe-area-inset-bottom));z-index:25;margin:0 auto;width:max-content;max-width:calc(100% - 28px);background:var(--card);color:var(--ink);border:1px solid var(--line);border-inline-start:4px solid var(--acc);border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:600;text-align:center;box-shadow:var(--elev-1,0 2px 6px rgba(0,0,0,.3));pointer-events:none}';document.head.appendChild(s)}catch(e){}}
@@ -40,7 +55,7 @@ function paint(){try{let e=document.getElementById('dcnet');if(!DC.stale){if(e)e
 function mark(t){try{t=+t||Date.now();if(!DC.stale||t<DC.stale)DC.stale=t;paint()}catch(e){}}
 /* קריאה הצליחה מהשרת – השורה נעלמת */
 function ok(){if(DC.stale){DC.stale=0;paint()}}
-function out(){GEN++;DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
+function out(){GEN++;LH.clear();DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
 const DC={get,put,del,out,key,rd,fnOk,mark,ok,stale:0};
 window.DC=DC;
 })();

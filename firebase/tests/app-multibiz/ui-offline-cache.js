@@ -32,7 +32,7 @@ async function mockCloud(ctx) {
     return ok(docOf(R.slice(1), {}));
   });
 }
-const idbKeys = (page) => page.evaluate(() => new Promise((res) => { const r = indexedDB.open('lp-cache', 1); r.onupgradeneeded = () => { const s = r.result.createObjectStore('k'); s.createIndex('a', 'a'); }; r.onsuccess = () => { const d = r.result, q = d.transaction('k').objectStore('k').getAllKeys(); q.onsuccess = () => { d.close(); res(q.result.map(String)); }; q.onerror = () => { d.close(); res([]); }; }; r.onerror = () => res(['ERR']); }));
+const idbKeys = (page) => page.evaluate(() => new Promise((res) => { const r = indexedDB.open('lp-cache'); r.onupgradeneeded = () => { r.transaction.abort(); }; r.onsuccess = () => { const d = r.result, q = d.transaction('k').objectStore('k').getAllKeys(); q.onsuccess = () => { d.close(); res(q.result.map(String)); }; q.onerror = () => { d.close(); res([]); }; }; r.onerror = () => res(['ERR']); }));
 const banner = (page) => page.evaluate(() => { const e = document.getElementById('dcnet'); return e ? e.innerText : ''; });
 // מריץ קריאה בדף ומחזיר { v } או { e: { offline, code, msg } }
 const run = (page, code) => page.evaluate(async (c) => { try { const v = await (0, eval)('(async()=>' + c + ')()'); return { v }; } catch (e) { return { e: { offline: !!e.offline, code: e.code || 0, msg: String(e.message || '') } }; } }, code);
@@ -89,6 +89,10 @@ const QB = JSON.stringify({ structuredQuery: { from: [{ collectionId: 'zz' }], l
   OFF = true; const r6b = await run(wp, "fsx('/zz/d1')"); OFF = false;
   check('6א בלי רשת שוב: מוחזר המידע העדכני ששמור עכשיו', r6b.v && r6b.v.fields.t.stringValue === 'מסמך ב', r6b);
   await run(wp, "fsx('/zz/d1')");
+  // 6ב. 403 מהשרת מוחק את העותק השמור (הרשאה שבוטלה לא מוצגת מהמטמון בלי רשת)
+  FORB = 403; await run(wp, "fsx('/zz/d1')"); FORB = 0; await sleep(300); OFF = true; const r6c = await run(wp, "fsx('/zz/d1')"); OFF = false;
+  check('6ב אחרי 403 – בלי רשת אין עותק שמור (השגיאה "אין חיבור")', r6c.e && r6c.e.offline, r6c);
+  await run(wp, "fsx('/zz/d1')"); await sleep(300);
 
   // 7. מגבלות: ערך מעל 3MB לא נשמר; עד 400 ערכים (הישן בשימוש נמחק)
   const lim = await wp.evaluate(async () => { const K = (s) => DC.key('GET', 'http://t/' + s); await DC.put(K('big'), 'x'.repeat(3 * 1024 * 1024 + 10)); const big = await DC.get(K('big'));
