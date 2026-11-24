@@ -36,26 +36,26 @@ function unitPrice(price,pack){const p=parsePack(pack),v=+price;if(!p||!(v>=0)||
 /* ---------- PDF ---------- */
 const PW=50/25.4*72,PH=25/25.4*72,W=591,H=295; // 50×25 מ"מ; קנבס 300 DPI
 const n2=x=>String(Math.round(x*100)/100),n3=x=>String(Math.round(x*1000)/1000);
-// סל → רצף עמודים: כל שורה n פעמים (1–200)
-function expand(list){const seq=[];(list||[]).forEach((b,i)=>{const n=Math.max(1,Math.min(200,Math.floor(+(b&&b.n)||1)));for(let k=0;k<n;k++)seq.push(i)});return seq}
+// סל → רצף עמודים: כל שורה n פעמים (1–999)
+function expand(list){const seq=[];(list||[]).forEach((b,i)=>{const n=Math.max(1,Math.min(999,Math.floor(+(b&&b.n)||1)));for(let k=0;k<n;k++)seq.push(i)});return seq}
 // RGBA → אפור 1 ביט (1 = לבן), שורות מרופדות לבית שלם
 function toBits(data,w,h,thr){const rb=Math.ceil(w/8),out=new Uint8Array(rb*h),t=thr||150;
  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if((data[i]*299+data[i+1]*587+data[i+2]*114)/1000>=t)out[y*rb+(x>>3)]|=0x80>>(x&7)}return out}
-// labels: [{w,h,bits (1 ביט), rects:[[x,y,w,h] בפיקסלים של הקנבס]}]; seq: אינדקס מדבקה לכל עמוד. עמודים זהים חולקים תמונה ותוכן
+// labels: [{w,h,bits (1 ביט), rects:[[x,y,w,h] בפיקסלים של הקנבס], pw?,ph? (גודל העמוד בנקודות – בלי: wPt/hPt)}]; seq: אינדקס מדבקה לכל עמוד. עמודים זהים חולקים תמונה ותוכן
 function mkPdf(labels,seq,wPt,hPt){wPt=wPt||PW;hPt=hPt||PH;const parts=[],offs=[];let len=0;
  const enc=s=>{const u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i)&255;return u};
  const push=b=>{if(typeof b==='string')b=enc(b);parts.push(b);len+=b.length};
  const obj=(n,f)=>{offs[n]=len;push(n+' 0 obj\n');f();push('\nendobj\n')};
- const L=labels.length,pg0=3+2*L,N=pg0+seq.length-1,box=`[0 0 ${n2(wPt)} ${n2(hPt)}]`;
+ const L=labels.length,pg0=3+2*L,N=pg0+seq.length-1,bx=lb=>`[0 0 ${n2(lb.pw||wPt)} ${n2(lb.ph||hPt)}]`;
  push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
  obj(1,()=>push('<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /PrintScaling /None >> >>'));
  obj(2,()=>push(`<< /Type /Pages /Count ${seq.length} /Kids [${seq.map((_,i)=>(pg0+i)+' 0 R').join(' ')}] >>`));
- labels.forEach((lb,i)=>{const sx=wPt/lb.w,sy=hPt/lb.h;
+ labels.forEach((lb,i)=>{const lw=lb.pw||wPt,lh=lb.ph||hPt,sx=lw/lb.w,sy=lh/lb.h;
   obj(3+2*i,()=>{push(`<< /Type /XObject /Subtype /Image /Width ${lb.w} /Height ${lb.h} /ColorSpace /DeviceGray /BitsPerComponent 1 /Length ${lb.bits.length} >>\nstream\n`);push(lb.bits);push('\nendstream')});
-  let c=`q ${n2(wPt)} 0 0 ${n2(hPt)} 0 0 cm /Im0 Do Q\n`;const R=lb.rects||[];
-  if(R.length)c+='0 g\n'+R.map(([x,y,w,h])=>`${n3(x*sx)} ${n3(hPt-(y+h)*sy)} ${n3(w*sx)} ${n3(h*sy)} re`).join('\n')+'\nf\n';
+  let c=`q ${n2(lw)} 0 0 ${n2(lh)} 0 0 cm /Im0 Do Q\n`;const R=lb.rects||[];
+  if(R.length)c+='0 g\n'+R.map(([x,y,w,h])=>`${n3(x*sx)} ${n3(lh-(y+h)*sy)} ${n3(w*sx)} ${n3(h*sy)} re`).join('\n')+'\nf\n';
   obj(4+2*i,()=>{push(`<< /Length ${c.length} >>\nstream\n`);push(c);push('endstream')})});
- seq.forEach((k,i)=>obj(pg0+i,()=>push(`<< /Type /Page /Parent 2 0 R /MediaBox ${box} /CropBox ${box} /Resources << /XObject << /Im0 ${3+2*k} 0 R >> >> /Contents ${4+2*k} 0 R >>`)));
+ seq.forEach((k,i)=>obj(pg0+i,()=>{const box=bx(labels[k]);push(`<< /Type /Page /Parent 2 0 R /MediaBox ${box} /CropBox ${box} /Resources << /XObject << /Im0 ${3+2*k} 0 R >> >> /Contents ${4+2*k} 0 R >>`)}));
  const xr=len;let x=`xref\n0 ${N+1}\n0000000000 65535 f \n`;for(let i=1;i<=N;i++)x+=String(offs[i]).padStart(10,'0')+' 00000 n \n';
  push(x+`trailer\n<< /Size ${N+1} /Root 1 0 R >>\nstartxref\n${xr}\n%%EOF\n`);
  const out=new Uint8Array(len);let o=0;for(const p of parts){out.set(p,o);o+=p.length}return out}
