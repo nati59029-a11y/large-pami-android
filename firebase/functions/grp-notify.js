@@ -13,6 +13,7 @@
 //   tag לכל קבוצה (grp_<gid>) – הודעה חדשה מחליפה את ההתראה הקודמת של אותה קבוצה. במסך נעול מוסתר (private). data: { k: 'grp', id: gid }.
 //   בלי כפתורים – הודעת notification רגילה לכל טלפון רשום (fcmPayload בלי act).
 // בנוסף: grp/{gid}.last = { txt (עד 120), byN, t, k } – רק אם ההודעה חדשה מ-last הקיים (טרנזקציה; הודעה שמגיעה באיחור לא דורסת).
+// 24.11.2026: אחרי ההתראות – זיהוי התחייבויות בקבוצה שפתוחה לגיטי (lib/sec-cmt.js; הצעה בלבד, sec_cmt).
 // אזור: europe-west1 בלבד (כמו secMailWork – טריגר Firestore), בלי ניסיון חוזר (כדי לא לשלוח התראה פעמיים).
 const { onDocumentCreated, onDocumentDeleted } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
@@ -105,7 +106,12 @@ async function onMsg(bizId, gid, mid, m, opts) {
         logger.warn('grpMsg: push failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code });
       }
     }
-    return { ok: true, n: to.length, sent };
+    // 24.11.2026 (גיטי, סבב 3 חלק ב): זיהוי התחייבויות – רק טקסט, רק אם הקבוצה פתוחה לגיטי ברגע הזה והמתג פעיל: סינון מקומי ופריט בתור בלבד,
+    // בלי AI כאן (secRemind מעבד את התור – lib/sec-cmt.js).
+    // תקלה כאן לא משפיעה על ההתראות (כבר נשלחו). o.cmt === false – בלי זיהוי (בדיקות של ההתראות בלבד)
+    let cmt = null;
+    if (o.cmt !== false && clean(m.txt)) cmt = await require('./lib/sec-cmt').safe(db, { ch: 'grp', gid, mid, from: name, grp: clean(g.name).slice(0, 60), text: m.txt }, { biz, ai: o.ai, now: o.now });
+    return { ok: true, n: to.length, sent, cmt };
   });
 }
 

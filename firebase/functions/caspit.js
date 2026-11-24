@@ -813,7 +813,30 @@ async function cxSales(w, input) {
   const docs = ds.docs.map((d) => { const x = d.data(); delete x.upd; return x; });
   if (pp) { const have = new Set(docs.map((x) => x.d)); for (const d of pp.docs) { const x = d.data(); if (have.has(x.d)) continue; delete x.upd; docs.push(x); } }
   const { days, items } = CC.packDays(docs); // צורה קומפקטית (CC.unpackDays בטלפון)
-  return { days, items, cats: Object.fromEntries(ct.docs.map((d) => [d.id, d.get('name') || ''])), cfg: { reg: cfg.reg, br: stockBr(w, cfg), lastSales: cfg.lastSales }, sa: !!w.superadmin };
+  const out = { days, items, cats: Object.fromEntries(ct.docs.map((d) => [d.id, d.get('name') || ''])), cfg: { reg: cfg.reg, br: stockBr(w, cfg), lastSales: cfg.lastSales }, sa: !!w.superadmin };
+  if (input.pt === true) out.bot = await botToday(w, to);
+  return out;
+}
+// late: עכשיו אמור להגיע עדכון כל שעה, ולא הגיע עדכון ב-75 הדקות האחרונות (גם לפני 75 דקות היה חלון עדכון – לא בבוקר ולא במוצאי שבת וחג)
+function botLate(now, tpAt) {
+  const TK = require('./lib/tk-time'), SC = require('./lib/shifts-core'), LATE = 75 * 60e3;
+  const on = (t) => TK.wall(t).hh >= 7 && !SC.quiet(t);
+  return on(now) && on(now - LATE) && now - (+tpAt || 0) > LATE;
+}
+// 24.11.2026: מצב העדכון השעתי של היום מהמחשב – כדי שהטלפון יראה למה "חלקי – עד השעה" לא מתקדם.
+// רק כשהטווח כולל את היום. → { now, pl (המחשב פנה לשרת לאחרונה, בדיוק של 5 דקות), tp:{hm, at} (העדכון האחרון שהצליח), tf:{s, c, at} (עדכון שנכשל), late } | null
+// רק זמנים וקוד תקלה – בלי פרטי חיבור. כשל בקריאה לא מפיל את מסך המכירות.
+async function botToday(w, to) {
+  try {
+    const TK = require('./lib/tk-time'), now = Date.now(), today = TK.dayStr(TK.ymdOf(now));
+    if (!w.bizId || to < today) return null;
+    const s = await require('firebase-admin/firestore').getFirestore().doc(`b/${w.bizId}/private/cxbot`).get();
+    const d = s.exists ? s.data() : null;
+    if (!d || !d.h) return null;
+    const tp = d.tp && d.tp.d === today ? { hm: String(d.tp.hm || ''), at: +d.tp.at || 0 } : null;
+    const tf = d.tf && typeof d.tf.s === 'string' && d.tf.s.slice(0, 10) === today ? { s: d.tf.s, c: String(d.tf.c || ''), at: +d.tf.at || 0 } : null;
+    return { now, pl: +d.pl || 0, tp, tf, late: botLate(now, tp ? tp.at : 0) };
+  } catch (e) { logger.warn('cxSales: bot state', { name: e && e.name }); return null; }
 }
 // cxLines({ bd } | { c, days:[d] } | { un:true } | { id }) → { tx:[{ id, d, tx, bk, bn, lines }] } – השורות שמאחורי מספר (החלטה 12)
 async function cxLines(w, input) {
@@ -950,4 +973,4 @@ async function phone(k, request) {
   return r;
 }
 for (const k of Object.keys(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, (request) => phone(k, request)));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanIn, cleanLine, cleanTm, cxPartial, partDrop, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { botLate, cleanIn, cleanLine, cleanTm, cxPartial, partDrop, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });

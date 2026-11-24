@@ -128,4 +128,67 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.equal(b.length, 4);
     assert.deepEqual([...b], [0x7f, 0x80, 0xff, 0xc0]);
   });
+  // לוגו וחותמת כשרות (24.11.2026)
+  it('layBox: top – פס 64 והתוכן מוקטן (~78%) וממורכז; bot – קופסאות 64×64 בפינות התחתונות בתוך המדבקה, והשורה התחתונה מוצרת מהן', () => {
+    const t = LP.layBox('top');
+    assert.ok(Math.abs(t.t.s - (LP.H - 64) / LP.H) < 1e-12 && t.t.s > 0.77 && t.t.s < 0.79);
+    assert.equal(t.t.dy, 64);
+    assert.ok(Math.abs(t.t.dx * 2 + LP.W * t.t.s - LP.W) <= 1, 'ממורכז');
+    assert.equal(t.ib, 0);
+    for (const r of [t.logo, t.stamp]) assert.ok(r[0] >= 0 && r[1] >= 0 && r[0] + r[2] <= LP.W && r[1] + r[3] <= 64, 'בתוך הפס ' + r);
+    assert.ok(t.logo[0] > t.stamp[0] + t.stamp[2], 'לוגו מימין, חותמת משמאל, בלי חפיפה');
+    const b = LP.layBox('bot');
+    assert.equal(b.t, null);
+    assert.deepEqual([b.logo[2], b.logo[3], b.stamp[2], b.stamp[3]], [64, 64, 64, 64]);
+    assert.ok(b.logo[0] + 64 <= LP.W && b.logo[1] + 64 <= LP.H && b.stamp[0] >= 0 && b.stamp[1] + 64 <= LP.H);
+    assert.ok(b.logo[0] > LP.W / 2 && b.stamp[0] < LP.W / 2, 'לוגו בימין, חותמת בשמאל');
+    assert.ok(14 + b.ib >= b.stamp[0] + 64 && LP.W - 14 - b.ib <= b.logo[0], 'השורה התחתונה לא נוגעת בקופסאות');
+    assert.equal(LP.layBox(''), null);
+    assert.equal(LP.layBox('x'), null);
+  });
+
+  it('xfRects: מלבני ברקוד עוברים את אותה הקטנה והזזה של התצוגה; בלי טרנספורם – אותו מערך', () => {
+    const t = LP.layBox('top').t, R = [[0, 0, 10, 100], [100, 86, 4, 116]];
+    const X = LP.xfRects(R, t);
+    assert.deepEqual(X[0], [t.dx, t.dy, 10 * t.s, 100 * t.s]);
+    assert.deepEqual(X[1], [100 * t.s + t.dx, 86 * t.s + t.dy, 4 * t.s, 116 * t.s]);
+    for (const r of X) assert.ok(r[0] >= 0 && r[1] >= 64 && r[0] + r[2] <= LP.W && r[1] + r[3] <= LP.H);
+    assert.equal(LP.xfRects(R, null), R);
+    assert.deepEqual(LP.xfRects(null, t), []);
+  });
+
+  it('bw1: שחור-לבן לפי סף; שקיפות = לבן; האלפא 255', () => {
+    // 4 פיקסלים: שחור, אפור 120, לבן, שחור שקוף לגמרי
+    const d = new Uint8ClampedArray([0, 0, 0, 255, 120, 120, 120, 255, 255, 255, 255, 255, 0, 0, 0, 0]);
+    LP.bw1(d, 4, 1);
+    assert.deepEqual([...d], [0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
+    const e = new Uint8ClampedArray([120, 120, 120, 255, 0, 0, 0, 64]);
+    LP.bw1(e, 2, 1, 100);
+    assert.deepEqual([...e], [255, 255, 255, 255, 255, 255, 255, 255], 'סף 100: אפור 120 לבן; שחור ב-25% אטימות (בהירות ~191) לבן');
+    const f = new Uint8ClampedArray([255, 0, 0, 255]);
+    assert.equal(LP.bw1(f, 1, 1), f, 'מחזיר את אותו מערך');
+    assert.deepEqual([...f], [0, 0, 0, 255], 'אדום (בהירות 76) – שחור');
+  });
+
+  it('imgOk: רק PNG ב-data URL, עד 40,000 תווים', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    assert.equal(LP.imgOk(png), true);
+    assert.equal(LP.imgOk('data:image/png;base64,' + 'A'.repeat(40000 - 22)), true);
+    assert.equal(LP.imgOk('data:image/png;base64,' + 'A'.repeat(40000 - 21)), false, 'מעל 40,000');
+    assert.equal(LP.imgOk(png.replace('png', 'jpeg')), false);
+    assert.equal(LP.imgOk('data:image/svg+xml;base64,PHN2Zz4='), false);
+    assert.equal(LP.imgOk('data:image/png;base64,abc"><script>'), false);
+    assert.equal(LP.imgOk(''), false);
+    assert.equal(LP.imgOk(null), false);
+    assert.equal(LP.imgOk({}), false);
+  });
+
+  it('mkPdf בלי לוגו – בדיוק אותם בייטים כמו לפני השינוי (טביעת SHA-256)', () => {
+    const crypto = require('node:crypto');
+    const bits = new Uint8Array(Math.ceil(LP.W / 8) * LP.H);
+    for (let i = 0; i < bits.length; i++) bits[i] = (i * 37 + 11) & 255;
+    const L = [{ w: LP.W, h: LP.H, bits, rects: [[10, 20, 4, 100], [30.5, 20, 8, 100]] }, { w: LP.W, h: LP.H, bits: bits.slice().reverse(), rects: [] }];
+    const h = crypto.createHash('sha256').update(LP.mkPdf(L, LP.expand([{ n: 2 }, { n: 1 }]))).digest('hex');
+    assert.equal(h, '86746cd26819a4632317386dd72e92c5a72664055beb98b2828d72dcf2130f12');
+  });
 });

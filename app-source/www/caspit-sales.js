@@ -131,8 +131,8 @@ const PER=[['today','היום'],['yday','אתמול'],['week','שבוע'],['mont
    שרת ישן (bad-field) → בלי pt עד סוף הטעינה הזו; בטעינה הבאה של המסך מנסים שוב (השרת אולי עודכן בינתיים) */
 let ptOk=true;
 async function yLoad(){const [f,t]=range(Y.per);Y.load=1;Y.err='';ptOk=true;
- try{let r=null,days=[];for(const [a,b] of C.chunks(f,t,92)){let x;if(ptOk){try{x=await fnCall('cxSales',{from:a,to:b,pt:true})}catch(e){if(e&&e.reason==='bad-field')ptOk=false;else throw e}}if(!x)x=await fnCall('cxSales',{from:a,to:b});days=days.concat(C.unpackDays(x));r=r||x}
-  Y.D=Object.assign(r,{days,f,t});Y.T=C.aggDays(days);Y.U=null}catch(e){Y.err=e.message||'הטעינה נכשלה';Y.D=null}
+ try{let r=null,days=[],bot=null;for(const [a,b] of C.chunks(f,t,92)){let x;if(ptOk){try{x=await fnCall('cxSales',{from:a,to:b,pt:true})}catch(e){if(e&&e.reason==='bad-field')ptOk=false;else throw e}}if(!x)x=await fnCall('cxSales',{from:a,to:b});days=days.concat(C.unpackDays(x));if(x.bot)bot=x.bot;r=r||x}
+  Y.D=Object.assign(r,{days,f,t,bot:bot||null});Y.T=C.aggDays(days);Y.U=null}catch(e){Y.err=e.message||'הטעינה נכשלה';Y.D=null}
  Y.load=0;if(cur().v==='cxSales')rerender()}
 const catN=c=>c?(Y.D&&Y.D.cats&&Y.D.cats[c])||'קטגוריה':'בלי קטגוריה';
 /* ימים חלקיים בתקופה: { 'YYYY-MM-DD': 'HH:MM' } (השעה המאוחרת מבין הסניפים) */
@@ -140,6 +140,17 @@ const ptDays=()=>{const o={};for(const x of(Y.D?Y.D.days:[]))if(x&&x.pt&&x.pt.hm
 const ptTag=d=>{const h=ptDays()[d];return h?` <span class="tag t1">חלקי – עד השעה ${esc(h)}</span>`:''};
 function ptH(){const P=ptDays(),ds=Object.keys(P).sort();if(!ds.length)return '';
  return `<div class="card" role="status" style="border-color:var(--warn)"><p style="margin:0">${ds.map(d=>`<b>${esc(df(d))}</b>${ptTag(d)}`).join(' · ')}</p><p class="note" style="margin-bottom:0">המכירות של היום מתעדכנות מהמחשב בחנות בכל שעה עגולה (07:00–23:00, לא בשבת וחג). זה נתון חלקי: בלילה הוא מוחלף בסכום הסופי. הוא לא נכלל בהתאמה לסגירת קופה, ופירוט העסקאות שלו יופיע אחרי הסיכום הסופי.</p></div>`}
+/* 24.11.2026: למה "חלקי – עד השעה" לא מתקדם. השרת (cxSales עם pt) מחזיר bot = { now, pl, tp:{hm,at}, tf:{s,c,at}, late } – רק כשהטווח כולל את היום.
+   tf: העדכון השעתי האחרון נכשל במחשב (תוסף 0.1.19 ומעלה) והוא אחרי העדכון האחרון שהצליח. late: בשעות העדכון ולא הגיע עדכון 75 דקות.
+   pl: מתי המחשב פנה לשרת לאחרונה (כל דקה כשהוא דלוק, נרשם כל 5 דקות) – מבחין בין "המחשב כבוי / Chrome סגור" לבין "מחובר, אבל העדכון נכשל" */
+const hmT=t=>{try{return new Date(t).toLocaleTimeString('he-IL',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
+function botH(){const b=Y.D&&Y.D.bot;if(!b||typeof b!=='object')return '';
+ const tp=b.tp,tf=b.tf&&b.tf.s&&!(tp&&tp.at>b.tf.at)?b.tf:null;if(!tf&&!b.late)return '';
+ const et=c=>typeof window.cxErrTxt==='function'?window.cxErrTxt(c):'העדכון נכשל.';
+ let h=tf?`⚠ העדכון של השעה ${esc(String(tf.s).slice(11))}:00 מהמחשב בחנות נכשל: ${esc(et(tf.c))}`:`⚠ לא התקבל עדכון מכירות מהמחשב בחנות ${tp&&tp.hm?'מאז השעה '+esc(tp.hm):'היום'}.`;
+ const off=!b.pl||b.now-b.pl>15*60e3;
+ h+=off?`<br>המחשב לא פנה לשרת ${b.pl?'מאז '+esc(hmT(b.pl)):'היום'} – כנראה שהוא כבוי או במצב שינה, או ש-Chrome סגור.`:(tf?'':'<br>המחשב מחובר לשרת, אבל העדכון לא הגיע.');
+ return `<div class="card" role="alert" style="border-color:var(--warn)"><p style="margin:0">${h}</p><p class="note" style="margin-bottom:0">המספרים כאן נכונים עד ${tp&&tp.hm?'השעה '+esc(tp.hm):'העדכון האחרון'}. העדכון הבא ינסה שוב בשעה העגולה הבאה.</p></div>`}
 const bkN=bk=>{const b=Y.T&&Y.T.br[bk];return esc((b&&b.bn)||bk)};
 V.cxSales=()=>{const T='מכירות כספית';if(!ok())return{t:T,h:'<div class="empty">אין לך הרשאה למסך הזה</div>'};const M=mgr();if(!M&&(Y.tab==='rec'||Y.tab==='un'))Y.tab='prod';
  const per=`<div class="chips scroll-x nw" role="group" style="margin-bottom:8px">${PER.map(([k,l])=>`<button class="chip${Y.per===k?' on':''}" data-a="cxYPer" data-k="${k}" aria-pressed="${Y.per===k}" style="min-height:44px">${l}</button>`).join('')}</div>
@@ -152,7 +163,7 @@ V.cxSales=()=>{const T='מכירות כספית';if(!ok())return{t:T,h:'<div cla
  const tabs=[['prod','מוצרים'],['hr','לפי שעה'],['reg','קופות'],['cat','קטגוריות']].concat(M?[['rec','התאמה לסגירת קופה'],['un','לא בטוח'+(A.un?' '+nf(A.un):'')]]:[]);
  let body='';
  if(Y.tab==='prod')body=prodH();else if(Y.tab==='hr')body=hrH();else if(Y.tab==='reg')body=regH();else if(Y.tab==='cat')body=catH();else if(Y.tab==='rec')body=recH();else body=unH();
- return{t:T,s:(f===t?df(f):df(f)+' – '+df(t))+(D.cfg&&D.cfg.lastSales?' · דוח אחרון נקלט '+new Date(D.cfg.lastSales.at).toLocaleDateString('he-IL'):''),h:per+(!D.days.length?`<div class="card"><p style="margin-top:0">אין מכירות מכספית בתקופה הזו.</p>${M?'<p class="note">מעלים "דוח מכירות לפריטים" מכספית במסך "סנכרון כספית".</p><button class="btn w" style="min-height:48px" data-a="go" data-v="cxSync">לסנכרון כספית</button>':''}</div>`+(M&&Y.tab==='rec'?recH():''):
+ return{t:T,s:(f===t?df(f):df(f)+' – '+df(t))+(D.cfg&&D.cfg.lastSales?' · דוח אחרון נקלט '+new Date(D.cfg.lastSales.at).toLocaleDateString('he-IL'):''),h:per+botH()+(!D.days.length?`<div class="card"><p style="margin-top:0">אין מכירות מכספית בתקופה הזו.</p>${M?'<p class="note">מעלים "דוח מכירות לפריטים" מכספית במסך "סנכרון כספית".</p><button class="btn w" style="min-height:48px" data-a="go" data-v="cxSync">לסנכרון כספית</button>':''}</div>`+(M&&Y.tab==='rec'?recH():''):
   ptH()+`<div class="card"><div class="kg">${k('הכנסה נטו (אחרי הנחות והחזרות)',A.net,'pos','net',1)}${k('פדיון מכירות',A.gross,'','gross',1)}${k('החזרות',A.ret,A.ret?'neg':'','ret',1)}${k('הנחות',A.disc,'','disc',1)}${k('עסקאות',A.ntx,'','ntx')}${M?k('לא בטוח',A.un,A.un?'neg':'','un'):''}</div><p class="note" style="margin-bottom:0">לחיצה על משבצת מציגה את הפירוט לפי יום, ומשם רק את השורות של אותה משבצת (למשל רק החזרות).${A.sp?' מתוך הפדיון, קודים מיוחדים (למשל פריט כללי): <bdi dir="ltr">'+ils(A.sp)+'</bdi>.':''}</p>${hrLine()}</div>
  ${M?'<button class="btn g w" style="min-height:44px;margin-top:8px" data-a="go" data-v="cxSee">עובדים שרואים את המסך</button>':''}<div class="chips scroll-x nw" role="tablist" style="margin:8px 0">${tabs.map(([id,l])=>`<button class="chip${Y.tab===id?' on':''}" role="tab" aria-selected="${Y.tab===id}" data-a="cxYTab" data-k="${id}" style="min-height:44px">${l}</button>`).join('')}</div>${body}`)}};
 ACT.cxYPer=el=>{Y.per=el.dataset.k;Y.D=null;Y.err='';Y.n=PG;rerender()};

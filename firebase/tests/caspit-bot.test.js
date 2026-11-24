@@ -703,6 +703,46 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.10', upd: { at: 'x' } })).body.reason, 'bad-field');
     await ref.set({ ureq: null }, { merge: true });
   });
+
+  // 24.11.2026 (תוסף 0.1.19): העדכון השעתי שנכשל – poll tf → private/cxbot; cxSales (pt) מחזיר bot; info מחזיר tf; botLate
+  it('0.1.19 tf: caps כולל tf; נשמר רק כשהשתנה; קלט פגום נדחה; cxSales עם pt מחזיר bot (רק לטווח שכולל את היום); info; botLate', async () => {
+    const ref = adm().doc(`b/${A}/private/cxbot`);
+    assert.ok((await okb(TOK, { op: 'poll', ver: '0.1.19' })).caps.includes('tf'));
+    const S = today + ' 11';
+    for (const tf of [null, 'x', [], { s: S }, { c: 'tab' }, { s: today, c: 'tab' }, { s: today + ' 24', c: 'tab' }, { s: S, c: 'Bad!' }, { s: S, c: 'tab', z: 1 }, { s: S, c: 'x'.repeat(31) }])
+      assert.equal((await bot(TOK, { op: 'poll', ver: '0.1.19', tf })).body.reason, 'bad-field', JSON.stringify(tf));
+    await ref.set({ tf: null, pl: 0, tp: { d: today, hm: '10:00', at: Date.now() - 3 * 3600e3, n: 2 } }, { merge: true });
+    await okb(TOK, { op: 'poll', ver: '0.1.19', tf: { s: S, c: 'needs-login' } });
+    const t1 = (await dev()).tf;
+    assert.equal(t1.s, S); assert.equal(t1.c, 'needs-login'); assert.ok(t1.at > 0);
+    await okb(TOK, { op: 'poll', ver: '0.1.19', tf: { s: S, c: 'needs-login' } });
+    assert.equal((await dev()).tf.at, t1.at, 'לא השתנה – לא נכתב שוב');
+    await okb(TOK, { op: 'poll', ver: '0.1.19', tf: { s: today + ' 12', c: 'stuck' } });
+    assert.equal((await dev()).tf.c, 'stuck');
+    // cxSales: עם pt ולטווח שכולל את היום – bot; בלי pt / טווח שהסתיים – אין
+    const s1 = await ok('cxSales', MGR, { from: yday, to: today, pt: true });
+    assert.equal(s1.bot.tf.s, today + ' 12'); assert.equal(s1.bot.tf.c, 'stuck'); assert.equal(s1.bot.tp.hm, '10:00'); assert.ok(s1.bot.pl > 0, 'poll רשם pl');
+    assert.equal(typeof s1.bot.late, 'boolean'); assert.ok(Math.abs(s1.bot.now - Date.now()) < 60e3);
+    assert.deepEqual(Object.keys(s1.bot).sort(), ['late', 'now', 'pl', 'tf', 'tp'], 'רק זמנים וקוד – בלי פרטי חיבור');
+    assert.equal((await ok('cxSales', MGR, { from: yday, to: today })).bot, undefined);
+    assert.equal((await ok('cxSales', MGR, { from: yday, to: yday, pt: true })).bot, null);
+    // tf / tp מיום אחר – לא מוחזרים
+    await ref.set({ tf: { s: yday + ' 12', c: 'tab', at: 1 }, tp: { d: yday, hm: '22:00', at: 1, n: 1 } }, { merge: true });
+    const s2 = await ok('cxSales', MGR, { from: today, to: today, pt: true });
+    assert.equal(s2.bot.tf, null); assert.equal(s2.bot.tp, null);
+    await ref.set({ tf: { s: S, c: 'needs-login', at: Date.now() } }, { merge: true });
+    assert.equal((await ok('cxBotTok', MGR, { op: 'info' })).tf.c, 'needs-login');
+    // botLate: יום שלישי 24.11.2026 (שעון ישראל)
+    const L = require('../functions/caspit.js')._core.botLate, AT = (d, hm) => { const [y, m, dd] = d.split('-').map(Number); const [H, M] = hm.split(':').map(Number); return TK.zoned(y, m - 1, dd, H, M); };
+    assert.equal(L(AT('2026-11-24', '16:56'), AT('2026-11-24', '10:00')), true, 'המקרה מ-24.11');
+    assert.equal(L(AT('2026-11-24', '16:56'), AT('2026-11-24', '16:00')), false);
+    assert.equal(L(AT('2026-11-24', '08:00'), 0), false, 'בבוקר – עוד לא עברו 75 דקות מ-07:00');
+    assert.equal(L(AT('2026-11-24', '08:20'), 0), true);
+    assert.equal(L(AT('2026-11-27', '16:00'), AT('2026-11-27', '13:00')), false, 'שישי אחרי 14:00');
+    assert.equal(L(AT('2026-11-28', '21:30'), 0), false, 'מוצאי שבת – רק מ-22:15');
+    assert.equal(L(AT('2026-11-28', '22:20'), 0), true);
+    await ref.set({ tf: null, tp: null }, { merge: true });
+  });
 });
 
 describe('רובוט כספית – שעות העובדים (תוסף 0.1.14, upload kind:hours, cxBotTok op:hours)', () => {

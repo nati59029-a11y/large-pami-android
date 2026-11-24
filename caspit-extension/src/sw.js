@@ -119,6 +119,10 @@ async function pollOnce() {
   const caps0 = (await get('caps')) || {};
   const ui = caps0.uq ? await updInfo().catch(() => null) : null;
   if (ui && ui.upd && (await get('updSent')) !== ui.upd.at + '|' + ui.upd.ok + '|' + ui.upd.ver) body.upd = ui.upd;
+  // 0.1.19: העדכון השעתי של מכירות היום נכשל (או נתקע) – מדווחים לשרת, כדי שהטלפון יראה למה "חלקי – עד השעה" לא מתקדם.
+  // רק לשרת שמכיר את השדה (caps.tf), ורק כשהשתנה. עד 0.1.18 הכישלון נשמר רק כאן (todaySt)
+  const tf = caps0.tf ? P.tfOf(await get('todaySt'), Date.now()) : null;
+  if (tf && (await get('tfSent')) !== tf.s + '|' + tf.c) body.tf = tf;
   try { r = await (await api()).call('poll', body); } catch (e) {
     // שרת ישן (bad-op) / העסק כבוי זמנית (403) → כל 15 דקות; האסימון בוטל (401) → מפסיקים עד חיבור מחדש / הפעלת Chrome
     if (e.code === 'bad-op' || (e.code === 'auth' && e.status === 403)) await pollEvery(POLL_SLOW_MIN);
@@ -127,11 +131,13 @@ async function pollOnce() {
   }
   await pollEvery(POLL_MIN);
   if (body.upd) await set({ updSent: body.upd.at + '|' + body.upd.ok + '|' + body.upd.ver });
+  if (body.tf) await set({ tfSent: body.tf.s + '|' + body.tf.c });
   // יכולות השרת (0.1.10): today = מכירות היום כל שעה, uq = "עדכון המחשב" מהטלפון; 0.1.14: hours = שעות העובדים (upload kind:'hours'). שרת ישן (בלי caps) → כבויות
   const cl = Array.isArray(r.caps) ? r.caps : [];
   // 0.1.15: hours2 = השרת מקבל empty (עובדים שכל השעות שלהם בחודש נמחקו בכספית). שרת בלי hours2 – לא שולחים empty (שדה לא מוכר נדחה)
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2') };
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2) await set({ caps });
+  // 0.1.19: tf = השרת מקבל ב-poll את העדכון השעתי שנכשל
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf') };
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
@@ -1578,7 +1584,7 @@ async function handle(m) {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
       run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null, hrs: (await get('hrsSt')) || null };
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null, capsToday: !!((await get('caps')) || {}).today, hrs: (await get('hrsSt')) || null };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }

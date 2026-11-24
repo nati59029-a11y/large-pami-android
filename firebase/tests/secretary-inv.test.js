@@ -54,7 +54,7 @@ async function arrive(buf, raw, o) {
   const opt = o || {};
   const biz = opt.biz || A;
   return inBiz(biz, async (db) => {
-    const r = await INV.ingest(db, { ch: opt.ch || 'wa', from: opt.from || SUP_WA, name: 'ספק', inId: opt.inId || 'in' + (++SEQ), fn: opt.fn || 'inv.pdf', buf, why: opt.why, hist: opt.hist });
+    const r = await INV.ingest(db, { ch: opt.ch || 'wa', from: opt.from || SUP_WA, name: 'ספק', inId: opt.inId || 'in' + (++SEQ), fn: opt.fn || 'inv.pdf', buf, why: opt.why, hist: opt.hist, auth: opt.auth });
     if (!r.bad && !r.long && !r.dup) await INV.workIn(r.id, { classify: async () => { CLS++; if (raw instanceof Error) throw raw; return raw; } });
     return Object.assign({ id: r.id, r }, await (await db.doc('sec_inv/' + r.id).get()).data());
   });
@@ -120,6 +120,40 @@ describe('קובץ: בדיקה לפני כל עלות (4.2, 10.3)', () => {
     assert.equal(SI.badByName('inv.pdf', 'application/pdf'), '');
     assert.equal(SI.badByName('cal.ics', 'text/calendar'), 'type');
   });
+  it('24.11.2026: inspect עם allowActive – PDF עם פקודות עובר ומסומן act; PDF מוצפן עדיין נחסם; בלי האפשרות – כמו קודם', () => {
+    const js = pdf(1, '<</S /JavaScript /JS (app.alert(1))>>');
+    assert.equal(SI.inspect(js).why, 'active');
+    const r = SI.inspect(js, { allowActive: true });
+    assert.equal(r.ok, true); assert.equal(r.act, true); assert.equal(r.pages, 1);
+    assert.equal(SI.inspect(pdf(1, '<</Encrypt 5 0 R>>'), { allowActive: true }).why, 'enc');
+    assert.equal(SI.inspect(pdf(1), { allowActive: true }).act, undefined, 'PDF רגיל – בלי סימון');
+  });
+  it('24.11.2026: שולח מאושר (trust) – PDF עם פקודות ממייל מאומת נקלט ונסרק, תמיד באישור (why act); מייל לא מאומת / שולח אחר – נחסם; אישור השולח מהכרטיס', async () => {
+    const SND = 'billing@sumit.example';
+    const js = () => pdf(1, '<</S /JavaScript /JS (print())>>');
+    // לפני האישור – כרטיס חסום, עם אפשרות אישור
+    const b0 = await arrive(js(), RAW.inv(), { ch: 'mail', from: SND, auth: true });
+    assert.equal(b0.k, 'bad'); assert.deepEqual(b0.why, ['active']);
+    const L = await call('secInv', M1, { op: 'list' });
+    assert.equal(L.r.items.find((i) => i.id === b0.id).trustOk, true);
+    // מייל לא מאומת – אי אפשר לאשר
+    const bu = await arrive(js(), RAW.inv(), { ch: 'mail', from: 'x@evil.example', auth: false });
+    assert.equal((await call('secDecide', M1, { op: 'trust', id: bu.id })).reason, 'unauth');
+    // אישור (אין מייל ב-sec_in בבדיקה הזו – השולח נשמר, הכרטיס נשאר)
+    const t = await call('secDecide', M1, { op: 'trust', id: b0.id });
+    assert.ok(t.ok, t.msg);
+    assert.equal((await get(`b/${A}/sec_cfg/inv`)).trust['m:' + SND], true);
+    // אחרי האישור – נקלט ונסרק, לא "נכנס ישר"
+    const ok = await arrive(js(), RAW.inv({ number: 'S1' }), { ch: 'mail', from: SND, auth: true });
+    assert.equal(ok.k, 'inv'); assert.equal(ok.act, true); assert.ok(ok.why.includes('act')); assert.equal(ok.el, false);
+    // אותו שולח במייל לא מאומת – עדיין נחסם; שולח אחר – נחסם
+    assert.equal((await arrive(js(), RAW.inv(), { ch: 'mail', from: SND, auth: false })).k, 'bad');
+    assert.equal((await arrive(js(), RAW.inv(), { ch: 'mail', from: 'other@x.example', auth: true })).k, 'bad');
+    // ביטול האישור
+    const c = await call('secInv', M1, { op: 'cfg', untrust: 'm:' + SND });
+    assert.ok(c.ok, c.msg); assert.deepEqual(c.r.cfg.trust, []);
+    assert.equal((await arrive(js(), RAW.inv(), { ch: 'mail', from: SND, auth: true })).k, 'bad');
+  });
   it('קובץ חשוד שהגיע – כרטיס "התקבל קובץ שלא נקלט" עם השולח; הקובץ לא נשמר, לא נשלח לזיהוי ולא נספר במכסה', async () => {
     const x = await arrive(Buffer.from('PK\x03\x04zipdata-evil', 'latin1'), RAW.inv(), { fn: 'invoice.zip' });
     assert.equal(x.k, 'bad'); assert.deepEqual(x.why, ['zip']); assert.equal(x.np, 0); assert.equal(x.el, false);
@@ -136,18 +170,31 @@ describe('קובץ: בדיקה לפני כל עלות (4.2, 10.3)', () => {
 describe('זיהוי דרך המכסה הקיימת – לפי קבצים (109)', () => {
   beforeEach(() => seed());
   it('PDF של 4 עמודים = 1 במונה העסק ובמונה המזכירה; PDF של 5 עמודים – "קובץ ארוך", בלי זיהוי ובלי ספירה; מכסת העסק נגמרה – "לא זוהה" בלי פנייה למודל', async () => {
-    await put(`b/${A}/private/info`, { adv: { limits: { scanDaily: 2 } } });
+    await put(`b/${A}/private/info`, { adv: { limits: { scanDaily: 3 } } });
     const a = await arrive(pdf(4), RAW.inv({ number: 'P4' }));
     assert.equal(a.k, 'inv'); assert.equal(CLS, 1);
     assert.equal((await get(`b/${A}/scan_usage/_biz`)).count, 1, 'קובץ = 1');
     assert.equal((await get(`b/${A}/scan_usage/_sec`)).count, 1);
-    const l = await arrive(pdf(5), RAW.inv());
-    assert.equal(l.k, 'long'); assert.equal(l.st, 'new'); assert.equal(CLS, 1, 'קובץ ארוך – לא נשלח לזיהוי');
-    assert.ok(l.np >= 1, 'הקובץ נשמר לבדיקה ידנית');
+    // 24.11.2026 (בעל העסק): קובץ ארוך עד 20 עמודים – נסרק ומזוהה, אבל לא "נכנס ישר" (why long). מעל 20 – כרטיס לבדיקה ידנית כמו קודם
+    const l = await arrive(pdf(5), RAW.inv({ number: 'P5' }));
+    assert.equal(l.k, 'inv'); assert.equal(l.long, true); assert.ok(l.why.includes('long')); assert.equal(l.el, false); assert.equal(CLS, 2, 'קובץ ארוך – נסרק');
+    const m = await arrive(pdf(21), RAW.inv());
+    assert.equal(m.k, 'long'); assert.equal(m.st, 'new'); assert.equal(CLS, 2, 'מעל 20 עמודים – לא נשלח לזיהוי');
+    assert.ok(m.np >= 1, 'הקובץ נשמר לבדיקה ידנית');
     await arrive(jpg(), RAW.inv({ number: 'J1' }));
-    assert.equal((await get(`b/${A}/scan_usage/_biz`)).count, 2);
+    assert.equal((await get(`b/${A}/scan_usage/_biz`)).count, 3);
     const q = await arrive(jpg(), RAW.inv({ number: 'J2' }));
-    assert.equal(q.k, 'unk'); assert.equal(q.err, 'quota'); assert.equal(CLS, 2, 'מכסה נגמרה – בלי מודל');
+    assert.equal(q.k, 'unk'); assert.equal(q.err, 'quota'); assert.equal(CLS, 3, 'מכסה נגמרה – בלי מודל');
+  });
+  it('24.11.2026: "סריקה" לכרטיס קובץ ארוך ישן – חוזר לתור (עד 20 עמודים); מעל 20 / לא ארוך – מסורב', async () => {
+    const l = await inBiz(A, async (db) => { const r = await INV.ingest(db, { ch: 'wa', from: SUP_WA, name: 'ספק', inId: 'old' + (++SEQ), fn: 'l.pdf', buf: pdf(8) }); return r.id; });
+    await prep((d) => d.doc(`b/${A}/sec_inv/${l}`).update({ st: 'new', k: 'long' })); // כמו כרטיס שנקלט לפני השינוי
+    const r = await call('secDecide', M1, { op: 'scan', id: l });
+    assert.ok(r.ok, r.msg);
+    const x = await get(`b/${A}/sec_inv/${l}`); assert.equal(x.st, 'q'); assert.equal(x.k, 'q'); assert.equal(x.long, true);
+    assert.equal((await call('secDecide', M1, { op: 'scan', id: l })).reason, 'not-long', 'כבר בתור');
+    const big = await arrive(pdf(21), RAW.inv());
+    assert.equal((await call('secDecide', M1, { op: 'scan', id: big.id })).reason, 'too-long');
   });
   it('זיהוי שנכשל – לא נספר (כמו בסריקה האחידה), והמסמך נשאר ככרטיס "לא זוהה"', async () => {
     const x = await arrive(pdf(1), new Error('model down'));
