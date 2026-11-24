@@ -13,9 +13,8 @@
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
 //   sec_cfg/main   + 23.11.2026 (גיטי, סבב 3): grp [gid...] – קבוצות פנימיות שגיטי רשאית לקרוא (אין שדה = אף קבוצה). secPrefs op:'grp' בלבד (lib/sec-grp.js)
 //   sec_cfg/main   + 24.11.2026 (גיטי, סבב 3 חלק ב): cmt – זיהוי התחייבויות (true = פעיל; ברירת מחדל כבוי). secPrefs op:'cmtOn'
-//   sec_cfg/main   + 24.11.2026 (גיטי, סבב 4 חלק א): mgr.<uid>.perm { <סוג>: { m, cap?, t } } – הרשאות לפי סוג פעולה, לכל מנהל בנפרד;
-//                    mgr.<uid>.pq { <סוג>: { t, n, note } } – שאלה בפעם הראשונה. אין שדה = "טרם הוגדר" (בלי מיגרציה).
-//                    secPrefs op:'perm' – כל מנהל רק את שלו (לפי uid בשרת) (lib/sec-perm.js)
+//   sec_perm/{uid} + 24.11.2026 (גיטי, סבב 4 חלק א): { perm { <סוג>: { m, cap?, t } }, pq, upd } – הרשאות לפי סוג פעולה, לכל מנהל בנפרד. שרת בלבד (גם לא מנהל אחר);
+//                    pq – שאלה בפעם הראשונה. אין מסמך = "טרם הוגדר". secPrefs op:'perm' – כל מנהל רק את שלו (לפי uid בשרת) (lib/sec-perm.js)
 //   sec_cmt/{cid}  { t, ch, src, from, who, what, d, prev, st:'pend'|'act'|'ok'|'no', actBy?, actAt?, kind?, ref?, stBy?, stAt? } – הצעות התחייבות (lib/sec-cmt.js). השרת בלבד
 //   sec_cmtq/{cid} { t, exp, n, lk?, ch, id?|gid,mid, wa?, from, text, grp? } – תור הזיהוי (נכתב בקליטה, מעובד ב-secRemind). השרת בלבד
 //   sec_cfg/use    { m, mc, d, dmc, w80, w100, r: { <uid>: { h, n, d, dn } }, mp: { h, n } } – מונה עלות במילי־סנט + קצב. מנהל־על בלבד (83)
@@ -73,7 +72,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq']); // sec_cmt – הצעות התחייבות, sec_cmtq – תור הזיהוי (24.11.2026, lib/sec-cmt.js; שרת בלבד); sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq', 'sec_perm']); // sec_perm – הרשאות לכל מנהל (24.11.2026, lib/sec-perm.js; שרת בלבד); // sec_cmt – הצעות התחייבות, sec_cmtq – תור הזיהוי (24.11.2026, lib/sec-cmt.js; שרת בלבד); sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -199,7 +198,7 @@ async function secState(request) {
   const grpOn = GRP.grpOn(who);
   out.grp = { on: grpOn, n: grpOn && cfg.grp.length ? (await GRP.allowedGroups(T.tdb(), cfg.grp)).length : 0, edit: !!who.superadmin }; // edit – רק מנהל־העל (24.11.2026, החלטה 5)
   out.cmt = { on: cfg.cmt, edit: !brLimited }; // 24.11.2026: זיהוי התחייבויות (מתג עסקי; מנהל עם הגבלת סניפים – צפייה בלבד)
-  out.perm = PERM.stateOf({ mgr: cfg.mgr }, who.uid); // 24.11.2026 (סבב 4 חלק א): מסך "הרשאות" – ההגדרות של המנהל המחובר בלבד
+  out.perm = PERM.stateOf(await PERM.readRec(db, who.uid)); // 24.11.2026 (סבב 4 חלק א): מסך "הרשאות" – ההגדרות של המנהל המחובר בלבד (sec_perm/{uid})
   { // "עצור הכל" (sec_cfg/wa.stop.on) – לכלל "לבד" שרץ במכשיר (התראות מהטלפון, sec-notif.js). קריאה אחת
     const ws = await db.doc('sec_cfg/wa').get();
     out.stop = !!(ws.exists && ws.get('stop') && ws.get('stop').on === true);
@@ -360,6 +359,15 @@ async function secPrefs(request) {
   const input = inputObject(request);
   const { who, cfg, me, db, brLimited } = await gate(request, { consent: true });
   const t = Date.now();
+  // 24.11.2026 (גיטי, סבב 4 חלק א; תיקון סבב 1, ליקוי 3): "אסור" במסך ההרשאות של המנהל הזה – נבדק לפני שנוצר משהו, ונרשם ביומן (permBlock):
+  //   tkCard st:'chk' – בדיקה מקדימה שהאפליקציה עושה לפני שהיא יוצרת את המשימה מכרטיס בשיחה (בלי מונה הקצב); cmt claim – לפני יצירה מהתחייבות;
+  //   tkCard/cmt st:'ok' – שוב, כהגנה. תזכורת מכרטיס נחסמת גם ב-secCal op:'add' (secretary-know.js) לפני הכתיבה
+  const permTy = input.op === 'tkCard' && ['chk', 'ok'].includes(input.st) ? (input.kind === 'rem' ? 'rem' : 'task') : input.op === 'cmt' && ['claim', 'ok'].includes(input.st) ? 'cmt' : '';
+  if (permTy && PERM.decide(await PERM.readRec(db, who.uid), permTy).d === 'deny') {
+    await db.collection('sec_log').doc().set(logData(who.uid, 'mgr', 'permBlock', { tgt: permTy, note: input.op + ':' + input.st }));
+    throw deny('perm-deny', 'לפי מסך ההרשאות שלך גיטי לא רשאית ' + ({ task: 'ליצור משימות', rem: 'לקבוע תזכורות', cmt: 'לאשר התחייבויות' }[permTy]) + '. לא נוצר כלום. אפשר לשנות בהגדרות המזכירה ← הרשאות.');
+  }
+  if (input.op === 'tkCard' && input.st === 'chk') return { ok: true };
   // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל. תפיסת הצעת התחייבות (cmt claim) – לא נרשמת ולא נספרת
   if (!(input.op === 'cmt' && input.st === 'claim')) await db.runTransaction(async (tx) => {
     const ref = db.doc('sec_cfg/use');
@@ -372,11 +380,6 @@ async function secPrefs(request) {
   const b = db.batch();
   const main = db.doc('sec_cfg/main');
   let out;
-  // 24.11.2026 (גיטי, סבב 4 חלק א): "אסור" במסך ההרשאות של המנהל הזה חוסם גם את האישור של כרטיס משימה / תזכורת / התחייבות (ולא רק את יצירת ההצעה)
-  if ((input.op === 'tkCard' && input.st === 'ok') || (input.op === 'cmt' && ['claim', 'ok'].includes(input.st))) {
-    const ty = input.op === 'cmt' ? 'cmt' : input.kind === 'rem' ? 'rem' : 'task';
-    if (PERM.decide({ mgr: cfg.mgr }, who.uid, ty).d === 'deny') throw deny('perm-deny', 'לפי מסך ההרשאות שלך גיטי לא רשאית לבצע את הפעולה הזו. אפשר לשנות בהגדרות המזכירה ← הרשאות.');
-  }
   if (input.op === 'mirror') {
     if (typeof input.on !== 'boolean') throw bad('bad-input', 'ערך לא תקין');
     b.set(main, { mirror: input.on, upd: t }, { merge: true });
@@ -472,15 +475,14 @@ async function secPrefs(request) {
   } else if (input.op === 'perm') {
     // 24.11.2026 (גיטי, סבב 4 חלק א, עדכון המשתמש): הרשאה לסוג פעולה – לכל מנהל בנפרד. מסך "הרשאות" או תשובה לשאלה בפעם הראשונה.
     // היעד תמיד המנהל המחובר (who.uid מהשרת) – מנהל לא משנה הרשאות של מנהל אחר (uid אחר בבקשה – נדחה).
-    // "תמיד כך" נשמר ב-mgr.<uid>.perm.<סוג> (מחליף את הרשומה כולה); "רק הפעם" / "לשאול שוב" – לא נשמר, רק סוגר את השאלה. m:'unset' – חזרה ל"טרם הוגדר". הכול ביומן
+    // "תמיד כך" נשמר ב-sec_perm/{uid}.perm.<סוג> (מחליף את הרשומה של הסוג); "רק הפעם" / "לשאול שוב" – לא נשמר, רק סוגר את השאלה. m:'unset' – חזרה ל"טרם הוגדר". הכול ביומן
     let s;
     try { s = PERM.parseSet(input, who.uid); } catch (e) {
       if (e && (e.code === 'not-yours' || e.code === 'not-allowed')) throw deny(e.code, e.message);
       if (e && typeof e.code === 'string') throw bad(e.code, e.message);
       throw e;
     }
-    b.update(main, Object.assign(PERM.updOf(s, t, FieldValue.delete()), { upd: t }));
-    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', s.m === 'unset' ? 'permUnset' : s.save ? 'permSet' : 'permOnce', { tgt: s.type, note: PERM.noteOf(s) }));
+    await PERM.writeRec(db, who.uid, (rec) => PERM.nextRec(rec, s, t), logData(who.uid, 'mgr', s.m === 'unset' ? 'permUnset' : s.save ? 'permSet' : 'permOnce', { tgt: s.type, note: PERM.noteOf(s) }));
     out = { type: s.type, m: s.m, scope: s.scope, saved: s.save && s.m !== 'unset' };
     if (s.cap !== undefined) out.cap = s.cap;
   } else if (input.op === 'permAsk') {
@@ -668,7 +670,7 @@ async function secChat(request) {
   }
   if (reply === null) {
     offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn, notes: !!notes });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who), perm: { mgr: cfg.mgr } }; // perm – ההרשאות (lib/sec-perm.js, לפי ctx.uid) // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards, notes, feat: (who.biz && who.biz.features) || {}, grpOn: GRP.grpOn(who) }; // feat: תוספות העסק (sec-biz-tools בודק בהפעלה); grpOn – קבוצות פנימיות (getGroupMessages)
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
       const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);

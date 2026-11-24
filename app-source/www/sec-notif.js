@@ -55,8 +55,11 @@ function stTrim(M,keys,max){let ch=false;max=max||MAXM;if(keys)Object.keys(M).fo
 function capTake(C,rk,day,used){if(!C||typeof C!=='object'||C.d!==day)C={d:day,n:{}};if(!C.n||typeof C.n!=='object')C.n={};
  if((used|0)>=AUTO_RUN)return{ok:false,C,why:'run'};if((+C.n[rk]||0)>=AUTO_DAY)return{ok:false,C,why:'day'};C.n[rk]=(+C.n[rk]||0)+1;return{ok:true,C}}
 /* 24.11.2026 (סבב 4 חלק א): הרשאת "פעולה על הודעה מאפליקציה / SMS" של המנהל (X.st.perm.m.app) ו"עצור הכל" (X.st.stop).
-   מחזיר 'auto' (מותר לבצע כלל לבד) / 'approve' / 'deny' / 'ask' (טרם הוגדר – לשאול את המנהל, ובינתיים לא לבד). בלי מידע מהשרת – לא לבד */
-function appPerm(st){const p=st&&st.perm;if(!p||!p.m||typeof p.m!=='object')return 'approve';const e=p.m.app;if(!e)return 'ask';if(e.m==='deny')return 'deny';if(e.m!=='auto')return 'approve';return st.stop===true?'approve':'auto'}
+   מחזיר 'auto' (מותר לבצע כלל לבד) / 'approve' / 'deny' / 'ask' (טרם הוגדר – לשאול את המנהל, ובינתיים לא לבד). בלי מידע מהשרת – לא לבד.
+   act – הפעולה שהכלל מבצע (תיקון סבב 1, ליקוי 2): 'task' – גם "יצירת משימה" לא מוגדרת "אסור" (task:deny → deny, גם כשההתראות "לבד") */
+function appPerm(st,act){const p=st&&st.perm;if(!p||!p.m||typeof p.m!=='object')return 'approve';
+ if(act==='task'&&p.m.task&&p.m.task.m==='deny')return 'deny';
+ const e=p.m.app;if(!e)return 'ask';if(e.m==='deny')return 'deny';if(e.m!=='auto')return 'approve';return st.stop===true?'approve':'auto'}
 const Core={MAXI,LOGN,AUTO_RUN,AUTO_DAY,MAXM,isOtp,appPerm,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd,stPut,applySt,stTrim,capTake};
 if(typeof module==='object'&&module&&module.exports){module.exports=Core;return}
 root.SecNotifCore=Core;
@@ -137,6 +140,7 @@ async function autoRun(added){const S=st();if(S.off)return;
  let ch=0,used=0;const day=dayK(Date.now()),capd={};
  for(const it of added){const r=ruleFor(S.R,it);if(!r)continue;
   if(r.act==='ign'){setSt(it.k,{st:'ign',by:'auto'});S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'ign',ok:1});ch=1;continue}
+  if(r.act==='task'&&appPerm(window.__sec&&window.__sec.st,'task')==='deny'){S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'task',un:r.un||'',ok:0,why:'לפי מסך ההרשאות שלך "יצירת משימה" אסורה'});ch=1;continue}
   if(r.act==='task'){const cp=capTake(S.C,ruleKey(it),day,used);S.C=cp.C;ch=1;
    if(!cp.ok){setSt(it.k,{cap:cp.why});const ck=ruleKey(it)+'|'+cp.why,g=capd[ck]||(capd[ck]={t:Date.now(),k:it.k,s:it.s,a:it.a,act:'cap',why:cp.why,n:0});g.n++;continue}
    used++;let res;try{res=await autoTask(it,r)}catch(e){res={ok:0,why:e&&e.cx||'פתיחת המשימה נכשלה'}}

@@ -212,7 +212,7 @@ async function run(name, a, ctx) {
     case 'proposeTask': {
       const kind = a.kind === 'reminder' ? 'rem' : 'task';
       // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל ששואל. "אסור" – לא נוצר כרטיס. "טרם הוגדר" – שאלה בפעם הראשונה (מרכז האישורים שלו); הכרטיס עצמו – לאישור כרגיל
-      const pd = PERM.decide(ctx.perm, ctx.uid, kind);
+      const pd = PERM.decide(await PERM.readRec(db, ctx.uid), kind);
       if (pd.d === 'deny') return { error: 'not-allowed', note: 'לפי מסך ההרשאות גיטי לא רשאית ליצור ' + (kind === 'rem' ? 'תזכורות' : 'משימות') + '. אמרי למנהל שאפשר לשנות זאת בהגדרות המזכירה ← הרשאות.' };
       if (pd.d === 'ask') await PERM.ask(db, ctx.uid, kind, 'הצעה בשיחה');
       if ((ctx.cards || []).filter((c) => c && c.k === 'tkp').length >= CARDS_MAX) return { error: 'too-many', note: 'כבר הוצעו כמה כרטיסים בתשובה הזו. בקשי מהמנהל לאשר אותם קודם.' };

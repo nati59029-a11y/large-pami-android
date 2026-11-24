@@ -461,7 +461,7 @@ async function secDecide(request) {
   const r = await db.runTransaction(async (tx) => {
     after = null; // טרנזקציה שרצה שוב – מתחילים נקי
     const au = op === 'claim' && mode === 'auto';
-    const [s, cs, ws, pms] = await Promise.all([tx.get(ref), au ? tx.get(db.doc('sec_cfg/inv')) : null, au ? tx.get(db.doc('sec_cfg/wa')) : null, au ? tx.get(db.doc('sec_cfg/main')) : null]);
+    const [s, cs, ws, pms, pps] = await Promise.all([tx.get(ref), au ? tx.get(db.doc('sec_cfg/inv')) : null, au ? tx.get(db.doc('sec_cfg/wa')) : null, au ? tx.get(db.doc('sec_cfg/main')) : null, au ? tx.get(db.doc(PERM.COLL + '/' + uid)) : null]);
     if (!s.exists) throw gone();
     const x = s.data();
     if (!brAllowed(g, x)) throw deny('br-limited', 'החשבונית שייכת לסניף שאינו שלך');
@@ -489,7 +489,7 @@ async function secDecide(request) {
         if (x.el !== true && !why.length) why.push('el');
         // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל שמכניס – "רישום הוצאה / הכנסה" חייב להיות "לבד", והסכום עד התקרה שלו.
         // בלי הגדרה – שאלה בפעם הראשונה (אחרי הטרנזקציה) והחשבונית ממתינה לאישור
-        const pd = PERM.decide(pms && pms.exists ? pms.data() : {}, uid, 'fin', { amount: x.f && x.f.total });
+        const pd = PERM.decide(PERM.recFrom(pps, pms && pms.exists ? pms.data() : {}, uid), 'fin', { amount: x.f && x.f.total });
         if (pd.d !== 'auto') why.push(pd.why);
         if (why.length) return { deny: why, el: x.el === true };
       }

@@ -605,7 +605,7 @@ async function tryMrAutoWa(db, id, x, d, o) {
   if (!W.inWindow(sn.exists ? sn.get('lastIn') : 0, now)) extra.push('window');
   if (d.voice) extra.push('voice');
   if (!cfg.pnid) extra.push('notConnected');
-  const pw = await PERM().blockWhy(db, cs.exists ? cs.data() : {}, rule.uid, 'wa', {}, 'כלל אישי "לבד" בווצאפ'); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
+  const pw = await PERM().blockWhy(db, rule.uid, 'wa', {}, 'כלל אישי "לבד" בווצאפ'); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
   if (pw) extra.push(pw);
   const fl = d.flags || [];
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: cfg.stop.on, owner: await MLC().ownerOk(db, rule.uid, 'wa'), rule, match: d.pm,

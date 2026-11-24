@@ -84,7 +84,7 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  factAdd:'נשמרה עובדה',factOk:'אושרה עובדה שהמזכירה הציעה',factNo:'בוטלה הצעה לעובדה',factEdit:'עובדה נערכה',factDel:'עובדה נמחקה',fixed:'עודכנו פרטים קבועים',price:'הועלה מחירון',priceDel:'המחירון נמחק',
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
- permSet:'שונתה הרשאה של גיטי (מסך הרשאות)',permOnce:'נענתה שאלת הרשאה – רק הפעם',permUnset:'הרשאה של גיטי חזרה ל"טרם הוגדר"',permAsk:'גיטי שאלה על הרשאה לסוג פעולה חדש', grpOn:'קבוצה פנימית נפתחה לקריאה של גיטי',cmtNew:'זוהתה התחייבות בהודעה (הצעה לאישור)',cmtOk:'אושרה התחייבות – נפתחה משימה / נקבעה תזכורת',cmtNo:'נדחתה הצעת התחייבות',cmtOn:'זיהוי התחייבויות הופעל',cmtOff:'זיהוי התחייבויות כובה',cmtCap:'זיהוי התחייבויות הגיע לתקרה היומית',grpOff:'קבוצה פנימית נסגרה לגיטי',tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
+ permSet:'שונתה הרשאה של גיטי (מסך הרשאות)',permOnce:'נענתה שאלת הרשאה – רק הפעם',permUnset:'הרשאה של גיטי חזרה ל"טרם הוגדר"',permAsk:'גיטי שאלה על הרשאה לסוג פעולה חדש',permBlock:'פעולה נחסמה לפי מסך ההרשאות (לא נוצר כלום)', grpOn:'קבוצה פנימית נפתחה לקריאה של גיטי',cmtNew:'זוהתה התחייבות בהודעה (הצעה לאישור)',cmtOk:'אושרה התחייבות – נפתחה משימה / נקבעה תזכורת',cmtNo:'נדחתה הצעת התחייבות',cmtOn:'זיהוי התחייבויות הופעל',cmtOff:'זיהוי התחייבויות כובה',cmtCap:'זיהוי התחייבויות הגיע לתקרה היומית',grpOff:'קבוצה פנימית נסגרה לגיטי',tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
  notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',remSnooze:'נקבע "תזכירי לי שוב" להתראה',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
@@ -2023,7 +2023,7 @@ async function tpRem(c,mid,force){c.busy=1;cxRe();
    c.ref=r&&r.id||''}
   await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'rem',ref:c.ref});
   c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה')}
- catch(e){if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
+ catch(e){if(e&&e.reason==='perm-deny')toast(e.message);else if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
  finally{c.busy=0;cxRe()}}
 ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const box=el.closest('[data-card]');if(box)tpSync(c,box);
  const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';if(!mid)return toast('הכרטיס לא נמצא. פתחו את השיחה מחדש');
@@ -2033,11 +2033,13 @@ ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;con
  if(!c.all&&!(c.to||[]).length)return toast('סמנו למי המשימה, או "כל העובדים"');
  c.busy=1;cxRe();let x=null;
  try{const rv=X.tpRv===false?false:await cxRvNow();x={id:c.id,txt:c.txt,all:!!c.all,to:c.to||[],due:tpDue(c),pri:c.pri==='h'?'h':'',rv};
+  /* 24.11.2026 (סבב 4 חלק א): בדיקה מקדימה בשרת – "יצירת משימה" אסורה במסך ההרשאות → לא נוצרת (השרת רושם ביומן ומחזיר הסבר) */
+  await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'chk',kind:'task'});
   const r=await cxCreate(x);
   let ok=1;try{await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'task'})}catch(e){ok=0}
   c.busy=0;if(!ok){toast('המשימה נפתחה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב (לא תיפתח משימה נוספת)');return}
   doneSt(c.id,'ok');toast(r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה ל'+cxNames(x)+', יעד: '+r.dlL);try{await tkLoad()}catch(e){}}
- catch(e){if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
+ catch(e){if(e&&e.reason==='perm-deny'){toast(e.message);return}if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
  finally{c.busy=0;cxRe()}};
 ACT.secTpNo=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';
  if(c.ref)return toast('התזכורת כבר נקבעה. לחצו "אישור" כדי לסיים');

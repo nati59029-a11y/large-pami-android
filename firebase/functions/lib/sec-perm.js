@@ -1,13 +1,15 @@
 'use strict';
 // גיטי – הרשאות לפי סוג פעולה, לכל מנהל בנפרד (24.11.2026, "גיטי מנהלת עסק", סבב 4 חלק א; עדכון המשתמש: כל מנהל מגדיר לעצמו).
 //   מה גיטי רשאית לעשות לבד בשם המנהל, לכל סוג פעולה: auto (לבד) / approve (מכינה ואני מאשר) / deny (אסור), ובפעולה כספית – תקרת סכום (₪).
-//   נשמר במסמך הקיים sec_cfg/main, בתוך הרשומה האישית של המנהל (mgr.<uid>) – בלי אוסף חדש ובלי מיגרציה (אין שדה = "טרם הוגדר"):
-//     mgr.<uid>.perm { <סוג>: { m: 'auto'|'approve'|'deny', cap?: ₪ (רק בסוג כספי), t } } – רק המנהל עצמו משנה (secPrefs op:'perm', לפי uid בשרת), כל שינוי ביומן
-//     mgr.<uid>.pq   { <סוג>: { t, n, note } }                                           – "שאלה בפעם הראשונה" שממתינה למנהל הזה (מרכז האישורים שלו)
+//   נשמר במסמך נפרד לכל מנהל – sec_perm/{uid} { perm: { <סוג>: { m, cap?, t } }, pq: { <סוג>: { t, n, note } }, upd }.
+//   השרת בלבד קורא וכותב (firestore.rules: אף אחד מהאפליקציה – גם לא מנהל אחר); האפליקציה מקבלת רק את של המנהל המחובר דרך secState.
+//   אין מסמך = "טרם הוגדר". תיקון סבב 1 (ליקוי 4): גרסה קודמת בענף שמרה ב-sec_cfg/main.mgr.<uid>.perm/pq (קריא לכל המנהלים) –
+//   נקרא משם כגיבוי אם אין מסמך חדש, ובכתיבה הראשונה מועבר למסמך החדש ונמחק מהמיקום הישן (באותה טרנזקציה – בלי לאבד הגדרה).
+//   שינוי: רק המנהל עצמו (secPrefs op:'perm', לפי uid בשרת), כל שינוי ביומן. "שאלה בפעם הראשונה" – pq של אותו מנהל (מרכז האישורים שלו).
 //   ההגדרה של מנהל אחד לא חלה על מנהל אחר. כל פעולה לבד נבדקת לפי ההרשאות של המנהל שבשמו היא נעשית ("בעלים"):
-//     כלל אישי – בעל הכלל; כלל מענה במייל – מי שאישר אותו; שליחה לבד ללקוח – מי שהפעיל אותה; חשבונית – המנהל שהמכשיר שלו מכניס אותה.
-//     אין בעלים ידוע – לאישור (בלי שאלה).
-//   ההחלטה (decide) – ממש לפני הביצוע (קריאה טרייה של sec_cfg/main):
+//     כלל אישי – בעל הכלל; כלל מענה במייל – מי שאישר אותו, ואם לא נשמר – מי שהפעיל את המענה האוטומטי במייל; שליחה לבד ללקוח – מי שהפעיל אותה;
+//     חשבונית – המנהל שהמכשיר שלו מכניס אותה. אין בעלים ידוע – לאישור (בלי שאלה, בלי נפילה למנהל הראשי).
+//   ההחלטה (decide) – ממש לפני הביצוע (קריאה טרייה):
 //     deny → לא מבוצע לבד; approve → נשאר לאישור (הטיוטה / החשבונית / הכרטיס במנגנון הקיים);
 //     auto → רק אם "עצור הכל" כבוי, ובסוג כספי – רק עם סכום ידוע ועד התקרה; אחרת – לאישור.
 //     בלי הגדרה → ask: נרשמת שאלה לאותו מנהל (ask) והפעולה עצמה – לאישור (כמו approve).
@@ -42,11 +44,13 @@ const WHY = Object.freeze({
 const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
 const capOk = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= CAP_MAX;
 const uidOk = (u) => typeof u === 'string' && UID_RE.test(u);
-const mine = (d, uid) => (uidOk(uid) ? obj(obj(obj(d).mgr)[uid]) : {});
+const COLL = 'sec_perm';
+const DEL = () => require('firebase-admin/firestore').FieldValue.delete(); // רק בהעברה מהמיקום הישן
 
-// ההגדרות השמורות של מנהל אחד, מנוקות: רק סוגים מוכרים ומצבים תקינים. רשומה לא תקינה = "טרם הוגדר". d – המסמך sec_cfg/main
-function permOf(d, uid) {
-  const p = obj(mine(d, uid).perm), out = {};
+// הרשומה של מנהל אחד: { perm, pq } – מהמסמך sec_perm/{uid} (או מהמיקום הישן mgr.<uid>)
+// ההגדרות השמורות, מנוקות: רק סוגים מוכרים ומצבים תקינים. רשומה לא תקינה = "טרם הוגדר"
+function permOf(rec) {
+  const p = obj(obj(rec).perm), out = {};
   for (const k of KEYS) {
     const e = obj(p[k]);
     if (!MODES.includes(e.m)) continue;
@@ -57,9 +61,9 @@ function permOf(d, uid) {
   }
   return out;
 }
-// שאלות שממתינות למנהל הזה (רק לסוגים שעדיין לא הוגדרו אצלו)
-function pqOf(d, uid) {
-  const q = obj(mine(d, uid).pq), p = permOf(d, uid), out = {};
+// שאלות שממתינות למנהל (רק לסוגים שעדיין לא הוגדרו אצלו)
+function pqOf(rec) {
+  const q = obj(obj(rec).pq), p = permOf(rec), out = {};
   for (const k of KEYS) {
     if (p[k]) continue;
     const e = obj(q[k]);
@@ -68,14 +72,29 @@ function pqOf(d, uid) {
   }
   return out;
 }
+const oldOf = (main, uid) => obj(obj(obj(main).mgr)[uid]);
+const hasOld = (main, uid) => { const m = oldOf(main, uid); return m.perm !== undefined || m.pq !== undefined; };
+// מהמסמכים שכבר נקראו: המסמך החדש (snap) ואם אין – המיקום הישן במסמך sec_cfg/main (data)
+function recFrom(snap, main, uid) {
+  if (snap && snap.exists) { const d = snap.data() || {}; return { perm: obj(d.perm), pq: obj(d.pq) }; }
+  const m = oldOf(main, uid);
+  return { perm: obj(m.perm), pq: obj(m.pq) };
+}
+// קריאה טרייה (מחוץ לטרנזקציה). אין uid תקין – רשומה ריקה
+async function readRec(db, uid) {
+  if (!uidOk(uid)) return { perm: {}, pq: {} };
+  const s = await db.doc(COLL + '/' + uid).get();
+  if (s.exists) return recFrom(s, null, uid);
+  const m = await db.doc('sec_cfg/main').get();
+  return recFrom(null, m.exists ? m.data() : {}, uid);
+}
 
-// ההחלטה. d – המסמך sec_cfg/main; uid – המנהל שבשמו הפעולה; o = { amount (₪, בסוג כספי), stop ("עצור הכל") }.
+// ההחלטה. rec – הרשומה של המנהל שבשמו הפעולה; o = { amount (₪, בסוג כספי), stop ("עצור הכל") }.
 // מחזיר { d: 'auto'|'approve'|'deny'|'ask', why: '' | מפתח ב-WHY }. d==='auto' הוא היחיד שמתיר ביצוע לבד
-function decide(d, uid, type, o) {
+function decide(rec, type, o) {
   const t = TYPES[type];
   if (!t) return { d: 'deny', why: 'pmDeny' }; // סוג לא מוכר – לא מבצעים לבד
-  if (!uidOk(uid)) return { d: 'approve', why: 'pmOwner' };
-  const p = permOf(d, uid)[type];
+  const p = permOf(rec)[type];
   const x = o || {};
   if (!p) return { d: 'ask', why: 'pmAsk' };
   if (p.m === 'deny') return { d: 'deny', why: 'pmDeny' };
@@ -87,7 +106,7 @@ function decide(d, uid, type, o) {
   }
   return { d: 'auto', why: '' };
 }
-const isAuto = (d, uid, type, o) => decide(d, uid, type, o).d === 'auto';
+const isAuto = (rec, type, o) => decide(rec, type, o).d === 'auto';
 
 // בדיקת בקשת שינוי (secPrefs op:'perm'). uid – המנהל המחובר (מהשרת). אפשר לשנות רק את ההגדרות של עצמך:
 // input.uid (אם נשלח) חייב להיות אותו uid. זורק Error עם code בשגיאה.
@@ -113,48 +132,64 @@ function parseSet(input, uid) {
   return out;
 }
 const noteOf = (s) => 'm=' + s.m + (s.cap !== undefined ? ',cap=' + s.cap : '') + ',scope=' + s.scope;
-// שדות העדכון במסמך sec_cfg/main (update עם נתיבי שדות – מחליף רק את הרשומה של הסוג הזה אצל המנהל הזה). del – FieldValue.delete()
-function updOf(s, now, del) {
-  const base = 'mgr.' + s.uid + '.';
-  const up = { [base + 'pq.' + s.type]: del };
-  if (s.m === 'unset') up[base + 'perm.' + s.type] = del;
-  else if (s.save) up[base + 'perm.' + s.type] = Object.assign({ m: s.m, t: now }, s.cap !== undefined ? { cap: s.cap } : {});
-  return up;
+// הרשומה החדשה אחרי השינוי (טהור): השאלה על הסוג נסגרת תמיד; "תמיד כך" מחליף את ההגדרה של הסוג; unset – מוחק אותה
+function nextRec(rec, s, now) {
+  const perm = Object.assign({}, obj(obj(rec).perm)), pq = Object.assign({}, obj(obj(rec).pq));
+  delete pq[s.type];
+  if (s.m === 'unset') delete perm[s.type];
+  else if (s.save) perm[s.type] = Object.assign({ m: s.m, t: now }, s.cap !== undefined ? { cap: s.cap } : {});
+  return { perm, pq };
+}
+// כתיבה בטרנזקציה: הרשומה כולה ל-sec_perm/{uid}; אם היא הגיעה מהמיקום הישן – מוחקים אותו (העברה, לא איבוד). log – שורת יומן (או null).
+// fn(rec) מחזיר את הרשומה החדשה, או null כדי לא לכתוב כלום. מחזיר את מה ש-fn החזירה
+async function writeRec(db, uid, fn, log) {
+  const ref = db.doc(COLL + '/' + uid), mref = db.doc('sec_cfg/main');
+  return db.runTransaction(async (tx) => {
+    const [s, ms] = await Promise.all([tx.get(ref), tx.get(mref)]);
+    const main = ms.exists ? ms.data() || {} : {};
+    const cur = recFrom(s, main, uid);
+    const r = fn(cur, main);
+    if (!r) return null;
+    tx.set(ref, { perm: r.perm, pq: r.pq, upd: Date.now() });
+    if (!s.exists && ms.exists && hasOld(main, uid)) tx.update(mref, { ['mgr.' + uid + '.perm']: DEL(), ['mgr.' + uid + '.pq']: DEL() });
+    const logs = typeof log === 'function' ? log(r) : log;
+    if (logs) tx.set(db.collection('sec_log').doc(), logs);
+    return r;
+  });
 }
 
 // "שאלה בפעם הראשונה" למנהל uid: נרשמת פעם אחת לכל סוג (כל עוד לא נענתה), עם מונה כמה פעמים גיטי הגיעה אליה. רישום ביומן – רק בפעם הראשונה.
-// db – מסד העסק. שורת היומן – באותו מבנה כמו logData ב-secretary.js. לא זורק (תקלה כאן לא עוצרת את הפעולה – היא ממילא נשארת לאישור)
+// רק למנהל שאישר את התנאים (sec_cfg/main.mgr.<uid>.cv). שורת היומן – באותו מבנה כמו logData ב-secretary.js.
+// לא זורק (תקלה כאן לא עוצרת את הפעולה – היא ממילא נשארת לאישור)
 async function ask(db, uid, type, note) {
   if (!TYPES[type] || !uidOk(uid)) return false;
+  let first = false;
   try {
-    const ref = db.doc('sec_cfg/main');
-    return await db.runTransaction(async (tx) => {
-      const s = await tx.get(ref);
-      const d = s.exists ? s.data() || {} : {};
-      if (!s.exists || !obj(obj(d.mgr)[uid]).cv) return false; // לא מנהל שאישר את התנאים – לא שואלים
-      if (permOf(d, uid)[type]) return false; // בינתיים הוגדר
-      const cur = obj(obj(mine(d, uid).pq)[type]);
-      const first = !Number.isFinite(cur.t);
+    await writeRec(db, uid, (rec, main) => {
+      if (!oldOf(main, uid).cv) return null; // לא מנהל שאישר את התנאים – לא שואלים
+      if (permOf(rec)[type]) return null; // בינתיים הוגדר
+      const cur = obj(obj(rec.pq)[type]);
+      first = !Number.isFinite(cur.t);
       const n = (Number.isInteger(cur.n) ? cur.n : 0) + 1;
-      tx.update(ref, { ['mgr.' + uid + '.pq.' + type]: { t: first ? Date.now() : cur.t, n, note: String(note || cur.note || '').slice(0, 120) } });
-      if (first) tx.set(db.collection('sec_log').doc(), { t: Date.now(), by: uid, who: 'auto', act: 'permAsk', ch: 'app', tgt: type, note: String(note || '').slice(0, 120) });
-      return first;
-    });
+      return { perm: rec.perm, pq: Object.assign({}, rec.pq, { [type]: { t: first ? Date.now() : cur.t, n, note: String(note || cur.note || '').slice(0, 120) } }) };
+    }, () => (first ? { t: Date.now(), by: uid, who: 'auto', act: 'permAsk', ch: 'app', tgt: type, note: String(note || '').slice(0, 120) } : null));
+    return first;
   } catch (e) { return false; }
 }
 
-// לנקודות הביצוע: '' = מותר לבד; אחרת קוד הסיבה (WHY). בלי הגדרה – גם רושם שאלה לאותו מנהל. d – sec_cfg/main (קריאה טרייה)
-async function blockWhy(db, d, uid, type, o, note) {
-  const r = decide(d, uid, type, o);
+// לנקודות הביצוע: '' = מותר לבד; אחרת קוד הסיבה (WHY). בלי הגדרה – גם רושם שאלה לאותו מנהל. אין בעלים – לאישור, בלי שאלה
+async function blockWhy(db, uid, type, o, note) {
+  if (!uidOk(uid)) return 'pmOwner';
+  const r = decide(await readRec(db, uid), type, o);
   if (r.d === 'auto') return '';
   if (r.d === 'ask') await ask(db, uid, type, note);
   return r.why;
 }
 
-// לאפליקציה (secState): ההגדרות והשאלות הפתוחות של המנהל המחובר, ושמות הסוגים
-function stateOf(d, uid) {
+// לאפליקציה (secState): ההגדרות והשאלות הפתוחות של המנהל המחובר בלבד, ושמות הסוגים
+function stateOf(rec) {
   return {
-    edit: uidOk(uid), m: permOf(d, uid), q: pqOf(d, uid),
+    edit: true, m: permOf(rec), q: pqOf(rec),
     types: KEYS.map((k) => ({ k, l: TYPES[k].l, auto: TYPES[k].auto && !TYPES[k].fixed, money: !!TYPES[k].money, fixed: TYPES[k].fixed || '' })),
   };
 }
@@ -168,4 +203,4 @@ function isOtp(text, title) {
   return OTP_NUM.test(s) || /סיסמ|password|passcode/i.test(s);
 }
 
-module.exports = { TYPES, KEYS, MODES, SCOPES, CAP_MAX, WHY, permOf, pqOf, decide, isAuto, parseSet, noteOf, updOf, ask, blockWhy, stateOf, isOtp };
+module.exports = { COLL, TYPES, KEYS, MODES, SCOPES, CAP_MAX, WHY, permOf, pqOf, recFrom, readRec, decide, isAuto, parseSet, noteOf, nextRec, writeRec, ask, blockWhy, stateOf, isOtp };

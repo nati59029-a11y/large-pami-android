@@ -13,6 +13,7 @@ const { onCall } = require('./lib/region');
 const { inputObject } = require('./lib/roles');
 const K = require('./lib/sec-know');
 const SENS = require('./lib/sec-sens');
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות לכל מנהל
 const C = require('./secretary')._core;
 const { gate, logData, hourKey, bad, deny, pre, wrap } = C;
 
@@ -286,6 +287,11 @@ async function secCal(request) {
     // תיקון סבב 2 (ליקוי 4): תזכורת מכרטיס בשיחה (cid = מזהה הכרטיס) – מזהה קבוע sec<cid>. אישור חוזר (למשל אחרי שהסימון נכשל) מחזיר את הקיימת ולא יוצר שנייה
     const cid = input.cid === undefined ? null : typeof input.cid === 'string' && /^(tp|cm)[0-9a-f]{16}$/.test(input.cid) && rem ? input.cid : false; // cm – התחייבות שאושרה (lib/sec-cmt.js, 24.11.2026)
     if (cid === false) throw bad('bad-cid', 'מזהה כרטיס לא תקין');
+    // 24.11.2026 (גיטי, סבב 4 חלק א; תיקון סבב 1, ליקוי 3): תזכורת מכרטיס (בשיחה / מהתחייבות) – "תזכורת" אסורה במסך ההרשאות של המנהל → לא נוצרת, שורה ביומן
+    if (cid && PERM.decide(await PERM.readRec(db, who.uid), 'rem').d === 'deny') {
+      await db.collection('sec_log').doc().set(C.logData(who.uid, 'mgr', 'permBlock', { tgt: 'rem', note: 'secCal:add' }));
+      throw new HttpsError('permission-denied', 'לפי מסך ההרשאות שלך גיטי לא רשאית לקבוע תזכורות. לא נוצר כלום. אפשר לשנות בהגדרות המזכירה ← הרשאות.', { reason: 'perm-deny' });
+    }
     if (cid) {
       const ex = await col.doc('sec' + cid).get();
       if (ex.exists) { if (ex.get('by') === who.uid && ex.get('rem') === true) return { ok: true, id: ex.id, already: true }; throw pre('exists', 'התזכורת כבר קיימת'); }

@@ -8,59 +8,53 @@ const P = require('../functions/lib/sec-perm');
 const NF = require('../../app-source/www/sec-notif.js');
 
 const A = 'mgrA', B = 'mgrB';
-const doc = (permA, permB) => ({ mgr: { [A]: { cv: 'v', perm: permA || {} }, [B]: { cv: 'v', perm: permB || {} } } });
+const rec = (perm) => ({ perm: perm || {}, pq: {} });
 
 describe('sec-perm: ההחלטה', () => {
   it('בלי הגדרה = לשאול (ask), ולא לבד', () => {
-    const r = P.decide(doc(), A, 'mail');
+    const r = P.decide(rec(), 'mail');
     assert.equal(r.d, 'ask'); assert.equal(r.why, 'pmAsk');
-    assert.equal(P.isAuto(doc(), A, 'mail'), false);
+    assert.equal(P.isAuto(rec(), 'mail'), false);
   });
-  it('deny חוסם', () => assert.deepEqual(P.decide(doc({ wa: { m: 'deny' } }), A, 'wa'), { d: 'deny', why: 'pmDeny' }));
-  it('approve = לאישור', () => assert.deepEqual(P.decide(doc({ mail: { m: 'approve' } }), A, 'mail'), { d: 'approve', why: 'pmApr' }));
-  it('auto = לבד', () => assert.deepEqual(P.decide(doc({ mail: { m: 'auto' } }), A, 'mail'), { d: 'auto', why: '' }));
-  it('"עצור הכל" גובר על לבד', () => assert.deepEqual(P.decide(doc({ mail: { m: 'auto' } }), A, 'mail', { stop: true }), { d: 'approve', why: 'pmStop' }));
+  it('deny חוסם', () => assert.deepEqual(P.decide(rec({ wa: { m: 'deny' } }), 'wa'), { d: 'deny', why: 'pmDeny' }));
+  it('approve = לאישור', () => assert.deepEqual(P.decide(rec({ mail: { m: 'approve' } }), 'mail'), { d: 'approve', why: 'pmApr' }));
+  it('auto = לבד', () => assert.deepEqual(P.decide(rec({ mail: { m: 'auto' } }), 'mail'), { d: 'auto', why: '' }));
+  it('"עצור הכל" גובר על לבד', () => assert.deepEqual(P.decide(rec({ mail: { m: 'auto' } }), 'mail', { stop: true }), { d: 'approve', why: 'pmStop' }));
   it('תקרת סכום: עד התקרה – לבד; מעליה, בלי סכום או בלי תקרה – לאישור', () => {
-    const d = doc({ fin: { m: 'auto', cap: 500 } });
-    assert.equal(P.decide(d, A, 'fin', { amount: 500 }).d, 'auto');
-    assert.equal(P.decide(d, A, 'fin', { amount: 120.5 }).d, 'auto');
-    assert.deepEqual(P.decide(d, A, 'fin', { amount: 500.01 }), { d: 'approve', why: 'pmCap' });
-    assert.equal(P.decide(d, A, 'fin', { amount: -900 }).d, 'approve'); // לפי ערך מוחלט
-    assert.equal(P.decide(d, A, 'fin', {}).d, 'approve');
-    assert.equal(P.decide(d, A, 'fin', { amount: NaN }).d, 'approve');
-    assert.equal(P.decide(doc({ fin: { m: 'auto' } }), A, 'fin', { amount: 1 }).d, 'approve'); // לבד בלי תקרה שמורה
+    const d = rec({ fin: { m: 'auto', cap: 500 } });
+    assert.equal(P.decide(d, 'fin', { amount: 500 }).d, 'auto');
+    assert.equal(P.decide(d, 'fin', { amount: 120.5 }).d, 'auto');
+    assert.deepEqual(P.decide(d, 'fin', { amount: 500.01 }), { d: 'approve', why: 'pmCap' });
+    assert.equal(P.decide(d, 'fin', { amount: -900 }).d, 'approve'); // לפי ערך מוחלט
+    assert.equal(P.decide(d, 'fin', {}).d, 'approve');
+    assert.equal(P.decide(d, 'fin', { amount: NaN }).d, 'approve');
+    assert.equal(P.decide(rec({ fin: { m: 'auto' } }), 'fin', { amount: 1 }).d, 'approve'); // לבד בלי תקרה שמורה
   });
   it('הזמנה מספק תמיד באישור – גם אם נשמר "לבד"; deny עדיין חוסם', () => {
-    assert.equal(P.decide(doc({ ord: { m: 'auto', cap: 1e6 } }), A, 'ord', { amount: 1 }).d, 'approve');
-    assert.equal(P.decide(doc({ ord: { m: 'deny' } }), A, 'ord').d, 'deny');
+    assert.equal(P.decide(rec({ ord: { m: 'auto', cap: 1e6 } }), 'ord', { amount: 1 }).d, 'approve');
+    assert.equal(P.decide(rec({ ord: { m: 'deny' } }), 'ord').d, 'deny');
   });
   it('סוג שאין לו ביצוע לבד (משימה, תזכורת, התחייבות) – לבד שנשמר בטעות = לאישור', () => {
-    for (const k of ['task', 'rem', 'cmt']) assert.equal(P.decide(doc({ [k]: { m: 'auto' } }), A, k).d, 'approve');
+    for (const k of ['task', 'rem', 'cmt']) assert.equal(P.decide(rec({ [k]: { m: 'auto' } }), k).d, 'approve');
   });
-  it('ההגדרה של מנהל אחד לא חלה על מנהל אחר', () => {
-    const d = doc({ mail: { m: 'auto' }, wa: { m: 'deny' } }, { mail: { m: 'deny' } });
-    assert.equal(P.decide(d, A, 'mail').d, 'auto');
-    assert.equal(P.decide(d, B, 'mail').d, 'deny');
-    assert.equal(P.decide(d, B, 'wa').d, 'ask'); // אצל ב' עדיין לא הוגדר
-    assert.equal(P.decide(d, 'mgrC', 'mail').d, 'ask');
-  });
-  it('אין בעלים ידוע / סוג לא מוכר / רשומה פגומה', () => {
-    assert.deepEqual(P.decide(doc({ mail: { m: 'auto' } }), '', 'mail'), { d: 'approve', why: 'pmOwner' });
-    assert.equal(P.decide(doc(), A, 'pay').d, 'deny');
-    assert.equal(P.decide(doc({ mail: { m: 'yes' } }), A, 'mail').d, 'ask');
-    assert.equal(P.decide({ mgr: { [A]: 'x' } }, A, 'mail').d, 'ask');
-    assert.equal(P.decide(null, A, 'mail').d, 'ask');
+  it('סוג לא מוכר / רשומה פגומה', () => {
+    assert.equal(P.decide(rec(), 'pay').d, 'deny');
+    assert.equal(P.decide(rec({ mail: { m: 'yes' } }), 'mail').d, 'ask');
+    assert.equal(P.decide({ perm: 'x' }, 'mail').d, 'ask');
+    assert.equal(P.decide(null, 'mail').d, 'ask');
   });
 });
 
 describe('sec-perm: שינוי הרשאות – רק המנהל עצמו', () => {
-  it('המנהל משנה את שלו – תמיד כך נשמר', () => {
+  it('המנהל משנה את שלו – תמיד כך נשמר, והשאלה על הסוג נסגרת', () => {
     const s = P.parseSet({ type: 'fin', m: 'auto', cap: 750, scope: 'always' }, A);
     assert.deepEqual(s, { uid: A, type: 'fin', m: 'auto', scope: 'always', save: true, cap: 750 });
-    const del = { del: 1 };
-    const up = P.updOf(s, 99, del);
-    assert.deepEqual(up, { ['mgr.' + A + '.pq.fin']: del, ['mgr.' + A + '.perm.fin']: { m: 'auto', t: 99, cap: 750 } });
-    assert.ok(Object.keys(up).every((k) => k.startsWith('mgr.' + A + '.'))); // נוגע רק ברשומה של המנהל עצמו
+    const r = P.nextRec({ perm: { mail: { m: 'deny' } }, pq: { fin: { t: 1 }, wa: { t: 2 } } }, s, 99);
+    assert.deepEqual(r, { perm: { mail: { m: 'deny' }, fin: { m: 'auto', t: 99, cap: 750 } }, pq: { wa: { t: 2 } } });
+  });
+  it('"תמיד כך" מחליף את כל הרשומה של הסוג (לא נשארת תקרה ישנה)', () => {
+    const r = P.nextRec({ perm: { fin: { m: 'auto', cap: 500, t: 1 } } }, P.parseSet({ type: 'fin', m: 'approve' }, A), 5);
+    assert.deepEqual(r.perm.fin, { m: 'approve', t: 5 });
   });
   it('מנהל א\' לא משנה את של מנהל ב\'', () => {
     assert.throws(() => P.parseSet({ uid: B, type: 'mail', m: 'auto' }, A), (e) => e.code === 'not-yours');
@@ -70,12 +64,11 @@ describe('sec-perm: שינוי הרשאות – רק המנהל עצמו', () =>
     for (const scope of ['once', 'again']) {
       const s = P.parseSet({ type: 'mail', m: 'auto', scope }, A);
       assert.equal(s.save, false);
-      assert.deepEqual(Object.keys(P.updOf(s, 1, null)), ['mgr.' + A + '.pq.mail']);
+      assert.deepEqual(P.nextRec({ perm: {}, pq: { mail: { t: 1 } } }, s, 1), { perm: {}, pq: {} });
     }
   });
   it('unset – חזרה ל"טרם הוגדר"', () => {
-    const s = P.parseSet({ type: 'wa', m: 'unset' }, A);
-    assert.deepEqual(Object.keys(P.updOf(s, 1, null)).sort(), ['mgr.' + A + '.perm.wa', 'mgr.' + A + '.pq.wa']);
+    assert.deepEqual(P.nextRec({ perm: { wa: { m: 'deny' } } }, P.parseSet({ type: 'wa', m: 'unset' }, A), 1), { perm: {}, pq: {} });
   });
   it('לבד בסוג כספי – חובה תקרה; הזמנה מספק ומשימה – לא לבד; ערכים לא תקינים', () => {
     assert.throws(() => P.parseSet({ type: 'fin', m: 'auto' }, A), (e) => e.code === 'bad-cap');
@@ -87,10 +80,8 @@ describe('sec-perm: שינוי הרשאות – רק המנהל עצמו', () =>
     assert.equal(P.parseSet({ type: 'ord', m: 'deny' }, A).m, 'deny');
     assert.equal(P.parseSet({ type: 'fin', m: 'approve' }, A).cap, undefined);
   });
-  it('stateOf – רק ההגדרות והשאלות של המנהל המחובר', () => {
-    const d = doc({ mail: { m: 'auto' } }, { wa: { m: 'deny' } });
-    d.mgr[A].pq = { wa: { t: 5, n: 2, note: 'x' }, mail: { t: 6 } }; // mail כבר הוגדר – השאלה לא מוצגת
-    const st = P.stateOf(d, A);
+  it('stateOf – רק ההגדרות והשאלות שברשומה (של המנהל המחובר)', () => {
+    const st = P.stateOf({ perm: { mail: { m: 'auto' } }, pq: { wa: { t: 5, n: 2, note: 'x' }, mail: { t: 6 } } }); // mail כבר הוגדר – השאלה לא מוצגת
     assert.deepEqual(st.m, { mail: { m: 'auto' } });
     assert.deepEqual(Object.keys(st.q), ['wa']);
     assert.equal(st.types.find((t) => t.k === 'ord').auto, false);
@@ -98,44 +89,65 @@ describe('sec-perm: שינוי הרשאות – רק המנהל עצמו', () =>
   });
 });
 
-// מסד מדומה מינימלי: מסמך אחד sec_cfg/main + יומן
-function fakeDb(data) {
-  const state = { main: data, log: [] };
-  const setPath = (o, path, v) => { const ks = path.split('.'); let c = o; for (let i = 0; i < ks.length - 1; i++) c = c[ks[i]] = c[ks[i]] && typeof c[ks[i]] === 'object' ? c[ks[i]] : {}; c[ks[ks.length - 1]] = v; };
+// מסד מדומה: מסמכים לפי נתיב (sec_perm/<uid>, sec_cfg/main) + יומן. FieldValue.delete() – מוחק
+function fakeDb(docs) {
+  const state = { docs: JSON.parse(JSON.stringify(docs || {})), log: [] };
+  const isDel = (v) => v && typeof v === 'object' && /FieldValue|Delete/i.test((v.constructor && v.constructor.name) || '');
+  const snap = (p) => ({ exists: !!state.docs[p], data: () => state.docs[p], get: (k) => (state.docs[p] || {})[k] });
+  const upd = (p, up) => { const o = state.docs[p]; for (const [k, v] of Object.entries(up)) { const ks = k.split('.'); let c = o; for (let i = 0; i < ks.length - 1; i++) c = c[ks[i]] = c[ks[i]] && typeof c[ks[i]] === 'object' ? c[ks[i]] : {}; if (isDel(v)) delete c[ks[ks.length - 1]]; else c[ks[ks.length - 1]] = v; } };
   const db = {
-    doc: (p) => ({ p }),
+    doc: (p) => ({ p, get: async () => snap(p) }),
     collection: () => ({ doc: () => ({ log: true }) }),
     runTransaction: async (fn) => fn({
-      get: async () => ({ exists: !!state.main, data: () => state.main }),
-      update: (ref, up) => { for (const [k, v] of Object.entries(up)) setPath(state.main, k, v); },
-      set: (ref, v) => { if (ref.log) state.log.push(v); },
+      get: async (ref) => snap(ref.p),
+      update: (ref, up) => upd(ref.p, up),
+      set: (ref, v) => { if (ref.log) state.log.push(v); else state.docs[ref.p] = JSON.parse(JSON.stringify(v)); },
     }),
   };
   return { db, state };
 }
-describe('sec-perm: שאלה בפעם הראשונה', () => {
-  it('נרשמת אצל המנהל עצמו, פעם אחת (מונה), ושורה אחת ביומן', async () => {
-    const { db, state } = fakeDb(doc());
+const main = (old) => ({ 'sec_cfg/main': { mgr: { [A]: Object.assign({ cv: 'v' }, old || {}), [B]: { cv: 'v' } } } });
+describe('sec-perm: אחסון נפרד לכל מנהל (sec_perm/{uid}) ושאלה בפעם הראשונה', () => {
+  it('השאלה נרשמת במסמך של המנהל עצמו, פעם אחת (מונה), ושורה אחת ביומן', async () => {
+    const { db, state } = fakeDb(main());
     assert.equal(await P.ask(db, A, 'mail', 'תשובה במייל'), true);
     assert.equal(await P.ask(db, A, 'mail', 'תשובה במייל'), false);
-    assert.equal(state.main.mgr[A].pq.mail.n, 2);
-    assert.equal(state.main.mgr[B].pq, undefined); // לא אצל מנהל אחר
+    assert.equal(state.docs['sec_perm/' + A].pq.mail.n, 2);
+    assert.equal(state.docs['sec_perm/' + B], undefined); // לא אצל מנהל אחר
+    assert.equal(state.docs['sec_cfg/main'].mgr[A].pq, undefined, 'לא נכתב למסמך המשותף');
     assert.equal(state.log.length, 1);
     assert.equal(state.log[0].act, 'permAsk'); assert.equal(state.log[0].by, A); assert.equal(state.log[0].tgt, 'mail');
   });
   it('לא נשאלת כשכבר הוגדר, לסוג לא מוכר, או למי שאינו מנהל שאישר תנאים', async () => {
-    const { db, state } = fakeDb(doc({ mail: { m: 'deny' } }));
+    const d = main(); d['sec_perm/' + A] = { perm: { mail: { m: 'deny' } }, pq: {} };
+    const { db, state } = fakeDb(d);
     assert.equal(await P.ask(db, A, 'mail'), false);
     assert.equal(await P.ask(db, A, 'pay'), false);
     assert.equal(await P.ask(db, 'stranger', 'mail'), false);
     assert.equal(state.log.length, 0);
   });
-  it('blockWhy: לבד – ריק; בלי הגדרה – סיבה + שאלה', async () => {
-    const { db, state } = fakeDb(doc({ wa: { m: 'auto' } }));
-    assert.equal(await P.blockWhy(db, state.main, A, 'wa', {}), '');
-    assert.equal(await P.blockWhy(db, state.main, A, 'mail', {}, 'x'), 'pmAsk');
-    assert.ok(state.main.mgr[A].pq.mail);
-    assert.equal(await P.blockWhy(db, state.main, B, 'wa', {}), 'pmAsk'); // ההגדרה של א' לא חלה על ב'
+  it('blockWhy: לבד – ריק; בלי הגדרה – סיבה + שאלה; ההגדרה של א\' לא חלה על ב\'; אין בעלים – לאישור בלי שאלה', async () => {
+    const d = main(); d['sec_perm/' + A] = { perm: { wa: { m: 'auto' } }, pq: {} };
+    const { db, state } = fakeDb(d);
+    assert.equal(await P.blockWhy(db, A, 'wa', {}), '');
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'x'), 'pmAsk');
+    assert.ok(state.docs['sec_perm/' + A].pq.mail);
+    assert.equal(await P.blockWhy(db, B, 'wa', {}), 'pmAsk');
+    assert.equal(await P.blockWhy(db, '', 'wa', {}), 'pmOwner');
+    assert.equal(state.log.filter((x) => x.by === '').length, 0);
+  });
+  it('גיבוי מהמיקום הישן (mgr.<uid>.perm): נקרא כשאין מסמך חדש, ובכתיבה הראשונה מועבר ונמחק מהמסמך המשותף', async () => {
+    const { db, state } = fakeDb(main({ perm: { mail: { m: 'auto' }, fin: { m: 'auto', cap: 300 } }, pq: { wa: { t: 7 } } }));
+    assert.equal(P.decide(await P.readRec(db, A), 'mail').d, 'auto', 'נקרא מהמיקום הישן');
+    assert.equal(P.decide(await P.readRec(db, B), 'mail').d, 'ask', 'לא של מנהל אחר');
+    const s = P.parseSet({ type: 'wa', m: 'deny' }, A);
+    await P.writeRec(db, A, (r) => P.nextRec(r, s, 9), { act: 'permSet' });
+    const nw = state.docs['sec_perm/' + A];
+    assert.deepEqual(nw.perm, { mail: { m: 'auto' }, fin: { m: 'auto', cap: 300 }, wa: { m: 'deny', t: 9 } }, 'ההגדרות הישנות נשמרו');
+    assert.deepEqual(nw.pq, {});
+    assert.equal(state.docs['sec_cfg/main'].mgr[A].perm, undefined, 'נמחק מהמסמך המשותף');
+    assert.equal(state.docs['sec_cfg/main'].mgr[A].cv, 'v', 'שאר הרשומה של המנהל נשארה');
+    assert.equal(state.log.length, 1);
   });
 });
 
@@ -157,5 +169,11 @@ describe('OTP – קודי אימות וסיסמאות לא נשמרים ולא 
     assert.equal(NF.appPerm({ perm: { m: { app: { m: 'deny' } } } }), 'deny');
     assert.equal(NF.appPerm({ perm: { m: {} } }), 'ask');
     assert.equal(NF.appPerm(null), 'approve'); // בלי מידע מהשרת – לא לבד
+  });
+  it('מכשיר: כלל שפותח משימה – "יצירת משימה" אסורה חוסמת גם כשההתראות "לבד" (תיקון סבב 1, ליקוי 2)', () => {
+    const st = { perm: { m: { app: { m: 'auto' }, task: { m: 'deny' } } }, stop: false };
+    assert.equal(NF.appPerm(st, 'task'), 'deny');
+    assert.equal(NF.appPerm(st, 'ign'), 'auto');
+    assert.equal(NF.appPerm({ perm: { m: { app: { m: 'auto' }, task: { m: 'approve' } } } }, 'task'), 'auto');
   });
 });

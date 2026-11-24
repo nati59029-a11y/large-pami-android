@@ -134,7 +134,7 @@ async function secComm(request) {
   }
   if (input.op === 'cmts') {
     // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל המחובר – "אישור התחייבות" אסור → בלי הצעות אצלו. טרם הוגדר ויש הצעות → שאלה בפעם הראשונה
-    const pd = PERM.decide({ mgr: g.cfg.mgr }, who.uid, 'cmt');
+    const pd = PERM.decide(await PERM.readRec(db, who.uid), 'cmt');
     if (pd.d === 'deny') return { ok: true, items: [], n: 0, perm: 'deny' };
     const r = await cmts(db, brLimited);
     if (pd.d === 'ask' && r.n) await PERM.ask(db, who.uid, 'cmt', 'הצעת התחייבות ממתינה');
