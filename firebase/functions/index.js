@@ -286,6 +286,8 @@ Object.assign(exports, require('./orders'));
 Object.assign(exports, require('./ord-pick'));
 // הצעת מחיר ללקוח (24.11.2026): qtSave, qtSet (ובהמשך כל פונקציה שנוספת ל-FNS ב-quotes.js – מיוצאת אוטומטית). quotes.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./quotes'));
+// הצעת מחיר – PDF ושליחה (24.11.2026, שלב 4): qtPdf, qtSend – quotes-pdf.js
+Object.assign(exports, require('./quotes-pdf'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
 // חשבונית ספק של עובד → pinv בשרת (22.11.2026): piInbox / piInboxB – טריגר על יצירת inbox/{id} ו-b/{bizId}/inbox/{id}, זיהוי + piCreate + צילום (pricing-inbox.js). לא מפורסם עד מיזוג ואישור
