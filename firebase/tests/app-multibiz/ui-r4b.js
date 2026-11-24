@@ -7,6 +7,8 @@ const BZ0 = ['larg', 'peami'].join('');
 const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
 let fail = 0; const check = (n, ok, info) => { if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + n + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// "הגדרות נוספות" בטופס המשימה (1f7a255) – התבניות בפנים; פותחים דרך הכפתור אם סגור
+const advOpen = async (pg) => { if (await pg.evaluate(() => !window.TKADV && !!document.querySelector('[data-a=tkAdv]'))) { await pg.click('[data-a=tkAdv]'); await sleep(300); } };
 const S = (v) => ({ stringValue: String(v) }), I = (v) => ({ integerValue: String(v) }), A = (a) => ({ arrayValue: { values: a.map(S) } });
 const T0 = H.T0, D1 = 864e5, H1 = 36e5;
 const DOCS = 'projects/demo-largpeami/databases/(default)/documents/';
@@ -157,7 +159,9 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   let tm = await open('m2-r4b', 'm@x.co'); let tp = tm.page;
   await tp.evaluate(() => { TKT = 'my'; go('tk'); }); await sleep(900);
   await tp.evaluate(() => { const f = document.querySelector('[data-a=tkwFold]'); if (f) f.click(); }); await sleep(400);
-  const openTpl = () => tp.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; return !!d; });
+  // מאז 1f7a255 התבניות נמצאות בתוך "הגדרות נוספות" (tkAdv, סגור כברירת מחדל) – פותחים אותו קודם דרך הכפתור
+  const openTpl = async () => { await advOpen(tp); return openTpl0(); };
+  const openTpl0 = () => tp.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; return !!d; });
   check('11 מנהל: ההגדרות נטענות מהענן (GET של tkt) והסעיף "תבניות" קיים', (await openTpl()) && LOG.some((l) => l.col === 'tkt' && l.list), LOG.filter((l) => l.col === 'tkt'));
   await tp.fill('form[data-f=tkAdd] textarea', 'לנקות את המקרר היטב');
   await tp.evaluate(() => { TKN.imgs = ['IMGX']; }); await tp.evaluate((i) => { TKN.imgs = [i]; }, IMG);
@@ -195,6 +199,7 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   await op.evaluate(() => { TKT = 'my'; go('tk'); }); await sleep(1000);
   await op.evaluate(() => { const f = document.querySelector('[data-a=tkwFold]'); if (f) f.click(); }); await sleep(400);
   await op.evaluate(() => { TKN.imgs = []; localStorage.setItem(LK('lp-tk-tpl'), JSON.stringify([{ txt: 'ישנה', to: [], np: 0 }])); tkRe(); }); await sleep(600);
+  await advOpen(op);
   await op.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; });
   let bt = await op.evaluate(() => document.body.innerText);
   check('16 שרת ישן (403 בטעינה): הודעה ברורה, בלי קריסה, בלי "העבר לענן"', /השרת עוד לא עודכן לתבניות בענן/.test(bt) && !/העבר לענן \(/.test(bt) && op.__errors.length === 0, op.__errors);
@@ -205,6 +210,7 @@ const yes = async (page) => { await waitFor(() => dlgOpen(page)); await page.cli
   K403 = false; let om2 = await open('m4-r4b', 'm@x.co'); let op2 = om2.page;
   await op2.evaluate(() => { TKT = 'my'; go('tk'); }); await sleep(1000);
   await op2.evaluate(() => { const f = document.querySelector('[data-a=tkwFold]'); if (f) f.click(); }); await sleep(300);
+  await advOpen(op2);
   K403 = true; await op2.fill('form[data-f=tkAdd] textarea', 'שמירה מול 403'); await op2.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => /תבניות/.test((x.querySelector('summary') || {}).innerText || '')); if (d) d.open = true; });
   await op2.click('[data-a=tkwTplSave]'); await sleep(800);
   const tt = await op2.evaluate(() => (document.getElementById('toast') || document.querySelector('.toast') || {}).innerText || '');
