@@ -63,7 +63,7 @@ const st=document.createElement('style');st.textContent=`
 .gr-unr{align-self:stretch;text-align:center;font-size:.8rem;font-weight:800;color:var(--onacc);background:var(--acc);border-radius:20px;padding:3px 0;scroll-margin-top:70px}
 #grcomp{position:sticky;bottom:0;background:var(--bg);padding:8px 0 calc(8px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
 .gr-comp{display:flex;gap:8px;align-items:flex-end}
-.gr-comp textarea{flex:1;min-height:44px;max-height:120px;border-radius:22px;padding:10px 14px;resize:none}
+.gr-comp textarea{flex:1;min-height:44px;max-height:40vh;border-radius:22px;padding:10px 14px;resize:none;overflow-y:auto;line-height:1.45;field-sizing:content}
 .gr-circ{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex:none;background:var(--card);border:1px solid var(--line);cursor:pointer;padding:0;color:var(--ink)}
 .gr-circ.go{background:var(--acc);color:var(--onacc);border:0;font-weight:800}
 .gr-circ[disabled]{opacity:.5}
@@ -171,8 +171,9 @@ function grPaint(opt){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)retur
  const bot=atBottom(),h0=document.documentElement.scrollHeight;m.innerHTML=msgsH(c);
  if(opt==='keep')window.scrollBy(0,document.documentElement.scrollHeight-h0);else if(opt==='bottom'||bot)window.scrollTo(0,document.documentElement.scrollHeight);
  grImgs()}
-function grComp(){const c=GR.c;if(!c||cur().v!=='grc')return;const e=$('#grcomp');if(e)e.innerHTML=compH(c)}
-function grScrollInit(){const u=document.getElementById('grunr');if(u)u.scrollIntoView({block:'start'});else window.scrollTo(0,document.documentElement.scrollHeight)}
+function grFit(t){t=t||$('#grtx');if(!t)return;try{t.style.height='auto';t.style.height=(t.scrollHeight+(t.offsetHeight-t.clientHeight))+'px'}catch(e){}}
+function grComp(){const c=GR.c;if(!c||cur().v!=='grc')return;const e=$('#grcomp');if(e){e.innerHTML=compH(c);grFit()}}
+function grScrollInit(){grFit();const u=document.getElementById('grunr');if(u)u.scrollIntoView({block:'start'});else window.scrollTo(0,document.documentElement.scrollHeight)}
 async function grEnter(c){
  try{
   try{const r=await fsx('/grp/'+c.gid+'/r/'+SY.uid),f=fvj({mapValue:r})||{};c.rt=+f.t||0;c.dS=+f.d||0;c.muw=f.mu===true}catch(e){if(e.code!==404)throw e}
@@ -260,7 +261,7 @@ ACT.grVid=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.
   v.innerHTML=`<div class="vbar"><button class="btn" data-a="grVidX">חזרה</button></div><div class="vimg"><video controls autoplay playsinline src="${esc(GR.vu)}" style="max-width:100%;max-height:80vh"></video></div>`;document.body.append(v)}
  catch(e){toast(e&&e.offline?e.message:'לא הצלחנו לפתוח את הסרטון')}};
 ACT.grVidX=()=>{const v=document.getElementById('viewer');if(v){const e=v.querySelector('video');if(e){try{e.pause();e.removeAttribute('src');e.load()}catch(x){}}v.remove()}if(GR.vu){URL.revokeObjectURL(GR.vu);GR.vu=''}};
-INP.grDraft=el=>{if(GR.c)GR.c.draft=el.value};
+INP.grDraft=el=>{if(GR.c)GR.c.draft=el.value;grFit(el)};
 /* שליחה */
 const newMid=()=>{const m=uid();return idOk(m)?m:'m'+Date.now().toString(36)};
 async function grPost(c,k,txt,x){
@@ -433,14 +434,14 @@ const DTE={perm:'אין הרשאה למיקרופון. אפשרו לאפליקצ
 async function spP(){const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.LpSpeech;if(!P||!isNat()||(C.isPluginAvailable&&!C.isPluginAvailable('LpSpeech')))return null;
  try{const r=await P.available();return r&&r.ok?P:null}catch(e){return null}}
 const dtTxt=()=>[DT.base,DT.fin,DT.par].map(x=>String(x||'').trim()).filter(Boolean).join(' ').slice(0,2000);
-function dtShow(){const c=GR.c;if(!DT.on||!c||c.gid!==DT.gid)return;const v=dtTxt();c.draft=v;const t=$('#grtx');if(t){t.readOnly=true;if(t.value!==v)t.value=v;try{t.scrollTop=t.scrollHeight}catch(e){}}}
+function dtShow(){const c=GR.c;if(!DT.on||!c||c.gid!==DT.gid)return;const v=dtTxt();c.draft=v;const t=$('#grtx');if(t){t.readOnly=true;if(t.value!==v)t.value=v;grFit(t);try{t.scrollTop=t.scrollHeight}catch(e){}}}
 function dtOff(){clearInterval(DT.tm);clearTimeout(DT.st);const hs=DT.hs||[];DT.hs=[];hs.forEach(h=>{try{h&&h.remove&&h.remove()}catch(e){}});Object.assign(DT,{on:0,P:null,stp:0})}
 function dtEnd(code){if(!DT.on)return;const v=dtTxt(),got=v.trim()!==String(DT.base||'').trim(),gid=DT.gid;dtOff();const c=GR.c;
  if(c&&c.gid===gid){c.draft=v;grComp();const t=$('#grtx');if(t){t.focus();try{t.setSelectionRange(v.length,v.length)}catch(e){}}}
  if(code&&code!=='pause'&&(code!=='silence'||!got))toast(DTE[code]||DTE.fail);else if(got)toast('אפשר לערוך את הטקסט ואז לשלוח')}
 function dtStop(){if(!DT.on||DT.stp)return;DT.stp=1;const P=DT.P;try{P.stop().catch(()=>dtEnd(''))}catch(e){dtEnd('')}DT.st=setTimeout(()=>dtEnd(''),4000)}
 /* שליחה או יציאה באמצע הקלטה: עוצרים מיד ושומרים את מה שנכתב */
-function dtFlush(){if(!DT.on)return;const v=dtTxt(),gid=DT.gid;try{DT.P&&DT.P.cancel().catch(()=>{})}catch(e){}dtOff();const c=GR.c;if(c&&c.gid===gid){c.draft=v;const t=$('#grtx');if(t){t.readOnly=false;t.value=v}}}
+function dtFlush(){if(!DT.on)return;const v=dtTxt(),gid=DT.gid;try{DT.P&&DT.P.cancel().catch(()=>{})}catch(e){}dtOff();const c=GR.c;if(c&&c.gid===gid){c.draft=v;const t=$('#grtx');if(t){t.readOnly=false;t.value=v;grFit(t)}}}
 ACT.grMic=async()=>{const c=GR.c;if(!c||c.sending)return;if(DT.on)return dtStop();
  const P=await spP();if(!P)return toast('הקלטה עם הקלדה אוטומטית זמינה בטלפון עם הגרסה המעודכנת של האפליקציה. אפשר להקליד.');
  if(GR.c!==c||DT.on)return;const t=$('#grtx');
