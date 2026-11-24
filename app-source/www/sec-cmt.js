@@ -30,6 +30,7 @@ async function load(){if(M.b)return;M.b=1;M.err='';
  finally{M.b=0;M.ld=1;re()}}
 function cxOk(){try{const c=cx();return !!(c&&c.on())}catch(e){return false}}
 const byId=id=>(M.L||[]).find(c=>c.cid===id)||null;
+const meU=()=>typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:'';
 /* 24.11.2026 (סבב 4 חלק ב): ch:'ord' – טיוטת הזמנה מספק מהלשונית "ניתוחים" (secPrefs op:'ordDraft'). באישור – משימה בלבד, עם נוסח להעתקה. אין שליחה לספק */
 const isOrd=c=>c&&c.ch==='ord';
 const srcL=c=>isOrd(c)?'הצעת הזמנה לפי הקצב הקודם':(CHL[c.ch]||'')+(c.ch==='grp'&&c.grp?' "'+c.grp+'"':'')+' מ'+(c.from||'שולח לא ידוע');
@@ -43,9 +44,11 @@ function prepTasks(){if(prep)return;prep=1;const c=cx();
 
 function cardH(c){const id=esc(c.cid),rem=c.kind==='rem',can=cxOk(),dis=c.busy?' disabled':'';
  const F=(f,x)=>`data-c="cmtF" data-id="${id}" data-f="${f}"${x||''}`;
- const S=typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L.slice(0,30):[],sel=new Set((c.to||[]).map(z=>z.uid));
+ const me=meU(),S=(typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L:[]).filter(z=>!(isOrd(c)&&me&&z.uid===me)).slice(0,30),sel=new Set((c.to||[]).map(z=>z.uid));
+ /* 24.11.2026 (סבב 4ג, החלטת המשתמש): משימת הזמנה – אפשר גם "לעצמי" (המנהל המאשר), לבד או יחד עם עובדים */
+ const meH=isOrd(c)&&me?`<label class="chip" style="min-height:40px"><input type="checkbox" ${F('me')}${sel.has(me)?' checked':''}${c.all?' disabled':''}> לעצמי</label>`:'';
  const kindH=isOrd(c)?(can?'':'<p class="note" style="margin:4px 0">כדי לאשר צריך את תוספת המשימות.</p>'):can?`<label class="note" style="display:block;margin:4px 0">מה ליצור <select ${F('kind')} style="min-height:40px"><option value="task"${rem?'':' selected'}>משימה לעובד/ים</option><option value="rem"${rem?' selected':''}>תזכורת לי</option></select></label>`:'';
- const whoH=rem?'':`<fieldset style="border:0;padding:0;margin:4px 0"><legend class="note">למי</legend><div class="secrow" style="flex-wrap:wrap"><label class="chip" style="min-height:40px"><input type="checkbox" ${F('all')}${c.all?' checked':''}> כל העובדים</label>${S.map(z=>`<label class="chip" style="min-height:40px"><input type="checkbox" ${F('to',` data-u="${esc(z.uid)}"`)}${sel.has(z.uid)?' checked':''}${c.all?' disabled':''}> ${esc(z.name)}</label>`).join('')}${S.length?'':'<span class="note">טוען את רשימת העובדים…</span>'}</div></fieldset>`;
+ const whoH=rem?'':`<fieldset style="border:0;padding:0;margin:4px 0"><legend class="note">למי</legend><div class="secrow" style="flex-wrap:wrap">${meH}<label class="chip" style="min-height:40px"><input type="checkbox" ${F('all')}${c.all?' checked':''}> כל העובדים</label>${S.map(z=>`<label class="chip" style="min-height:40px"><input type="checkbox" ${F('to',` data-u="${esc(z.uid)}"`)}${sel.has(z.uid)?' checked':''}${c.all?' disabled':''}> ${esc(z.name)}</label>`).join('')}${S.length?'':'<span class="note">טוען את רשימת העובדים…</span>'}</div></fieldset>`;
  const D=dups(c),dupH=D.length?`<div class="note" role="alert" style="margin:4px 0"><b>שימו לב: נראה שכבר יש משימה דומה</b> (אזהרה בלבד – אפשר לאשר בכל זאת):<ul style="margin:2px 0;padding-inline-start:18px">${D.map(x=>`<li>${esc(String(x.task&&x.task.txt||'').slice(0,100))}${x.why&&x.why.length?' · '+esc(x.why.join(', ')):''}</li>`).join('')}</ul></div>`:'';
  return `<div class="secli" data-cmt="${id}"><p style="margin:0"><b>${esc(whoL(c))}</b> <span class="sectags">${esc(srcL(c))}</span>${c.d?` <span class="sectags g">עד ${esc(dShow(c.d))}</span>`:''}</p>
  ${c.prev?`<p class="note" dir="auto" style="margin:4px 0;overflow-wrap:anywhere">${isOrd(c)?'נוסח להעתקה (נשמר במשימה – גיטי לא שולחת לספק): ':''}"${esc(c.prev)}"</p>`:''}${kindH}
@@ -70,6 +73,7 @@ CHG.cmtF=el=>{const c=byId(el.dataset.id);if(!c||c.st||c.busy)return;const f=el.
  if(f==='txt')c.txt=String(el.value||'').trim().slice(0,c.kind==='rem'?120:400);
  else if(f==='d')c.d=/^\d{4}-\d{2}-\d{2}$/.test(el.value)?el.value:'';
  else if(f==='to'){const u=el.dataset.u,z=(typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L:[]).find(x=>x.uid===u);c.to=(c.to||[]).filter(x=>x.uid!==u);if(el.checked&&z)c.to.push({uid:z.uid,name:z.name});re()}
+ else if(f==='me'){const u=meU();if(!u)return;c.to=(c.to||[]).filter(x=>x.uid!==u);if(el.checked)c.to.unshift({uid:u,name:(typeof fbBy==='function'&&fbBy())||'מנהל'});re()}
  else if(f==='all'){c.all=!!el.checked;re()}
  else if(f==='kind'){c.kind=el.value==='rem'?'rem':'task';if(c.kind==='rem')c.txt=String(c.txt||'').slice(0,120);re()}};
 function sync(c,box){if(!box)return;const v=f=>box.querySelector(`[data-c=cmtF][data-f=${f}]`);let e;
@@ -100,15 +104,15 @@ async function okRem(c,force,quiet){c.busy=1;re();
  try{if(!c.ref){const d={op:'add',title:c.txt.slice(0,120),d:c.d,rem:true,cid:c.cid};if(force)d.force=true;if(quiet)d.auto=true;/* "לבד" – השרת עוצר ב"עצור הכל" */
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){c.busy=0;re();return ask('התאריך נופל ב'+r.warn.kind+'. לקבוע את התזכורת בכל זאת?',()=>okRem(c,true),'כן, לקבוע')}
-   c.ref=r&&r.id||'sec'+c.cid}
-  if(!(await fin(c,'rem',()=>fnCall('secCal',{op:'del',id:'sec'+c.cid}))))return;c.ref='';done(c,'ok');toast(quiet?'✓ גיטי קבעה לבד תזכורת מהתחייבות':'✓ התזכורת נקבעה')}
+   c.ref=r&&r.id||'sec'+c.cid;if(r&&r.moved)c.mv=r.moved/* שבת/חג – השרת העביר למוצאי שבת/חג */}
+  if(!(await fin(c,'rem',()=>fnCall('secCal',{op:'del',id:'sec'+c.cid}))))return;c.ref='';done(c,'ok');toast((quiet?'✓ גיטי קבעה לבד תזכורת מהתחייבות':'✓ התזכורת נקבעה')+(c.mv?' – הועברה למוצאי שבת/חג ('+dShow(c.mv.d)+' '+c.mv.tm+')':''))}
  catch(e){c.busy=0;toast(c.ref?'התזכורת נקבעה, אבל הסימון נכשל. לחצו "אישור" שוב':(e&&e.message)||'הקביעה נכשלה');re()}}
 ACT.cmtOk=async el=>{const c=byId(el.dataset.id);if(!c||c.st||c.busy)return;sync(c,el.closest('[data-cmt]'));
  if(!c.txt)return toast(c.kind==='rem'?'כתבו על מה להזכיר':'כתבו מה צריך לעשות');
  if(isOrd(c))c.kind='task';
  if(c.kind==='rem'){if(!c.d)return toast('בחרו תאריך לתזכורת');return okRem(c,false)}
  const k=cx();if(!cxOk()||!k)return toast('אי אפשר לפתוח משימה כאן. אפשר לבחור "תזכורת לי"');
- if(!c.all&&!(c.to||[]).length)return toast('סמנו למי המשימה, או "כל העובדים"');
+ if(!c.all&&!(c.to||[]).length)return toast(isOrd(c)?'סמנו למי המשימה: "לעצמי", עובד או "כל העובדים"':'סמנו למי המשימה, או "כל העובדים"');
  c.busy=1;re();
  try{const rv=await k.rvNow();
   if(!(await claim(c)))return;/* תפיסה (או רענון התפיסה) ממש לפני היצירה */

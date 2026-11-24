@@ -2035,9 +2035,9 @@ async function tpRem(c,mid,force){c.busy=1;cxRe();
  try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true,cid:c.id};if(c.au)d.auto=true;/* auto – אישור "לבד": השרת עוצר אותו ב"עצור הכל" */if(c.tm)d.tm=c.tm;/* cid – מזהה קבוע (sec<cid>): אישור חוזר לא יוצר תזכורת שנייה */if(force)d.force=true;
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){const w=r.warn;c.busy=0;cxRe();return ask('התאריך נופל ב'+w.kind+'. לקבוע את התזכורת בכל זאת? (אפשר גם לבחור בכרטיס תאריך אחר, למשל '+dShort(w.next)+')',()=>tpRem(c,mid,true),'כן, לקבוע')}
-   c.ref=r&&r.id||''}
+   c.ref=r&&r.id||'';if(r&&r.moved)c.mv=r.moved/* "לבד" בשבת/חג – השרת העביר למוצאי שבת/חג */}
   await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'rem',ref:c.ref});
-  c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה')}
+  c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה'+(c.mv?' – הועברה למוצאי שבת/חג ('+dShort(c.mv.d)+' '+c.mv.tm+')':''))}
  catch(e){if(e&&(e.reason==='perm-deny'||e.reason==='stopped'))toast(e.message);else if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
  finally{c.busy=0;cxRe()}}
 ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const box=el.closest('[data-card]');if(box)tpSync(c,box);

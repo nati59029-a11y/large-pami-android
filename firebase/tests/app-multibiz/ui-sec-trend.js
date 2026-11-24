@@ -105,11 +105,19 @@ const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose
     if (card) {
       check('בכרטיס: בלי "ההודעה המקורית" ובלי "תזכורת לי"', !(await card.$('[data-a=cmtSrc]')) && !(await card.$('select[data-f=kind]')));
       if (shots) await card.screenshot({ path: path.join(shots, 'ord-card-360.png') });
-      await page.evaluate((id) => { const c = document.querySelector('[data-cmt=' + id + '] [data-f=all]'); if (c) { c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); } }, CID); await H.settle(page, 300);
+      // סבב 4ג: "לעצמי" – משימת ההזמנה למנהל המאשר (to = המשתמש עצמו)
+      check('בכרטיס: אפשרות "לעצמי"', /לעצמי/.test(await card.innerText()) && !!(await card.$('[data-f=me]')));
+      if (shots) await card.screenshot({ path: path.join(shots, 'ord-card-me-360.png') });
+      await page.evaluate((id) => { const c = document.querySelector('[data-cmt=' + id + '] [data-f=me]'); if (c) { c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); } }, CID); await H.settle(page, 300);
+      const tasks = [];
+      await ctx.route(/\/tasks\?documentId=/, async (route) => { try { tasks.push(JSON.parse(route.request().postData() || '{}')); } catch (e) { /* */ } return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }); });
       const n0 = bodies.length;
       await page.evaluate((id) => document.querySelector('[data-cmt=' + id + '] [data-a=cmtOk]').click(), CID); await H.settle(page, 1500);
       const after = bodies.slice(n0).filter((b) => b[0] === 'secPrefs').map((b) => b[1]);
       check('אישור: claim ואז ok כמשימה', after.length >= 2 && after[0].st === 'claim' && after[after.length - 1].st === 'ok' && after[after.length - 1].kind === 'task', after);
+      const me = await page.evaluate(() => SY.uid), tf = tasks[0] && tasks[0].fields || {};
+      const to = ((tf.to || {}).arrayValue || {}).values || [];
+      check('"לעצמי": המשימה נפתחה למנהל עצמו (to, ow)', to.length === 1 && to[0].stringValue === me && (tf.ow || {}).stringValue === me, { to, ow: tf.ow, me, n: tasks.length });
     }
     check('בלי שגיאות JS', errs.length === 0, errs);
     void cnt0;

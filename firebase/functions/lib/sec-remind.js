@@ -340,7 +340,8 @@ function daySum(o) {
     if (fin.late && fin.late.n) L.push('חשבוניות באיחור: ' + fin.late.n + ', סך ' + ils(fin.late.sum));
     // 24.11.2026 (גיטי סבב 4 חלק ב): הוצאות חריגות – בסיכום הבוקר בלבד, כל חריגה פעם אחת (anSeen)
     if (o.kind === 'am') {
-      const seen = o.anSeen || {}, A = TR.anomalies(fin, { today: o.today }).filter((x) => !seen[x.key]);
+      // 24.11.2026 (סבב 4ג, הערת הבודק): מזהה ספק בפורמט הקודם (an:sup:<שם>:<חודש>, לפני שנוספה הקטגוריה) – נחשב שכבר הוצג, כדי שחריגה לא תחזור אחרי הפריסה
+      const seen = o.anSeen || {}, A = TR.anomalies(fin, { today: o.today }).filter((x) => !seen[x.key] && !(x.by === 'sup' && seen['an:sup:' + x.name + ':' + x.month]));
       an = A.map((x) => x.key);
       if (A.length) {
         L.push('הוצאות חריגות (30% ומעלה מעל ממוצע 3 החודשים הקודמים): ' + A.length);

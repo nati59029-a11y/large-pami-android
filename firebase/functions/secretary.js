@@ -528,8 +528,12 @@ async function secPrefs(request) {
     // באישור – משימה "להזמין מספק X" עם נוסח להעתקה (אותה זרימה כמו התחייבות: claim → tasks/sec<cid> → ok). אין שום שליחה לספק.
     // מזהה קבוע לפי הספק ותאריך החשבונית האחרונה: לחיצה כפולה או שני מנהלים – הצעה אחת (create)
     if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא מכין הזמנות לכל העסק');
-    const od = require('./lib/sec-trend').orderDraft(input);
+    const TRD = require('./lib/sec-trend');
+    const od = TRD.orderDraft(input, dayKey(t));
     if (!od) throw bad('bad-input', 'ערך לא תקין');
+    // 24.11.2026 (סבב 4ג, הערת הבודק): הספק חייב להופיע בנתוני הכספים שבענן (מראה הכספים, sec_mirror/fin). בלי מראה / בלי רשימת ספקים – אי אפשר לבדוק, ממשיכים (טיוטה לאישור בלבד)
+    const fm = await db.doc('sec_mirror/fin').get();
+    if (fm.exists && TRD.supKnown(ST.cleanFin(parseJ(fm.get('data'))), od.sup) === false) throw pre('not-found', 'הספק "' + od.sup + '" לא נמצא בנתוני הכספים. פתחו את האפליקציה במכשיר שבו נשמרים הנתונים ונסו שוב.');
     const pd = PERM.decide(await PERM.readRec(db, who.uid), 'ord');
     if (pd.d === 'ask') await PERM.ask(db, who.uid, 'ord', 'טיוטת הזמנה מספק');
     const cid = 'cm' + require('node:crypto').createHash('sha256').update(od.key, 'utf8').digest('hex').slice(0, 16);

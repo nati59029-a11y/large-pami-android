@@ -131,16 +131,28 @@ function orderTips(fin, o) {
 // "הכן הזמנה" (החלטת המשתמש 24.11.2026): טיוטה בלבד. בדיקת הקלט ובניית הנוסח – כאן; השרת (secPrefs op:'ordDraft') שומר אותה כהצעה במרכז האישורים
 //   (sec_cmt ch:'ord', מזהה קבוע מ-key – הצעה אחת לכל ספק וחשבונית אחרונה), ובאישור נפתחת משימה עם הנוסח להעתקה. אין שליחה לספק.
 const cleanS = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n) : '');
-function orderDraft(o) {
-  o = o || {};
-  const sup = cleanS(o.sup, 60), last = DAY_RE.test(o.last) ? o.last : '', every = Number.isInteger(o.every) && o.every >= 1 && o.every <= 365 ? o.every : 0;
+// 24.11.2026 (סבב 4ג, הערת הבודק): בדיקה קפדנית – ספק: מחרוזת עד 60 תווים (לא נחתך), בלי תגיות HTML (< >); last – תאריך אמיתי ולא אחרי today
+//   (כשנמסר); every – מספר שלם 1–365. ערך לא תקין – null (השרת מחזיר bad-input)
+const realDay = (d) => typeof d === 'string' && DAY_RE.test(d) && dayStr(dayNum(d)) === d;
+function orderDraft(o, today) {
+  o = o && typeof o === 'object' ? o : {};
+  const raw = typeof o.sup === 'string' && o.sup.length <= 200 ? cleanS(o.sup, 201) : '';
+  const sup = raw.length <= 60 && !/[<>]/.test(raw) ? raw : '';
+  const last = realDay(o.last) && !(realDay(today) && o.last > today) ? o.last : '', every = Number.isInteger(o.every) && o.every >= 1 && o.every <= 365 ? o.every : 0;
   if (!sup || !last || !every) return null;
   const dm = (+last.slice(8, 10)) + '.' + (+last.slice(5, 7));
   return { key: 'ord|' + sup.toLowerCase() + '|' + last, sup, last, every, what: 'להזמין מספק ' + sup,
     prev: 'שלום, נבקש להזמין כרגיל (כמו בהזמנה הקודמת מ-' + dm + '). נא לאשר מועד אספקה. תודה' };
 }
 
-const api = { PCT, MIN, HIST, MONTHS, ORD_MIN, addMon, dayNum, dayStr, pct, isAnomaly, anomalies, trends, orderTips, orderDraft, seriesOf };
+// ספק קיים בנתוני הכספים (fin.spn, כרטיס הוצאה – 'e'), לפי אותו ניקוי והשוואה בלי רישיות. בלי רשימת ספקים – null (אי אפשר לבדוק)
+function supKnown(fin, sup) {
+  if (!fin || !Array.isArray(fin.spn) || !fin.spn.length) return null;
+  const k = cleanS(sup, 60).toLowerCase();
+  return !!k && fin.spn.some((r) => Array.isArray(r) && r[1] === 'e' && cleanS(r[0], 60).toLowerCase() === k);
+}
+
+const api = { PCT, MIN, HIST, MONTHS, ORD_MIN, addMon, dayNum, dayStr, pct, isAnomaly, anomalies, trends, orderTips, orderDraft, supKnown, seriesOf };
 // שרת (Node) – module.exports; אפליקציה (דפדפן) – window.SecTrend
 if (typeof module === 'object' && module.exports) module.exports = api; else root.SecTrend = api;
 })(typeof self !== 'undefined' ? self : this);

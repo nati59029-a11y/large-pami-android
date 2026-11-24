@@ -185,6 +185,23 @@ describe('sec-trend: "הכן הזמנה" – טיוטה בלבד', () => {
     for (const x of [{}, { sup: '', last: '2026-11-13', every: 7 }, { sup: 'x', last: '13/11', every: 7 }, { sup: 'x', last: '2026-11-13', every: 0 }, { sup: 'x', last: '2026-11-13', every: 1.5 }, { sup: 5, last: '2026-11-13', every: 7 }]) assert.equal(TR.orderDraft(x), null, JSON.stringify(x));
     assert.equal(TR.orderDraft({ sup: 'a\u202eb\u0007c', last: '2026-11-13', every: 7 }).sup, 'a b c', 'תווי בקרה וכיוון מוסרים');
   });
+  it('סבב 4ג: אימות קפדני – אורך, HTML, תאריך אמיתי ולא עתידי, טיפוסים', () => {
+    const ok = { sup: 'ספק הקמח', last: '2026-11-13', every: 7 };
+    assert.ok(TR.orderDraft(ok, '2026-11-24'));
+    assert.ok(TR.orderDraft(Object.assign({}, ok, { sup: 'א'.repeat(60) })), '60 תווים – תקין');
+    for (const x of [{ sup: 'א'.repeat(61) }, { sup: 'x'.repeat(300) }, { sup: '<b>ספק</b>' }, { sup: 'a<img src=x onerror=1>' }, { sup: ['ספק'] }, { sup: { a: 1 } },
+      { last: '2026-02-30' }, { last: '2026-11-25' }, { last: 20261113 }, { every: '7' }, { every: 366 }, { every: -1 }])
+      assert.equal(TR.orderDraft(Object.assign({}, ok, x), '2026-11-24'), null, JSON.stringify(x));
+    assert.equal(TR.orderDraft(null), null);
+  });
+  it('סבב 4ג: supKnown – ספק הוצאה קיים ברשימת הספקים; בלי רשימה – null', () => {
+    const fin = { spn: [['ספק הקמח', 'e', 'ספקים'], ['לקוח', 'i', 'מכירות']] };
+    assert.equal(TR.supKnown(fin, 'ספק  הקמח'), true);
+    assert.equal(TR.supKnown(fin, 'לקוח'), false, 'כרטיס הכנסה – לא ספק');
+    assert.equal(TR.supKnown(fin, 'ספק אחר'), false);
+    assert.equal(TR.supKnown({}, 'ספק הקמח'), null);
+    assert.equal(TR.supKnown(null, 'ספק הקמח'), null);
+  });
 });
 
 describe('sec-trend: שרת – cleanFin, כלים בצ\'אט, סיכום בוקר', () => {
@@ -225,6 +242,9 @@ describe('sec-trend: שרת – cleanFin, כלים בצ\'אט, סיכום בוק
     assert.deepEqual(a.an, ['an:sup:ספקים:A:2026-11']);
     const b = R.daySum(Object.assign({}, o, { anSeen: { 'an:sup:ספקים:A:2026-11': 1 } }));
     assert.doesNotMatch(b.body, /הוצאות חריגות/); assert.deepEqual(b.an, []);
+    // סבב 4ג: חריגה שהוצגה לפני הפריסה (מזהה בפורמט הקודם, בלי קטגוריה) – לא חוזרת
+    const c = R.daySum(Object.assign({}, o, { anSeen: { 'an:sup:A:2026-11': 1 } }));
+    assert.doesNotMatch(c.body, /הוצאות חריגות/); assert.deepEqual(c.an, []);
     assert.doesNotMatch(R.daySum(Object.assign({}, o, { kind: 'pm' })).body, /הוצאות חריגות/);
   });
 });

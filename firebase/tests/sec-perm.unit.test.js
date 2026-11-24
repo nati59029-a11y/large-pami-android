@@ -286,3 +286,31 @@ describe('OTP – קודי אימות וסיסמאות לא נשמרים ולא 
     assert.equal(NF.appPerm({ perm: { m: { app: { m: 'auto' }, task: { m: 'approve' } } } }, 'task'), 'auto');
   });
 });
+
+// 24.11.2026 (סבב 4ג): תזכורת "לבד" בשבת / יום טוב – עוברת למוצאי שבת/חג 21:00 (השרת: secCal op:'add' עם auto:true, lib/sec-know.js restMove)
+describe('תזכורת "לבד" בשבת/חג – למוצאי שבת/חג', () => {
+  const K = require('../functions/lib/sec-know');
+  it('שבת (בלי שעה / בבוקר) – מוצאי שבת 21:00; כבר במוצאי שבת – לא זז', () => {
+    assert.deepEqual(K.restMove('2026-11-28', ''), { d: '2026-11-28', tm: '21:00' });
+    assert.deepEqual(K.restMove('2026-11-28', '10:00'), { d: '2026-11-28', tm: '21:00' });
+    assert.equal(K.restMove('2026-11-28', '22:00'), null);
+  });
+  it('ערב שבת: מ-16:00 – למוצאי שבת; בבוקר או בלי שעה – לא זז; יום חול – לא זז', () => {
+    assert.deepEqual(K.restMove('2026-11-27', '17:00'), { d: '2026-11-28', tm: '21:00' });
+    assert.equal(K.restMove('2026-11-27', '10:00'), null);
+    assert.equal(K.restMove('2026-11-27', ''), null);
+    assert.equal(K.restMove('2026-11-29', '10:00'), null);
+    assert.equal(K.restMove('2026-11-24', '23:00'), null);
+  });
+  it('יום טוב: פסח (ט"ו ניסן, חמישי), ראש השנה שמתחיל בשבת – ליום המנוחה האחרון ברצף; חול המועד – לא זז', () => {
+    assert.deepEqual(K.restMove('2027-04-22', '09:00'), { d: '2027-04-22', tm: '21:00' });
+    assert.deepEqual(K.restMove('2027-04-21', '18:00'), { d: '2027-04-22', tm: '21:00' }, 'ערב פסח בערב');
+    assert.deepEqual(K.restMove('2027-10-02', '09:00'), { d: '2027-10-03', tm: '21:00' }, 'שבת + ב׳ דראש השנה');
+    assert.deepEqual(K.restMove('2027-06-11', ''), { d: '2027-06-12', tm: '21:00' }, 'שבועות בשישי + שבת');
+    assert.equal(K.restMove('2027-04-23', '10:00'), null, 'חול המועד בבוקר');
+  });
+  it('קלט לא תקין – null', () => {
+    assert.equal(K.restMove('28/11/2026', ''), null);
+    assert.equal(K.restMove('2026-02-30', ''), null);
+  });
+});
