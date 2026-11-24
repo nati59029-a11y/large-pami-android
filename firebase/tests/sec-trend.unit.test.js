@@ -74,7 +74,7 @@ describe('sec-trend: anomalies על נתוני כספים', () => {
     const L = TR.anomalies(f, { today: T });
     assert.equal(L.length, 1);
     assert.deepEqual([L[0].by, L[0].name, L[0].month, L[0].amount, L[0].avg3, L[0].overPct], ['sup', 'A', '2026-11', 1500, 1000, 50]);
-    assert.equal(L[0].key, 'an:sup:A:2026-11');
+    assert.equal(L[0].key, 'an:sup:ספקים:A:2026-11');
     assert.deepEqual(TR.anomalies(f, { today: T }).map((x) => x.key), [L[0].key], 'אותה תוצאה בכל קריאה');
   });
   it('זיכוי באותו חודש מוריד את הסכום – אחרי הזיכוי כבר לא חריג', () => {
@@ -98,7 +98,20 @@ describe('sec-trend: anomalies על נתוני כספים', () => {
     m['2026-07'].i = { C: 100 }; m['2026-10'].i = { C: 900 };
     m['2026-07'].c = { 'ספקים': 1000 }; m['2026-08'].c = { 'ספקים': 1000 }; m['2026-09'].c = { 'ספקים': 1000 }; m['2026-10'].c = { 'ספקים': 2000 };
     const L = TR.anomalies(finOf(m), { today: '2026-11-02' });
-    assert.deepEqual(L.map((x) => x.key), ['an:sup:A:2026-10']);
+    assert.deepEqual(L.map((x) => x.key), ['an:sup:ספקים:A:2026-10']);
+  });
+  it('שני ספקים באותו שם בקטגוריות שונות – שתי חריגות עם מזהים שונים; אחת שכבר הוצגה לא מסתירה את השנייה (תיקון בדיקה סבב 1)', () => {
+    const months = {};
+    for (const mon of ['2026-08', '2026-09', '2026-10']) months[mon] = { inc: 0, exp: 1500, own: 0, cats: [], sp: [[0, 1000], [1, 500]] };
+    months['2026-11'] = { inc: 0, exp: 2600, own: 0, cats: [], sp: [[0, 1800], [1, 800]] };
+    const f = { v: 1, at: 1, months, spn: [['אבי', 'e', 'ספקים'], ['אבי', 'e', 'תחזוקה']] };
+    const L = TR.anomalies(f, { today: T });
+    assert.deepEqual(L.map((x) => x.key).sort(), ['an:sup:ספקים:אבי:2026-11', 'an:sup:תחזוקה:אבי:2026-11']);
+    const fin = ST.cleanFin(Object.assign({}, f, { at: Date.UTC(2026, 10, 20, 9) }));
+    const o = { kind: 'am', today: T, now: Date.UTC(2026, 10, 20, 6), dayStart: 0, fin, tasks: [], cal: [], wait: {}, acts: { ok: 0, fail: 0 } };
+    const a = R.daySum(Object.assign({}, o, { anSeen: { 'an:sup:ספקים:אבי:2026-11': 1 } }));
+    assert.deepEqual(a.an, ['an:sup:תחזוקה:אבי:2026-11'], 'השני עדיין מוצג');
+    assert.equal((a.body.match(/ספק אבי/g) || []).length, 1, 'שורה אחת, בלי כפילות');
   });
   it('בלי נתונים / מכשיר ישן (בלי פירוט ספקים) – לא נשבר', () => {
     assert.deepEqual(TR.anomalies(null, { today: T }), []);
@@ -163,6 +176,17 @@ describe('sec-trend: קצב הזמנות', () => {
   });
 });
 
+describe('sec-trend: "הכן הזמנה" – טיוטה בלבד', () => {
+  it('קלט תקין – נוסח ומפתח קבוע; אותו ספק ותאריך = אותו מפתח (בלי כפילות); קלט לא תקין – null', () => {
+    const a = TR.orderDraft({ sup: ' ספק  הקמח ', last: '2026-11-13', every: 7 });
+    assert.deepEqual([a.sup, a.what, a.key], ['ספק הקמח', 'להזמין מספק ספק הקמח', 'ord|ספק הקמח|2026-11-13']);
+    assert.match(a.prev, /13\.11/); assert.doesNotMatch(a.prev, /undefined/);
+    assert.equal(TR.orderDraft({ sup: 'ספק הקמח', last: '2026-11-13', every: 9 }).key, a.key, 'לחיצה חוזרת / מנהל אחר – אותו מפתח');
+    for (const x of [{}, { sup: '', last: '2026-11-13', every: 7 }, { sup: 'x', last: '13/11', every: 7 }, { sup: 'x', last: '2026-11-13', every: 0 }, { sup: 'x', last: '2026-11-13', every: 1.5 }, { sup: 5, last: '2026-11-13', every: 7 }]) assert.equal(TR.orderDraft(x), null, JSON.stringify(x));
+    assert.equal(TR.orderDraft({ sup: 'a\u202eb\u0007c', last: '2026-11-13', every: 7 }).sup, 'a b c', 'תווי בקרה וכיוון מוסרים');
+  });
+});
+
 describe('sec-trend: שרת – cleanFin, כלים בצ\'אט, סיכום בוקר', () => {
   const base = () => finOf(Object.assign(hist([1000, 1000, 1000]), { '2026-11': { e: { A: 1500 } } }), { ord: { A: ['2026-10-23', '2026-10-30', '2026-11-06', '2026-11-13'] } });
   it('cleanFin שומר spn/sp/ord תקינים וזורק לא תקינים', () => {
@@ -181,7 +205,8 @@ describe('sec-trend: שרת – cleanFin, כלים בצ\'אט, סיכום בוק
     assert.equal(r.month, '2026-11');
     assert.equal(r.rows[0].name, 'A'); assert.equal(r.rows[0].vsPrevPct, 50);
     assert.equal(r.anomalies.length, 1); assert.equal(r.anomalies[0].overPct, 50);
-    const o = await ST.runTool('getOrderSuggestions', {}, ctx);
+    const o = await ST.runTool('getOrderSuggestions', {}, Object.assign({}, ctx, { now: Date.UTC(2026, 10, 27, 9) }));
+    assert.equal(o.asOf, '2026-11-20', 'ימים מאז – עד תאריך הנתונים, לא עד היום');
     assert.equal(o.items[0].everyDays, 7); assert.equal(o.items[0].daysSinceLast, 7);
     assert.match(o.note, /הצעה בלבד/);
     assert.ok(ST.FIN_TOOLS.includes('getTrends') && ST.toolsFor('app', {}).includes('getOrderSuggestions'));
@@ -197,8 +222,8 @@ describe('sec-trend: שרת – cleanFin, כלים בצ\'אט, סיכום בוק
     const o = { kind: 'am', today: T, now: Date.UTC(2026, 10, 20, 6), dayStart: 0, fin, tasks: [], cal: [], wait: {}, acts: { ok: 0, fail: 0 } };
     const a = R.daySum(o);
     assert.match(a.body, /הוצאות חריגות/); assert.match(a.body, /ספק A/);
-    assert.deepEqual(a.an, ['an:sup:A:2026-11']);
-    const b = R.daySum(Object.assign({}, o, { anSeen: { 'an:sup:A:2026-11': 1 } }));
+    assert.deepEqual(a.an, ['an:sup:ספקים:A:2026-11']);
+    const b = R.daySum(Object.assign({}, o, { anSeen: { 'an:sup:ספקים:A:2026-11': 1 } }));
     assert.doesNotMatch(b.body, /הוצאות חריגות/); assert.deepEqual(b.an, []);
     assert.doesNotMatch(R.daySum(Object.assign({}, o, { kind: 'pm' })).body, /הוצאות חריגות/);
   });

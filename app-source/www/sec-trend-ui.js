@@ -27,9 +27,17 @@ function anH(){const m0=NOWM(),f=C.fin&&TR.trends(C.fin,{today:today(),limit:1})
  const rows=C.an.map(x=>`<div class="li"><div class="m"><b>${esc(x.name)}</b><small>${x.by==='sup'?'ספק':'קטגוריה'}${x.cat?' · '+esc(x.cat):''} · ${esc(mfmt(x.month))} · ממוצע 3 חודשים: ${ils(x.avg3)}</small></div><div class="a">${ils(x.amount)}<small><bdi dir="ltr">+${x.overPct}%</bdi></small></div></div>`).join('');
  return `<div class="card" id="secTrAn"><b>הוצאות חריגות</b><p class="note" style="margin:4px 0">הוצאה חודשית לספק או לקטגוריה שגבוהה ב-${TR.PCT}% לפחות מהממוצע של 3 החודשים הקודמים, וגם מעל ${TR.MIN} ₪. זיכויים מורידים את הסכום. ספק חדש, בלי היסטוריה – לא נחשב חריג.</p>
  ${rows||`<div class="empty">${few&&!C.an.length?'אין מספיק נתונים (צריך לפחות 3 חודשים של הוצאות)':'לא נמצאו הוצאות חריגות החודש ובחודש הקודם'}</div>`}</div>`}
+/* 24.11.2026 (החלטת המשתמש): "הכן הזמנה" – secPrefs op:'ordDraft' (השרת בודק הרשאה "הזמנה מספק", "עצור הכל", ומונע כפילות). שום דבר לא נשלח לספק */
+const OD={};const odK=x=>x.name+'|'+x.lastDate;
+const ordBtn=x=>{const s=OD[odK(x)];return s==='ok'?'<small class="sectags g">טיוטה במרכז האישורים</small>':`<button type="button" class="chip" data-a="trOrd" data-n="${esc(x.name)}" data-l="${esc(x.lastDate)}" data-e="${x.every}" style="min-height:44px"${s==='b'?' disabled':''}>הכן הזמנה</button>`};
+ACT.trOrd=async el=>{const x={name:el.dataset.n,lastDate:el.dataset.l,every:+el.dataset.e},k=odK(x);if(OD[k])return;OD[k]='b';rerender();
+ try{const d={op:'ordDraft',sup:x.name,last:x.lastDate,every:x.every};if(SY&&SY.sa&&SY.bizId)d.bizId=SY.bizId;const r=await root.fnCall('secPrefs',d);
+  OD[k]='ok';toast(r&&r.dup?'כבר הוכנה טיוטה להזמנה הזו – במרכז האישורים':'✓ טיוטת ההזמנה מחכה לאישור שלך במרכז האישורים');try{if(typeof root.__secCmtAuto==='function')root.__secCmtAuto()}catch(e){}}
+ catch(e){delete OD[k];toast(e&&e.message||'הפעולה נכשלה')}
+ finally{try{if(cur().v==='sec')rerender()}catch(e){}}};
 function ordH(){const has=!!(C.fin&&Array.isArray(C.fin.ord));
- const rows=C.tips.map(x=>`<div class="li"><div class="m"><b>כדאי להזמין מ${esc(x.name)}</b><small>בדרך כלל כל ${x.every} ימים · האחרונה לפני ${x.daysSince} ימים (${esc(dfmt(x.lastDate))}) · ${x.orders} חשבוניות בשנה</small></div>${x.late?'<div class="a"><small class="sectags">עבר הזמן הרגיל</small></div>':''}</div>`).join('');
- return `<div class="card" id="secTrOrd"><b>כדאי להזמין</b><p class="note" style="margin:4px 0">לפי קצב החשבוניות הקודמות מכל ספק. הצעה בלבד – גיטי לא שולחת הזמנות. הזמנה מספק תמיד באישור שלך.</p>
+ const rows=C.tips.map(x=>`<div class="li"><div class="m"><b>כדאי להזמין מ${esc(x.name)}</b><small>בדרך כלל כל ${x.every} ימים · האחרונה לפני ${x.daysSince} ימים (${esc(dfmt(x.lastDate))}) · ${x.orders} חשבוניות בשנה</small></div><div class="a">${x.late?'<small class="sectags">עבר הזמן הרגיל</small>':''}${ordBtn(x)}</div></div>`).join('');
+ return `<div class="card" id="secTrOrd"><b>כדאי להזמין</b><p class="note" style="margin:4px 0">לפי קצב החשבוניות הקודמות מכל ספק. הצעה בלבד – גיטי לא שולחת הזמנות. "הכן הזמנה" יוצר טיוטה במרכז האישורים; באישור שלך נפתחת משימה עם נוסח להעתקה.</p>
  ${rows||`<div class="empty">${has?'אין כרגע ספק שהגיע הזמן להזמין ממנו':'אין מספיק נתונים'}</div>`}</div>`}
 function trH(){const r=trd();if(r.error)return `<div class="card"><div class="empty">אין מספיק נתונים</div></div>`;
  const mons=r.months.slice().reverse(),T=r.totals,tot=k=>(T.find(x=>x.month===k)||{})[C.kind==='i'?'income':'expenses']||0,M=C.fin.months||{};

@@ -14,7 +14,8 @@
 //   חריגה: הוצאה חודשית לספק או לקטגוריה שגבוהה ב-30% לפחות מהממוצע של 3 החודשים הקודמים, וגם מעל 200 ₪.
 //     הממוצע – של החודשים שהיו בהם הוצאות (סכום חיובי) מתוך ה-3; צריך לפחות 2 כאלה, אחרת "אין היסטוריה" ← לא חריג (הנחה).
 //     זיכויים מורידים את הסכום החודשי (סך שלילי או 0 – לא חריג). נבדקים החודש הנוכחי והחודש הקודם.
-//     בלי כפילות: קטגוריה לא מסומנת כחריגה אם באותו חודש כבר סומן ספק חריג מאותה קטגוריה (זו אותה הוצאה). מזהה קבוע לכל חריגה (key).
+//     בלי כפילות: קטגוריה לא מסומנת כחריגה אם באותו חודש כבר סומן ספק חריג מאותה קטגוריה (זו אותה הוצאה – הנחה). מזהה קבוע לכל חריגה (key):
+//     ספק – an:sup:<קטגוריה>:<שם>:<חודש> (שני ספקים באותו שם בקטגוריות שונות – שתי חריגות נפרדות); קטגוריה – an:cat:<שם>:<חודש>.
 //   הצעת הזמנה: ספק סחורה עם לפחות 3 ימי חשבונית ב-365 הימים האחרונים; הקצב = החציון של הימים בין חשבוניות;
 //     מוצע כשעברו לפחות (קצב − 1) ימים מהאחרונה, ולא יותר מפי 3 מהקצב (או קצב + 14) – אחרת כנראה הפסיקו לעבוד איתו. הצעה בלבד.
 (function (root) {
@@ -70,7 +71,8 @@ function anomalies(fin, o) {
         if (by === 'cat' && flagged.some((x) => x.cat && x.cat === r.name)) continue; // אותה הוצאה כבר סומנה לפי הספק
         const a = isAnomaly(cur, [1, 2, 3].map((k) => r.v[addMon(mon, -k)] || 0));
         if (!a) continue;
-        const x = Object.assign({ key: 'an:' + by + ':' + r.name + ':' + mon, by, name: r.name, month: mon, amount: rnd(cur) }, a, r.cat ? { cat: r.cat } : {});
+        // מזהה: לספק – גם הקטגוריה וסוג הכרטיס (שם ספק ייחודי רק בתוך קטגוריה); לקטגוריה – השם (תיקון בדיקה סבב 1)
+        const x = Object.assign({ key: 'an:' + by + ':' + (by === 'sup' ? (r.cat || '') + ':' : '') + r.name + ':' + mon, by, name: r.name, month: mon, amount: rnd(cur) }, a, r.cat ? { cat: r.cat } : {});
         flagged.push(x); out.push(x);
       }
     }
@@ -126,7 +128,19 @@ function orderTips(fin, o) {
   return out.sort((a, b) => b.daysSince / b.every - a.daysSince / a.every || a.name.localeCompare(b.name));
 }
 
-const api = { PCT, MIN, HIST, MONTHS, ORD_MIN, addMon, dayNum, dayStr, pct, isAnomaly, anomalies, trends, orderTips, seriesOf };
+// "הכן הזמנה" (החלטת המשתמש 24.11.2026): טיוטה בלבד. בדיקת הקלט ובניית הנוסח – כאן; השרת (secPrefs op:'ordDraft') שומר אותה כהצעה במרכז האישורים
+//   (sec_cmt ch:'ord', מזהה קבוע מ-key – הצעה אחת לכל ספק וחשבונית אחרונה), ובאישור נפתחת משימה עם הנוסח להעתקה. אין שליחה לספק.
+const cleanS = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n) : '');
+function orderDraft(o) {
+  o = o || {};
+  const sup = cleanS(o.sup, 60), last = DAY_RE.test(o.last) ? o.last : '', every = Number.isInteger(o.every) && o.every >= 1 && o.every <= 365 ? o.every : 0;
+  if (!sup || !last || !every) return null;
+  const dm = (+last.slice(8, 10)) + '.' + (+last.slice(5, 7));
+  return { key: 'ord|' + sup.toLowerCase() + '|' + last, sup, last, every, what: 'להזמין מספק ' + sup,
+    prev: 'שלום, נבקש להזמין כרגיל (כמו בהזמנה הקודמת מ-' + dm + '). נא לאשר מועד אספקה. תודה' };
+}
+
+const api = { PCT, MIN, HIST, MONTHS, ORD_MIN, addMon, dayNum, dayStr, pct, isAnomaly, anomalies, trends, orderTips, orderDraft, seriesOf };
 // שרת (Node) – module.exports; אפליקציה (דפדפן) – window.SecTrend
 if (typeof module === 'object' && module.exports) module.exports = api; else root.SecTrend = api;
 })(typeof self !== 'undefined' ? self : this);

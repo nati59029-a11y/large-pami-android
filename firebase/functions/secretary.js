@@ -362,10 +362,19 @@ async function secPrefs(request) {
   // 24.11.2026 (גיטי, סבב 4 חלק א; תיקון סבב 1, ליקוי 3): "אסור" במסך ההרשאות של המנהל הזה – נבדק לפני שנוצר משהו, ונרשם ביומן (permBlock):
   //   tkCard st:'chk' – בדיקה מקדימה שהאפליקציה עושה לפני שהיא יוצרת את המשימה מכרטיס בשיחה (בלי מונה הקצב); cmt claim – לפני יצירה מהתחייבות;
   //   tkCard/cmt st:'ok' – שוב, כהגנה. תזכורת מכרטיס נחסמת גם ב-secCal op:'add' (secretary-know.js) לפני הכתיבה
-  const permTy = input.op === 'tkCard' && ['chk', 'ok'].includes(input.st) ? (input.kind === 'rem' ? 'rem' : 'task') : input.op === 'cmt' && ['claim', 'ok'].includes(input.st) ? 'cmt' : '';
+  let permTy = input.op === 'tkCard' && ['chk', 'ok'].includes(input.st) ? (input.kind === 'rem' ? 'rem' : 'task') : input.op === 'cmt' && ['claim', 'ok'].includes(input.st) ? 'cmt' : input.op === 'ordDraft' ? 'ord' : '';
+  // 24.11.2026 (גיטי סבב 4 חלק ב): טיוטת הזמנה מספק נשמרת כהצעה ב-sec_cmt (ch:'ord') – אותו מנגנון אישור; ההרשאה שלה היא "הזמנה מספק" (תמיד באישור), ו"עצור הכל" גובר
+  if (permTy === 'cmt' && typeof input.cid === 'string' && /^cm[0-9a-f]{16}$/.test(input.cid)) { const c0 = await db.doc('sec_cmt/' + input.cid).get(); if (c0.exists && c0.get('ch') === 'ord') permTy = 'ord'; }
   if (permTy && PERM.decide(await PERM.readRec(db, who.uid), permTy).d === 'deny') {
-    await db.collection('sec_log').doc().set(logData(who.uid, 'mgr', 'permBlock', { tgt: permTy, note: input.op + ':' + input.st }));
-    throw deny('perm-deny', 'לפי מסך ההרשאות שלך גיטי לא רשאית ' + ({ task: 'ליצור משימות', rem: 'לקבוע תזכורות', cmt: 'לאשר התחייבויות' }[permTy]) + '. לא נוצר כלום. אפשר לשנות בהגדרות המזכירה ← הרשאות.');
+    await db.collection('sec_log').doc().set(logData(who.uid, 'mgr', 'permBlock', { tgt: permTy, note: input.op + ':' + (input.st || '') }));
+    throw deny('perm-deny', 'לפי מסך ההרשאות שלך גיטי לא רשאית ' + ({ task: 'ליצור משימות', rem: 'לקבוע תזכורות', cmt: 'לאשר התחייבויות', ord: 'להכין הזמנות מספקים' }[permTy]) + '. לא נוצר כלום. אפשר לשנות בהגדרות המזכירה ← הרשאות.');
+  }
+  if (permTy === 'ord' && input.st !== 'no') {
+    const ws = await db.doc('sec_cfg/wa').get();
+    if (ws.exists && ws.get('stop') && ws.get('stop').on === true) {
+      await db.collection('sec_log').doc().set(logData(who.uid, 'mgr', 'permBlock', { tgt: 'ord', note: 'stop:' + input.op + ':' + (input.st || '') }));
+      throw pre('stopped', '"עצור הכל" פעיל – גיטי לא מכינה הזמנות מספקים עכשיו. לא נוצר כלום.');
+    }
   }
   if (input.op === 'tkCard' && input.st === 'chk') return { ok: true };
   // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל. תפיסת הצעת התחייבות (cmt claim) – לא נרשמת ולא נספרת
@@ -502,6 +511,23 @@ async function secPrefs(request) {
     b.set(main, { cmt: input.on, upd: t }, { merge: true });
     b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', input.on ? 'cmtOn' : 'cmtOff'));
     out = { cmt: input.on };
+  } else if (input.op === 'ordDraft') {
+    // 24.11.2026 (גיטי סבב 4 חלק ב, החלטת המשתמש): "הכן הזמנה" ליד הצעת הזמנה במסך "ניתוחים". נוצרת הצעה בלבד במרכז האישורים (sec_cmt ch:'ord');
+    // באישור – משימה "להזמין מספק X" עם נוסח להעתקה (אותה זרימה כמו התחייבות: claim → tasks/sec<cid> → ok). אין שום שליחה לספק.
+    // מזהה קבוע לפי הספק ותאריך החשבונית האחרונה: לחיצה כפולה או שני מנהלים – הצעה אחת (create)
+    if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא מכין הזמנות לכל העסק');
+    const od = require('./lib/sec-trend').orderDraft(input);
+    if (!od) throw bad('bad-input', 'ערך לא תקין');
+    const pd = PERM.decide(await PERM.readRec(db, who.uid), 'ord');
+    if (pd.d === 'ask') await PERM.ask(db, who.uid, 'ord', 'טיוטת הזמנה מספק');
+    const cid = 'cm' + require('node:crypto').createHash('sha256').update(od.key, 'utf8').digest('hex').slice(0, 16);
+    const doc = { t, ch: 'ord', src: { sup: od.sup, last: od.last, every: od.every }, from: od.sup, who: 'me', what: od.what, d: '', st: 'pend', by: who.uid, prev: od.prev };
+    try { await db.doc('sec_cmt/' + cid).create(doc); } catch (e) {
+      if (e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)))) { const x = await db.doc('sec_cmt/' + cid).get(); return { ok: true, cid, dup: true, st: x.get('st') || '' }; }
+      throw e;
+    }
+    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'ordDraft', { tgt: cid, note: od.sup, res: 'ok' }));
+    out = { cid, st: 'pend' };
   } else if (input.op === 'cmt') {
     // 24.11.2026 (גיטי, החלטה 4): הצעת התחייבות (sec_cmt) במרכז האישורים. שלושה שלבים, כדי שלא תיפתח משימה מהצעה שכבר הוכרעה:
     //   st:'claim' – תפיסה: pend → act (actBy, actAt). רק אם התפיסה הצליחה האפליקציה יוצרת את המשימה / התזכורת. בלי רישום ביומן ובלי מונה הקצב.
@@ -529,6 +555,7 @@ async function secPrefs(request) {
       let patch;
       if (input.st === 'ok') {
         const kind = input.kind === 'rem' ? 'rem' : 'task';
+        if (cs.get('ch') === 'ord' && kind !== 'task') throw bad('bad-input', 'טיוטת הזמנה מאושרת רק כמשימה');
         if (kind === 'task' ? !ts.exists || ts.get('owner') !== who.uid : !es.exists || es.get('by') !== who.uid || es.get('rem') !== true) throw pre('not-done', kind === 'task' ? 'המשימה לא נמצאה' : 'התזכורת לא נמצאה');
         patch = { st: 'ok', kind, ref };
       } else {

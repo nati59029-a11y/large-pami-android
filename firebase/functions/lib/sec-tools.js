@@ -338,10 +338,12 @@ async function runTool(name, args, ctx) {
     case 'getOrderSuggestions': {
       if (!fin) return noFin(ctx);
       if (!Array.isArray(fin.ord)) return { error: 'no-data', note: 'אין נתוני חשבוניות ספקים לחישוב קצב. צריך גרסה חדשה של האפליקציה במכשיר שבו נשמרים הנתונים.' };
-      let L = TR.orderTips(fin, { today: dayOf(now), all: !!a.supplier });
+      // הימים נספרים מתאריך הנתונים (fin.at), לא מהיום – חשבונית שנרשמה אחרי עדכון המראה לא ידועה כאן (הערת בדיקה סבב 1)
+      const asOf = dayOf(fin.at);
+      let L = TR.orderTips(fin, { today: asOf, all: !!a.supplier });
       if (a.supplier) L = L.filter((x) => match(x.name, a.supplier));
-      return { count: L.length, items: L.slice(0, 15).map((x) => ({ supplier: x.name, everyDays: x.every, lastInvoice: x.lastDate, daysSinceLast: x.daysSince, invoicesInYear: x.orders, suggestNow: x.due })),
-        note: 'הצעה בלבד לפי קצב החשבוניות ב-365 הימים האחרונים (לפחות 3). שום הזמנה לא נשלחה ולא תישלח בלי אישור המנהל. לא ידוע: מלאי בפועל, הזמנות שלא נרשמו כחשבונית, ושינויים בעונה.' };
+      return { asOf, count: L.length, items: L.slice(0, 15).map((x) => ({ supplier: x.name, everyDays: x.every, lastInvoice: x.lastDate, daysSinceLast: x.daysSince, invoicesInYear: x.orders, suggestNow: x.due })),
+        note: 'הצעה בלבד לפי קצב החשבוניות ב-365 הימים האחרונים (לפחות 3). "ימים מאז" נספר עד תאריך הנתונים (asOf). המנהל יכול ללחוץ "הכן הזמנה" בלשונית "ניתוחים" – נוצרת טיוטה לאישור ומשימה, בלי שליחה. שום הזמנה לא נשלחה ולא תישלח בלי אישור המנהל. לא ידוע: מלאי בפועל, הזמנות שלא נרשמו כחשבונית, ושינויים בעונה.' };
     }
     case 'getImprovementIdeas': {
       if (!fin) return noFin(ctx);

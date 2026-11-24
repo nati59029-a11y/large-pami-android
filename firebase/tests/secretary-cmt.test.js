@@ -348,6 +348,39 @@ describe('מרכז האישורים: רשימה, אישור, דחייה והרש
     assert.equal((await get(`b/${A}/sec_cfg/main`)).cmt, false);
     assert.deepEqual((await logs('cmtOn')).length + (await logs('cmtOff')).length, 2);
   });
+  it('סבב 4 חלק ב – "הכן הזמנה": טיוטה אחת במרכז האישורים (לחיצה כפולה / שני מנהלים), "אסור" חוסם עם יומן, "עצור הכל" גובר, באישור – משימה בלבד', async () => {
+    await seed();
+    const D = { op: 'ordDraft', sup: 'ספק הקמח', last: '2026-11-13', every: 7 };
+    const r1 = await call('secPrefs', M1, D);
+    assert.equal(r1.status, 'OK', r1.text); assert.equal(r1.result.st, 'pend');
+    const g = r1.result.cid;
+    assert.equal((await call('secPrefs', M1, D)).result.dup, true, 'לחיצה כפולה – אותה טיוטה');
+    assert.equal((await call('secPrefs', M2, D)).result.dup, true, 'מנהל אחר – אותה טיוטה');
+    const all = await cmts();
+    assert.equal(all.length, 1); assert.deepEqual([all[0].ch, all[0].st, all[0].what], ['ord', 'pend', 'להזמין מספק ספק הקמח']);
+    assert.equal((await logs('ordDraft')).length, 1);
+    assert.ok((await call('secComm', M1, { op: 'cmts' })).result.items.some((x) => x.cid === g && x.ch === 'ord'));
+    assert.equal((await call('secComm', M1, { op: 'src', cid: g })).reason, 'not-found', 'אין "הודעה מקורית" לטיוטת הזמנה');
+    assert.equal((await call('secPrefs', MBR, D)).reason, 'branch-limited');
+    // "אסור" אצל M2: לא יוצר, לא תופס, לא רואה – ונרשם ביומן
+    await prep((d) => d.doc(`b/${A}/sec_perm/${M2}`).set({ perm: { ord: { m: 'deny', t: 1 } } }));
+    assert.equal((await call('secPrefs', M2, Object.assign({}, D, { last: '2026-11-14' }))).reason, 'perm-deny');
+    assert.equal((await call('secPrefs', M2, { op: 'cmt', cid: g, st: 'claim' })).reason, 'perm-deny');
+    assert.ok(!(await call('secComm', M2, { op: 'cmts' })).result.items.some((x) => x.ch === 'ord'));
+    assert.ok((await logs('permBlock')).filter((l) => l.tgt === 'ord').length >= 2);
+    // "עצור הכל" גובר – גם על יצירה וגם על תפיסה
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa`).set({ stop: { on: true } }, { merge: true }));
+    assert.equal((await call('secPrefs', M1, Object.assign({}, D, { last: '2026-11-15' }))).reason, 'stopped');
+    assert.equal((await call('secPrefs', M1, { op: 'cmt', cid: g, st: 'claim' })).reason, 'stopped');
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa`).set({ stop: { on: false } }, { merge: true }));
+    // אישור: תפיסה → משימה tasks/sec<cid> → ok. תזכורת במקום משימה – נדחה
+    assert.equal((await call('secPrefs', M1, { op: 'cmt', cid: g, st: 'claim' })).status, 'OK');
+    await prep((d) => d.doc(`b/${A}/tasks/sec${g}`).set({ owner: M1, txt: 'להזמין מספק ספק הקמח · נוסח הזמנה להעתקה: …', st: 'open', to: [E1] }));
+    assert.equal((await call('secPrefs', M1, { op: 'cmt', cid: g, st: 'ok', kind: 'rem' })).status, 'INVALID_ARGUMENT');
+    const ok = await call('secPrefs', M1, { op: 'cmt', cid: g, st: 'ok', kind: 'task' });
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(ok.result.st, 'ok');
+    assert.equal((await coll(`b/${A}/tasks`)).length, 1);
+  });
   it('האוסף sec_cmt – אף אחד לא קורא ולא כותב מהאפליקציה (גם מנהל)', async () => {
     const { g } = await two();
     const { assertFails } = require('@firebase/rules-unit-testing');

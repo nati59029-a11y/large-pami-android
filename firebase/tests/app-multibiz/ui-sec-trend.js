@@ -22,13 +22,21 @@ const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose
     const cfg = { mode: 'new', users: { [who]: BIZ }, sa: {}, biz: { [BIZ]: { dataRoot: 'b', features: FEAT, name: 'עסק בדיקה' } },
       admins: { [`b/${BIZ}/|${who}`]: 1 }, staff: { [`b/${BIZ}/|${who}`]: 1 }, ctx: { hasTouch: true, isMobile: true, viewport: { width: 360, height: 740 } } };
     const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, mirror: false, mirrorAt: null, cfTh: null, pct: 10, saving: '', brLimited: false, stop: false };
-    const calls = [];
+    const calls = [], bodies = [];
+    const CID = 'cm0123456789abcdef';
+    const ORD = { cid: CID, ch: 'ord', t: H.T0, from: 'ספק הקמח', who: 'me', what: 'להזמין מספק ספק הקמח', d: '', prev: 'שלום, נבקש להזמין כרגיל (כמו בהזמנה הקודמת מ-27.10). נא לאשר מועד אספקה. תודה', st: 'pend', ref: {} };
+    let drafted = false;
     const { ctx, page } = await H.newPage(browser, www, cfg, [], who);
     await ctx.route(/:5001\/.*/, async (route) => {
       const n = new URL(route.request().url()).pathname.split('/').pop(); calls.push(n);
+      let body = {}; try { body = JSON.parse(route.request().postData() || '{}').data || {}; } catch (e) { /* */ }
+      bodies.push([n, body]);
       const ok = (r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
       if (n === 'secState') return ok(st);
       if (n === 'secChatLoad') return ok({ ok: true, msgs: [] });
+      if (n === 'secPrefs' && body.op === 'ordDraft') { const dup = drafted; drafted = true; return ok({ ok: true, cid: CID, st: 'pend', ...(dup ? { dup: true } : {}) }); }
+      if (n === 'secPrefs' && body.op === 'cmt') return ok({ ok: true, st: body.st === 'claim' ? 'act' : body.st, ref: 'sec' + CID });
+      if (n === 'secComm' && body.op === 'cmts') return ok({ ok: true, items: drafted ? [ORD] : [], n: drafted ? 1 : 0 });
       if (n === 'secLearn') return ok({ ok: true, open: [], did: [], hold: [], items: [], rules: [] });
       return ok(n === 'getBackupKey' ? { key: Buffer.alloc(32, 7).toString('base64') } : {});
     });
@@ -66,7 +74,12 @@ const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose
     check('עובד בשכר לא מופיע בניתוחים', !/עובד בדיקה/.test(t1));
     const ord = await page.$eval('#secTrOrd', (e) => e.innerText).catch(() => '');
     check('הצעת הזמנה: כל 7 ימים, האחרונה לפני 7 ימים', /כדאי להזמין מספק הקמח/.test(ord) && /כל 7 ימים/.test(ord) && /לפני 7 ימים/.test(ord), ord.slice(0, 200));
-    check('הצעה בלבד: אין כפתור בכרטיס ההזמנות', (await page.$$('#secTrOrd button')).length === 0);
+    const ob = await page.$$eval('#secTrOrd button', (L) => L.map((b) => b.innerText));
+    check('ליד ההצעה: כפתור "הכן הזמנה" אחד בלבד (אין כפתור שליחה)', ob.length === 1 && /הכן הזמנה/.test(ob[0]) && !ob.some((t) => /שלח/.test(t)), ob);
+    await page.evaluate(() => document.querySelector('#secTrOrd [data-a=trOrd]').click()); await H.settle(page, 500);
+    const od = bodies.filter((b) => b[0] === 'secPrefs' && b[1].op === 'ordDraft');
+    check('"הכן הזמנה" → secPrefs op:ordDraft עם הספק, התאריך והקצב', od.length === 1 && od[0][1].sup === 'ספק הקמח' && od[0][1].every === 7 && /^\d{4}-\d{2}-\d{2}$/.test(od[0][1].last), od.map((b) => b[1]));
+    check('אחרי הלחיצה: "טיוטה במרכז האישורים", בלי כפתור נוסף', /טיוטה במרכז האישורים/.test(await page.$eval('#secTrOrd', (e) => e.innerText)) && (await page.$$('#secTrOrd [data-a=trOrd]')).length === 0);
     const tr = await page.$eval('#secTrT', (e) => e.innerText).catch(() => '');
     check('מגמות לפי קטגוריה: ספקים, חודש קודם ואשתקד', /ספקים/.test(tr) && /חודש קודם/.test(tr) && /אשתקד/.test(tr), tr.slice(0, 200));
     await page.evaluate(() => document.querySelector('#secTrT [data-a=trBy][data-v=sup]').click()); await H.settle(page, 300);
@@ -84,6 +97,20 @@ const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose
     check('הלשונית לא קוראת לשרת (חישוב במכשיר)', !calls.some((c) => /secTrend|secMirrorPut/.test(c)), [...new Set(calls)]);
     check('כיוון RTL', await page.evaluate(() => getComputedStyle(document.getElementById('secTr')).direction === 'rtl'));
     if (shots) { const el = await page.$('#secTr'); await el.screenshot({ path: path.join(shots, 'trend-360.png') }); }
+    // מרכז האישורים: כרטיס טיוטת ההזמנה – בלי "ההודעה המקורית" ובלי בחירת תזכורת; אישור = תפיסה, משימה עם נוסח להעתקה, ok (משימה)
+    await page.evaluate(() => { const b = document.querySelector('#secTabs [data-v=appr]'); if (b) b.click(); }); await H.settle(page, 900);
+    const card = await page.$('[data-cmt=' + CID + ']');
+    const ct = card ? await card.innerText() : await page.evaluate(() => document.getElementById('main').innerText.slice(0, 300) + ' TAB=' + window.__sec.tab);
+    check('מרכז האישורים: כרטיס "טיוטת הזמנה מספק ספק הקמח" עם נוסח להעתקה', /טיוטת הזמנה מספק ספק הקמח/.test(ct) && /נוסח להעתקה/.test(ct), ct.slice(0, 200));
+    if (card) {
+      check('בכרטיס: בלי "ההודעה המקורית" ובלי "תזכורת לי"', !(await card.$('[data-a=cmtSrc]')) && !(await card.$('select[data-f=kind]')));
+      if (shots) await card.screenshot({ path: path.join(shots, 'ord-card-360.png') });
+      await page.evaluate((id) => { const c = document.querySelector('[data-cmt=' + id + '] [data-f=all]'); if (c) { c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); } }, CID); await H.settle(page, 300);
+      const n0 = bodies.length;
+      await page.evaluate((id) => document.querySelector('[data-cmt=' + id + '] [data-a=cmtOk]').click(), CID); await H.settle(page, 1500);
+      const after = bodies.slice(n0).filter((b) => b[0] === 'secPrefs').map((b) => b[1]);
+      check('אישור: claim ואז ok כמשימה', after.length >= 2 && after[0].st === 'claim' && after[after.length - 1].st === 'ok' && after[after.length - 1].kind === 'task', after);
+    }
     check('בלי שגיאות JS', errs.length === 0, errs);
     void cnt0;
   } finally { await browser.close(); }

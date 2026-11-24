@@ -105,7 +105,7 @@ async function feed(who, db, input) {
 // הצעת התחייבות לתצוגה. ref – אותו מבנה כמו בפיד (mail: { id }, wa: { wa }, grp: { gid, mid })
 function cmtItem(id, x) {
   const s = x.src && typeof x.src === 'object' ? x.src : {};
-  const ref = x.ch === 'grp' ? { gid: clean(s.gid, 128), mid: clean(s.mid, 128) } : x.ch === 'wa' ? { wa: clean(s.wa, 30) } : { id: clean(s.id, 200) };
+  const ref = x.ch === 'ord' ? {} : x.ch === 'grp' ? { gid: clean(s.gid, 128), mid: clean(s.mid, 128) } : x.ch === 'wa' ? { wa: clean(s.wa, 30) } : { id: clean(s.id, 200) };
   const it = { cid: id, ch: x.ch, t: +x.t || 0, from: clean(x.from, 60), who: x.who === 'me' ? 'me' : 'them', what: clean(x.what, 200), d: typeof x.d === 'string' ? x.d : '', prev: clean(x.prev, PREV), st: x.st, ref };
   if (x.grp) it.grp = clean(x.grp, 60);
   return it;
@@ -136,10 +136,15 @@ async function secComm(request) {
     // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל המחובר – "אישור התחייבות" אסור → בלי הצעות אצלו. טרם הוגדר ויש הצעות → שאלה בפעם הראשונה
     // החלטות המשתמש 1–2: "לבד" (ו"עצור הכל" כבוי) – auto:true, והאפליקציה מאשרת לבד הצעות עם תאריך (כתזכורת למנהל); השרת בודק שוב בכל שלב
     const ws = await db.doc('sec_cfg/wa').get();
-    const pd = PERM.decide(await PERM.readRec(db, who.uid), 'cmt', { stop: !!(ws.exists && ws.get('stop') && ws.get('stop').on === true) });
-    if (pd.d === 'deny') return { ok: true, items: [], n: 0, perm: 'deny' };
+    const rec = await PERM.readRec(db, who.uid);
+    const pd = PERM.decide(rec, 'cmt', { stop: !!(ws.exists && ws.get('stop') && ws.get('stop').on === true) });
+    // 24.11.2026 (סבב 4 חלק ב): טיוטות הזמנה מספק (ch:'ord') – לפי ההרשאה "הזמנה מספק" (תמיד באישור); "אסור" – לא מוצגות. שאר ההצעות – לפי "אישור התחייבות"
+    const od = PERM.decide(rec, 'ord').d;
+    if (pd.d === 'deny' && od === 'deny') return { ok: true, items: [], n: 0, perm: 'deny' };
     const r = await cmts(db, brLimited);
-    if (pd.d === 'ask' && r.n) await PERM.ask(db, who.uid, 'cmt', 'הצעת התחייבות ממתינה', { k: 'cmt' });
+    r.items = r.items.filter((x) => (x.ch === 'ord' ? od !== 'deny' : pd.d !== 'deny'));
+    r.n = r.items.length;
+    if (pd.d === 'ask' && r.items.some((x) => x.ch !== 'ord')) await PERM.ask(db, who.uid, 'cmt', 'הצעת התחייבות ממתינה', { k: 'cmt' });
     if (pd.d === 'auto') r.auto = true;
     return r;
   }
@@ -147,7 +152,7 @@ async function secComm(request) {
     const cid = typeof input.cid === 'string' && /^cm[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
     if (!cid) throw bad('bad-input', 'ערך לא תקין');
     const s = await db.doc('sec_cmt/' + cid).get();
-    if (!s.exists || (brLimited && s.get('ch') !== 'grp')) throw C.pre('not-found', 'ההודעה המקורית לא נמצאה');
+    if (!s.exists || s.get('ch') === 'ord' || (brLimited && s.get('ch') !== 'grp')) throw C.pre('not-found', 'ההודעה המקורית לא נמצאה');
     const it = cmtItem(s.id, s.data());
     return { ok: true, ch: it.ch, ref: it.ref, from: it.from, prev: it.prev, grp: it.grp || '' };
   }
