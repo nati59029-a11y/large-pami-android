@@ -104,14 +104,31 @@ describe('הדפסת מדבקות – חוקים בשורש (לארג\' פעמי
     await assertSucceeds(db(RLBL).doc('lblp/bc_2').set(good(RLBL)));
     await assertSucceeds(db(RMGR).doc('lblp/m1').delete());
   });
+  it('נעילת השורש (lpW) גם ל-lblt ול-lbls: אחרי המעבר אין כתיבה ומחיקה בשורש; קריאה מותרת; legacy פותח שוב', async () => {
+    await prep(async (d) => { await d.doc('lblt/t1').set(tpl(RMGR)); await d.doc('lbls/main').set(sets(RMGR)); });
+    const lp = (dataRoot) => prep((d) => d.doc('b/largpeami').set({ name: 'lp', status: 'active', dataRoot, schemaVersion: 1, createdAt: 1, createdBy: 'migrate', migrationTarget: true }));
+    await lp('b');
+    await assertFails(db(RLBL).doc('lblt/t2').set(tpl(RLBL)));
+    await assertFails(db(RLBL).doc('lblt/t1').set(tpl(RLBL, { del: true })));
+    await assertFails(db(RMGR).doc('lblt/t1').delete());
+    await assertFails(db(RLBL).doc('lbls/main').set(sets(RLBL)));
+    await assertFails(db(RMGR).doc('lbls/main').delete());
+    await assertSucceeds(db(RLBL).collection('lblt').get());
+    await assertSucceeds(db(RLBL).doc('lbls/main').get());
+    await lp('legacy');
+    await assertSucceeds(db(RLBL).doc('lblt/t2').set(tpl(RLBL)));
+    await assertSucceeds(db(RLBL).doc('lbls/main').set(sets(RLBL)));
+    await assertSucceeds(db(RMGR).doc('lblt/t1').delete());
+  });
 });
 
 // תבניות מדבקה (lblt) והגדרות מדבקות (lbls/main) – 24.11.2026. אותן בדיקות בשורש (legacy) ובתוך b/{bizId}.
 const tpl = (uid, x) => Object.assign({ v: 1, name: 'מדבקת מחיר', w: 50, h: 30, base: 1, j: '{"el":[]}', at: Date.now(), by: uid }, x || {});
 const sets = (uid, x) => Object.assign({ sz: [{ w: 50, h: 30 }], def: 't1', at: Date.now(), by: uid }, x || {});
-for (const [title, P, mgr, lbl, nol, old, out] of [
-  ['b/{bizId}', `b/${A}/`, MGR, LBL, NOL, OLD, OUT],
-  ['שורש (legacy)', '', RMGR, RLBL, 'r_nol', ROLD, 'r_out'],
+// oth = משתמש של עסק אחר: ב-b – מנהל ועובד עם lbl רק בעסק OFF; בשורש – מנהל של b/biz-lbl (אין לו מסמך בשורש).
+for (const [title, P, mgr, lbl, nol, old, out, oth] of [
+  ['b/{bizId}', `b/${A}/`, MGR, LBL, NOL, OLD, OUT, 'l_oth'],
+  ['שורש (legacy)', '', RMGR, RLBL, 'r_nol', ROLD, 'r_out', MGR],
 ]) {
   describe(`תבניות והגדרות מדבקות – חוקים (${title})`, () => {
     beforeEach(() => prep(async (d) => {
@@ -120,6 +137,8 @@ for (const [title, P, mgr, lbl, nol, old, out] of [
         b.set(d.doc('staff/r_nol'), { name: 'r_nol', active: true, perms: Object.assign({}, NONE) });
         b.set(d.doc('staff/r_out'), { name: 'r_out', active: false, perms: Object.assign({}, NONE, { lbl: true }) });
       }
+      b.set(d.doc(`b/${OFF}/admins/l_oth`), { email: 'l_oth@example.invalid' });
+      b.set(d.doc(`b/${OFF}/staff/l_oth`), { name: 'l_oth', role: 'employee', active: true, perms: Object.assign({}, NONE, { lbl: true }) });
       b.set(d.doc(P + 'lblt/t1'), tpl(mgr));
       b.set(d.doc(P + 'lbls/main'), sets(mgr));
       await b.commit();
@@ -171,6 +190,24 @@ for (const [title, P, mgr, lbl, nol, old, out] of [
       }
       await assertFails(db(lbl).doc(P + 'lbls/main').delete());
       await assertSucceeds(db(mgr).doc(P + 'lbls/main').delete());
+    });
+    it('lbls/main: כל פריט ב-sz נבדק ({ w, h } בטווח); 2 גדלים תקינים – מותר', async () => {
+      await assertSucceeds(db(lbl).doc(P + 'lbls/main').set(sets(lbl, { sz: [{ w: 15, h: 10 }, { w: 104, h: 100 }] })));
+      const bad = [['x'.repeat(90000)], [{ w: 50, h: 30 }, { w: { a: { b: 1 } }, h: 30 }], [{ w: 50, h: 30, extra: 1 }], [{ w: 14, h: 30 }],
+        [{ w: 50, h: 101 }], [{ w: 50 }], [{ w: '50', h: 30 }], [{ l: [50, 30] }], [...Array(9).fill({ w: 50, h: 30 }), 'x']];
+      for (const sz of bad) await assertFails(db(lbl).doc(P + 'lbls/main').set(sets(lbl, { sz })), JSON.stringify(sz).slice(0, 60));
+    });
+    it('lblt / lbls: משתמש של עסק אחר ומשתמש לא מחובר – לא קורא ולא כותב', async () => {
+      const anon = env.unauthenticatedContext().firestore();
+      for (const [c, u] of [[db(oth), oth], [anon, 'anon']]) {
+        await assertFails(c.collection(P + 'lblt').get(), u);
+        await assertFails(c.doc(P + 'lblt/t1').get(), u);
+        await assertFails(c.doc(P + 'lblt/x9').set(tpl(u)), u);
+        await assertFails(c.doc(P + 'lbls/main').get(), u);
+        await assertFails(c.doc(P + 'lbls/main').set(sets(u)), u);
+        await assertFails(c.doc(P + 'lblt/t1').delete(), u);
+        await assertFails(c.doc(P + 'lbls/main').delete(), u);
+      }
     });
   });
 }

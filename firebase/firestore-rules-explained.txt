@@ -1466,9 +1466,16 @@ service cloud.firestore {
         && (!('del' in d) || d.del is bool)
         && d.at is int && d.at > 0 && d.by == request.auth.uid;
     }
+    // גודל מדבקה ב-lbls.sz: { w, h } במ"מ. כל פריט נבדק לפי מיקום (0..9 – בכללים אין לולאות).
+    function szOk(x) {
+      return x is map && x.keys().hasOnly(['w', 'h']) && x.keys().hasAll(['w', 'h'])
+        && x.w is number && x.w >= 15 && x.w <= 104 && x.h is number && x.h >= 10 && x.h <= 100;
+    }
+    function szI(l, i) { return l.size() <= i || szOk(l[i]); }
     function lblsOk(d) {
       return d.keys().hasOnly(['sz', 'def', 'at', 'by']) && d.keys().hasAll(['at', 'by'])
-        && (!('sz' in d) || (d.sz is list && d.sz.size() <= 10))
+        && (!('sz' in d) || (d.sz is list && d.sz.size() <= 10 && szI(d.sz, 0) && szI(d.sz, 1) && szI(d.sz, 2) && szI(d.sz, 3)
+          && szI(d.sz, 4) && szI(d.sz, 5) && szI(d.sz, 6) && szI(d.sz, 7) && szI(d.sz, 8) && szI(d.sz, 9)))
         && (!('def' in d) || (d.def is string && d.def.size() <= 40))
         && d.at is int && d.at > 0 && d.by == request.auth.uid;
     }
