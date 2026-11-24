@@ -1,5 +1,5 @@
 /* שלב B1 (24.11.2026): מטמון מכשיר משותף – כל מסך מציג את המידע האחרון שהתקבל כשאין אינטרנט.
-   window.DC = { get, put, del, out, key, rd, fnOk, mark, ok, stale }
+   window.DC = { get, put, del, out, key, rd, fnOk, mark, ok, sput, sfill, swait, soff, stale }
    - IndexedDB 'lp-cache', מפתחות: bizId|uid|... (כמו groups.js). כל שגיאה = "אין מטמון" – לא זורק ולא עוצר את האפליקציה.
    - כל ערך נשמר כמחרוזת JSON (בדיוק התשובה מהשרת), עם זמן השמירה. ערך מעל 3MB לא נשמר. עד 400 ערכים ועד 40MB בסך הכול; מעבר לזה (או כשהמקום בטלפון נגמר) נמחק הישן ביותר בשימוש (LRU).
    - 403/404 מהשרת מוחקים את העותק השמור (הרשאה שבוטלה / מסמך שנמחק לא יוצגו מהמטמון). תשובה זהה לקודמת לא נכתבת שוב.
@@ -55,7 +55,21 @@ function paint(){try{let e=document.getElementById('dcnet');if(!DC.stale){if(e)e
 function mark(t){try{t=+t||Date.now();if(!DC.stale||t<DC.stale)DC.stale=t;paint()}catch(e){}}
 /* קריאה הצליחה מהשרת – השורה נעלמת */
 function ok(){if(DC.stale){DC.stale=0;paint()}}
-function out(){GEN++;LH.clear();DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
-const DC={get,put,del,out,key,rd,fnOk,mark,ok,stale:0};
+/* ---- B2a (24.11.2026): מטמון תצוגה של מסכים – נפרד מהמטמון של fsx ----
+   sput(n,v): אחרי טעינה מוצלחת מהשרת – שומר את הנתונים המעובדים שהמסך מציג (JSON) תחת עסק|משתמש|SCR|n.
+     תצוגה בלבד: לא נכנס לשום מסלול קליטה, סנכרון או כתיבה (pullInbox, ייבוא wv/inbox וכו').
+   sfill(n,apply): כשהזיכרון ריק – פעם אחת בהפעלה לכל מפתח קורא את העותק השמור וקורא ל-apply(v,t),
+     רק אם עוד לא הגיעה תשובה מהשרת (sput) למפתח הזה בהפעלה הזו. השרת תמיד גובר.
+   soff(e,t): הטעינה מהשרת נכשלה בגלל שאין חיבור והמסך מציג עותק שמור מזמן t – שורת "אין חיבור" (mark).
+   again=1: גם אם כבר נקרא/נטען בהפעלה הזו (מסך שמתרוקן בכל כניסה); apply חייב לבדוק בעצמו שהזיכרון עדיין ריק.
+   swait(n): מחכה לקריאה מהמכשיר שעוד בדרך (לפני הבקשה לשרת), כדי שעותק שמור לא יחליף תשובה חדשה וש-soff יידע מה מוצג. */
+const SF=new Set(),SR=new Set(),SP=new Map(),skey=n=>key('SCR',String(n),'');
+function sput(n,v){try{const k=skey(n);if(!k)return;SR.add(k);const s=JSON.stringify(v);if(typeof s==='string')put(k,s)}catch(e){}}
+function sfill(n,apply,again){try{const k=skey(n);if(!k||(!again&&(SF.has(k)||SR.has(k))))return;SF.add(k);
+ const p=get(k).then(r=>{if(!r||(!again&&SR.has(k))||skey(n)!==k)return;let v;try{v=JSON.parse(r.v)}catch(e){return}try{apply(v,r.t)}catch(e){}}).catch(()=>{}).then(()=>{if(SP.get(k)===p)SP.delete(k)});SP.set(k,p)}catch(e){}}
+function swait(n){try{return SP.get(skey(n))||Promise.resolve()}catch(e){return Promise.resolve()}}
+function soff(e,t){try{if(e&&e.offline&&t)mark(t)}catch(x){}}
+function out(){GEN++;LH.clear();SF.clear();SR.clear();SP.clear();DC.stale=0;paint();try{if(D)D.close()}catch(e){}D=null;P=null;try{indexedDB.deleteDatabase(DBN)}catch(e){}}
+const DC={get,put,del,out,key,rd,fnOk,mark,ok,sput,sfill,swait,soff,stale:0};
 window.DC=DC;
 })();

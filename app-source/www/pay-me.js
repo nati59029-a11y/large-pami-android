@@ -94,19 +94,25 @@ window.pmSync=pmSync;
 /* ================= העובד: משבצת ומסך ================= */
 const wOn=()=>{try{return isW()&&bzB()&&uidOk(SY.uid)}catch(e){return false}};
 const HM={u:'',t:0,b:0,m:'',d:null};/* משבצת: המסמך של החודש הנוכחי (או הקודם, אם עוד אין) */
-const PW={m:'',D:{},at:{},b:0,err:''};/* המסך: D[m] = המסמך או null (אין), at[m] = זמן הפרסום */
+const PW={m:'',D:{},at:{},b:0,err:'',st:{}};/* st[m] = D[m] מהעותק השמור (זמן השמירה) *//* המסך: D[m] = המסמך או null (אין), at[m] = זמן הפרסום */
 const docOf=async m=>{const r=await wvGet('pay_'+m+'_'+SY.uid);const v=r.v&&typeof r.v==='object'&&!Array.isArray(r.v)&&Array.isArray(r.v.rows)?r.v:null;return{v,at:v?r.at||0:0}};
-async function homeLoad(){if(HM.b||!wOn())return;HM.b=1;const u=SY.uid;let m='',d=null,at=0;
- try{for(const k of months()){const r=await docOf(k);if(r.v){m=k;d=r.v;at=r.at;break}}}catch(e){/* 403 / רשת – אין משבצת */}
- if(SY.uid===u){HM.u=u;HM.t=Date.now();HM.m=m;HM.d=d;if(d){PW.D[m]=d;PW.at[m]=at}}HM.b=0;
+/* B2a (24.11.2026): המשבצת והמסך נפתחים מיד מהעותק השמור במכשיר (DC.sfill/sput – תצוגה בלבד; בעל העסק החליט לשמור גם נתוני שכר במכשיר),
+   ואז מתעדכנים מהשרת. HM.sc = המשבצת מהעותק השמור; בלי חיבור היא נשארת (עם שורת "אין חיבור"), 403 – יורדת כמו היום */
+async function homeLoad(){if(HM.b||!wOn())return;HM.b=1;const u=SY.uid;let m='',d=null,at=0,er=null;
+ try{await DC.swait('pm-home');for(const k of months()){const r=await docOf(k);if(r.v){m=k;d=r.v;at=r.at;break}}}catch(e){er=e/* 403 / רשת – אין משבצת */}
+ if(SY.uid===u){if(er&&er.offline&&HM.sc&&HM.u===u&&HM.d){HM.t=Date.now();DC.soff(er,HM.sct)}
+  else{HM.u=u;HM.t=Date.now();HM.m=m;HM.d=d;HM.sc=0;if(d){PW.D[m]=d;PW.at[m]=at}if(!er||er.code===403)DC.sput('pm-home',{m,d,at});if(d)DC.sput('pm|'+m,{v:d,at})}}HM.b=0;
  try{if(cur().v==='wk'&&WS==='home')rerender()}catch(e){}}
-window.pmTile=()=>{try{if(!wOn())return'';if((HM.u!==SY.uid||Date.now()-HM.t>3e5)&&!HM.b)setTimeout(homeLoad,0);if(HM.u!==SY.uid||!HM.d)return'';
+const docOk=v=>v&&typeof v==='object'&&!Array.isArray(v)&&Array.isArray(v.rows)?v:null;
+function homeFill(){DC.sfill('pm-home',(v,t)=>{const u=SY.uid;if(HM.u===u||!v||!wOn())return;const d=docOk(v.d);HM.u=u;HM.t=0;HM.m=String(v.m||'');HM.d=d;HM.sc=1;HM.sct=t;try{if(cur().v==='wk'&&WS==='home')rerender()}catch(e){}})}
+function viewFill(m){DC.sfill('pm|'+m,(v,t)=>{if(m in PW.D||!v||!wOn())return;PW.D[m]=docOk(v.v);PW.at[m]=PW.D[m]?+v.at||0:0;PW.st[m]=t;try{if(cur().v==='wk'&&WS==='pm')rerender()}catch(e){}},1)}
+window.pmTile=()=>{try{if(!wOn())return'';if(HM.u!==SY.uid)homeFill();if((HM.u!==SY.uid||Date.now()-HM.t>3e5)&&!HM.b)setTimeout(homeLoad,0);if(HM.u!==SY.uid||!HM.d)return'';
  const d=HM.d;return `<button class="tile" data-a="pmGo" data-pay-tile style="border-color:var(--acc);color:var(--acc);font-size:1.05rem;text-align:center">${ico('chart')}שכר משוער<b style="display:block;font-size:1.15rem;margin-top:2px">${ils((d.est||0)/100)}</b><small style="display:block;font-size:.72rem;font-weight:600;opacity:.85;line-height:1.25">${d.slip?'הסכום הסופי לפי התלוש':'הסכום הסופי בסוף החודש'}</small></button>`}catch(e){return''}};
-async function viewLoad(){const m=PW.m;if(PW.b||!wOn())return;PW.b=1;PW.err='';try{const r=await docOf(m);PW.D[m]=r.v;PW.at[m]=r.at}
- catch(e){PW.err=e&&e.offline?e.message:(e&&e.code===403?'אין לך הרשאה לנתוני השכר':'הטעינה נכשלה: '+(e&&e.message||''))}
+async function viewLoad(){const m=PW.m;if(PW.b||!wOn())return;PW.b=1;PW.err='';try{await DC.swait('pm|'+m);const r=await docOf(m);PW.D[m]=r.v;PW.at[m]=r.at;delete PW.st[m];DC.sput('pm|'+m,{v:r.v,at:r.at})}
+ catch(e){if(PW.st[m]){if(e&&e.offline)DC.soff(e,PW.st[m]);else{delete PW.D[m];delete PW.st[m]}}PW.err=e&&e.offline?e.message:(e&&e.code===403?'אין לך הרשאה לנתוני השכר':'הטעינה נכשלה: '+(e&&e.message||''))}
  finally{PW.b=0}try{if(cur().v==='wk'&&WS==='pm')rerender()}catch(e){}}
-ACT.pmGo=()=>{if(!wOn())return;WS='pm';PW.m=HM.m||months()[0];PW.err='';rerender();if(!(PW.m in PW.D))viewLoad()};
-ACT.pmMon=el=>{const m=el.dataset.m;if(!months().includes(m)||PW.b)return;PW.m=m;PW.err='';rerender();if(!(m in PW.D))viewLoad()};
+ACT.pmGo=()=>{if(!wOn())return;WS='pm';PW.m=HM.m||months()[0];PW.err='';const ld=!(PW.m in PW.D);if(ld)viewFill(PW.m);rerender();if(ld)viewLoad()};
+ACT.pmMon=el=>{const m=el.dataset.m;if(!months().includes(m)||PW.b)return;PW.m=m;PW.err='';const ld=!(m in PW.D);if(ld)viewFill(m);rerender();if(ld)viewLoad()};
 ACT.pmRefresh=()=>{delete PW.D[PW.m];HM.t=0;viewLoad()};
 const STN={calc:['לפי שעות',''],fix:['קבוע',''],exp:['צפוי','t1'],ok:['אושר','t3'],man:['ידני',''],acc:['לרואה החשבון','']};
 const LN=(a,b,x)=>`<div class="row" style="justify-content:space-between;margin:6px 0;flex-wrap:nowrap;gap:8px"${x||''}><span style="min-width:0">${a}</span><b style="white-space:nowrap">${b}</b></div>`;
@@ -132,5 +138,5 @@ ACT.pmRow=el=>{const d=PW.D[PW.m];if(!d||!Array.isArray(d.rows))return;const r=d
  if(Array.isArray(r.h)&&r.h.length)b+='<div class="sec"><h3>מה אפשר לשפר</h3></div>'+r.h.map(t=>`<div class="note" style="margin:4px 0">• ${esc(String(t))}</div>`).join('');
  dlg(`<h3>${esc(String(r.n||''))}</h3><div data-pay-det>${b}</div><button type="button" class="btn g w" style="margin-top:12px" data-a="closeDlg">סגירה</button>`)};
 
-window.PayMe={build,pmSync,_st:{PS,HM,PW},_reset:()=>{PS.b=0;PS.again=0;PS.off=0;PS.ld={};PS.dz={};HM.u='';HM.t=0;HM.d=null;HM.m='';PW.D={};PW.at={};PW.m='';PW.err=''}};
+window.PayMe={build,pmSync,_st:{PS,HM,PW},_reset:()=>{PS.b=0;PS.again=0;PS.off=0;PS.ld={};PS.dz={};HM.u='';HM.t=0;HM.d=null;HM.m='';HM.sc=0;PW.D={};PW.at={};PW.st={};PW.m='';PW.err=''}};
 })();
