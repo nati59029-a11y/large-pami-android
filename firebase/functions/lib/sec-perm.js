@@ -11,8 +11,11 @@
 //   'auto' – לבד: רק כשהסוג הוגדר "לבד" וגם הסכום בתוך התקרה לפעולה ובתוך התקרה היומית.
 //   סוג שלא ברשימה (כולל תשלום / העברת כסף) – תמיד 'no'. אין ואין להוסיף סוג תשלום.
 //
-// מנגנונים קיימים שהמנהל כבר הדליק כ"לבד" (מענה אוטומטי במייל, הכללים שלי, פתיחה/"קיבלנו" בווצאפ, שליחת טיוטת הזמנה ללקוח):
-//   ממשיכים לפעול כל עוד הסוג לא הוגדר "אסור" (legacyOk) – הנחה שנבחרה בסבב 4, כדי לא לשנות התנהגות קיימת כברירת מחדל.
+// אכיפה (תיקון סבב 1 של הבודק, החלטת המתאם): כל מה שאינו "לבד" עוצר שליחה / ביצוע לבד – גם מנגנונים קיימים
+//   (מענה אוטומטי במייל, "קיבלנו" ופתיחה בווצאפ, כללים אישיים "לבד", שליחה לבד של טיוטת הזמנה ללקוח) – blocked / takeAuto.
+// תאימות לאחור: לסוג שאין לו עדיין ערך שמור, הערך האפקטיבי ההתחלתי הוא "לבד" אם יש כרגע אצל העסק מנגנון לבד דלוק מהסוג הזה,
+//   אחרת "רק אחרי אישור" (legacyOf; src: 'set' | 'legacy' | 'def'). היום יש מנגנון כזה רק לשליחת הודעות.
+//   "נכנס ישר" של חשבוניות ותזכורת שהמנהל ביקש בעצמו בווצאפ – לא מחוברים (נשארים כמו היום).
 //
 // נקודת חיבור לחלק ב (טיוטת הזמנה מספק): canPropose(p, 'ord') לפני יצירת טיוטה; takeAuto(db, 'ord', סכום) אם בעתיד יהיה ביצוע לבד.
 
@@ -31,12 +34,15 @@ const own = (o, k) => !!o && typeof o === 'object' && Object.prototype.hasOwnPro
 const dayKey = (ms) => new Date(ms).toLocaleString('sv-SE', { timeZone: TZ }).slice(0, 10);
 
 // ההגדרות האפקטיביות מתוך נתוני המסמך (או null). ערך לא תקין = ברירת המחדל
-function permOf(data) {
+// legacy = { <סוג>: true } – מנגנון לבד דלוק היום (legacyOf); משמש רק לסוג בלי ערך שמור
+function permOf(data, legacy) {
   const d = data && typeof data === 'object' ? data : {};
   const lv = d.t && typeof d.t === 'object' && !Array.isArray(d.t) ? d.t : {};
-  const t = {};
-  for (const k of KEYS) t[k] = own(lv, k) && LEVELS.includes(lv[k]) ? lv[k] : DEF.lvl;
-  const out = { t };
+  const t = {}, src = {};
+  for (const k of KEYS) {
+    if (own(lv, k) && LEVELS.includes(lv[k])) { t[k] = lv[k]; src[k] = 'set'; } else if (own(legacy, k) && legacy[k] === true) { t[k] = 'auto'; src[k] = 'legacy'; } else { t[k] = DEF.lvl; src[k] = 'def'; }
+  }
+  const out = { t, src };
   for (const k of NUMS) out[k] = typeof d[k] === 'number' && Number.isFinite(d[k]) && d[k] >= LIM[k][0] && d[k] <= LIM[k][1] ? d[k] : DEF[k];
   return out;
 }
@@ -60,8 +66,8 @@ function decide(p, type, o) {
 }
 // מותר להציע (כרטיס / טיוטה לאישור)? – כל עוד לא "אסור"
 const canPropose = (p, type) => decide(p, type).r !== 'no';
-// מנגנון קיים שהמנהל כבר הדליק כ"לבד" – ממשיך כל עוד הסוג לא "אסור" (ראו למעלה)
-const legacyOk = (p, type) => decide(p, type).r !== 'no';
+// ביצוע לבד (בלי סכום) מותר? – רק "לבד"
+const autoOk = (p, type) => decide(p, type).r === 'auto';
 
 // שינוי אחד (מהמסך או מכרטיס בצ'אט): { type, lvl } או { num: 'cap1'|'capD'|'anPct'|'anMin', v }.
 // מחזיר { set: נתונים למיזוג במסמך, note: לרישום ביומן } או זורק { badPerm: קוד }. סוג תשלום / לא מוכר – נדחה
@@ -73,7 +79,7 @@ function applyChange(cur, ch) {
   if (c.type !== undefined) {
     if (typeof c.type !== 'string' || !KEYS.includes(c.type)) fail('bad-type');
     if (typeof c.lvl !== 'string' || !LEVELS.includes(c.lvl)) fail('bad-level');
-    return { set: { t: { [c.type]: c.lvl } }, note: c.type + ':' + P.t[c.type] + '>' + c.lvl, same: P.t[c.type] === c.lvl };
+    return { set: { t: { [c.type]: c.lvl } }, note: c.type + ':' + P.t[c.type] + '>' + c.lvl, same: P.t[c.type] === c.lvl && (!P.src || P.src[c.type] === 'set') }; // ערך לפי ההגדרות הקיימות – נשמר במפורש
   }
   if (c.num !== undefined) {
     if (typeof c.num !== 'string' || !NUMS.includes(c.num)) fail('bad-type');
@@ -93,19 +99,22 @@ function changeText(cur, ch) {
 }
 
 // ---------- הוראה בצ'אט ("תני לעצמך לשלוח הודעות לבד", "תעלי את התקרה ל-1000") – זיהוי בלי AI ----------
-// מחזיר null (לא הוראת הרשאה – השיחה ממשיכה כרגיל) | { pay: true } | { change } | { bad: 'range', num }
+// מחזיר null (לא הוראת הרשאה – השיחה ממשיכה כרגיל) | { pay: true } | { change } | { bad: 'range'|'num', num }
 const PAY_RE = /(תשלו?ם|תשלומים|לשלם|ישלם|תשלמי|העבר(ת|ות)\s*(ה)?כסף|העברה בנקאית|העברות בנקאיות|העברת כספים|להעביר כסף|תעבירי כסף|pay(ment)?s?\b|transfer money)/i;
-const PAY_ASK_RE = /(הרשא|לעצמך|מותר לך|רשאית|לבד|בעצמך|בלי לשאול|בלי אישור|תאפשרי|לאפשר|תוסיפי|להוסיף)/;
-const INTENT_RE = /(תני לעצמך|תרשי לעצמך|לעצמך|מותר לך|אסור לך|את רשאית|רשאית|הרשא|תפסיקי|מעכשיו|מעתה|מהיום|תמיד|לעולם|אף פעם|בלי לשאול|בלי אישור|רק (אחרי |ב)אישור)/;
+// תיקון סבב 1 (בודק): רק בקשת הרשאה מפורשת. "תוסיפי משימה לשלם…", "מה התשלומים שלא שולמו לבד?", "תפסיקי לשלוח לי הודעות בלילה" – שיחה רגילה
+const INTENT_RE = /(הרשא|לעצמך|מותר לך|אסור לך|רשאית)/;
 const TYPE_RE = [['msg', /(הודע|ווטסאפ|וואטסאפ|ווצאפ|וואצאפ|whatsapp|מייל|אימייל|דוא"ל)/i], ['task', /משימ/], ['rem', /תזכור/], ['ord', /(הזמנ\S* (מ|ל|אצל )?ספק|הזמנות לספק|טיוט\S* הזמנ|הזמנות רכש|הזמנת רכש)/], ['tag', /(תיוג|לתייג|תתייגי|סיווג|לסווג|תסווגי|קטגורי)/]];
-const NO_RE = /(אסור|תפסיקי|בכלל לא|לעולם לא|אף פעם לא|חסמי|לחסום|לא מותר)/;
+const NO_RE = /(אסור|בכלל לא|לעולם לא|אף פעם לא|לא מותר)/;
 const ASK_RE = /(רק (אחרי |ב)אישור|באישור|אחרי אישור|תשאלי|לשאול אותי|לא לבד|אל ת\S+ לבד)/;
 const AUTO_RE = /(לבד|בעצמך|בלי לשאול|בלי אישור|אוטומטי)/;
 const CAP_RE = /(תקרה|תקרת|התקרה)/;
 const NOT_PERM_CAP_RE = /(חודשי|עלות|שימוש|ניצול|\$|דולר|AI|בינה)/i; // תקרת העלות של המזכירה – לא כאן (מנהל־על, secAdminSetCfg)
+// מספר אחד ברור, אחרת null (לא מנחשים): בלי מספר, שלילי ("-5", "מינוס"), כתיב מדעי (1e9), או יותר ממספר אחד
 function numIn(text) {
+  if (/\d\s*[eE]\s*[+-]?\d/.test(text) || /(^|[\s(:])[-−–]\s?\d/.test(text) || /מינוס/.test(text)) return null;
+  const all = text.match(/\d[\d,]*(?:\.\d+)?/g) || [];
+  if (all.length !== 1) return null;
   const m = /(\d[\d,]*(?:\.\d+)?)\s*(אלף|k)?/i.exec(text);
-  if (!m) return null;
   let v = Number(m[1].replace(/,/g, ''));
   if (m[2]) v *= 1000;
   return Number.isFinite(v) ? v : null;
@@ -114,21 +123,20 @@ function parseChat(text) {
   const s = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, 400) : '';
   if (!s) return null;
   const intent = INTENT_RE.test(s);
-  // תשלום / העברת כסף – רק כשמבקשים הרשאה ("תני לעצמך לשלם", "הרשאה לתשלומים"), לא שאלה רגילה על תשלומים
-  // (תזכורת לשלם – לא בקשת הרשאה; ממשיכה לשיחה הרגילה)
-  if (PAY_RE.test(s) && !/תזכ/.test(s) && PAY_ASK_RE.test(s)) return { pay: true };
+  // תשלום / העברת כסף – רק כשמבקשים הרשאה ("תני לעצמך לשלם", "הרשאה לתשלומים"), לא שאלה או משימה רגילה על תשלומים
+  if (PAY_RE.test(s) && intent && !/תזכ/.test(s)) return { pay: true };
   // תקרות (לפעולה / ליום) וספי הוצאה חריגה
   if (CAP_RE.test(s) && !NOT_PERM_CAP_RE.test(s) && /(תעלי|תורידי|תשני|שני|קבעי|תקבעי|להעלות|להוריד|לשנות|לקבוע|העלי|הורידי)/.test(s)) {
-    const v = numIn(s);
-    if (v === null) return null;
     const num = /(יומי|ליום|ביום|ליומית)/.test(s) ? 'capD' : 'cap1';
+    const v = numIn(s);
+    if (v === null) return { bad: 'num', num };
     if (v < LIM[num][0] || v > LIM[num][1]) return { bad: 'range', num };
     return { change: { num, v: Math.round(v) } };
   }
   if (/חריג/.test(s) && /(סף|תשני|שני|קבעי|תקבעי|תעלי|תורידי)/.test(s)) {
-    const v = numIn(s);
-    if (v === null) return null;
     const num = /%|אחוז/.test(s) ? 'anPct' : 'anMin';
+    const v = numIn(s);
+    if (v === null) return { bad: 'num', num };
     if (v < LIM[num][0] || v > LIM[num][1]) return { bad: 'range', num };
     return { change: { num, v: Math.round(v) } };
   }
@@ -141,31 +149,48 @@ function parseChat(text) {
 }
 
 // ---------- גישה למסד ----------
+// מנגנוני לבד דלוקים היום (לתאימות לאחור) – נקרא רק לסוג שאין לו ערך שמור
+async function msgAutoOn(db) {
+  const [wa, rep, oa, mr, main] = await Promise.all([db.doc('sec_cfg/wa').get(), db.doc('sec_cfg/mail_rep').get(), db.doc('sec_cfg/ord_auto').get(),
+    db.collection('sec_mrule').where('auto', '==', true).limit(1).get(), db.doc('sec_cfg/main').get()]);
+  const on = (x) => !!x && typeof x === 'object' && x.on === true && typeof x.text === 'string' && !!x.text.trim(); // כמו waCfgOf
+  if (wa.exists && (on(wa.get('open')) || on(wa.get('ack')))) return true;   // פתיחה / "קיבלנו" בווצאפ
+  if (rep.exists && rep.get('auto') === true) return true;                    // מענה אוטומטי במייל
+  const om = oa.exists ? oa.get('on') : null;                                 // שליחה לבד של טיוטת הזמנה ללקוח
+  if (om && typeof om === 'object' && Object.values(om).some((v) => v === true)) return true;
+  return !mr.empty && !(main.exists && main.get('learn') === false);          // כלל אישי "לבד" (כשהכללים האישיים פעילים)
+}
+async function legacyOf(db, data) {
+  const lv = data && data.t && typeof data.t === 'object' ? data.t : {};
+  return own(lv, 'msg') && LEVELS.includes(lv.msg) ? {} : { msg: await msgAutoOn(db) };
+}
 async function readPerm(db) {
   const s = await db.doc('sec_cfg/perm').get();
-  return permOf(s.exists ? s.data() : null);
+  const d = s.exists ? s.data() : null;
+  return permOf(d, await legacyOf(db, d));
 }
 // ביצוע לבד עם סכום (לחלק ב ואילך): ההחלטה והמונה היומי באותה טרנזקציה – שתי פעולות בו-זמנית לא עוברות את התקרה היומית.
 // מחזיר את ההחלטה; רק 'auto' מוסיף את הסכום למונה
 async function takeAuto(db, type, amount, now) {
   const t = now || Date.now();
   const day = dayKey(t);
+  const leg = await legacyOf(db, (await db.doc('sec_cfg/perm').get()).data() || null); // מחוץ לטרנזקציה (שאילתה); ערך שמור גובר בכל מקרה
   return db.runTransaction(async (tx) => {
     const [ps, us] = await Promise.all([tx.get(db.doc('sec_cfg/perm')), tx.get(db.doc('sec_cfg/use'))]);
     const pa = us.exists && us.get('pa') && typeof us.get('pa') === 'object' ? us.get('pa') : {};
     const used = pa.d === day && Number.isFinite(pa.s) ? pa.s : 0;
-    const r = decide(permOf(ps.exists ? ps.data() : null), type, { amount, dayUsed: used });
+    const r = decide(permOf(ps.exists ? ps.data() : null, leg), type, { amount, dayUsed: used });
     if (r.r === 'auto' && typeof amount === 'number') tx.set(db.doc('sec_cfg/use'), { pa: { d: day, s: used + Math.abs(amount) } }, { merge: true });
     return Object.assign({ used }, r);
   });
 }
-// מנגנון קיים חסום? (קריאה טרייה, ממש לפני הביצוע) – רק כשהסוג הוגדר "אסור"
-async function blocked(db, type) { return !legacyOk(await readPerm(db), type); }
-const NO_LABEL = 'מנהל־העל הגדיר: שליחת הודעות – אסור';
+// ביצוע לבד בלי סכום חסום? (קריאה טרייה, ממש לפני הביצוע) – כל מה שאינו "לבד"
+async function blocked(db, type) { return !autoOk(await readPerm(db), type); }
+const NO_LABEL = 'שליחת הודעות לבד לא מותרת בהרשאות של גיטי';
 // למסך ההגדרות (secState): הערכים, השמות והאם מותר לשנות
 function stateOf(p, edit) {
-  return { t: Object.assign({}, p.t), cap1: p.cap1, capD: p.capD, anPct: p.anPct, anMin: p.anMin, edit: !!edit,
+  return { t: Object.assign({}, p.t), src: Object.assign({}, p.src || {}), cap1: p.cap1, capD: p.capD, anPct: p.anPct, anMin: p.anMin, edit: !!edit,
     types: KEYS.map((k) => ({ k, l: TYPES[k] })), lv: LEVELS.map((k) => ({ k, l: LV_L[k] })), lim: LIM };
 }
 
-module.exports = { blocked, NO_LABEL, TYPES, KEYS, LEVELS, LV_L, DEF, LIM, NUMS, NUM_L, AMT_TYPES, permOf, decide, canPropose, legacyOk, applyChange, changeText, parseChat, readPerm, takeAuto, stateOf, dayKey };
+module.exports = { blocked, NO_LABEL, TYPES, KEYS, LEVELS, LV_L, DEF, LIM, NUMS, NUM_L, AMT_TYPES, permOf, decide, canPropose, autoOk, legacyOf, applyChange, changeText, parseChat, readPerm, takeAuto, stateOf, dayKey };

@@ -350,16 +350,16 @@ async function secMirrorPut(request) {
 // 24.11.2026 (סבב 4): שינוי הרשאה אחד מהמסך – קריאה, בדיקה, שמירה ורישום ביומן בטרנזקציה אחת
 async function permWrite(db, uid, ch, t) {
   const ref = db.doc('sec_cfg/perm');
+  const leg = await PERM.legacyOf(db, (await ref.get()).data() || null); // הערך האפקטיבי (לתיאור ביומן) – לפי ההגדרות הקיימות כשאין ערך שמור
   return db.runTransaction(async (tx) => {
     const ps = await tx.get(ref);
-    const cur = PERM.permOf(ps.exists ? ps.data() : null);
+    const cur = PERM.permOf(ps.exists ? ps.data() : null, leg);
     let a;
     try { a = PERM.applyChange(cur, ch); } catch (e) { if (e && e.badPerm) throw bad(e.badPerm === 'bad-amount' ? 'bad-amount' : 'bad-input', e.badPerm === 'bad-amount' ? 'סכום לא תקין' : 'ערך לא תקין'); throw e; }
     tx.set(ref, Object.assign({}, a.set, { upd: t, updBy: uid }), { merge: true });
     tx.set(db.collection('sec_log').doc(), logData(uid, 'sa', 'permSet', { note: a.note + ' screen' }));
-    const next = PERM.permOf(Object.assign({}, ps.exists ? ps.data() : {}, a.set, a.set.t ? { t: Object.assign({}, (ps.exists && ps.get('t')) || {}, a.set.t) } : {}));
-    return { perm: PERM.stateOf(next, true) };
-  });
+    return true;
+  }).then(async () => ({ perm: PERM.stateOf(await PERM.readPerm(db), true) }));
 }
 // secPrefs – הגדרות של מנהל העסק: מתג המראה (45), אישור סף התזרים (51), "לא רלוונטי" לרעיון (56)
 const NR_DAYS = 90, NR_MAX = 200, PREFS_HOUR = 30;
@@ -485,6 +485,7 @@ async function secPrefs(request) {
     const cid = typeof input.cid === 'string' && /^pm[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
     if (!mid || !cid || !['ok', 'no'].includes(input.st)) throw bad('bad-input', 'ערך לא תקין');
     const mRef = db.doc(`sec_chat/${who.uid}/m/${mid}`), pRef = db.doc('sec_cfg/perm');
+    const leg = await PERM.legacyOf(db, (await pRef.get()).data() || null);
     const r = await db.runTransaction(async (tx) => {
       const [ms, ps] = await Promise.all([tx.get(mRef), tx.get(pRef)]);
       const cards = ms.exists && Array.isArray(ms.get('cards')) ? ms.get('cards') : [];
@@ -493,7 +494,7 @@ async function secPrefs(request) {
       if (c.st) return { st: c.st, already: true };
       let a = null;
       if (input.st === 'ok') {
-        try { a = PERM.applyChange(PERM.permOf(ps.exists ? ps.data() : null), c.ch); } catch (e) { if (e && e.badPerm) throw bad('bad-input', 'השינוי בכרטיס לא תקין'); throw e; }
+        try { a = PERM.applyChange(PERM.permOf(ps.exists ? ps.data() : null, leg), c.ch); } catch (e) { if (e && e.badPerm) throw bad('bad-input', 'השינוי בכרטיס לא תקין'); throw e; }
         tx.set(pRef, Object.assign({}, a.set, { upd: t, updBy: who.uid }), { merge: true });
       }
       let hit = false;
@@ -537,10 +538,12 @@ async function secPrefs(request) {
         tx.update(cRef, { st: 'act', actBy: who.uid, actAt: t });
         return { st: 'act' };
       }
-      const [ts, es] = await Promise.all([tx.get(db.doc('tasks/' + ref)), tx.get(db.doc('sec_cal/' + ref))]);
+      const [ts, es, ps] = await Promise.all([tx.get(db.doc('tasks/' + ref)), tx.get(db.doc('sec_cal/' + ref)), tx.get(db.doc('sec_cfg/perm'))]);
       let patch;
       if (input.st === 'ok') {
         const kind = input.kind === 'rem' ? 'rem' : 'task';
+        // תיקון סבב 1 (בודק): הסוג נאכף בשרת גם בסגירה (בלי סוג – משימה), לא רק בתפיסה
+        if (!PERM.canPropose(PERM.permOf(ps.exists ? ps.data() : null), kind)) throw deny('perm-no', 'מנהל־העל הגדיר שגיטי לא מציעה ' + (kind === 'rem' ? 'תזכורות' : 'משימות'));
         if (kind === 'task' ? !ts.exists || ts.get('owner') !== who.uid : !es.exists || es.get('by') !== who.uid || es.get('rem') !== true) throw pre('not-done', kind === 'task' ? 'המשימה לא נמצאה' : 'התזכורת לא נמצאה');
         patch = { st: 'ok', kind, ref };
       } else {
@@ -826,6 +829,7 @@ const PERM_TXT = {
 async function permReply(db, who, pq) {
   if (pq.pay) return { reply: PERM_TXT.pay, act: 'permPayNo' };
   if (!who.superadmin) return { reply: PERM_TXT.deny, act: 'permDeny', note: pq.change ? String(pq.change.type || pq.change.num) : '' };
+  if (pq.bad === 'num') return { reply: PERM.NUM_L[pq.num] + ': לא זיהיתי מספר אחד ברור (בלי מינוס ובלי כתיב מדעי). כתבו למשל "תעלי את התקרה ל-1000". לא הוכן שינוי.', act: 'permUnclear', note: pq.num };
   if (pq.bad === 'range') { const L = PERM.LIM[pq.num]; return { reply: PERM.NUM_L[pq.num] + ': אפשר לקבוע בין ' + L[0].toLocaleString('he-IL') + ' ל-' + L[1].toLocaleString('he-IL') + '. לא הוכן שינוי.', act: 'permUnclear', note: pq.num }; }
   const cur = await PERM.readPerm(db);
   const a = PERM.applyChange(cur, pq.change);

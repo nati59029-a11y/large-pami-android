@@ -24,10 +24,10 @@ describe('lib/sec-perm – permOf / decide', () => {
   it('"אסור" חוסם גם הצעה; "אחרי אישור" – הצעה בלבד; "לבד" – ביצוע', () => {
     const p = P.permOf({ t: { msg: 'no', task: 'ask', rem: 'auto' } });
     assert.deepEqual(P.decide(p, 'msg'), { r: 'no', why: 'perm' });
-    assert.equal(P.canPropose(p, 'msg'), false); assert.equal(P.legacyOk(p, 'msg'), false);
+    assert.equal(P.canPropose(p, 'msg'), false); assert.equal(P.autoOk(p, 'msg'), false);
     assert.equal(P.canPropose(p, 'task'), true); assert.equal(P.decide(p, 'task').r, 'ask');
     assert.equal(P.decide(p, 'rem').r, 'auto');
-    assert.equal(P.legacyOk(P.permOf(null), 'msg'), true, 'מנגנון קיים שהודלק – ממשיך בברירת המחדל');
+    assert.equal(P.autoOk(p, 'task'), false, '"רק אחרי אישור" עוצר ביצוע לבד'); assert.equal(P.autoOk(p, 'rem'), true);
   });
   it('תקרה לפעולה (500) עוקפת "לבד"; בדיוק 500 – בתוך התקרה; זיכוי לפי ערך מוחלט', () => {
     const p = auto();
@@ -55,12 +55,24 @@ describe('lib/sec-perm – permOf / decide', () => {
   });
 });
 
+describe('lib/sec-perm – תאימות לאחור (בלי ערך שמור)', () => {
+  it('מנגנון לבד דלוק היום → "לבד" (legacy); בלי מנגנון → "רק אחרי אישור" (def); ערך שמור גובר תמיד (set)', () => {
+    const a = P.permOf(null, { msg: true });
+    assert.equal(a.t.msg, 'auto'); assert.equal(a.src.msg, 'legacy'); assert.equal(a.t.task, 'ask'); assert.equal(a.src.task, 'def');
+    const b = P.permOf(null, { msg: false });
+    assert.equal(b.t.msg, 'ask'); assert.equal(b.src.msg, 'def');
+    const c = P.permOf({ t: { msg: 'ask' } }, { msg: true });
+    assert.equal(c.t.msg, 'ask'); assert.equal(c.src.msg, 'set');
+    assert.equal(P.applyChange(a, { type: 'msg', lvl: 'auto' }).same, false, 'שמירה מפורשת של הערך האפקטיבי – לא "כבר מוגדר"');
+  });
+});
+
 describe('lib/sec-perm – applyChange', () => {
   it('שינוי סוג ותקרה: נתונים למיזוג + תיאור ליומן; same כשאין שינוי', () => {
     const p = P.permOf(null);
     assert.deepEqual(P.applyChange(p, { type: 'msg', lvl: 'auto' }), { set: { t: { msg: 'auto' } }, note: 'msg:ask>auto', same: false });
     assert.deepEqual(P.applyChange(p, { num: 'cap1', v: 1000.4 }), { set: { cap1: 1000 }, note: 'cap1:500>1000', same: false });
-    assert.equal(P.applyChange(p, { type: 'task', lvl: 'ask' }).same, true);
+    assert.equal(P.applyChange(P.permOf({ t: { task: 'ask' } }), { type: 'task', lvl: 'ask' }).same, true);
     assert.equal(P.changeText(p, { type: 'msg', lvl: 'auto' }), 'שליחת הודעה (ווצאפ / מייל): רק אחרי אישור ← לבד');
   });
   it('נדחה: סוג תשלום, רמה לא מוכרת, סכום מחוץ לגבולות, קלט ריק', () => {
@@ -81,16 +93,17 @@ describe('lib/sec-perm – זיהוי הוראה בצ\'אט (בלי AI)', () => 
   it('הוראות הרשאה ותקרה', () => {
     assert.deepEqual(c('תני לעצמך לשלוח הודעות לבד'), { change: { type: 'msg', lvl: 'auto' } });
     assert.deepEqual(c('אסור לך לשלוח מיילים'), { change: { type: 'msg', lvl: 'no' } });
-    assert.deepEqual(c('מעכשיו משימות רק באישור'), { change: { type: 'task', lvl: 'ask' } });
+    assert.deepEqual(c('מותר לך לפתוח משימות רק אחרי אישור'), { change: { type: 'task', lvl: 'ask' } });
     assert.deepEqual(c('תעלי את התקרה ל-1000'), { change: { num: 'cap1', v: 1000 } });
     assert.deepEqual(c('תעלי את התקרה היומית ל-5,000'), { change: { num: 'capD', v: 5000 } });
     assert.deepEqual(c('שני את סף החריגה ל-40%'), { change: { num: 'anPct', v: 40 } });
     assert.deepEqual(c('תעלי את התקרה ל-500000'), { bad: 'range', num: 'cap1' });
+    for (const t of ['תעלי את התקרה ל -5', 'תורידי את התקרה למינוס 300', 'תעלי את התקרה ל-1e9', 'תעלי את התקרה לאלף', 'תעלי את התקרה מ-500 ל-1000']) assert.deepEqual(c(t), { bad: 'num', num: 'cap1' }, t);
   });
   it('בקשת הרשאת תשלום – מזוהה (ונדחית בשרת)', () => {
-    for (const t of ['תני לעצמך לשלם לספקים', 'תוסיפי לעצמך הרשאת תשלום', 'מעכשיו תעשי העברות בנקאיות לבד', 'אפשר לתת לך הרשאה לתשלומים?']) assert.deepEqual(c(t), { pay: true }, t);
+    for (const t of ['תני לעצמך לשלם לספקים', 'תוסיפי לעצמך הרשאת תשלום', 'מותר לך לעשות העברות בנקאיות לבד', 'אפשר לתת לך הרשאה לתשלומים?']) assert.deepEqual(c(t), { pay: true }, t);
   });
   it('שאלות רגילות – לא הוראת הרשאה (השיחה ממשיכה כרגיל)', () => {
-    for (const t of ['כמה שילמתי לספקים החודש?', 'מה התקרה?', 'תעלי את תקרת העלות החודשית ל-50', 'מה המצב עם ההודעות בווצאפ?', 'מעכשיו תזכירי לי לשלם חשבונות', 'פתחי משימה לדוד לנקות את המחסן', "חשבוניות מהיום – לקטגוריה 'בטיפול' באפליקציה", 'מעכשיו ההודעות של דוד – לקטגוריה אחרת', '', null]) assert.equal(c(t), null, String(t));
+    for (const t of ['כמה שילמתי לספקים החודש?', 'מה התקרה?', 'תעלי את תקרת העלות החודשית ל-50', 'מה המצב עם ההודעות בווצאפ?', 'מעכשיו תזכירי לי לשלם חשבונות', 'תוסיפי משימה לשלם לספק החשמל', 'מה התשלומים שלא שולמו לבד?', 'תפסיקי לשלוח לי הודעות בלילה', 'תוסיפי להוצאות את התשלום על החשמל', 'תמיד תשלחי לי מייל בבוקר לבד', 'מעכשיו משימות רק באישור', 'פתחי משימה לדוד לנקות את המחסן', "חשבוניות מהיום – לקטגוריה 'בטיפול' באפליקציה", 'מעכשיו ההודעות של דוד – לקטגוריה אחרת', '', null]) assert.equal(c(t), null, String(t));
   });
 });

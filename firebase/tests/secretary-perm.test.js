@@ -66,6 +66,25 @@ describe('גיטי – הרשאות פעולה: מסך (secPrefs op:perm)', () =
     assert.equal(s1.edit, true); assert.equal(s2.edit, false); assert.deepEqual(s2.t, s1.t);
     assert.ok(!s1.types.some((x) => /pay|transfer/.test(x.k) || /תשלום|העבר/.test(x.l)), 'אין סוג תשלום במסך');
     assert.equal(await get(`b/${A}/sec_cfg/perm`), null, 'הקריאה לא יוצרת מסמך');
+    assert.equal(s1.src.msg, 'def');
+  });
+  it('תאימות לאחור: בלי ערך שמור ועם מנגנון לבד דלוק (מענה אוטומטי במייל / "קיבלנו" / כלל אישי "לבד") – "לבד" לפי ההגדרות הקיימות; ערך שמור גובר', async () => {
+    for (const [p, v] of [[`b/${A}/sec_cfg/mail_rep`, { auto: true }], [`b/${A}/sec_cfg/wa`, { ack: { on: true, text: 'קיבלנו' } }], [`b/${A}/sec_mrule/r1`, { uid: SA, auto: true, on: true }]]) {
+      await seed();
+      await prep((d) => d.doc(p).set(v));
+      const s = (await call('secState', M2, {})).result.perm;
+      assert.equal(s.t.msg, 'auto', p); assert.equal(s.src.msg, 'legacy', p); assert.equal(s.t.task, 'ask');
+      assert.equal(await inBiz((db) => PERM.blocked(db, 'msg')), false, p);
+    }
+    await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).set({ t: { msg: 'ask' } }));
+    const s = (await call('secState', M2, {})).result.perm;
+    assert.equal(s.t.msg, 'ask'); assert.equal(s.src.msg, 'set');
+    assert.equal(await inBiz((db) => PERM.blocked(db, 'msg')), true, '"רק אחרי אישור" עוצר גם מנגנון דלוק');
+    await seed(); // בלי מנגנון דלוק – רק אחרי אישור
+    assert.equal(await inBiz((db) => PERM.blocked(db, 'msg')), true);
+    // כיבוי הכללים האישיים בעסק – כלל "לבד" לא נחשב מנגנון דלוק
+    await prep(async (d) => { await d.doc(`b/${A}/sec_mrule/r1`).set({ uid: SA, auto: true }); await d.doc(`b/${A}/sec_cfg/main`).update({ learn: false }); });
+    assert.equal((await call('secState', M2, {})).result.perm.t.msg, 'ask');
   });
   it('מנהל רגיל נדחה – שום דבר לא נשמר; מנהל־העל משנה סוג ותקרה – נשמר ונרשם ביומן (permSet, מנהל המערכת)', async () => {
     for (const d of [{ op: 'perm', type: 'msg', lvl: 'auto' }, { op: 'perm', num: 'cap1', v: 900 }]) {
@@ -148,6 +167,11 @@ describe('גיטי – הוראה בצ\'אט: כרטיס הצעה + אישור (
     assert.equal(await get(`b/${A}/sec_cfg/perm`), null);
     const big = await chat(SA, 'תעלי את התקרה ל-500000');
     assert.deepEqual(big.result.cards, []); assert.match(big.result.reply, /לא הוכן שינוי/);
+    for (const t of ['תעלי את התקרה ל -5', 'תעלי את התקרה ל-1e9', 'תעלי את התקרה לאלף']) {
+      const r2 = await chat(SA, t);
+      assert.deepEqual(r2.result.cards, [], t); assert.match(r2.result.reply, /לא זיהיתי מספר/, t);
+    }
+    assert.equal(await get(`b/${A}/sec_cfg/perm`), null);
   });
   it('אין מסלול תשלום: בקשה בצ\'אט להרשאת תשלום נדחית – גם ממנהל־העל, בלי כרטיס ובלי AI', async () => {
     for (const u of [SA, M2]) for (const t of ['תני לעצמך לשלם לספקים לבד', 'תוסיפי לעצמך הרשאת תשלום']) {
@@ -186,11 +210,16 @@ describe('גיטי – אכיפה', () => {
     assert.equal((await get(`b/${A}/sec_cmt/${cid}`)).st, 'pend');
     let ai = 0;
     const out = await inBiz((db) => CMT.runQueue(db, { ai: async () => { ai++; return { text: '{}' }; } }));
-    assert.equal(out.perm, 1); assert.equal(ai, 0); assert.equal((await coll(`b/${A}/sec_cmtq`)).length, 0);
+    assert.equal(out.perm, 1); assert.equal(ai, 0); assert.equal((await coll(`b/${A}/sec_cmtq`)).length, 1, 'לא נמחק – רק לא מעובד');
     // רק משימה אסורה – תפיסה לתזכורת עוברת
     await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).set({ t: { task: 'no', rem: 'ask' } }));
     assert.equal((await call('secPrefs', SA, { op: 'cmt', cid, st: 'claim', kind: 'task' })).reason, 'perm-no');
     assert.equal((await call('secPrefs', SA, { op: 'cmt', cid, st: 'claim', kind: 'rem' })).status, 'OK');
+    // סגירה בלי סוג (= משימה) – נאכפת בשרת, גם כשמשימה כבר נוצרה במזהה ההצעה
+    await prep((d) => d.doc(`b/${A}/tasks/sec${cid}`).set({ owner: SA, txt: 'x' }));
+    const ok = await call('secPrefs', SA, { op: 'cmt', cid, st: 'ok' });
+    assert.equal(ok.status, 'PERMISSION_DENIED', ok.text); assert.equal(ok.reason, 'perm-no');
+    assert.notEqual((await get(`b/${A}/sec_cmt/${cid}`)).st, 'ok');
   });
   it('takeAuto (נקודת החיבור לחלק ב): ברירת מחדל – אישור; "לבד" בתוך התקרה; מעל 500 לפעולה ומעל 2,000 ביום – אישור; המונה רק על ביצוע', async () => {
     await seed();
@@ -203,5 +232,13 @@ describe('גיטי – אכיפה', () => {
     assert.deepEqual(last, { used: 2000, r: 'ask', why: 'capD' });
     assert.deepEqual((await get(`b/${A}/sec_cfg/use`)).pa, { d: PERM.dayKey(now), s: 2000 });
     assert.equal((await inBiz((db) => PERM.takeAuto(db, 'pay', 1, now))).r, 'no', 'אין סוג תשלום');
+  });
+  it('takeAuto במקביל: 6 פעולות של 500 בו-זמנית – בדיוק 4 עוברות, המונה היומי 2,000 ולא יותר', async () => {
+    await seed({ t: { ord: 'auto' } });
+    const now = Date.now();
+    const rs = await Promise.all(Array.from({ length: 6 }, () => inBiz((db) => PERM.takeAuto(db, 'ord', 500, now))));
+    assert.equal(rs.filter((x) => x.r === 'auto').length, 4, JSON.stringify(rs));
+    assert.ok(rs.filter((x) => x.r !== 'auto').every((x) => x.why === 'capD'));
+    assert.equal((await get(`b/${A}/sec_cfg/use`)).pa.s, 2000);
   });
 });

@@ -159,9 +159,10 @@ async function runQueue(db, o) {
   if (main.cmt !== true) { const b = db.batch(); s.docs.forEach((d) => b.delete(d.ref)); await b.commit(); out.off = s.size; return out; } // כובה – התור מתרוקן
   const st = ws.exists && ws.get('stop') && typeof ws.get('stop') === 'object' ? ws.get('stop') : {};
   if (st.on === true) { out.stop = s.size; return out; } // "עצור הכל" – לא מעבדים (התור נשמר עד שפג תוקפו)
-  // 24.11.2026 (סבב 4): משימה וגם תזכורת "אסור" – גיטי לא מציעה התחייבויות (התור מתרוקן, בלי AI ובלי עלות). אחד מהם מותר – ממשיכים (הסוג נבדק באישור)
+  // 24.11.2026 (סבב 4): משימה וגם תזכורת "אסור" – גיטי לא מציעה התחייבויות: לא מעבדים (בלי AI ובלי עלות), אבל לא מוחקים –
+  // הפריטים נשארים בתור עד שפג תוקפם (Q_TTL), כמו ב"עצור הכל". אחד מהם מותר – ממשיכים (הסוג נבדק באישור)
   const pm = await require('./sec-perm').readPerm(db);
-  if (!['task', 'rem'].some((k) => require('./sec-perm').canPropose(pm, k))) { const b = db.batch(); s.docs.forEach((d) => b.delete(d.ref)); await b.commit(); out.perm = s.size; return out; }
+  if (!['task', 'rem'].some((k) => require('./sec-perm').canPropose(pm, k))) { out.perm = s.size; return out; }
   const ctx = { grp: require('./sec-grp').allowedOf(main) }; // ההרשאה נקראת מחדש – קבוצה שנסגרה לא נסרקת
   for (const d of s.docs) {
     if (opt.deadline && Date.now() > opt.deadline - AI_MS) { add('later'); continue; } // תקציב הזמן – בריצה הבאה

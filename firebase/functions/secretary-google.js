@@ -1476,7 +1476,7 @@ async function ordReply(db, id, x, so, r, now) {
   if (ans === 'change') return q(await ordChg(db, id, so, r, now));
   if (ans !== 'ok') return q({ res: 'mgr', why: 'other' });
   if (WA.waCfgOf(await db.doc('sec_cfg/wa').get()).stop.on) return q({ res: 'mgr', why: 'stop' });
-  if (await PERM.blocked(db, 'msg')) return q({ res: 'mgr', why: 'permNo' }); // 24.11.2026 (סבב 4): כמו "עצור הכל" – לבדיקה ידנית
+  // 24.11.2026 (סבב 4, תיקון): יצירת ההזמנה מאישור הלקוח – פעולה של הלקוח, לא הודעה של גיטי; נשארת כמו היום. מייל האישור (cfmSend) – כפוף להרשאת "שליחת הודעה"
   if (o.sentVer !== o.ver || o.nBlock || (o.blk || []).length || !(o.lines || []).length || o.lines.some(lineBad)) return q({ res: 'mgr', why: 'ask' });
   let c;
   try { c = await ordCreateFromSec(db, o, { sent: true }); } catch (e) { return q({ res: 'mgr', why: 'ord', err: String((e && e.details && e.details.reason) || (e && e.code) || 'error').slice(0, 30) }); }
@@ -1553,9 +1553,9 @@ async function cfmSend(db, id, x, so, c, now) {
 }
 const ORD_RE_WHY = { dup: 'הלקוח שלח אישור נוסף – ההזמנה כבר קיימת, לא נוצרה הזמנה שנייה.', ordered: 'הלקוח כתב על הזמנה שכבר נוצרה (שינוי/ביטול/אחר) – ההזמנה לא שונתה. לטיפול שלך.',
   st: 'הלקוח ענה בשרשור של טיוטת הזמנה שעוד לא נשלחה או שכבר טופלה – לבדיקה.', from: 'התקבלה תשובה לטיוטת ההזמנה מכתובת אחרת או בלי אימות שולח – לא בוצע שום שינוי. לבדיקה.',
-  other: 'הלקוח ענה על טיוטת ההזמנה – לא זוהה אישור, שינוי או ביטול. לבדיקה.', permNo: 'מנהל־העל הגדיר: שליחת הודעות – אסור – אישור הלקוח לא בוצע. לבדיקה.', stop: '"עצור הכל" מופעל – אישור הלקוח לא בוצע. לבדיקה.',
+  other: 'הלקוח ענה על טיוטת ההזמנה – לא זוהה אישור, שינוי או ביטול. לבדיקה.', permNo: 'שליחת הודעות לבד לא מותרת בהרשאות של גיטי – אישור הלקוח לא בוצע. לבדיקה.', stop: '"עצור הכל" מופעל – אישור הלקוח לא בוצע. לבדיקה.',
   ask: 'הלקוח אישר, אבל בטיוטה יש שורות לבחירה/לבירור או פריט שאזל – ההזמנה לא נוצרה. לבדיקה.', ord: 'הלקוח אישר, אבל ההזמנה לא נוצרה – לבדיקה.', err: 'תקלה בטיפול בתשובת הלקוח לטיוטת ההזמנה – לבדיקה.' };
-const CFM_NO = { permNo: 'מנהל־העל הגדיר: שליחת הודעות – אסור', stop: '"עצור הכל" מופעל', off: 'המענה במייל כבוי', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה', thread: 'כבר נשלחה תשובה בשרשור', thrErr: 'לא ניתן היה לבדוק את השרשור',
+const CFM_NO = { permNo: 'שליחת הודעות לבד לא מותרת בהרשאות של גיטי', stop: '"עצור הכל" מופעל', off: 'המענה במייל כבוי', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה', thread: 'כבר נשלחה תשובה בשרשור', thrErr: 'לא ניתן היה לבדוק את השרשור',
   out: 'מכסת המיילים היוצאים להיום', gmail: 'תקלה ב-Gmail', cf: 'מייל אישור כבר נשלח', draft: 'הטיוטה כבר טופלה' };
 async function ordReNote(db, id, so, q, now) {
   let body;
@@ -1639,7 +1639,6 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   const no = [];
   if (o.st !== 'mgr') no.push('st');
   if (repOf(await db.doc('sec_cfg/mail_rep').get()).held) no.push('held');
-  if (await PERM.blocked(db, 'msg')) no.push('permNo');
   if (r && r.risk) no.push('risk');
   const from = G.addrOf(x.from);
   const cs = await db.doc('cust/' + o.custId).get();
@@ -1655,6 +1654,10 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   if (hasFile(x)) no.push('file');
   const key = G.sha('ord|' + o.custId).slice(0, 20);
   let lim = null;
+  // 24.11.2026 (סבב 4, תיקון סבב 1): הרשאת "שליחת הודעה" ותקרות הסכום (סכום הטיוטה) – ההחלטה והמונה היומי בטרנזקציה אחת (takeAuto).
+  // לא "לבד", מעל התקרה לפעולה או מעל התקרה היומית – לא נשלחת, נשארת לאישור המנהל (nope). אחרי כל שאר הבדיקות, כדי שלא ייספר סכום שלא נשלח
+  // total באגורות (lib/sec-ord.js) → ₪
+  if (!no.length) { const pa = await PERM.takeAuto(db, 'msg', Number.isInteger(o.total) && o.total >= 0 ? o.total / 100 : NaN, now); if (pa.r !== 'auto') no.push(pa.why === 'perm' ? 'permNo' : pa.why === 'cap1' ? 'permCap1' : pa.why === 'capD' ? 'permCapD' : 'permAmt'); }
   if (!no.length) { lim = await autoTake(db, key, now); if (lim.why) { if (lim.why === 'day') await holdAuto(db, 'day', now); no.push(lim.why); } }
   const name = String(cs.exists ? cs.get('bn') || cs.get('name') || '' : '').slice(0, 80);
   const nope = async (why) => {
@@ -1677,7 +1680,7 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   if (!(opt && opt.quiet)) await WA.notifyMgrs(db, 'ordauto-sent|' + oid + '|' + o.ver, 'טיוטת הזמנה נשלחה לבד', 'טיוטת ההזמנה נשלחה לבד ל' + (name || 'לקוח') + ' (לקוח שאישרת לשליחה לבד). אפשר לראות אותה בתיבת המייל.', now).catch(() => {});
   return { sent: true };
 }
-const OA_NO = { permNo: 'מנהל־העל הגדיר: שליחת הודעות – אסור', st: 'הטיוטה כבר טופלה', held: 'המענה האוטומטי נעצר להיום', risk: 'המייל נראה רגיש (בקשת הנחה, תלונה וכד׳)', from: 'השולח לא אומת', ask: 'יש בטיוטה שורות לבחירה/לבירור, פריט שאזל או פרט חסר',
+const OA_NO = { permCap1: 'סכום הטיוטה מעל תקרת הסכום לפעולה', permCapD: 'השליחות לבד היום הגיעו לתקרת הסכום היומית', permAmt: 'לא ידוע סכום הטיוטה', permNo: 'שליחת הודעות לבד לא מותרת בהרשאות של גיטי', st: 'הטיוטה כבר טופלה', held: 'המענה האוטומטי נעצר להיום', risk: 'המייל נראה רגיש (בקשת הנחה, תלונה וכד׳)', from: 'השולח לא אומת', ask: 'יש בטיוטה שורות לבחירה/לבירור, פריט שאזל או פרט חסר',
   cust: 'כרטיס הלקוח לא נמצא', big: 'מייל גדול, חתוך או חשוד', file: 'יש קובץ מצורף', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail', err: 'תקלה בבדיקה' };
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {
@@ -2016,7 +2019,7 @@ async function tryAuto(db, id, x, r, rep0, now) {
     return { no };
   };
   const no = G.autoBlock({ stop: WA.waCfgOf(ws).stop.on, on: rep.auto, held: !!rep.held, rule, x, r, neverCls: W.NEVER_AUTO, now });
-  if (await PERM.blocked(db, 'msg')) no.push('permNo');
+  if (!no.length && await PERM.blocked(db, 'msg')) no.push('permNo'); // 24.11.2026 (סבב 4): רק כשאין סיבה אחרת – הסיבות הקיימות נשארות כמו היום
   // החלטה (א): כלל בלי נתון חי – מותר (הטקסט הקבוע של הכלל). כלל עם נתון חי – הנתון חייב להיות קיים, ציבורי ובתוקף; אחרת לא שולחים
   const filled = K.tplKeys(rule.a).length ? K.fillTpl(rule.a, r.fm) : String(rule.a).trim();
   if (!filled) no.push('src');

@@ -2,6 +2,7 @@
    1. בהגדרות המזכירה: "הרשאות של גיטי" – לכל סוג פעולה (משימה, תזכורת, שליחת הודעה, טיוטת הזמנה מספק, תיוג/סיווג הוצאה):
       אסור / רק אחרי אישור / לבד, ותקרות הסכום (לפעולה וליום) וספי ההוצאה החריגה. הערכים מהשרת (secState → perm).
       רק מנהל־העל משנה (secPrefs op:'perm', שינוי אחד בכל לחיצה); שאר המנהלים רואים את אותו מסך נעול. השרת אוכף בכל מקרה.
+      סוג שעוד לא נשמר במפורש – הערך האפקטיבי מהשרת (perm.src != 'set') וסימון "לפי ההגדרות הקיימות".
    2. בשיחה: כרטיס "שינוי הרשאה" (k:'perm') שהשרת מכין למנהל־העל כשהוא כותב הוראה ("תני לעצמך לשלוח הודעות לבד").
       "אשר" – secPrefs op:'permCard' st:'ok' (השינוי נקרא מהכרטיס השמור בשרת); "בטל" – st:'no'. שום דבר לא נשמר לפני האישור.
    עיצוב: רק משתני הערכה ומחלקות קיימות (card, chip, note, btn). שום דבר לא נשמר במכשיר. */
@@ -22,11 +23,11 @@ const P=()=>X.st&&X.st.perm||null;
 /* ---------- הגדרות ---------- */
 root.__secPermSetH=()=>{const p=P();if(!p||!Array.isArray(p.types))return '';
  const ed=!!p.edit,dis=ed?'':' disabled';
- const rows=p.types.map(t=>`<div class="pmrow" data-pm="${esc(t.k)}"><b>${esc(t.l)}</b><div class="chips" role="radiogroup" aria-label="${esc(t.l)}">${(p.lv||[]).map(l=>`<label class="chip"><input type="radio" name="pm_${esc(t.k)}" data-c="permLv" data-t="${esc(t.k)}" value="${esc(l.k)}"${p.t[t.k]===l.k?' checked':''}${dis}> ${esc(l.l)}</label>`).join('')}</div></div>`).join('');
+ const rows=p.types.map(t=>`<div class="pmrow" data-pm="${esc(t.k)}"><b>${esc(t.l)}${(p.src||{})[t.k]&&p.src[t.k]!=='set'?' <small class="note pmsrc">· לפי ההגדרות הקיימות</small>':''}</b><div class="chips" role="radiogroup" aria-label="${esc(t.l)}">${(p.lv||[]).map(l=>`<label class="chip"><input type="radio" name="pm_${esc(t.k)}" data-c="permLv" data-t="${esc(t.k)}" value="${esc(l.k)}"${p.t[t.k]===l.k?' checked':''}${dis}> ${esc(l.l)}</label>`).join('')}</div></div>`).join('');
  const nums=['cap1','capD','anPct','anMin'].map(k=>{const L=NUML[k],lim=(p.lim||{})[k]||[0,1e6];
   return `<form class="pmnum" data-f="permNumF" data-k="${k}"><label class="f"><span>${esc(L[0])} (${esc(L[1])})</span><input class="amt" name="v" inputmode="numeric" dir="ltr" maxlength="9" value="${esc(String(p[k]))}" aria-label="${esc(L[0])}" data-min="${lim[0]}" data-max="${lim[1]}"${dis}></label>${ed?'<button class="chip">שמירה</button>':''}</form>`}).join('');
  return `<div class="card" id="secPermSet" style="margin-top:8px"><b>הרשאות של גיטי</b>
- <p class="note" style="margin:4px 0 8px">מה גיטי רשאית לעשות בעצמה. "אסור" – גם לא מציעה. "רק אחרי אישור" – מכינה הצעה, ושום דבר לא קורה בלי לחיצה שלך. "לבד" – מבצעת בעצמה, רק בתוך תקרות הסכום; מעל התקרה תמיד מבקשת אישור.</p>
+ <p class="note" style="margin:4px 0 8px">מה גיטי רשאית לעשות בעצמה. "אסור" – גם לא מציעה. "רק אחרי אישור" – מכינה הצעה, ושום דבר לא קורה בלי לחיצה שלך. "לבד" – מבצעת בעצמה, רק בתוך תקרות הסכום; מעל התקרה תמיד מבקשת אישור. בשליחת הודעות זה כולל גם מענה אוטומטי במייל, "קיבלנו" והודעת פתיחה בווצאפ, כללים אישיים ושליחת טיוטת הזמנה ללקוח.</p>
  ${ed?'':'<p class="note" style="margin:0 0 6px">רק מנהל־העל יכול לשנות. כאן אפשר לראות מה מוגדר.</p>'}
  <div>${rows}</div>
  <div class="pmrow"><b>תקרות סכום וספים</b>${nums}<p class="note" style="margin:0">פעולה מעל התקרה לפעולה, או שמצטברת היום מעל התקרה היומית – תמיד באישור, גם כשהסוג מוגדר "לבד". ספי ההוצאה החריגה משמשים להתראות על הוצאות חריגות.</p></div></div>`};

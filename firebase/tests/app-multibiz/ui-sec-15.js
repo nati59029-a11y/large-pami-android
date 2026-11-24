@@ -14,7 +14,7 @@ const BIZ = 'biz-o';
 const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose: true, secretary: true };
 const TYPES = { invDue: 'חשבונית לתשלום' };
 const PTYPES = [['task', 'משימה'], ['rem', 'תזכורת'], ['msg', 'שליחת הודעה (ווצאפ / מייל)'], ['ord', 'טיוטת הזמנה מספק'], ['tag', 'תיוג / סיווג הוצאה']];
-const permOf = (edit) => ({ t: { task: 'ask', rem: 'ask', msg: 'ask', ord: 'ask', tag: 'ask' }, cap1: 500, capD: 2000, anPct: 30, anMin: 200, edit,
+const permOf = (edit) => ({ t: { task: 'ask', rem: 'ask', msg: 'ask', ord: 'ask', tag: 'ask' }, cap1: 500, capD: 2000, anPct: 30, anMin: 200, edit, src: { task: 'set', rem: 'set', msg: 'def', ord: 'set', tag: 'set' },
   types: PTYPES.map(([k, l]) => ({ k, l })), lv: [{ k: 'no', l: 'אסור' }, { k: 'ask', l: 'רק אחרי אישור' }, { k: 'auto', l: 'לבד' }],
   lim: { cap1: [0, 100000], capD: [0, 1000000], anPct: [1, 500], anMin: [0, 1000000] } });
 
@@ -66,6 +66,7 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     const t = await txt(page, '#secPermSet');
     check('מנהל־העל: הכרטיס "הרשאות של גיטי" בהגדרות, עם 5 הסוגים', /הרשאות של גיטי/.test(t) && PTYPES.every(([, l]) => t.includes(l)), t.slice(0, 300));
     check('אין סוג תשלום / העברת כסף במסך', !/תשלום|העברת כסף|העברות/.test(t));
+    check('סימון "לפי ההגדרות הקיימות" רק לסוג שלא נשמר במפורש', await page.evaluate(() => [...document.querySelectorAll('#secPermSet .pmsrc')].map((e) => e.closest('[data-pm]').dataset.pm).join(',')) === 'msg');
     const r = await page.evaluate(() => { const L = [...document.querySelectorAll('#secPermSet input[data-c=permLv]')]; return { n: L.length, dis: L.filter((i) => i.disabled).length, ask: L.filter((i) => i.checked && i.value === 'ask').length }; });
     check('מנהל־העל: 15 מתגי רמה פעילים, ברירת מחדל "רק אחרי אישור" בכולם', r.n === 15 && r.dis === 0 && r.ask === 5, r);
     check('מנהל־העל: שדות התקרה פעילים עם 500 / 2000 וכפתורי שמירה', await page.evaluate(() => { const f = [...document.querySelectorAll('#secPermSet form[data-f=permNumF]')]; const v = f.map((x) => x.v.value); return f.length === 4 && v[0] === '500' && v[1] === '2000' && f.every((x) => !x.v.disabled && x.querySelector('button')); }));

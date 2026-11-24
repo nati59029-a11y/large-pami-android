@@ -2882,6 +2882,34 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.equal((await oa(M1, { act: 'list' })).r.ask.length, 0, 'כתובת שונה מהכרטיס – אין הצעה');
       assert.equal((await oa(M1, { act: 'on', custId: 'cn2' })).reason, 'no-offer');
     });
+    it('24.11.2026 (גיטי, סבב 4): שליחה לבד של טיוטת הזמנה – תקרה לפעולה (500), תקרה יומית (2,000) ו"רק אחרי אישור" מפורש – לא נשלחת, נשארת לאישור', async () => {
+      await ordSetup();
+      const DANA = 'Dana <dana@shop.example>';
+      await sentOrd('thr-p1');
+      assert.ok((await oa(M1, { act: 'on', custId: 'cmail' })).ok);
+      const s0 = GO.state.sent.length;
+      const noted = async (n, re) => (await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === n && re.test(x.note));
+      // בלי ערך שמור – "לבד" לפי ההגדרות הקיימות (לקוח מאושר לשליחה לבד); 60 × 10 ₪ = 600 – מעל התקרה לפעולה
+      const big = await orderMail(DANA, [{ txt: 'צלחת עמוקה', qty: 60 }]);
+      assert.equal((await ordOf(big.n)).total, 60000, 'הסכום באגורות');
+      assert.equal(big.r.aw, 'draft'); assert.ok(await noted(big.n, /permCap1/)); assert.equal((await ordOf(big.n)).st, 'mgr', 'נשארת לאישור');
+      // מצטבר היום 1,995 – טיוטה של 10 ₪ חורגת מהתקרה היומית
+      await prep((d) => d.doc(`b/${A}/sec_cfg/use`).set({ pa: { d: require('../functions/lib/sec-perm.js').dayKey(Date.now()), s: 1995 } }, { merge: true }));
+      const day = await orderMail(DANA);
+      assert.equal(day.r.aw, 'draft'); assert.ok(await noted(day.n, /permCapD/));
+      // "רק אחרי אישור" שנשמר במפורש – לא נשלחת גם בתוך התקרה
+      await prep((d) => d.doc(`b/${A}/sec_cfg/use`).set({ pa: { d: '', s: 0 } }, { merge: true }));
+      await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).set({ t: { msg: 'ask' } }));
+      const ask = await orderMail(DANA);
+      assert.equal(ask.r.aw, 'draft'); assert.ok(await noted(ask.n, /permNo/));
+      assert.equal(GO.state.sent.length, s0, 'שום טיוטה לא נשלחה לבד');
+      // "לבד" במפורש ובתוך התקרה – נשלחת, והסכום נספר במונה היומי
+      await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).set({ t: { msg: 'auto' } }));
+      const ok = await orderMail(DANA);
+      assert.equal(ok.r.aw, 'auto', JSON.stringify(ok.r)); assert.equal(GO.state.sent.length, s0 + 1);
+      assert.equal((await get(`b/${A}/sec_cfg/use`)).pa.s, (await ordOf(ok.n)).total / 100, 'נספר בשקלים');
+      await prep((d) => d.doc(`b/${A}/sec_cfg/perm`).delete());
+    });
 
     it('שלב ג/7: לא נשלח לבד – מייל גדול, קובץ מצורף, תשובת שינוי מסוג רגיש (תלונה)', async () => {
       await ordSetup();
