@@ -105,8 +105,11 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   check('3א בועות: שלי (me) אחת, של אחרים עם שם שולח, מפרידי תאריך, אין סרגל תחתון', ch.mine.length === 1 && /המנהל/.test(ch.who) && ch.dsep >= 1 && ch.n === 6 && ch.bar === 'none', ch);
   check('3ב התמונה נטענה כתמונה ממוזערת (img), סרטון עם ▶ ומשך 0:24', await wp.evaluate(() => !!document.querySelector('.gr-pic img') && /▶/.test(document.querySelector('[data-a=grVid]').innerText) && /0:24/.test(document.querySelector('[data-a=grVid]').innerText)));
   await shot(wp, shots, 'r3-ב-צ׳אט-לא-נקרא');
-  const rd = LOG.find((l) => l.m === 'PATCH' && /\/grp\/g1\/r\/w1/.test(l.R));
-  check('4 כניסה עדכנה r/w1.t להודעה האחרונה (בלי לגעת ב-mu)', rd && rd.body.fields.t.integerValue === String(T0 - 30 * MIN) && !rd.body.fields.mu && /updateMask.fieldPaths=t$/.test(rd.q), rd && rd.body);
+  // מאז "וי קריאה" (71dde32): ברשימה נכתב "התקבל עד" (d,u,n – בלי t), ובכניסה לקבוצה t,d,u,n בבקשה אחת
+  const rP = LOG.filter((l) => l.m === 'PATCH' && /\/grp\/g1\/r\/w1$/.test(l.R)), msk = (l) => new URLSearchParams(l.q).getAll('updateMask.fieldPaths');
+  const rd = rP.find((l) => msk(l).includes('t'));
+  check('4 כניסה עדכנה r/w1.t להודעה האחרונה (בלי לגעת ב-mu)', rd && rd.body.fields.t && rd.body.fields.t.integerValue === String(T0 - 30 * MIN) && !rd.body.fields.mu && !msk(rd).includes('mu') && msk(rd).every((k) => rd.body.fields[k]), rd && { q: rd.q, f: rd.body.fields });
+  check('4ג "התקבל עד" מהרשימה לא מסמן כנקרא (בלי t)', rP.filter((l) => l !== rd).every((l) => !msk(l).includes('t') && !l.body.fields.t), rP.map((l) => l.q));
   await wp.click('[data-a=grVid]'); await waitFor(() => wp.evaluate(() => !!document.querySelector('#viewer video')));
   check('4א לחיצה על סרטון: <video> מתוך Storage (הורדה עם הרשאה)', await wp.evaluate(() => !!document.querySelector('#viewer video[src^=blob]')) && LOG.some((l) => l.st && l.m === 'GET' && /grpv/.test(l.url)));
   await wp.evaluate(() => ACT.grVidX());
@@ -128,11 +131,9 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'big.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(31 * 1024 * 1024) }); await waitFor(() => wp.evaluate(() => window.__T.some((x) => /30MB/.test(x))), 5000);
   check('5ג סרטון מעל 30MB: הודעה ברורה, בלי העלאה ובלי הודעה', (await wp.evaluate(() => window.__T)).some((x) => /30MB/.test(x)) && !LOG.some((l) => l.st || l.m === 'POST'), await wp.evaluate(() => window.__T));
   LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'x.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(100) }); await sleep(500);
-  check('5ד פורמט לא נתמך: הודעה ובלי שליחה', /פורמט/.test(await toasts(wp)) && !LOG.some((l) => l.st || l.m === 'POST'));
-  // השתקה
-  LOG.length = 0; await wp.check('input[data-c=grMute]'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && /\/r\/w1$/.test(l.R)));
-  const mu = LOG.find((l) => l.m === 'PATCH' && /\/r\/w1$/.test(l.R));
-  check('6 השתקה: PATCH ל-r/w1 עם mu=true בלבד', mu && mu.body.fields.mu.booleanValue === true && /updateMask.fieldPaths=mu$/.test(mu.q) && DB.r['g1/w1'].mu.booleanValue === true, mu && mu.q);
+  check('5ד פורמט לא נתמך: הודעה ובלי שליחה', (await wp.evaluate(() => window.__T)).some((x) => /פורמט/.test(x)) && !LOG.some((l) => l.st || l.m === 'POST'));
+  // השתקה בוטלה ב-71dde32 (groups.js: "mu רק false") – אין תיבת השתקה, ו-mu=true ישן מתבטל בכתיבת הקריאה
+  check('6 אין תיבת השתקה בקבוצה (השתקה בוטלה)', await wp.evaluate(() => !document.querySelector('input[data-c=grMute]')));
   check('6א לעובד אין כפתור הגדרות/הצמדה בקבוצה (תפריט ⋯ לכל הודעה – לכולם מ-#150, מחיקה/הצמדה רק למנהל)', await wp.evaluate(() => !document.querySelector('[data-a=grPin]') && !document.querySelector('[data-a=grSet]')));
   await wp.evaluate(() => goBack()); await sleep(400); await wp.click('.gr-row[data-id=g2]'); await sleep(900);
   const ao = await wp.evaluate(() => ({ lock: (document.querySelector('.gr-lock') || {}).innerText || '', ta: !!document.getElementById('grtx'), clip: !!document.querySelector('input[data-c=grFile]'), mute: !!document.querySelector('input[data-c=grMute]') }));
