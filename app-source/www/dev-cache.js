@@ -35,16 +35,16 @@ async function get(k){try{if(!k||!who()||k.indexOf(who()+'|')!==0)return null;co
 function trim(t,keep,force){const z=t.objectStore(SZ),o=t.objectStore(ST);let tot=0,cnt=0;const c=z.openCursor();
  c.onsuccess=()=>{const cu=c.result;if(cu){tot+=+(cu.value&&cu.value.n)||0;cnt++;cu.continue();return}
   let xn=Math.max(cnt-MAXN,force||0),xt=tot-MAXT;if(xn<=0&&xt<=0)return;const q=z.index('a').openCursor();
-  q.onsuccess=()=>{const cu=q.result;if(!cu||(xn<=0&&xt<=0))return;if(cu.primaryKey!==keep){o.delete(cu.primaryKey);xt-=+(cu.value&&cu.value.n)||0;xn--;cu.delete()}cu.continue()}}}
+  q.onsuccess=()=>{const cu=q.result;if(!cu||(xn<=0&&xt<=0))return;if(cu.primaryKey!==keep){LH.delete(cu.primaryKey);o.delete(cu.primaryKey);xt-=+(cu.value&&cu.value.n)||0;xn--;cu.delete()}cu.continue()}}}
 async function put(k,txt){try{if(!k||typeof txt!=='string'||k.indexOf(who()+'|')!==0||!who())return;if(txt.length>MAXB){del(k);return}
  const h=hs(txt);if(LH.get(k)===h)return;const g=GEN,d=await db();if(g!==GEN||k.indexOf(who()+'|')!==0)return;
  const wr=force=>new Promise(res=>{let t;try{t=d.transaction([ST,SZ],'readwrite')}catch(e){return res(false)}const n=Date.now();
   if(force)trim(t,'',force);else{t.objectStore(ST).put({v:txt,t:n},k);t.objectStore(SZ).put({n:txt.length,a:n},k);trim(t,k,0)}
   t.oncomplete=()=>res(true);t.onerror=()=>res(false);t.onabort=()=>res(false)});
- if(await wr(0)){LH.set(k,h);return}
+ if(await wr(0)){if(g===GEN)LH.set(k,h);return}
  /* נכשל (בדרך כלל: אין מקום) – מפנים רבע מהערכים וממשיכים פעם אחת */
  await wr(Math.max(20,Math.ceil(MAXN/4)));if(g===GEN&&await wr(0))LH.set(k,h)}catch(e){}}
-async function del(k){try{if(!k)return;LH.delete(k);const d=await db();await new Promise(res=>{const t=d.transaction([ST,SZ],'readwrite');t.objectStore(ST).delete(k);t.objectStore(SZ).delete(k);t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
+async function del(k){try{if(!k||!who())return;LH.delete(k);const d=await db();await new Promise(res=>{const t=d.transaction([ST,SZ],'readwrite');t.objectStore(ST).delete(k);t.objectStore(SZ).delete(k);t.oncomplete=res;t.onerror=res;t.onabort=res})}catch(e){}}
 /* ---- שורת "אין חיבור" ---- */
 let st0=0;
 function css(){if(st0)return;st0=1;try{const s=document.createElement('style');s.textContent='#dcnet{position:fixed;inset-inline:0;bottom:calc(84px + env(safe-area-inset-bottom));z-index:25;margin:0 auto;width:max-content;max-width:calc(100% - 28px);background:var(--card);color:var(--ink);border:1px solid var(--line);border-inline-start:4px solid var(--acc);border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:600;text-align:center;box-shadow:var(--elev-1,0 2px 6px rgba(0,0,0,.3));pointer-events:none}';document.head.appendChild(s)}catch(e){}}
