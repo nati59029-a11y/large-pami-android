@@ -105,3 +105,72 @@ describe('הדפסת מדבקות – חוקים בשורש (לארג\' פעמי
     await assertSucceeds(db(RMGR).doc('lblp/m1').delete());
   });
 });
+
+// תבניות מדבקה (lblt) והגדרות מדבקות (lbls/main) – 24.11.2026. אותן בדיקות בשורש (legacy) ובתוך b/{bizId}.
+const tpl = (uid, x) => Object.assign({ v: 1, name: 'מדבקת מחיר', w: 50, h: 30, base: 1, j: '{"el":[]}', at: Date.now(), by: uid }, x || {});
+const sets = (uid, x) => Object.assign({ sz: [{ w: 50, h: 30 }], def: 't1', at: Date.now(), by: uid }, x || {});
+for (const [title, P, mgr, lbl, nol, old, out] of [
+  ['b/{bizId}', `b/${A}/`, MGR, LBL, NOL, OLD, OUT],
+  ['שורש (legacy)', '', RMGR, RLBL, 'r_nol', ROLD, 'r_out'],
+]) {
+  describe(`תבניות והגדרות מדבקות – חוקים (${title})`, () => {
+    beforeEach(() => prep(async (d) => {
+      const b = d.batch();
+      if (!P) {
+        b.set(d.doc('staff/r_nol'), { name: 'r_nol', active: true, perms: Object.assign({}, NONE) });
+        b.set(d.doc('staff/r_out'), { name: 'r_out', active: false, perms: Object.assign({}, NONE, { lbl: true }) });
+      }
+      b.set(d.doc(P + 'lblt/t1'), tpl(mgr));
+      b.set(d.doc(P + 'lbls/main'), sets(mgr));
+      await b.commit();
+    }));
+    it('lblt: מנהל ועובד עם lbl קוראים, יוצרים ומעדכנים תבנית תקינה; עובד מוחק "רך" (del:true)', async () => {
+      await assertSucceeds(db(lbl).collection(P + 'lblt').get());
+      await assertSucceeds(db(lbl).doc(P + 'lblt/t2').set(tpl(lbl)));
+      await assertSucceeds(db(lbl).doc(P + 'lblt/t1').set(tpl(lbl, { name: 'שונה', w: 104, h: 100 })));
+      const { base, ...noBase } = tpl(lbl, { w: 15, h: 10 }); // בלי base (רשות)
+      await assertSucceeds(db(lbl).doc(P + 'lblt/t3').set(noBase));
+      await assertSucceeds(db(lbl).doc(P + 'lblt/t1').set(tpl(lbl, { del: true })));
+      await assertSucceeds(db(mgr).doc(P + 'lblt/t_M-1').set(tpl(mgr)));
+      await assertSucceeds(db(mgr).collection(P + 'lblt').get());
+    });
+    it('lblt: עובד בלי lbl / ישן בלי perms / מושבת – לא קורא ולא כותב', async () => {
+      for (const u of [nol, old, out]) {
+        await assertFails(db(u).collection(P + 'lblt').get(), u);
+        await assertFails(db(u).doc(P + 'lblt/x1').set(tpl(u)), u);
+      }
+    });
+    it('lblt: שדות / מזהה לא תקינים נחסמים', async () => {
+      const bad = [
+        { extra: 1 }, { j: 'x'.repeat(16001) }, { j: 'x' }, { by: mgr }, { w: 14 }, { w: 105 }, { h: 9 }, { h: 101 }, { w: '50' },
+        { v: 0 }, { v: 10 }, { v: 1.5 }, { name: '' }, { name: 'א'.repeat(41) }, { base: 6 }, { del: 'yes' }, { at: 0 },
+      ];
+      for (const x of bad) await assertFails(db(lbl).doc(P + 'lblt/bad').set(tpl(lbl, x)), JSON.stringify(x).slice(0, 40));
+      await assertFails(db(lbl).doc(P + 'lblt/bad').set({ v: 1, name: 'א', w: 50, h: 30, at: Date.now(), by: lbl }), 'חסר j');
+      await assertFails(db(lbl).doc(P + 'lblt/' + 'a'.repeat(41)).set(tpl(lbl)), 'מזהה ארוך');
+      await assertFails(db(lbl).doc(P + 'lblt/a.b').set(tpl(lbl)), 'מזהה עם נקודה');
+      await assertFails(db(lbl).doc(P + 'lblt/א1').set(tpl(lbl)), 'מזהה בעברית');
+    });
+    it('lblt: מחיקה מלאה – רק מנהל', async () => {
+      await assertFails(db(lbl).doc(P + 'lblt/t1').delete());
+      await assertSucceeds(db(mgr).doc(P + 'lblt/t1').delete());
+    });
+    it('lbls/main: עובד עם lbl קורא ושומר; מסמך אחר / sz מעל 10 / שדה נוסף – חסום; עובד בלי lbl – חסום; מחיקה – מנהל', async () => {
+      await assertSucceeds(db(lbl).doc(P + 'lbls/main').get());
+      await assertSucceeds(db(lbl).doc(P + 'lbls/main').set(sets(lbl, { sz: Array.from({ length: 10 }, () => ({ w: 40, h: 20 })) })));
+      await assertSucceeds(db(lbl).doc(P + 'lbls/main').set({ at: Date.now(), by: lbl }));
+      await assertFails(db(lbl).doc(P + 'lbls/other').set(sets(lbl)), 'מזהה אחר');
+      await assertFails(db(lbl).doc(P + 'lbls/other').get(), 'קריאת מזהה אחר');
+      await assertFails(db(lbl).doc(P + 'lbls/main').set(sets(lbl, { sz: Array.from({ length: 11 }, () => ({ w: 40, h: 20 })) })), 'sz>10');
+      await assertFails(db(lbl).doc(P + 'lbls/main').set(sets(lbl, { extra: 1 })), 'שדה נוסף');
+      await assertFails(db(lbl).doc(P + 'lbls/main').set(sets(lbl, { def: 'x'.repeat(41) })), 'def ארוך');
+      await assertFails(db(lbl).doc(P + 'lbls/main').set(sets(mgr)), 'by של משתמש אחר');
+      for (const u of [nol, old, out]) {
+        await assertFails(db(u).doc(P + 'lbls/main').get(), u);
+        await assertFails(db(u).doc(P + 'lbls/main').set(sets(u)), u);
+      }
+      await assertFails(db(lbl).doc(P + 'lbls/main').delete());
+      await assertSucceeds(db(mgr).doc(P + 'lbls/main').delete());
+    });
+  });
+}
