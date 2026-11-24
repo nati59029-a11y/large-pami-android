@@ -1072,6 +1072,9 @@ async function delCust(request) {
       for (const a of a1.docs.concat(a2.docs)) if (!a.get('void')) als.set(a.id, a);
     }
     const pq = await tx.get(cref.collection('p'));
+    // לקוח מכספית (xc): hkc/{xc} שמקושר אליו → st:'del' כבר עכשיו (hk-import.js – הריצה הלילית לא תיצור אותו שוב ולא תתאים אותו מחדש)
+    const xc = cs.get('xc');
+    const hs = typeof xc === 'string' && /^[0-9A-Za-z-]{1,20}$/.test(xc) ? await tx.get(db.doc('hkc/' + xc)) : null;
     // כתיבות: גיבוי ← ביטול מסמכים והקצאות ← מחיקת p והלקוח ← יומן
     const now = Date.now(), p = {};
     pq.docs.forEach((x) => { p[x.id] = x.data(); });
@@ -1082,6 +1085,7 @@ async function delCust(request) {
     for (const s of live) tx.update(s.ref, { open: 0, st: 'void', void: { at: now, by: w.uid, why: 'מחיקת לקוח' }, upd: now });
     for (const x of pq.docs) tx.delete(x.ref);
     tx.delete(cref);
+    if (hs && hs.exists && hs.get('cust') === id) tx.update(hs.ref, { st: 'del', upd: now });
     tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: id, act: 'delcust', nv: live.length });
     res = { ok: true, nv: live.length, bak: bref.id };
   }, { maxAttempts: 10 });

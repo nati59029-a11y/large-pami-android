@@ -16,8 +16,12 @@
 //   hkcfg/main         { st?:'on', pend?:{ sid, day, at, n, parts, pv }, apr?:{ sid, batch, pos, n, day, at, by, c }, first?:{ batch, day, at, by, n, c }, night?:{ day, at, batch, ...מונים } }
 //   hkpend/{sid}_{k}   { sid, k, rows:[{ xc, tz, name, ph, addr, bal, p? }] } – עד PART שורות לחלק. נמחק אחרי האישור או כשתמונה חדשה מחליפה.
 //   hkc/{xc}           { xc, st:'ok'|'chk'|'del', cust?, bal, day, b, why?, at, upd } – היתרה האחרונה בכספית שהוחלה, והלקוח באפליקציה.
-//   hkchk/{id}         { xc, name, ph, why, day, at, cust?, diff?, doneAt?, doneBy? } – "לבדוק" למנהל. a_{xc} = התאמה בעייתית; n_{YYYYMMDD}_{xc} = הפרש שלילי (diff אגורות, שלילי).
-//                      סבב 2: hkChkDone (מנהל) מסמן "טופל" (doneAt, doneBy) – בלי מחיקה. hkGet מחזיר רק פתוחים. פריט שנכתב שוב (הפרש נוסף / התאמה חוזרת) – נפתח שוב.
+//   hkchk/{id}         { xc, name, ph, why, day, at, cust?, diff?, open, doneAt?, doneBy? } – "לבדוק" למנהל. a_{xc} = התאמה בעייתית; n_{YYYYMMDD}_{xc} = הפרש שלילי (diff אגורות, שלילי).
+//                      סבב 2: p_{YYYYMMDD}_{xc} = חיוב חדש (diff חיובי, מצטבר) ללקוח שממתין לבדיקה (hkc.st='chk'); v_{YYYYMMDD}_{xc} = חיוב נוסף באותו יום כשכל 9 המזהים
+//                      של היום תפוסים (diff = ההפרש שלא נכנס, נדרס – לא מצטבר; היתרה לא מתעדכנת, ולכן החיוב ייכנס בתמונה של היום הבא).
+//                      open:true בכל כתיבה (פתיחה מחדש); hkChkDone (מנהל) → open:false + doneAt/doneBy – בלי מחיקה. hkGet: where open==true.
+// סבב 2 – לילה: שורה עם hkc.day מאוחר מיום התמונה – מדלגים בלי שינוי (תמונה ישנה / מקבילה). hkc.day מתעדכן גם כשהיתרה לא השתנתה.
+//   לקוח ב-chk: ההתאמה מחושבת שוב בכל לילה; התאמה חד־משמעית ללקוח קיים → כמו באישור (xc + יתרת פתיחה = היתרה הנוכחית). "לקוח חדש" לא משחרר. אחרת – היתרה נשמרת, וחיוב חדש → p_ ב"לבדוק".
 // כל האוספים – שרת בלבד (אין להם כלל בחוקים = אין קריאה ואין כתיבה מהאפליקציה). האפליקציה קוראת דרך hkGet.
 // פרטיות: ביומן השרת רק קודים ומספרים – בלי שמות, טלפונים ות.ז.
 
@@ -47,6 +51,8 @@ const WHY = {
   'xc-other': 'הלקוח המתאים באפליקציה מקושר למספר לקוח אחר בכספית', 'dup-cust': 'כמה לקוחות בכספית מתאימים לאותו לקוח באפליקציה',
   'has-ob': 'ללקוח המתאים כבר יש יתרת פתיחה', changed: 'הלקוח השתנה מאז החישוב – בדקו ונסו שוב', 'too-many-v': 'המסמך יובא ובוטל יותר מדי פעמים',
   neg: 'היתרה בכספית ירדה (קבלה או זיכוי בכספית) – לא נוצר מסמך',
+  'day-full': 'חיוב נוסף באותו יום – לא נוצר מסמך (ייכנס בתמונה של היום הבא)',
+  'chk-add': 'חיוב חדש בכספית ללקוח שממתין לבדיקה – לא נוצר מסמך (אחרי שההתאמה תסודר, היתרה המלאה תיכנס כיתרת פתיחה)',
 };
 
 // ---------- פונקציות טהורות (גם לבדיקות) ----------
@@ -199,7 +205,7 @@ function writePlan(tx, B, db, w, it, ctx, made, open) {
   const hk = db.doc('hkc/' + it.xc);
   if (x.k === 'chk') {
     tx.set(hk, { xc: it.xc, st: 'chk', why: x.why, bal: it.bal, day: ctx.day, b: ctx.batch, at: now, upd: now });
-    tx.set(db.doc('hkchk/a_' + it.xc), { xc: it.xc, name: it.name, ph: it.ph, why: x.why, day: ctx.day, at: now, ...(it.p.id ? { cust: it.p.id } : {}) });
+    tx.set(db.doc('hkchk/a_' + it.xc), { xc: it.xc, name: it.name, ph: it.ph, why: x.why, day: ctx.day, at: now, open: true, ...(it.p.id ? { cust: it.p.id } : {}) });
     return { k: 'chk' };
   }
   let c;
@@ -274,17 +280,17 @@ async function night(w, db, cfg, day, rows, now) {
   // הקבוצה של היום (אם בוטלה – הבאה בתור)
   let batch = 'hk_' + ymd8(day);
   for (let v = 2; v <= 9; v++) { const s = await db.doc('arimp/' + batch).get(); if (!s.exists || s.get('st') !== 'void') break; batch = 'hk_' + ymd8(day) + '_' + v; }
-  // שורות בלי hkc → התאמה (סריקת לקוחות רק אם יש כאלה)
+  // שורות בלי hkc, ושורות שממתינות לבדיקה (chk) → התאמה (סריקת לקוחות רק אם יש כאלה)
   const hs = new Map();
   for (let i = 0; i < rows.length; i += 300) (await db.getAll(...rows.slice(i, i + 300).map((r) => db.doc('hkc/' + r.xc)))).forEach((s) => { if (s.exists) hs.set(s.id, s.data()); });
-  const nw = rows.filter((r) => !hs.has(r.xc));
+  const nw = rows.filter((r) => !hs.has(r.xc) || hs.get(r.xc).st === 'chk');
   if (nw.length) await planOf(nw, await scanCusts(db), await obLiveDb(db));
-  const tot = { n: rows.length, same: 0, add: 0, sum: 0, neg: 0, nsum: 0, new: 0, match: 0, ob: 0, obSum: 0, del: 0, chk: 0 };
+  const tot = { n: rows.length, same: 0, add: 0, sum: 0, neg: 0, nsum: 0, new: 0, match: 0, ob: 0, obSum: 0, del: 0, chk: 0, pend: 0, psum: 0, full: 0, fsum: 0, skip: 0 };
   for (let i = 0; i < rows.length; i += CH) {
     const L = rows.slice(i, i + CH).map((r) => Object.assign({}, r));
     let cnt = null;
     await db.runTransaction(async (tx) => {
-      cnt = { same: 0, add: 0, sum: 0, neg: 0, nsum: 0, new: 0, match: 0, ob: 0, obSum: 0, del: 0, chk: 0 };
+      cnt = { same: 0, add: 0, sum: 0, neg: 0, nsum: 0, new: 0, match: 0, ob: 0, obSum: 0, del: 0, chk: 0, pend: 0, psum: 0, full: 0, fsum: 0, skip: 0 };
       const B = await new ARD.Book(tx, db, w, now).init();
       const bref = db.doc('arimp/' + batch);
       const [bs, ...hh] = await tx.getAll(bref, ...L.map((r) => db.doc('hkc/' + r.xc)));
@@ -295,7 +301,14 @@ async function night(w, db, cfg, day, rows, now) {
         delete it.x; delete it.open;
         if (!h) { if (!it.p) it.p = { k: 'chk', why: 'changed' }; await readPlan(tx, B, db, it); it.mode = 'plan'; continue; }
         it.h = h;
+        if (typeof h.day === 'string' && day < h.day) { it.mode = 'old0'; continue; } // תמונה ישנה / מקבילה – בלי שום שינוי
         if (h.st === 'del') { it.mode = 'del0'; continue; }
+        if (h.st === 'chk') {
+          if (!it.p || it.p.k === 'new') it.p = { k: 'chk', why: h.why || 'changed' }; // רק התאמה חד־משמעית ללקוח קיים משחררת (לא "לקוח חדש")
+          await readPlan(tx, B, db, it);
+          if (it.x.k !== 'chk') { it.mode = 'plan'; continue; } // ההתאמה הסתדרה – כמו באישור
+          it.mode = 'chkN'; it.diff = it.bal - (Number.isInteger(h.bal) ? h.bal : 0); continue;
+        }
         if (h.st !== 'ok') { it.mode = 'chk0'; continue; }
         let cid = h.cust, c = await B.needCust(cid);
         if (c.data && c.data.mv) { const c2 = await B.needCust(c.data.mv); if (c2.data && !c2.data.mv) { cid = c2.id; c = c2; } else c = { data: null }; } // לקוח שאוחד – ממשיכים בלקוח שנשאר
@@ -304,11 +317,12 @@ async function night(w, db, cfg, day, rows, now) {
         const diff = it.bal - (Number.isInteger(h.bal) ? h.bal : 0);
         it.diff = diff;
         if (diff === 0) { it.mode = cid !== h.cust ? 'relink' : 'same'; continue; }
+        // (סבב 2) ב-same / relink / full מתעדכן גם hkc.day, כדי שתמונה ישנה שתגיע אחר כך תדולג
         if (diff < 0) { it.mode = 'neg'; continue; }
         const base = `x_old_hk${ymd8(day)}_${it.xc}`;
         let id = base, v = 1;
         while (await get(id) && v < 9) { v++; id = base + '_' + v; }
-        if (await get(id)) { it.mode = 'neg'; it.why = 'too-many-v'; continue; }
+        if (await get(id)) { it.mode = 'full'; continue; }
         it.oldId = id; it.mode = 'add';
         if (!B.custs[cid].open0) B.custs[cid].open0 = await B.openDocs(cid);
       }
@@ -318,14 +332,28 @@ async function night(w, db, cfg, day, rows, now) {
       for (const it of L) {
         const hk = db.doc('hkc/' + it.xc);
         if (it.mode === 'plan') { const r = writePlan(tx, B, db, w, it, ctx, made, open); cnt[r.k]++; if (r.ob) { cnt.ob++; cnt.obSum += r.ag; } continue; }
+        if (it.mode === 'old0') { cnt.skip++; continue; }
         if (it.mode === 'del0') { cnt.del++; continue; }
         if (it.mode === 'chk0') { cnt.chk++; continue; }
+        if (it.mode === 'chkN') {
+          tx.update(hk, Object.assign({ bal: it.bal, day, upd: now }, it.x.why ? { why: it.x.why } : {}));
+          if (it.diff > 0) {
+            tx.set(db.doc(`hkchk/p_${ymd8(day)}_${it.xc}`), { xc: it.xc, name: it.name, ph: it.ph, why: 'chk-add', day, at: now, diff: FieldValue.increment(it.diff), open: true, doneAt: FieldValue.delete(), doneBy: FieldValue.delete() }, { merge: true });
+            cnt.pend++; cnt.psum += it.diff;
+          }
+          cnt.chk++; continue;
+        }
+        if (it.mode === 'full') { // כל 9 המזהים של היום תפוסים: diff נדרס (לא מצטבר), היתרה לא מתעדכנת → ייכנס מחר
+          tx.set(db.doc(`hkchk/v_${ymd8(day)}_${it.xc}`), { xc: it.xc, name: it.name, ph: it.ph, why: 'day-full', day, at: now, cust: it.cid, diff: it.diff, open: true, doneAt: FieldValue.delete(), doneBy: FieldValue.delete() }, { merge: true });
+          tx.update(hk, { day, upd: now });
+          cnt.full++; cnt.fsum += it.diff; continue;
+        }
         if (it.mode === 'del') { tx.update(hk, { st: 'del', upd: now }); cnt.del++; continue; }
-        if (it.mode === 'same') { cnt.same++; continue; }
-        if (it.mode === 'relink') { tx.update(hk, { cust: it.cid, upd: now }); cnt.same++; continue; }
+        if (it.mode === 'same') { if (it.h.day !== day) tx.update(hk, { day, upd: now }); cnt.same++; continue; }
+        if (it.mode === 'relink') { tx.update(hk, { cust: it.cid, day, upd: now }); cnt.same++; continue; }
         if (it.mode === 'neg') {
-          tx.set(db.doc(`hkchk/n_${ymd8(day)}_${it.xc}`), { xc: it.xc, name: it.name, ph: it.ph, why: it.why || 'neg', day, at: now, cust: it.cid, diff: FieldValue.increment(it.diff), doneAt: FieldValue.delete(), doneBy: FieldValue.delete() }, { merge: true });
-          if (!it.why) tx.update(hk, { bal: it.bal, day, cust: it.cid, upd: now }); // היתרה החדשה = הבסיס להפרש הבא
+          tx.set(db.doc(`hkchk/n_${ymd8(day)}_${it.xc}`), { xc: it.xc, name: it.name, ph: it.ph, why: 'neg', day, at: now, cust: it.cid, diff: FieldValue.increment(it.diff), open: true, doneAt: FieldValue.delete(), doneBy: FieldValue.delete() }, { merge: true });
+          tx.update(hk, { bal: it.bal, day, cust: it.cid, upd: now }); // היתרה החדשה = הבסיס להפרש הבא
           cnt.neg++; cnt.nsum += it.diff; continue;
         }
         // add: מסמך ישן אחד על ההפרש
@@ -359,9 +387,9 @@ async function hkGet(request) {
   await who(request);
   onlyKeys(inputObject(request), []);
   const db = T.tdb();
-  const [cs, q] = await Promise.all([db.doc(CFG).get(), db.collection('hkchk').orderBy('at', 'desc').limit(CHK_MAX).get()]);
+  const [cs, q] = await Promise.all([db.doc(CFG).get(), db.collection('hkchk').where('open', '==', true).limit(CHK_MAX).get()]);
   const c = cs.exists ? cs.data() || {} : {};
-  const out = { st: c.st === 'on' ? 'on' : c.apr ? 'apr' : c.pend ? 'pend' : 'none', chk: q.docs.filter((s) => !s.get('doneAt')).map((s) => Object.assign({ id: s.id }, s.data(), { msg: WHY[s.get('why')] || '' })) };
+  const out = { st: c.st === 'on' ? 'on' : c.apr ? 'apr' : c.pend ? 'pend' : 'none', chk: q.docs.filter((s) => !s.get('doneAt')).map((s) => Object.assign({ id: s.id }, s.data(), { msg: WHY[s.get('why')] || '' })).sort((a, b) => (b.at || 0) - (a.at || 0)) };
   if (c.pend && c.st !== 'on') out.pend = { sid: c.pend.sid, day: c.pend.day, at: c.pend.at, n: c.pend.n, pv: Object.assign({}, c.pend.pv, { chkL: (c.pend.pv && c.pend.pv.chkL || []).map((x) => Object.assign({}, x, { msg: WHY[x.why] || '' })) }) };
   if (c.apr) out.apr = { pos: c.apr.pos, n: c.apr.n, c: c.apr.c };
   if (c.first) out.first = c.first;
@@ -431,8 +459,8 @@ async function hkApprove(request) {
   return { done, pos: st.pos, n: st.n, c: st.c, batch: st.batch };
 }
 
-// hkChkDone({ id }) – סבב 2: סימון פריט "לבדוק" כטופל (doneAt, doneBy). בלי מחיקה; פעם שנייה – בלי שינוי (done:true כבר).
-const CHK_ID = /^(?:a_[0-9A-Za-z-]{1,20}|n_\d{8}_[0-9A-Za-z-]{1,20})$/;
+// hkChkDone({ id }) – סבב 2: סימון פריט "לבדוק" כטופל (open:false, doneAt, doneBy). בלי מחיקה; פעם שנייה – בלי שינוי (done:true כבר).
+const CHK_ID = /^(?:a_[0-9A-Za-z-]{1,20}|[npv]_\d{8}_[0-9A-Za-z-]{1,20})$/;
 async function hkChkDone(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -443,8 +471,8 @@ async function hkChkDone(request) {
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     if (!s.exists) throw new HttpsError('not-found', 'הפריט לא נמצא', { reason: 'no-chk' });
-    if (s.get('doneAt')) { out = { ok: true, dup: true }; return; }
-    tx.update(ref, { doneAt: Date.now(), doneBy: w.uid });
+    if (s.get('doneAt') || s.get('open') === false) { out = { ok: true, dup: true }; return; }
+    tx.update(ref, { open: false, doneAt: Date.now(), doneBy: w.uid });
     out = { ok: true };
   });
   return out;

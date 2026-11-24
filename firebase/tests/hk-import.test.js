@@ -242,7 +242,7 @@ describe('לקוחות הקפה מכספית', () => {
     const r = await ok('hkChkDone', MGR, { id });
     assert.equal(r.ok, true); assert.equal(r.dup, undefined);
     const d = await get('hkchk/' + id);
-    assert.ok(d && d.doneAt > 0, 'לא נמחק – מסומן'); assert.equal(d.doneBy, MGR); assert.equal(d.diff, -1000);
+    assert.ok(d && d.doneAt > 0, 'לא נמחק – מסומן'); assert.equal(d.doneBy, MGR); assert.equal(d.open, false); assert.equal(d.diff, -1000);
     assert.ok(!(await ok('hkGet', MGR, {})).chk.some((x) => x.id === id), 'לא מוצג יותר');
     assert.equal((await ok('hkChkDone', MGR, { id })).dup, true);
     assert.equal((await call('hkChkDone', MB, { id })).status, 'not-found', 'עסק אחר – לא רואה');
@@ -298,6 +298,76 @@ describe('לקוחות הקפה מכספית', () => {
     // ושוב – נשאר נמחק
     const rn2 = await snap(today, [{ xc: '400', tz: '', name: 'נוסף 0', ph: '', addr: '', bal: 1000 }]);
     assert.equal(rn2.del, 1); assert.equal(await get('cust/' + cid2), null);
+  });
+
+  it('סבב 2 – תיקוני בודק: open ב"לבדוק", לקוח ב-chk, תמונה ישנה / מקבילה, יום מלא, delCust → hkc del, יומן בלי פרטים', async () => {
+    const T8 = today.replace(/-/g, '');
+    await adm().doc(`b/${A}/private/cxbot`).set({ hk: { d: today, n: 0 } }, { merge: true });
+    const one = (xc, bal, ph) => [{ xc, tz: '', name: 'שורה ' + xc, ph: ph || '', addr: '', bal }];
+    // 4. open: פריט שסומן "טופל" – open:false; יותר מ-300 פריטים סגורים חדשים לא מסתירים פריט פתוח; פתיחה מחדש מחזירה open:true
+    assert.equal((await get(`hkchk/n_${T8}_102`)).open, false);
+    assert.equal((await get('hkchk/a_103')).open, true);
+    { let bt = adm().batch(); for (let k = 0; k < 310; k++) { bt.set(adm().doc(`b/${A}/hkchk/n_20000101_x${k}`), { xc: 'x' + k, why: 'neg', at: Date.now() + 1e9, open: false, doneAt: 1 }); if (k % 200 === 199) { await bt.commit(); bt = adm().batch(); } } await bt.commit(); }
+    assert.ok((await ok('hkGet', MGR, {})).chk.some((x) => x.id === 'a_103'), 'פריט פתוח מוצג גם אחרי 310 סגורים');
+    const rn = await snap(today, one('102', -6500));
+    assert.equal(rn.neg, 1);
+    const n2 = await get(`hkchk/n_${T8}_102`);
+    assert.equal(n2.open, true); assert.equal(n2.doneAt, undefined); assert.equal(n2.diff, -1500);
+    // 1. לקוח ב-chk: היתרה נשמרת, חיוב חדש → p_ פתוח (מצטבר), ואותה יתרה שוב – בלי שינוי
+    assert.equal((await get('hkc/103')).bal, 111);
+    let r = await snap(today, one('103', 611, '0521110003'));
+    assert.equal(r.chk, 1); assert.equal(r.pend, 1); assert.equal(r.psum, 500); assert.equal(r.add, 0);
+    r = await snap(today, one('103', 811, '0521110003'));
+    assert.equal(r.pend, 1); assert.equal(r.psum, 200);
+    let pc = await get(`hkchk/p_${T8}_103`);
+    assert.equal(pc.diff, 700); assert.equal(pc.open, true); assert.equal(pc.why, 'chk-add');
+    assert.equal((await get('hkc/103')).bal, 811); assert.equal((await get('hkc/103')).st, 'chk');
+    assert.ok((await ok('hkGet', MGR, {})).chk.some((x) => x.id === `p_${T8}_103` && /ממתין לבדיקה/.test(x.msg)));
+    r = await snap(today, one('103', 811)); // בלי טלפון – "לקוח חדש" לא משחרר
+    assert.equal(r.pend, 0); assert.equal(r.new, 0); assert.equal(r.chk, 1); assert.equal((await get(`hkchk/p_${T8}_103`)).diff, 700);
+    // ...ההתאמה הסתדרה (הלקוח הכפול נמחק) → מצב רגיל: xc + יתרת פתיחה של היתרה הנוכחית
+    await adm().doc(`b/${A}/cust/cAAAAAAAAAAAAAAAAAAAA`).delete();
+    r = await snap(today, one('103', 811, '0521110003'));
+    assert.equal(r.match, 1); assert.equal(r.ob, 1); assert.equal(r.chk, 0);
+    const h103 = await get('hkc/103');
+    assert.equal(h103.st, 'ok'); assert.equal(h103.cust, 'p0521110003');
+    assert.equal((await get('cust/p0521110003')).xc, '103');
+    assert.equal(await balanced('p0521110003'), 811);
+    // 2. "same" מעדכן את hkc.day; תמונה ישנה (hkc.day מאוחר יותר) – מדלגים בלי שינוי
+    assert.equal((await get('hkc/201')).day, today, 'גם כשהיתרה לא השתנתה');
+    await adm().doc(`b/${A}/hkcfg/main`).update({ 'night.day': yday }); // כאילו הלילה האחרון היה אתמול – רק הבדיקה לפי שורה עוצרת
+    const n0 = (await all('ardoc')).length;
+    r = await snap(yday, one('101', 99999));
+    assert.equal(r.skip, 1); assert.equal(r.add, 0); assert.equal(r.neg, 0);
+    assert.equal((await get('hkc/101')).bal, 12300); assert.equal((await get('hkc/101')).day, today);
+    assert.equal((await all('ardoc')).length, n0);
+    // ...ושתי תמונות מקבילות של אותו יום – חיוב אחד בלבד
+    const b0 = await balanced('p0521110001');
+    const [c1, c2] = await Promise.all([snap(today, one('101', 12800)), snap(today, one('101', 12800))]);
+    assert.equal(c1.add + c2.add, 1, 'חיוב אחד'); assert.equal(c1.sum + c2.sum, 500);
+    assert.equal((await get(`ardoc/x_old_hk${T8}_101_3`)).gross, 500);
+    assert.equal(await get(`ardoc/x_old_hk${T8}_101_4`), null);
+    assert.equal(await balanced('p0521110001'), b0 + 500);
+    // 3. כל 9 המזהים של היום תפוסים → "יום מלא": מונה נפרד (לא neg), diff לא מצטבר, היתרה לא מתעדכנת
+    for (let v = 4; v <= 9; v++) await adm().doc(`b/${A}/ardoc/x_old_hk${T8}_101_${v}`).set({ t: 'old', k: 'dr', cust: 'p0521110001', gross: 1, net: 1, vat: 0, open: 0, st: 'void', void: { at: 1 }, d: today, at: 1, lines: [], ser: 'X', no: '', ext: '' });
+    for (let k = 0; k < 2; k++) {
+      r = await snap(today, one('101', 13000));
+      assert.equal(r.full, 1); assert.equal(r.fsum, 200); assert.equal(r.neg, 0); assert.equal(r.add, 0);
+      const fv = await get(`hkchk/v_${T8}_101`);
+      assert.equal(fv.diff, 200, 'לא מצטבר'); assert.equal(fv.why, 'day-full'); assert.equal(fv.open, true);
+      assert.equal((await get('hkc/101')).bal, 12800);
+    }
+    assert.equal(await get(`hkchk/n_${T8}_101`), null, 'לא נרשם כירידה');
+    assert.ok((await ok('hkGet', MGR, {})).chk.some((x) => x.id === `v_${T8}_101` && /חיוב נוסף באותו יום/.test(x.msg)));
+    assert.equal((await ok('hkChkDone', MGR, { id: `v_${T8}_101` })).ok, true);
+    assert.equal((await ok('hkChkDone', MGR, { id: `p_${T8}_103` })).ok, true);
+    // 5. delCust של לקוח מכספית → hkc/{xc} = del באותה טרנזקציה
+    assert.equal((await get('hkc/402')).st, 'ok');
+    await ok('delCust', MGR, { custId: cHash('402'), confirm: 'מחק' });
+    assert.equal((await get('hkc/402')).st, 'del');
+    // 6. יומן השגיאות של cxBot – בלי נתיבים ומספרים ארוכים
+    const lm = BOT.logMsg(new Error('No document to update: b/biz-hk/cust/t' + TZA + ' 0521234567'));
+    assert.ok(!lm.includes(TZA) && !lm.includes('0521234567'), lm);
   });
 
   it('מגבלת תמונות ביום לעסק', async () => {

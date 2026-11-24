@@ -87,7 +87,7 @@ const HK={g:null,err:'',ld:0,hide:0,run:0,prog:''};
 async function hkLoad(){if(HK.ld)return;HK.ld=1;try{HK.g=await fnCall('hkGet',{});HK.err='';HK.hide=0}catch(e){if(e&&e.reason==='manager-only')HK.hide=1;else HK.err=e&&e.message||'הטעינה נכשלה'}HK.ld=0;if(cur().v==='cxSync')rerender()}
 const ag=n=>ils((+n||0)/100); /* השרת שומר באגורות */
 const kv=(l,v,c)=>`<div class="k${c?' '+c:''}"><small>${l}</small><b>${v}</b></div>`;
-const hkLi=(x,btn)=>`<div class="li" style="cursor:default;align-items:center"><div class="m"><b><bdi>${esc(x.name||'לקוח כספית '+(x.xc||''))}</bdi></b><small>מספר לקוח בכספית ${esc(String(x.xc||''))}${typeof x.bal==='number'?' · יתרה '+ag(x.bal):''}${typeof x.diff==='number'?' · ירידה של '+ag(-x.diff):''}${x.day?' · '+dd(x.day):''}</small><small>${esc(x.msg||'')}</small></div>${btn?`<button class="btn g s" style="min-height:48px;padding:4px 14px;flex:none" data-a="hkDone" data-id="${esc(x.id)}">טופל</button>`:''}</div>`;
+const hkLi=(x,btn)=>`<div class="li" style="cursor:default;align-items:center"><div class="m"><b><bdi>${esc(x.name||'לקוח כספית '+(x.xc||''))}</bdi></b><small>מספר לקוח בכספית ${esc(String(x.xc||''))}${typeof x.bal==='number'?' · יתרה '+ag(x.bal):''}${typeof x.diff==='number'&&x.diff?(x.diff<0?' · ירידה של '+ag(-x.diff):' · חיוב של '+ag(x.diff)):''}${x.day?' · '+dd(x.day):''}</small><small>${esc(x.msg||'')}</small></div>${btn?`<button class="btn g s" style="min-height:48px;padding:4px 14px;flex:none" data-a="hkDone" data-id="${esc(x.id)}">טופל</button>`:''}</div>`;
 function hkCardH(){if(HK.hide)return'';if(!HK.g&&!HK.err)hkLoad();const g=HK.g;
  let h='<div class="card"><h3 style="margin-top:0">לקוחות הקפה מכספית</h3>';
  if(HK.err)h+=`<p class="note">${esc(HK.err)}</p><button class="btn g w" ${big} data-a="hkRe">נסו שוב</button>`;
@@ -103,7 +103,7 @@ function hkCardH(){if(HK.hide)return'';if(!HK.g&&!HK.err)hkLoad();const g=HK.g;
   <button class="btn w" ${big} data-a="hkApr">${g.st==='apr'?'המשך אישור':'אשר ייבוא'}</button>
   ${L.length?`<details style="margin-top:8px"><summary style="min-height:48px;display:flex;align-items:center"><b>לבדוק (${L.length}${v.chk>L.length?' מתוך '+v.chk:''})</b></summary>${L.map(x=>hkLi(x,false)).join('')}</details>`:''}`}
  else if(g.st==='on'){const n=g.night,f=g.first,L=g.chk||[];
-  h+=n?`<div class="kg">${kv('ריצה לילית אחרונה',dd(n.day))}${kv('חיובים שנוספו',+n.add||0)}${kv('בסכום',ag(n.sum))}${kv('לקוחות חדשים',+n.new||0)}${kv('ירידות יתרה (לבדוק)',+n.neg||0,n.neg?'neg':'')}</div><p class="note">נקלט ${dt(n.at)} · ${+n.n||0} לקוחות בתמונה${n.del?' · '+n.del+' שנמחקו באפליקציה (לא נוצרים שוב)':''}</p>`
+  h+=n?`<div class="kg">${kv('ריצה לילית אחרונה',dd(n.day))}${kv('חיובים שנוספו',+n.add||0)}${kv('בסכום',ag(n.sum))}${kv('לקוחות חדשים',+n.new||0)}${kv('ירידות יתרה (לבדוק)',+n.neg||0,n.neg?'neg':'')}</div><p class="note">נקלט ${dt(n.at)} · ${+n.n||0} לקוחות בתמונה${n.del?' · '+n.del+' שנמחקו באפליקציה (לא נוצרים שוב)':''}${n.pend?' · '+n.pend+' חיובים ללקוחות שממתינים לבדיקה ('+ag(n.psum)+') – לא נכנסו':''}${n.full?' · '+n.full+' חיובים נוספים באותו יום ('+ag(n.fsum)+') – ייכנסו מחר':''}</p>`
    :`<p class="note" style="margin-top:0">הייבוא הראשון אושר${f?' ('+dt(f.at)+')':''}. הריצה הלילית הבאה תוסיף חיובים חדשים מכספית.</p>`;
   h+=`<div class="sec"><h3>לבדוק (${L.length})</h3></div>${L.length?L.map(x=>hkLi(x,true)).join(''):'<p class="note">אין פריטים פתוחים.</p>'}`}
  h+=`<button class="btn g w" ${big} data-a="hkRe" style="margin-top:8px">רענן</button></div>`;

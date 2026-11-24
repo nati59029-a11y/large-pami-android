@@ -613,11 +613,15 @@ async function handle(req, res, opts) {
       logger.info('cxBot: refused', { biz: v.bizId, op, log: lg, reason });
       return no(STATUS[e.code] || 500, reason, e.message);
     }
-    logger.error('cxBot: failed', { biz: v.bizId, op, log: lg, name: e && e.name, code: e && e.code, msg: String(e && e.message).slice(0, 200) });
+    logger.error('cxBot: failed', { biz: v.bizId, op, log: lg, name: e && e.name, code: e && e.code, msg: logMsg(e) });
     return no(500, 'internal', 'תקלה בשרת. ננסה שוב.');
   }
 }
 
+// סבב 2 (24.11): הודעת שגיאה ליומן – בלי פרטים אישיים. נתיבי מסמכים (cust/t{ת.ז}, cust/p{טלפון}, hkc/{מספר לקוח}...) מוסתרים, וכל רצף של 5 ספרות ומעלה → #
+function logMsg(e) {
+  return String(e && e.message || '').replace(/\b([A-Za-z]+)\/[^\s"'`,;)\]}]+/g, '$1/…').replace(/\d{5,}/g, '#').slice(0, 200);
+}
 // ---------- התראות ----------
 const MSG = {
   'needs-login': 'צריך להתחבר מחדש לכספית בדפדפן Chrome במחשב החנות. אחרי ההתחברות הסנכרון ימשיך לבד.',
@@ -738,4 +742,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, logMsg, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
