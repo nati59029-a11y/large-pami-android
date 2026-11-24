@@ -1471,6 +1471,10 @@ service cloud.firestore {
     match /sec_mlog/{id} {
       allow read, create, update, delete: if false;
     }
+    // הצעות התחייבות (24.11.2026, גיטי סבב 3 חלק ב): רק דרך השרת (lib/sec-cmt.js, secComm op:'cmts', secPrefs op:'cmt') – אף אחד מהאפליקציה
+    match /sec_cmt/{id} {
+      allow read, create, update, delete: if false;
+    }
 
     // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
     function s3Now(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -2914,6 +2918,10 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
       match /sec_mlog/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // הצעות התחייבות (24.11.2026): רק דרך השרת
+      match /sec_cmt/{id} {
         allow read, create, update, delete: if false;
       }
 

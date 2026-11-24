@@ -469,6 +469,7 @@ async function dailyBiz(opts) {
   const out = { chat: 0, notes: 0, log: 0 };
   for (const p of await db.collection('sec_chat').listDocuments()) out.chat += await delWhere(db, `sec_chat/${p.id}/m`, c12);
   for (const p of await db.collection('sec_note').listDocuments()) out.notes += await delWhere(db, `sec_note/${p.id}/n`, c12);
+  out.notes += await delWhere(db, 'sec_cmt', c12); // 24.11.2026: הצעות התחייבות (עם קטע מההודעה) – 12 חודשים, כמו ההתראות
   out.log = await delWhere(db, 'sec_log', c24);
   out.log += await delWhere(db, 'sec_mlog', c24); // 15.11.2026: יומן "נשלח לבד" – כמו sec_log, 24 חודשים
   out.inbox = await require('./secretary-wa')._core.shrinkOld(db, c12); // שלב 5: הודעות ווצאפ וטיוטות בנות יותר מ-12 חודשים – רק תקציר (9.5)

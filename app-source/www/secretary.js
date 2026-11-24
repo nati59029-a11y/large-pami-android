@@ -84,7 +84,7 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  factAdd:'נשמרה עובדה',factOk:'אושרה עובדה שהמזכירה הציעה',factNo:'בוטלה הצעה לעובדה',factEdit:'עובדה נערכה',factDel:'עובדה נמחקה',fixed:'עודכנו פרטים קבועים',price:'הועלה מחירון',priceDel:'המחירון נמחק',
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
- grpOn:'קבוצה פנימית נפתחה לקריאה של גיטי',grpOff:'קבוצה פנימית נסגרה לגיטי',tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
+ grpOn:'קבוצה פנימית נפתחה לקריאה של גיטי',cmtNew:'זוהתה התחייבות בהודעה (הצעה לאישור)',cmtOk:'אושרה התחייבות – נפתחה משימה / נקבעה תזכורת',cmtNo:'נדחתה הצעת התחייבות',cmtOn:'זיהוי התחייבויות הופעל',cmtOff:'זיהוי התחייבויות כובה',cmtCap:'זיהוי התחייבויות הגיע לתקרה היומית',grpOff:'קבוצה פנימית נסגרה לגיטי',tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
  notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',remSnooze:'נקבע "תזכירי לי שוב" להתראה',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
@@ -256,6 +256,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  ${mailSetH()}
  ${gSetH()}
  ${typeof window.__secGrpSetH==='function'?window.__secGrpSetH():''/* 23.11.2026: קבוצות פנימיות שגיטי רשאית לקרוא – sec-comm.js */}
+ ${typeof window.__secCmtSetH==='function'?window.__secCmtSetH():''/* 24.11.2026: זיהוי התחייבויות – sec-cmt.js */}
  ${ntH(S)}
  <button class="btn g w" data-a="secEdit" style="margin-top:10px">שינוי שם ואופן פנייה</button><button class="btn g w" data-a="secSetX" style="margin-top:8px">חזרה לשיחה</button>
  <div class="sec"><h3>יומן פעולות</h3></div><div class="card"><p class="note" style="margin:0 0 8px">היומן המלא: חיפוש, סינון לפי סוג ותאריך, ופירוט לכל פעולה.</p><button class="btn w" data-a="hubLog" style="min-height:44px">פתיחת יומן הפעולות המלא</button></div>`}

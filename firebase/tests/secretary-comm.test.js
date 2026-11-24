@@ -10,7 +10,7 @@ const H = require('./helpers');
 const GM = require('./gemini-mock');
 
 const A = 'biz-gc', B = 'biz-gc2';
-const M1 = 'gc_m1', M2 = 'gc_m2', MBR = 'gc_mbr', E1 = 'gc_e1', BM = 'gc_bm';
+const M1 = 'gc_m1', M2 = 'gc_m2', MBR = 'gc_mbr', E1 = 'gc_e1', BM = 'gc_bm'; // M1 – גם מנהל־העל (superadmins) – רק הוא משנה הרשאות קבוצות (24.11.2026)
 const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 const fnUrl = (n) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${n}`;
 async function call(name, uid, data) {
@@ -39,6 +39,7 @@ async function seed(o) {
     b.set(d.doc('b/' + B), { name: B, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: { secretary: true, groups: true } });
     for (const u of [M1, M2, MBR]) { b.set(d.doc(`b/${A}/admins/${u}`), Object.assign({ email: u + '@example.invalid' }, u === MBR ? { br: ['b1'] } : {})); b.set(d.doc(`b/${A}/staff/${u}`), { name: u, role: 'manager', active: true }); }
     b.set(d.doc(`b/${A}/staff/${E1}`), { name: 'דוד כהן', role: 'employee', active: true });
+    b.set(d.doc('superadmins/' + M1), {});
     b.set(d.doc(`b/${B}/admins/${BM}`), { email: BM + '@example.invalid' }); b.set(d.doc(`b/${B}/staff/${BM}`), { name: BM, role: 'manager', active: true });
     for (const [u, role, biz] of [[M1, 'admin', A], [M2, 'admin', A], [MBR, 'admin', A], [E1, 'worker', A], [BM, 'admin', B]]) b.set(d.doc('users/' + u), { bizId: biz, role, active: true, bizStatus: 'active', email: u + '@example.invalid', createdAt: 1 });
     const mgr = {}; for (const u of [M1, M2, MBR]) mgr[u] = { cv: SEC.CONSENT_VER, ca: 1, nm: 'גיטי', ad: 'f' };
@@ -83,7 +84,7 @@ after(async () => { await GM.stop(); try { (await H.getEnv()).cleanup(); } catch
 beforeEach(() => GM.reset());
 
 describe('גיטי – הרשאת קבוצות (secPrefs op:grp)', () => {
-  it('ברירת מחדל כבוי; מנהל מפעיל ומכבה – נשמר ונרשם ביומן; מסמך הקבוצה לא משתנה', async () => {
+  it('ברירת מחדל כבוי; מנהל־העל מפעיל ומכבה – נשמר ונרשם ביומן; מסמך הקבוצה לא משתנה', async () => {
     await seed();
     const core = (g) => ({ name: g.name, mem: g.mem, ao: g.ao, md: g.md, by: g.by, t: g.t, grp: g.grp, sec: g.sec }); // last – נכתב בטריגר grpMsg (לא כאן)
     const g0 = core(await get(`b/${A}/grp/${G1}`));
@@ -92,23 +93,28 @@ describe('גיטי – הרשאת קבוצות (secPrefs op:grp)', () => {
     const on = await setGrp(M1, G1, true);
     assert.equal(on.status, 'OK', on.text); assert.deepEqual([on.result.gid, on.result.on], [G1, true]);
     assert.deepEqual((await get(`b/${A}/sec_cfg/main`)).grp, [G1]);
-    assert.equal((await setGrp(M2, G1, true)).status, 'OK', 'כל מנהל של העסק (בלי הגבלת סניפים) – כמו שאר הגדרות המזכירה');
+    assert.equal((await setGrp(M1, G1, true)).status, 'OK');
     assert.deepEqual((await get(`b/${A}/sec_cfg/main`)).grp, [G1], 'בלי כפילות');
+    const m2 = await setGrp(M2, G1, false);
+    assert.equal(m2.reason, 'not-superadmin', 'מנהל רגיל (בלי הגבלת סניפים) – לא משנה');
+    assert.deepEqual((await get(`b/${A}/sec_cfg/main`)).grp, [G1], 'מנהל רגיל לא כיבה');
+    assert.deepEqual((await call('secState', M2, {})).result.grp, { on: true, n: 1, edit: false }, 'מנהל רגיל – צפייה בלבד');
     assert.equal((await call('secState', M1, {})).result.grp.n, 1);
     const off = await setGrp(M1, G1, false);
     assert.equal(off.status, 'OK', off.text);
     assert.deepEqual((await get(`b/${A}/sec_cfg/main`)).grp, []);
     const log = (await coll(`b/${A}/sec_log`)).filter((l) => l.act === 'grpOn' || l.act === 'grpOff');
     assert.deepEqual(log.map((l) => l.act).sort(), ['grpOff', 'grpOn', 'grpOn']);
-    assert.ok(log.every((l) => l.tgt === G1 && l.note === 'צוות בוקר' && l.who === 'mgr'));
+    assert.ok(log.every((l) => l.tgt === G1 && l.note === 'צוות בוקר' && l.who === 'sa'));
     assert.deepEqual(core(await get(`b/${A}/grp/${G1}`)), g0, 'מסמך הקבוצה לא השתנה');
     assert.ok(!Object.keys(await get(`b/${A}/grp/${G1}`)).some((k) => !['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'].includes(k)), 'בלי שדות חדשים במסמך הקבוצה');
   });
   it('נחסם: עובד, מנהל עם הגבלת סניפים, מנהל של עסק אחר, בלי התחברות, קבוצה שלא קיימת, קלט לא תקין, תוספת כבויה', async () => {
     await seed();
     assert.equal((await setGrp(E1, G1, true)).status, 'PERMISSION_DENIED');
-    assert.equal((await setGrp(MBR, G1, true)).reason, 'branch-limited');
-    assert.equal((await setGrp(BM, G1, true)).reason, 'not-found', 'עסק אחר – הקבוצה לא קיימת אצלו');
+    assert.equal((await setGrp(MBR, G1, true)).reason, 'not-superadmin');
+    assert.equal((await setGrp(M2, G1, true)).reason, 'not-superadmin', 'מנהל רגיל של העסק');
+    assert.equal((await setGrp(BM, G1, true)).reason, 'not-superadmin', 'מנהל של עסק אחר');
     assert.equal((await setGrp(null, G1, true)).status, 'UNAUTHENTICATED');
     assert.equal((await setGrp(M1, 'nope', true)).reason, 'not-found');
     assert.equal((await setGrp(M1, 'nope', false)).reason, 'not-found');
@@ -259,7 +265,7 @@ describe('גיטי – secComm: פיד מאוחד ורשימת קבוצות', ()
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.grpOn, false); assert.ok(!r.result.items.some((x) => x.ch === 'grp'));
   });
-  it('רשימת הקבוצות להגדרות: מצב לכל קבוצה; מנהל עם הגבלת סניפים – צפייה בלבד', async () => {
+  it('רשימת הקבוצות להגדרות: מצב לכל קבוצה; מנהל רגיל ומנהל עם הגבלת סניפים – צפייה בלבד', async () => {
     await seed();
     assert.equal((await setGrp(M1, G2, true)).status, 'OK');
     const r = await call('secComm', M1, { op: 'groups' });
@@ -268,6 +274,8 @@ describe('גיטי – secComm: פיד מאוחד ורשימת קבוצות', ()
     const by = Object.fromEntries(r.result.groups.map((g) => [g.gid, g]));
     assert.equal(by[G1].on, false); assert.equal(by[G2].on, true); assert.equal(by[G1].name, 'צוות בוקר'); assert.equal(by[G1].n, 1);
     assert.equal((await call('secComm', MBR, { op: 'groups' })).result.edit, false);
+    const r2 = await call('secComm', M2, { op: 'groups' });
+    assert.equal(r2.result.edit, false); assert.equal(r2.result.groups.length, 2, 'מנהל רגיל רואה את הרשימה');
     assert.equal((await call('secComm', E1, { op: 'groups' })).status, 'PERMISSION_DENIED');
   });
 });

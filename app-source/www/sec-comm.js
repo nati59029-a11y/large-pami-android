@@ -74,7 +74,7 @@ function commH(){
  const chip=(a,k,l,on)=>`<button class="chip${on?' on':''}" data-a="${a}" data-v="${k}" aria-pressed="${on}">${l}</button>`;
  let h=`<div class="cmf" role="group" aria-label="ערוץ">${CH.map(([k,l])=>chip('commCh',k,l,C.ch===k)).join('')}</div>
  <div class="cmf" role="group" aria-label="מצב">${chip('commSt','all','הכול',C.st==='all')}${chip('commSt','open','לטיפול / לא נקרא',C.st==='open')}<button class="chip" data-a="commRe">רענון</button></div>`;
- if(gOn&&C.at&&!C.groups.length&&(C.ch==='all'||C.ch==='grp'))h+=`<div class="card"><p class="note" style="margin:0 0 6px">אף קבוצה פנימית לא פתוחה לגיטי, ולכן הודעות מהקבוצות לא מופיעות כאן.</p><button class="chip" data-a="commSet" style="min-height:44px">פתיחת קבוצות בהגדרות</button></div>`;
+ if(gOn&&C.at&&!C.groups.length&&(C.ch==='all'||C.ch==='grp'))h+=`<div class="card"><p class="note" style="margin:0 0 6px">אף קבוצה פנימית לא פתוחה לגיטי, ולכן הודעות מהקבוצות לא מופיעות כאן.</p><button class="chip" data-a="commSet" style="min-height:44px">${X.st&&X.st.grp&&X.st.grp.edit?'פתיחת קבוצות בהגדרות':'לרשימת הקבוצות (רק מנהל־העל משנה)'}</button></div>`;
  if(C.err&&!C.items.length)return h+`<div class="card"><p class="note">${esc(C.err)}</p><button class="btn g w" data-a="commRe">נסה שוב</button></div>`;
  if(!C.at&&C.ch!=='notif')return h+'<div class="empty">טוען…</div>';
  const L=view();
@@ -92,13 +92,16 @@ ACT.commRe=()=>{reset();try{if(typeof root.__secNfTick==='function')root.__secNf
 ACT.commMore=()=>{if(!C.busy&&C.more)load(true)};
 ACT.commSet=()=>{try{ACT.secSet()}catch(e){}setTimeout(()=>{const e=document.getElementById('secGrpSet');if(e)e.scrollIntoView({block:'start'})},120)};
 const hasTab=k=>TABS.some(x=>x[0]===k);
-ACT.commGo=el=>{const id=el.dataset.id,x=view().find(i=>i.id===id);if(!x)return toast('הפריט כבר לא ברשימה');
+ACT.commGo=el=>{const id=el.dataset.id,x=view().find(i=>i.id===id);if(!x)return toast('הפריט כבר לא ברשימה');openItem(x)};
+/* פתיחת פריט במסך הקיים שלו. x = { ch, ref } – גם מ-sec-cmt.js ("ההודעה המקורית" של הצעת התחייבות) */
+function openItem(x){if(!x||!x.ref&&x.ch!=='notif')return toast('לא הצלחתי לפתוח');
  try{
   if(x.ch==='mail'){if(!hasTab('mail'))return toast('המסך הזה לא זמין');ACT.secTab({dataset:{v:'mail'}});if(X.ml){X.ml.cur=x.ref.id;X.ml.card=null}rerender();window.scrollTo(0,0);return}
   if(x.ch==='wa'){if(!hasTab('wa'))return toast('המסך הזה לא זמין');ACT.secTab({dataset:{v:'wa'}});if(X.wa&&x.ref.wa){X.wa.cur=x.ref.wa;X.wa.card=null}rerender();window.scrollTo(0,0);return}
   if(x.ch==='grp'){if(root.GRP&&typeof root.GRP.open==='function')return root.GRP.open(x.ref.gid);return toast('הקבוצות לא זמינות כאן')}
   if(x.ch==='notif'){if(!hasTab('notif'))return toast('המסך הזה לא זמין');ACT.secTab({dataset:{v:'notif'}});return}
- }catch(e){toast('לא הצלחתי לפתוח')}};
+ }catch(e){toast('לא הצלחתי לפתוח')}}
+root.__secCommOpen=openItem;
 {const t0=ACT.secTab;ACT.secTab=el=>{if(el&&el.dataset&&el.dataset.v===TK){reset();try{if(typeof root.__secNfTick==='function')root.__secNfTick()}catch(e){}}return t0(el)}}
 
 /* ---------- הגדרות: קבוצות פנימיות ---------- */
@@ -112,7 +115,7 @@ root.__secGrpSetH=()=>{const g=X.st&&X.st.grp;if(!g||!g.on)return '';
  const rows=G.L?(L.length?L.map(x=>`<label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;gap:8px"><input type="checkbox" data-c="secGrpT" data-g="${esc(x.gid)}"${x.on?' checked':''}${G.edit?'':' disabled'}> <span dir="auto">${esc(x.name)}</span> <small class="note">· ${x.n===1?'חבר אחד':esc(String(x.n))+' חברים'}</small></label>`).join(''):'<p class="note" style="margin:0">אין עדיין קבוצות בעסק.</p>'):(G.err?`<p class="note">${esc(G.err)}</p><button class="chip" data-a="secGrpRe" style="min-height:40px">נסה שוב</button>`:'<p class="note">טוען…</p>');
  return `<div class="card" id="secGrpSet" style="margin-top:8px"><b>קבוצות פנימיות – מה גיטי רשאית לקרוא</b>
  <p class="note" style="margin:4px 0 8px">כבוי כברירת מחדל. בקבוצה שמסומנת כאן גיטי קוראת את כל ההיסטוריה – לשאלות בשיחה ולמסך "תקשורת". כיבוי עוצר את הקריאה מיד. הקבוצה עצמה והחברים בה לא משתנים.</p>
- ${G.edit||!G.L?'':'<p class="note" style="margin:0 0 6px">רק מנהל בלי הגבלת סניפים יכול לשנות.</p>'}<div style="display:grid;gap:6px">${rows}</div></div>`};
+ ${G.edit||!G.L?'':'<p class="note" style="margin:0 0 6px">רק מנהל־העל יכול לשנות. כאן אפשר לראות אילו קבוצות פתוחות לגיטי.</p>'}<div style="display:grid;gap:6px">${rows}</div></div>`};
 ACT.secGrpRe=()=>{G.L=null;G.err='';grpLoad()};
 CHG.secGrpT=async el=>{const gid=el.dataset.g,on=!!el.checked;el.disabled=true;
  try{await fnCall('secPrefs',{op:'grp',gid,on});const x=(G.L||[]).find(z=>z.gid===gid);if(x)x.on=on;

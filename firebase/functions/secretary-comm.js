@@ -7,6 +7,9 @@
 //     מצב: מייל – "טופל" (hd / נענה); ווצאפ – נענה / סומן טופל; קבוצה – "לא נקרא" לפי מצב הקריאה של המנהל (grp/{gid}/r/{uid}). st:'open' = רק מה שפתוח.
 //     התראות מהטלפון לא כאן: הן נשמרות רק במכשיר ומתמזגות בפיד באפליקציה (sec-comm.js), בלי לעלות לשרת.
 //   secComm({ op:'groups' }) – קבוצות העסק עם מצב ההרשאה, למסך ההגדרות. השינוי עצמו – secPrefs op:'grp' (secretary.js).
+//   secComm({ op:'cmts' }) – 24.11.2026 (סבב 3 חלק ב): הצעות התחייבות שממתינות לאישור (sec_cmt st:'pend', עד 30, מהחדשה לישנה) – למרכז האישורים.
+//   secComm({ op:'src', cid }) – לאן מוביל הקישור "ההודעה המקורית" של הצעה (גם אחרי שאושרה – מתפריט המשימה): { ch, ref } כמו בפיד.
+//     מנהל עם הגבלת סניפים – רק הצעות מקבוצות פנימיות (מייל וווצאפ הם ערוצים של כל העסק). השינוי עצמו – secPrefs op:'cmt'.
 // הרשאה: אותו שער כמו כל המזכירה (gate + הסכמה). מייל וווצאפ – כמו secMail list / secInbox list. קבוצות – רק כשתוספת הקבוצות פעילה.
 
 const { onCall } = require('./lib/region');
@@ -98,6 +101,22 @@ async function feed(who, db, input) {
   return { ok: true, items, more, next, grpOn, groups: groups.map((g) => ({ gid: g.gid, name: g.name })), now: Date.now() };
 }
 
+// הצעת התחייבות לתצוגה. ref – אותו מבנה כמו בפיד (mail: { id }, wa: { wa }, grp: { gid, mid })
+function cmtItem(id, x) {
+  const s = x.src && typeof x.src === 'object' ? x.src : {};
+  const ref = x.ch === 'grp' ? { gid: clean(s.gid, 128), mid: clean(s.mid, 128) } : x.ch === 'wa' ? { wa: clean(s.wa, 30) } : { id: clean(s.id, 200) };
+  const it = { cid: id, ch: x.ch, t: +x.t || 0, from: clean(x.from, 60), who: x.who === 'me' ? 'me' : 'them', what: clean(x.what, 200), d: typeof x.d === 'string' ? x.d : '', prev: clean(x.prev, PREV), st: x.st, ref };
+  if (x.grp) it.grp = clean(x.grp, 60);
+  return it;
+}
+const CMT_MAX = 30;
+async function cmts(db, brLimited) {
+  // בלי אינדקס מורכב: לפי מצב בלבד, ומיון בזיכרון
+  const s = await db.collection('sec_cmt').where('st', '==', 'pend').limit(CMT_MAX * 3).get();
+  const L = s.docs.map((d) => cmtItem(d.id, d.data())).filter((x) => !brLimited || x.ch === 'grp').sort((a, b) => b.t - a.t);
+  return { ok: true, items: L.slice(0, CMT_MAX), n: L.length };
+}
+
 async function secComm(request) {
   const input = inputObject(request);
   const g = await gate(request, { consent: true });
@@ -106,11 +125,20 @@ async function secComm(request) {
   if (input.op === 'groups') {
     const on = GRP.grpOn(who);
     if (!on) return { ok: true, on: false, edit: false, groups: [], max: GRP.MAX_ALLOWED };
-    return { ok: true, on: true, edit: !brLimited, groups: await GRP.listGroups(db, await GRP.readAllowed(db)), max: GRP.MAX_ALLOWED };
+    return { ok: true, on: true, edit: !!who.superadmin, groups: await GRP.listGroups(db, await GRP.readAllowed(db)), max: GRP.MAX_ALLOWED };
+  }
+  if (input.op === 'cmts') return cmts(db, brLimited);
+  if (input.op === 'src') {
+    const cid = typeof input.cid === 'string' && /^cm[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
+    if (!cid) throw bad('bad-input', 'ערך לא תקין');
+    const s = await db.doc('sec_cmt/' + cid).get();
+    if (!s.exists || (brLimited && s.get('ch') !== 'grp')) throw C.pre('not-found', 'ההודעה המקורית לא נמצאה');
+    const it = cmtItem(s.id, s.data());
+    return { ok: true, ch: it.ch, ref: it.ref, from: it.from, prev: it.prev, grp: it.grp || '' };
   }
   throw bad('bad-op', 'פעולה לא מוכרת');
 }
 
 exports.secComm = onCall(wrap('secComm', secComm));
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { mailItem, waItem, grpItem, PAGE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { mailItem, waItem, grpItem, cmtItem, PAGE } });
