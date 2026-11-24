@@ -962,7 +962,7 @@ function hoursInfo(A, months) {
     months.length > 1 ? { pm } : {}, A.list.some((x) => x.zw) ? { warn: A.list.find((x) => x.zw).zw } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
 }
 
-// ---------- יתרות הקפה (0.1.20) ----------
+// ---------- יתרות הקפה (0.1.21) ----------
 // בריצה הלילית בלבד (לא בשעתית): "יצוא לאקסל" של #/hakafa-customers (capture: נקודת קצה אם הוגדרה, אחרת המסך – הזרימה hkSnap),
 // פענוח (lib/hk.js) ושליחה לשרת: upload { kind:'hkSnap', run, day, rows:[{ xc, tz, name, ph, addr, bal }] } – רק השדות האלה.
 // הרשימה זהה בשני הסניפים → פעם אחת, בסניף הבית (brHome לפני). דגל: selectors.json hkSync:true.
@@ -1119,7 +1119,7 @@ const STEP = {
       return { err: run.flags.hrs.code };
     }
   },
-  hk: (run) => hkStep(run), // 0.1.20: יתרות הקפה – כישלון לא מפיל את הריצה
+  hk: (run) => hkStep(run), // 0.1.21: יתרות הקפה – כישלון לא מפיל את הריצה
   exportNew: (run) => exportImport(run, 'new'),
   exportPrice: (run) => exportImport(run, 'price'),
   async report(run) {

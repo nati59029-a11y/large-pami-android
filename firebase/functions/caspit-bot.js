@@ -60,7 +60,7 @@ const DISC_MAX = 1024 * 1024;
 const DISC_PART = 300000; // תווים; גם ב-3 בייטים לתו – פחות מ-1MiB למסמך
 const CALLS_DAY = 600, RUNS_DAY = 10, FAIL_IP_DAY = 30;
 const FAIL_BUCKETS = 64; // מוני כישלונות: מספר קבוע של מסמכים (cxbot_fail/b0..b63) – כתובת מזויפת לא יוצרת מסמכים חדשים
-const LIM = { price: 500, newMax: 50 };
+const LIM = { price: 500, newMax: 100000 }; // 24.11.2026 (בעל העסק): פריטים חדשים – ללא הגבלה (100000 = "ללא הגבלה", התקרה הטכנית של cxExport). עד אז 50
 const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
 const SRUN_RE = /^[A-Za-z0-9_-]{6,40}$/; // מזהה ריצה (runId מ-hello, או מזהה של התוסף אם hello נכשל)
@@ -351,7 +351,7 @@ const OPF = {
   async export(w, b, x) {
     O.onlyKeys(b, ['kind', 'max']);
     if (!['new', 'price'].includes(b.kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
-    if (!Number.isInteger(b.max) || b.max < 0 || b.max > LIM.price) throw bad('bad-max', 'מגבלה לא תקינה');
+    if (!Number.isInteger(b.max) || b.max < 0 || b.max > (b.kind === 'new' ? LIM.newMax : LIM.price)) throw bad('bad-max', 'מגבלה לא תקינה');
     const lim = limitsOf(await cfgNow());
     const max = Math.min(b.max, b.kind === 'new' ? lim.newMax : lim.price);
     await CX.lockTake(w.bizId, 'bot:' + x.dev.id);

@@ -26,7 +26,7 @@ test('ריצה מלאה: כל השלבים לפי הסדר, יום מכירות 
 test('בלי ימים – מדלגים על מכירות; סנכרון ראשון ידני – מדלגים על קבצים לכספית', () => {
   const { r, seen } = drive(run0(), (s, run) => { if (s === 'catApply') run.flags.noCat = true; return {}; });
   assert.equal(r.st, 'ok');
-  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'hours', 'hk', 'report']); // 0.1.14: שעות העובדים, 0.1.20: יתרות הקפה – גם בלי ימים ובלי קטלוג
+  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'hours', 'hk', 'report']); // 0.1.14: שעות העובדים, 0.1.21: יתרות הקפה – גם בלי ימים ובלי קטלוג
 });
 
 test('שגיאת רשת: ניסיון חוזר אחרי 1, 4, 15 דקות ואז נכשל', () => {

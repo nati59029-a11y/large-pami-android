@@ -141,7 +141,7 @@ function hakafa(app, k) {
   };
   app.querySelectorAll('[data-hit]').forEach((b) => { b.onclick = () => hit(b.dataset.hit + ':' + k); });
   const x = document.getElementById('hkX');
-  // 0.1.20 (hkXlsx=1): "יצוא לאקסל" של לקוחות הקפה כמו בכספית האמיתית – div.hakafa-customer-index, button.btn.btn-success, xlsx עם 22 עמודות
+  // 0.1.21 (hkXlsx=1): "יצוא לאקסל" של לקוחות הקפה כמו בכספית האמיתית – div.hakafa-customer-index, button.btn.btn-success, xlsx עם 22 עמודות
   // (מהשרת המדומה, כותרת בשורה הראשונה). hkXlsx=bad – כותרות לא מוכרות; hkXlsx=none – בלי כפתור יצוא. כל יצוא נרשם ב-hkXs לפי הסניף
   const hx = k === 'hakafa-customers' ? localStorage.getItem('hkXlsx') : null;
   if (hx && x) {

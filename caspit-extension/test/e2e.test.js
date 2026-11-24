@@ -40,7 +40,7 @@ async function caspitRoute(route) {
   if (p === '/api/me') return JSONR({ email: 'owner@example.co.il', phone: '052-1234567', token: 'Zx9kQ2mP7vL4nR8sT1wY6bC3', items: [{ id: 4580123412341234, name: 'x' }] });
   // משימות של כספית (run-as-job) והקובץ שלהן
   if (/^\/bo\/merkaz\/(items\/(full_)?report\.xlsx|reports\/sales_items)$/.test(p)) return JSONR({ job_id: 7, success: true });
-  // 0.1.20: "יצוא לאקסל" של לקוחות הקפה (כספית המדומה, hkXlsx) – xlsx כמו באמיתי; bad=1 – כותרות לא מוכרות
+  // 0.1.21: "יצוא לאקסל" של לקוחות הקפה (כספית המדומה, hkXlsx) – xlsx כמו באמיתי; bad=1 – כותרות לא מוכרות
   if (p === '/bo/hakafa/customers_export.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.hkXlsx(X, u.searchParams.get('bad') === '1')) });
   if (p === '/bo/files/get_job_result') {
     const f = u.searchParams.get('filename') || '';
@@ -101,7 +101,7 @@ function impOn(dir) {
   const f = path.join(dir, 'selectors.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.equal(j.importEnabled, true, 'במוצר – פעיל (מ-0.1.4)');
   j.importEnabled = true;
-  j.hkSync = false; // 0.1.20: יתרות הקפה – כבוי בעותק של הבדיקה (הבדיקות הקודמות לא משתנות); הבדיקות של hkSnap מדליקות דרך sel()
+  j.hkSync = false; // 0.1.21: יתרות הקפה – כבוי בעותק של הבדיקה (הבדיקות הקודמות לא משתנות); הבדיקות של hkSnap מדליקות דרך sel()
   j.branch.switch.ms = 8000; j.branch.switch.settle = 800; // 0.1.13: בבדיקה – המתנה קצרה לבחירת סניף שלא נקלטת
   fs.writeFileSync(f, JSON.stringify(j));
 }
@@ -1326,7 +1326,7 @@ test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספי
   } finally { await sw.evaluate(() => chrome.storage.local.remove('hrsSeen')); await hrsOff(); }
 });
 
-// ---------- 0.1.20: יתרות הקפה (hkSnap) ----------
+// ---------- 0.1.21: יתרות הקפה (hkSnap) ----------
 // כספית המדומה (hkXlsx=1): "יצוא לאקסל" ב-#/hakafa-customers מחזיר xlsx עם 22 עמודות (fixtures/data.js hkXlsx); כל יצוא נרשם ב-hkXs לפי הסניף
 const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'upload' && c.kind === 'hkSnap');
 async function hkOn(mode, ms) {
@@ -1339,7 +1339,7 @@ async function hkOff() {
   await ls({ hkXlsx: null, hkXs: null, store: 'יהודה הנשיא' });
   await sw.evaluate(async () => { const S = await self.__cxTest.sel(); S.hkSync = false; S.flows.hkSnap[1].ms = 30000; });
 }
-test('0.1.20 יתרות הקפה בריצה הלילית: hkSnap פעם אחת ביהודה הנשיא, רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
+test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת ביהודה הנשיא, רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
   await hkOn('1');
   try {
     const n0 = srv.calls.length;
@@ -1363,7 +1363,7 @@ test('0.1.20 יתרות הקפה בריצה הלילית: hkSnap פעם אחת �
     assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'בלי "לקוח חדש" / "טעינת לקוחות" / "עריכה"');
   } finally { await hkOff(); }
 });
-test('0.1.20 יתרות הקפה: אין כפתור יצוא → hk-export בנפרד; המכירות וההעלאות לכספית נשלחו והריצה הצליחה; קובץ במבנה לא מוכר → hk-format', async () => {
+test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנפרד; המכירות וההעלאות לכספית נשלחו והריצה הצליחה; קובץ במבנה לא מוכר → hk-format', async () => {
   await hkOn('none', 3000);
   try {
     const n0 = srv.calls.length;
