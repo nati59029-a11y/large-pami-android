@@ -1,7 +1,7 @@
 // תוסף כספית – service worker: תזמון, ריצת סנכרון (מכונת מצבים שממשיכה אחרי הפסקה), מצב היכרות, והודעות מהחלון הקופץ.
 // כל הבקשות לכספית רצות בתוך לשונית ייעודית של התוסף (מוצמדת, לא פעילה) – לא בלשונית של בעל העסק, ולא מהשרת.
 // התוסף לעולם לא ממלא שם משתמש או סיסמה: אם כספית מבקשת התחברות – מדווחים "צריך התחברות" ומנסים שוב בבדיקה הבאה.
-importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js', 'lib/upd.js', 'lib/hours.js');
+importScripts('config.js', 'lib/caspit-core.js', 'lib/xlsx.full.min.js', 'lib/days.js', 'lib/plan.js', 'lib/sanitize.js', 'lib/util.js', 'lib/api.js', 'lib/upd.js', 'lib/hours.js', 'lib/hk.js');
 const P = self.CxPlan, D = self.CxDays, U = self.CxUtil, S = self.CxSanitize, C = self.CaspitCore, A = self.CxApi, UP = self.CxUpd, HR = self.CxHours;
 const VER = chrome.runtime.getManifest().version;
 const CASPIT = 'https://caspit.valu.co.il/';
@@ -962,6 +962,43 @@ function hoursInfo(A, months) {
     months.length > 1 ? { pm } : {}, A.list.some((x) => x.zw) ? { warn: A.list.find((x) => x.zw).zw } : {}, A.list.some((x) => x.r.skip) ? { skip: A.list.reduce((a, x) => a + x.r.skip, 0) } : {}, A.list.some((x) => x.r.paged) ? { paged: true } : {});
 }
 
+// ---------- יתרות הקפה (0.1.20) ----------
+// בריצה הלילית בלבד (לא בשעתית): "יצוא לאקסל" של #/hakafa-customers (capture: נקודת קצה אם הוגדרה, אחרת המסך – הזרימה hkSnap),
+// פענוח (lib/hk.js) ושליחה לשרת: upload { kind:'hkSnap', run, day, rows:[{ xc, tz, name, ph, addr, bal }] } – רק השדות האלה.
+// הרשימה זהה בשני הסניפים → פעם אחת, בסניף הבית (brHome לפני). דגל: selectors.json hkSync:true.
+// כישלון לא מפיל את הריצה: נרשם ב-flags.hk ({ code, msg }) ונשלח בדיווח (info.flags.hk, info.hk) – הריצה עצמה "הצליחה".
+// נזרקות (כמו בשעות): wrong-page / needs-login / branch-restore / auth; תקלה זמנית (רשת, שרת, זמן) – ניסיון חוזר רגיל, ובניסיון האחרון – flags.hk.
+const HK = self.CxHk;
+const HK_STOP = ['wrong-page', 'needs-login', 'branch-restore', 'auth'];
+async function hkStep(run) {
+  if ((await sel()).hkSync !== true) return { skip: 'off' };
+  const tab = await ownTab(false);
+  let stage = 'get';
+  try {
+    await brHome(tab);
+    const f = await capture(tab, 'hkSnap', {}, 120e3);
+    stage = 'parse';
+    let R;
+    try { R = U.readRows(f.bytes, f.name, self.XLSX, C); } catch (e) { throw P.err('hk-format', 'לא הצלחנו לקרוא את קובץ לקוחות ההקפה מכספית'); }
+    const X = HK.parse(R);
+    if (!X.ok) { const sh = S.fileShape(R, 0); throw P.err('hk-format', undefined, { fmt: { rows: R.length, hi: sh.hi, hdr: sh.hdr, why: X.why } }); }
+    if (!X.rows.length) throw P.err('hk-empty');
+    if (X.rows.length > HK.MAX_ROWS) throw P.err('hk-limit', `${X.rows.length} לקוחות הקפה – מעל המגבלה (${HK.MAX_ROWS}). לא נשלח.`);
+    stage = 'send';
+    const day = D.dayStr(Date.now(), (await sched()).tz);
+    await (await api()).call('upload', { run: U.rid('hk'), kind: 'hkSnap', day, rows: X.rows });
+    return { n: X.rows.length, skip: X.skip, bad: X.bad, dup: X.dup, day, via: f.via };
+  } catch (e) {
+    const code = e && typeof e.code === 'string' ? e.code : 'tab';
+    if (HK_STOP.includes(code)) throw e;
+    if (P.RETRY.has(code) && (run.attempt || 0) < P.BACKOFF.length) throw e;
+    const c = /^hk-/.test(code) ? code : stage === 'send' ? 'hk-server' : stage === 'get' ? 'hk-export' : 'hk-format';
+    const msg = /^hk-/.test(code) ? String((e && e.message) || P.msgOf(c)) : P.msgOf(c) + ' (' + code + ': ' + String((e && e.message) || '').slice(0, 160) + ')';
+    run.flags.hk = Object.assign({ code: c, msg: msg.slice(0, 260) }, e && e.fmt ? { fmt: e.fmt } : {});
+    return { err: c };
+  }
+}
+
 // ---------- שלבי הריצה ----------
 const STEP = {
   async hello(run) {
@@ -1082,6 +1119,7 @@ const STEP = {
       return { err: run.flags.hrs.code };
     }
   },
+  hk: (run) => hkStep(run), // 0.1.20: יתרות הקפה – כישלון לא מפיל את הריצה
   exportNew: (run) => exportImport(run, 'new'),
   exportPrice: (run) => exportImport(run, 'price'),
   async report(run) {
@@ -1169,7 +1207,7 @@ async function waitImport(tab, name, after, ms) {
 }
 function summary(run) {
   const i = run.info || {};
-  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, hrs: i.hours || null, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
+  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, hrs: i.hours || null, hk: i.hk || null, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
 }
 
 // ---------- ריצה ----------
