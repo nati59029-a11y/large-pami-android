@@ -158,7 +158,11 @@ describe('זיהוי: בקליטה רק תור (בלי AI); העובד (secRemin
     await seed();
     await prep((d) => d.doc(`b/${A}/sec_cfg/cap`).set({ capCents: 0 }));
     await grpMsg(G1, 'c3', 'אני אסדר את המדף מחר בבוקר');
+    const u0 = await get(`b/${A}/sec_cfg/use`);
     assert.deepEqual(await work(), { saving: 1 }); assert.equal(AI.calls.length, 0);
+    assert.deepEqual(await work(), { saving: 1 });
+    assert.deepEqual(await get(`b/${A}/sec_cfg/use`), u0, 'בחיסכון – שום מונה לא משתנה (גם לא התקרה היומית)');
+    assert.equal((await coll(`b/${A}/sec_cmtq`)).length, 1, 'נשאר בתור');
     await seed();
     await grpMsg(G1, 'c4', 'אני אסדר את המדף מחר בבוקר');
     assert.deepEqual(await inBiz((db) => CMT.runQueue(db, {})), { nokey: 1 }, 'בתהליך הבדיקה אין מפתח AI');
@@ -283,6 +287,30 @@ describe('מרכז האישורים: רשימה, אישור, דחייה והרש
     // תפיסה שפג תוקפה (10 דקות) – מנהל אחר יכול לתפוס
     await prep((d) => d.doc(`b/${A}/sec_cmt/${g}`).set({ st: 'act', actBy: M1, actAt: Date.now() - 11 * 60000 }, { merge: true }));
     assert.equal((await call('secPrefs', M2, { op: 'cmt', cid: g, st: 'claim' })).result.st, 'act');
+  });
+  it('תפיסה שפגה: מנהל אחר דוחה, הסיום מחזיר already/no – והמשימה או התזכורת שנוצרו נמחקות בדרך המותרת (undo)', async () => {
+    const { g, w } = await two();
+    const { assertSucceeds } = require('@firebase/rules-unit-testing');
+    const expire = (cid) => prep((d) => d.doc(`b/${A}/sec_cmt/${cid}`).set({ actAt: Date.now() - 11 * 60000 }, { merge: true }));
+    // משימה: M1 תפס, התפיסה פגה, M2 דחה (עוד אין משימה), M1 יצר משימה ומסיים
+    assert.equal((await call('secPrefs', M1, { op: 'cmt', cid: g, st: 'claim' })).result.st, 'act');
+    await expire(g);
+    assert.equal((await call('secPrefs', M2, { op: 'cmt', cid: g, st: 'no' })).status, 'OK');
+    await prep((d) => d.doc(`b/${A}/tasks/sec${g}`).set({ owner: M1, txt: 'x', st: 'open', to: [E1] }));
+    const f = await call('secPrefs', M1, { op: 'cmt', cid: g, st: 'ok', kind: 'task' });
+    assert.deepEqual([f.result.already, f.result.st], [true, 'no'], 'השרת לא מאשר הצעה שנדחתה');
+    await assertSucceeds(env.authenticatedContext(M1).firestore().doc(`b/${A}/tasks/sec${g}`).delete()); // מה שהאפליקציה עושה (fsx DELETE)
+    assert.equal(await get(`b/${A}/tasks/sec${g}`), null, 'לא נשארה משימה פעילה מהצעה שנדחתה');
+    // תזכורת: אותו דבר, והביטול דרך secCal op:'del'
+    assert.equal((await call('secPrefs', M1, { op: 'cmt', cid: w, st: 'claim' })).result.st, 'act');
+    await expire(w);
+    assert.equal((await call('secPrefs', M2, { op: 'cmt', cid: w, st: 'no' })).status, 'OK');
+    assert.equal((await call('secCal', M1, { op: 'add', title: 'לחזור ליוסי', d: day(2), rem: true, cid: w, force: true })).status, 'OK');
+    assert.equal((await call('secPrefs', M1, { op: 'cmt', cid: w, st: 'ok', kind: 'rem' })).result.st, 'no');
+    const del = await call('secCal', M1, { op: 'del', id: 'sec' + w });
+    assert.equal(del.status, 'OK', del.text);
+    assert.equal(await get(`b/${A}/sec_cal/sec${w}`), null, 'לא נשארה תזכורת מהצעה שנדחתה');
+    assert.equal((await logs('cmtOk')).length, 0);
   });
   it('אישור כתזכורת: secCal עם אותו מזהה – תזכורת אחת גם בלחיצה כפולה; דחייה – נרשמת', async () => {
     const { g, w } = await two();

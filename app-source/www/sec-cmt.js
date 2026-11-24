@@ -76,15 +76,19 @@ const STL={ok:'ההצעה כבר אושרה',no:'ההצעה כבר נדחתה'};
 /* תפיסה בשרת לפני יצירה: רק אם ההצעה עדיין ממתינה (או בתפיסה שלי) נוצרת משימה / תזכורת. אחרת – לא יוצרים כלום */
 async function claim(c){try{const r=await mark(c,'claim');if(r&&r.already){done(c,r.st||'ok');toast(STL[r.st]||'ההצעה כבר הוכרעה');return false}return true}
  catch(e){c.busy=0;re();if(e&&e.reason==='not-found'){done(c,'gone');toast('ההצעה כבר לא קיימת')}else toast(e&&e.message||'הפעולה נכשלה');return false}}
-/* סיום אחרי יצירה: אם השרת עונה שכבר הוכרעה – אומרים זאת (לא "נפתחה") */
-async function fin(c,kind){const r=await mark(c,'ok',kind);if(r&&r.already&&r.st!=='ok'){done(c,r.st);toast(STL[r.st]||'ההצעה כבר הוכרעה');return false}return true}
+/* סיום אחרי יצירה: אם השרת עונה שההצעה כבר נדחתה (למשל התפיסה פגה בזמן שחלון "לקבוע בכל זאת?" היה פתוח) –
+   מבטלים את מה שנוצר עכשיו (undo: מחיקת tasks/sec<cid> לפי החוקים, או secCal op:'del' לתזכורת) ואומרים זאת בבירור */
+async function fin(c,kind,undo){const r=await mark(c,'ok',kind);if(!(r&&r.already&&r.st!=='ok'))return true;
+ let u=1;try{await undo()}catch(e){u=0}c.ref='';done(c,r.st);
+ toast((STL[r.st]||'ההצעה כבר הוכרעה')+(u?(kind==='rem'?' – התזכורת שנוצרה בוטלה':' – המשימה שנוצרה נמחקה'):(kind==='rem'?' – לא הצלחתי לבטל את התזכורת, מחקו אותה ביומן':' – לא הצלחתי למחוק את המשימה, מחקו אותה במסך המשימות')));
+ try{if(kind!=='rem'&&typeof tkLoad==='function')tkLoad()}catch(e){}return false}
 async function okRem(c,force){c.busy=1;re();
  if(!c.ref&&!(await claim(c)))return;
  try{if(!c.ref){const d={op:'add',title:c.txt.slice(0,120),d:c.d,rem:true,cid:c.cid};if(force)d.force=true;
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){c.busy=0;re();return ask('התאריך נופל ב'+r.warn.kind+'. לקבוע את התזכורת בכל זאת?',()=>okRem(c,true),'כן, לקבוע')}
    c.ref=r&&r.id||'sec'+c.cid}
-  if(!(await fin(c,'rem')))return;done(c,'ok');toast('✓ התזכורת נקבעה')}
+  if(!(await fin(c,'rem',()=>fnCall('secCal',{op:'del',id:'sec'+c.cid}))))return;c.ref='';done(c,'ok');toast('✓ התזכורת נקבעה')}
  catch(e){c.busy=0;toast(c.ref?'התזכורת נקבעה, אבל הסימון נכשל. לחצו "אישור" שוב':(e&&e.message)||'הקביעה נכשלה');re()}}
 ACT.cmtOk=async el=>{const c=byId(el.dataset.id);if(!c||c.st||c.busy)return;sync(c,el.closest('[data-cmt]'));
  if(!c.txt)return toast(c.kind==='rem'?'כתבו על מה להזכיר':'כתבו מה צריך לעשות');
@@ -92,12 +96,12 @@ ACT.cmtOk=async el=>{const c=byId(el.dataset.id);if(!c||c.st||c.busy)return;sync
  const k=cx();if(!cxOk()||!k)return toast('אי אפשר לפתוח משימה כאן. אפשר לבחור "תזכורת לי"');
  if(!c.all&&!(c.to||[]).length)return toast('סמנו למי המשימה, או "כל העובדים"');
  c.busy=1;re();
- if(!(await claim(c)))return;
  try{const rv=await k.rvNow();
+  if(!(await claim(c)))return;/* תפיסה (או רענון התפיסה) ממש לפני היצירה */
   /* קישור להודעה המקורית: בטקסט המשימה (מקור), ובתפריט המשימה – "ההודעה המקורית" (מזהה seccm…) */
   const txt=(c.txt+' · מקור: '+srcL(c)).slice(0,500);
   const r=await k.create({id:c.cid,txt,all:!!c.all,to:c.to||[],due:dueOf(c),pri:'',rv});
-  try{if(!(await fin(c,'task')))return}catch(e){c.busy=0;re();return toast('המשימה נפתחה, אבל הסימון נכשל. לחצו "אישור" שוב (לא תיפתח משימה נוספת)')}
+  try{if(!(await fin(c,'task',()=>fsx('/tasks/sec'+c.cid,{method:'DELETE'}))))return}catch(e){c.busy=0;re();return toast('המשימה נפתחה, אבל הסימון נכשל. לחצו "אישור" שוב (לא תיפתח משימה נוספת)')}
   done(c,'ok');toast(r&&r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה'+(r&&r.dlL?', יעד: '+r.dlL:''));try{if(typeof tkLoad==='function')tkLoad()}catch(e){}}
  catch(e){c.busy=0;re();toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}};
 ACT.cmtNo=async el=>{const c=byId(el.dataset.id);if(!c||c.st||c.busy)return;if(c.ref)return toast('התזכורת כבר נקבעה. לחצו "אישור" כדי לסיים');

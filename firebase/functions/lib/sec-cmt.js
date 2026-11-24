@@ -110,6 +110,9 @@ async function processOne(db, qref, ctx, o) {
   if (!x) return 'busy';
   if (x.drop) return 'drop';
   if (!o.ai && !hasKey()) { await qref.update({ lk: 0 }).catch(() => {}); return 'nokey'; } // בלי מפתח – לא נוגעים בתקרה
+  // תקרת העלות – בדיקה בלי לשנות שום מונה (meter מעלה את מונה הקצב לפני שהוא בודק חיסכון): בחיסכון – לא נוגעים בתקרה היומית
+  const [us0, cp0] = await Promise.all([db.doc('sec_cfg/use').get(), db.doc('sec_cfg/cap').get()]);
+  if (C.usageOf(us0, C.capOf(cp0), now).saving) { await qref.update({ lk: 0 }).catch(() => {}); return 'saving'; }
   // התקרה היומית והשמירה מראש בתקרת העלות – רק עכשיו, ממש לפני הקריאה למודל
   let mt;
   try { mt = await C.meter(db, '_cmt', 'fast', true, { hour: CAP_DAY, day: CAP_DAY }, AI.costMc('fast', { in: 4000, out: 600 })); } catch (e) {
