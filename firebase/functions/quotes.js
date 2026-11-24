@@ -5,7 +5,7 @@
 //   qt/{id}          { no, br, cust, custId?, items:[{pid?,n,qty,price,ct?,c?,lb?}], total, vm, vr, net, vat, gross, disc?, note?,
 //                      vu:'YYYY-MM-DD' (היום האחרון בתוקף, שעון ישראל), st:'open'|'conv'|'cancel', apr?:{st:'req'|'ok',by,byName,at},
 //                      cvReq (reqId קבוע להמרה להזמנה), cancel?:{by,at}, by, byName, at, upd }   – id = 'q' + reqId
-//   qt/{id}/log/{k}  { t, by, act, note }                                                  – create / cancel / req / ok (ובהמשך conv, send)
+//   qt/{id}/log/{k}  { t, by, act, note }                                                  – create / cancel / req / ok / conv (ובהמשך send)
 //   ordcfg/seq_qt    { n }                                                                 – מספור רץ של הצעות, נצרך בטרנזקציית השמירה
 // "פג תוקף" לא נשמר – מחושב: st==='open' && vu < היום בשעון ישראל (_core.expired).
 // הצעה לא נוגעת במלאי (אין applyMoves, אין stockLog/xfer), לא ב-cprice, לא ברווחיות ולא בדוחות. הצעה לא ניתנת לעריכה.
@@ -159,6 +159,84 @@ async function qtSet(request) {
   return out;
 }
 
+// =====================================================================================
+// qtConvert({ id }) → { id, st:'conv', ord:{id,no}, dup, why:[…] }   (משימה 2026-11-24, שלב 3)
+//   הזמנה רגילה דרך createCore (אותה טרנזקציה: מספור, מלאי, עלות, קרטונים, חסום, מוצר כבוי) – במחירים השמורים בהצעה.
+//   סדר: st==='open' ('conv' → אותה הזמנה, dup:true; 'cancel' → qt-closed) ← הנחה כללית: מנהל בלבד ← vm של הלקוח היום ≠ vm בהצעה → quote-vm
+//        ← "דורש אישור" = פג תוקף ו/או מחיר שנכשל היום ב-AC.staffOk (priceRun של עובד, שורה-שורה, מול העלות/המחירון/המינימום של היום)
+//          → עובד בלי apr.st==='ok' → quote-approval { why:[{t:'exp',vu} | {t:'floor',pid,n,min,why}] }; מנהל / עובד עם אישור – עובר
+//        ← createCore(reqId: cvReq) ← רק אחרי הצלחה: st:'conv', ord:{id,no} + יומן בהצעה (conv) ובהזמנה (quote).
+//   אידמפוטנטי: cvReq קבוע → לחיצה כפולה / שתי קריאות במקביל = הזמנה אחת (createCore מחזיר dup), וההצעה מסומנת פעם אחת (טרנזקציה).
+//   כישלון ב-createCore → ההצעה נשארת 'open' (שום דבר לא נכתב). כישלון אחרי ההזמנה (נדיר) → קריאה חוזרת משלימה את הסימון (dup).
+//   floorOk ל-createCore = true רק לעובד שההצעה אושרה לו בידי מנהל (נקבע כאן, לא מהקלט). מנהל – priceRun ממילא לא בודק מינימום.
+// =====================================================================================
+const STAFF = (w) => Object.assign({}, w, { role: 'staff' }); // לבדיקת "דורש אישור" גם כשהממיר מנהל (רק priceRun – לא נשמר)
+function rawOf(items) {
+  if (!Array.isArray(items) || !items.length) throw pre('qt-bad', 'ההצעה פגומה (אין פריטים)');
+  return items.map((it) => {
+    const o = { qty: it.qty, price: it.price };
+    if (it.pid) o.pid = it.pid;
+    else { o.n = it.n; if (typeof it.c === 'number') o.c = it.c; if (it.lb) o.lb = it.lb; }
+    return o;
+  });
+}
+// מצב היום: סוג הלקוח (vm) והשורות שמחירן נכשל מול המינימום של היום. קריאות רגילות (לא טרנזקציה) – createCore בודק שוב בטרנזקציה שלו.
+async function today(db, w, d, raw, custId) {
+  const pids = raw.filter((x) => x.pid).map((x) => x.pid);
+  const [prods, costs, c] = await Promise.all([O.loadProds(db, db, pids), O.loadCosts(db, db, pids), db.doc('ordcfg/main').get()]);
+  const pc = await O.priceCtx(db, db, custId, pids, c);
+  const pd = O.plain(prods);
+  const sw = STAFF(w);
+  const fl = [];
+  raw.forEach((x) => {
+    if (!x.pid || !pd.get(x.pid)) return; // מוצר שנמחק – createCore ידחה (no-prod)
+    const it = { pid: x.pid, n: String(pd.get(x.pid).name || '').slice(0, 80), qty: x.qty, price: x.price };
+    try { O.priceRun(sw, [it], [x], pc, pd, d.br, costs, null); } catch (e) {
+      const r = e && e.details && e.details.reason;
+      if (r !== 'price-floor') throw e;
+      fl.push({ t: 'floor', pid: x.pid, n: it.n, price: x.price, min: e.details.min == null ? null : e.details.min, why: e.details.why || '' });
+    }
+  });
+  return { vm: pc.vm, bad: fl };
+}
+const whyTxt = (why) => why.map((x) => (x.t === 'exp' ? `פג תוקף (${x.vu})` : `"${x.n}" ₪${x.price} מתחת למינימום${x.min != null ? ` ₪${x.min}` : ''}`)).join('; ');
+async function qtConvert(request) {
+  const w = await O.who(request);
+  const input = inputObject(request);
+  O.onlyKeys(input, ['id']);
+  const id = O.idOf(input.id, 'הצעה');
+  const db = T.tdb();
+  const { d } = await loadQt(null, db, w, id);
+  const done = (q) => ({ id, st: 'conv', ord: q.ord, dup: true, why: [] });
+  if (d.st === 'conv') return done(d);
+  if (d.st !== 'open') throw pre('qt-closed', 'ההצעה בוטלה');
+  if (typeof d.cvReq !== 'string' || !d.cvReq) throw pre('qt-bad', 'ההצעה פגומה');
+  if (d.disc && !isMgr(w)) throw deny('manager-only', 'בהצעה יש הנחה כללית – רק מנהל יכול להפוך אותה להזמנה');
+  const raw = rawOf(d.items);
+  const custId = typeof d.custId === 'string' ? d.custId : '';
+  const now = Date.now();
+  const td = await today(db, w, d, raw, custId);
+  if (td.vm !== d.vm) throw pre('quote-vm', 'סוג הלקוח השתנה (עסקי/פרטי) מאז ההצעה – צרו הצעה חדשה');
+  const why = (expired(d, now) ? [{ t: 'exp', vu: d.vu }] : []).concat(td.bad);
+  const apr = !!(d.apr && d.apr.st === 'ok');
+  if (why.length && !isMgr(w) && !apr) {
+    throw new HttpsError('failed-precondition', `ההצעה דורשת אישור מנהל: ${whyTxt(why)}`, { reason: 'quote-approval', why });
+  }
+  const r = await O.createCore(db, w, { reqId: d.cvReq, br: d.br, cust: d.cust, raw, note: typeof d.note === 'string' ? d.note : '', custId, input: {},
+    disc: d.disc || undefined, src: 'staff', floorOk: apr && !isMgr(w) });
+  let out = null;
+  await db.runTransaction(async (tx) => {
+    const { ref, d: q } = await loadQt(tx, db, w, id);
+    if (q.st === 'conv') { out = done(q); return; } // קריאה מקבילה כבר סימנה
+    const t = Date.now();
+    tx.update(ref, { st: 'conv', ord: { id: r.id, no: r.no }, conv: { by: w.uid, at: t }, upd: t });
+    tx.set(logRef(db, id), O.logData(w, 'conv', `הזמנה #${r.no}${q.st === 'cancel' ? ' · ההצעה בוטלה במקביל' : ''}${why.length ? ` · ${apr && !isMgr(w) ? 'באישור מנהל' : 'מנהל'}: ${whyTxt(why)}` : ''}`));
+    tx.set(O.logRef(db, r.id), O.logData(w, 'quote', `נוצרה מהצעת מחיר #${q.no}`));
+    out = { id, st: 'conv', ord: { id: r.id, no: r.no }, dup: false, why };
+  });
+  return out;
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -166,7 +244,7 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { qtSave, qtSet }; // סבב ב: qtConvert, qtPdf, qtSend מתווספים כאן – ומיוצאים אוטומטית דרך index.js
+const FNS = { qtSave, qtSet, qtConvert }; // סבב ב: qtPdf, qtSend (quotes-pdf.js) – qtConvert כאן – ומיוצאים אוטומטית דרך index.js
 const OPT = {}; // אפשרויות onCall לפי שם (למשל { qtSend: { secrets: [...], timeoutSeconds: 120 } })
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(OPT[k] || {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { qtSave, qtSet, loadQt, access, expired, ilDay, addDays, vuOf, daysOf, qtRef, logRef, newReq, isMgr, QT_DAYS, DAYS_MAX, ACTS, QT_KEYS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { qtSave, qtSet, qtConvert, rawOf, loadQt, access, expired, ilDay, addDays, vuOf, daysOf, qtRef, logRef, newReq, isMgr, QT_DAYS, DAYS_MAX, ACTS, QT_KEYS } });

@@ -292,3 +292,177 @@ describe('_core – תאריכים (שעון ישראל) ופג תוקף', () =>
     for (const k of ['loadQt', 'access', 'expired', 'qtRef', 'logRef']) assert.equal(typeof C[k], 'function', k);
   });
 });
+
+// =====================================================================================
+// סבב ב, שלב 3: qtConvert – המרת הצעה להזמנה (במחירים השמורים), אישור מנהל, אידמפוטנטיות, floorOk רק מהשרת
+// =====================================================================================
+describe('qtConvert – המרת הצעה להזמנה', () => {
+  const P = `b/${A}/`;
+  async function mk(u, x) { const r = await call('qtSave', u || E1, body(x)); assert.equal(r.status, 'OK', r.text); return r.result.id; }
+  const ords = () => coll(P + 'ord');
+  const qlog = async (id, act) => (await coll(`${P}qt/${id}/log`)).filter((x) => x.act === act);
+  it('הזמנה במחירי ההצעה גם כשהמחירון השתנה; המלאי יורד רק בהמרה; סימון conv + יומן בהצעה ובהזמנה', async () => {
+    const id = await mk();
+    const q0 = await get(P + 'qt/' + id);
+    await prep((d) => d.doc(P + 'prod/pA').update({ price: 12 })); // המחירון עלה אחרי ההצעה
+    const s0 = await stockState(P);
+    assert.equal(s0.ord, 0);
+    const r = await call('qtConvert', E1, { id });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.st, 'conv'); assert.equal(r.result.dup, false); assert.deepEqual(r.result.why, []);
+    assert.equal(r.result.ord.id, 'o' + q0.cvReq); assert.equal(r.result.ord.no, 1);
+    const o = await get(P + 'ord/' + r.result.ord.id);
+    assert.deepEqual(o.items.map((x) => x.price), [9.9, 7.5, 15], 'מחירי ההצעה, לא המחירון החדש');
+    assert.equal(o.total, 72.3); assert.equal(o.gross, q0.gross); assert.equal(o.src, 'staff'); assert.equal(o.by, E1); assert.equal(o.br, 'br1');
+    assert.equal(o.status, 'new'); assert.deepEqual(o.cust, q0.cust); assert.equal(o.floorOk, undefined);
+    const q = await get(P + 'qt/' + id);
+    assert.equal(q.st, 'conv'); assert.deepEqual(q.ord, { id: r.result.ord.id, no: 1 }); assert.equal(q.conv.by, E1);
+    assert.equal((await qlog(id, 'conv')).length, 1);
+    const ol = await coll(`${P}ord/${r.result.ord.id}/log`);
+    assert.ok(ol.some((x) => x.act === 'quote' && x.note.includes('#' + q0.no)), JSON.stringify(ol));
+    const pA = await get(P + 'prod/pA'), pB = await get(P + 'prod/pB');
+    assert.equal(pA.q.br1, 1, 'עוגה: 3 − 2'); assert.equal(pB.q.br2, 5, 'לחם: מסניף 2 (אין בסניף 1)');
+  });
+  it('לחיצה כפולה (3 קריאות במקביל) → הזמנה אחת, המלאי יורד פעם אחת וההצעה מסומנת פעם אחת; הצעה conv לא מומרת שוב', async () => {
+    const id = await mk();
+    const rs = await Promise.all([E1, E1, E1B].map((u) => call('qtConvert', u, { id })));
+    for (const r of rs) assert.equal(r.status, 'OK', r.text);
+    assert.equal(new Set(rs.map((r) => r.result.ord.id)).size, 1);
+    assert.equal(rs.filter((r) => r.result.dup === false).length, 1, 'רק קריאה אחת סימנה');
+    assert.equal((await ords()).length, 1);
+    assert.equal((await get(P + 'ordcfg/seq')).n, 1);
+    assert.equal((await qlog(id, 'conv')).length, 1);
+    assert.equal((await coll(`${P}ord/${rs[0].result.ord.id}/log`)).filter((x) => x.act === 'quote').length, 1);
+    assert.equal((await get(P + 'prod/pA')).q.br1, 1);
+    const again = await call('qtConvert', MGR, { id });
+    assert.equal(again.status, 'OK', again.text); assert.equal(again.result.dup, true); assert.equal(again.result.ord.id, rs[0].result.ord.id);
+    assert.equal((await ords()).length, 1); assert.equal((await get(P + 'prod/pA')).q.br1, 1);
+  });
+  it('פג תוקף: עובד בלי אישור → quote-approval (exp), שום דבר לא נוצר; עם אישור מנהל → עובר; מנהל → עובר', async () => {
+    const id = await mk(), id2 = await mk();
+    const old = plus(ilDay(Date.now()), -2);
+    await prep(async (d) => { await d.doc(`${P}qt/${id}`).update({ vu: old }); await d.doc(`${P}qt/${id2}`).update({ vu: old }); });
+    const s0 = await stockState(P);
+    const r = await call('qtConvert', E1, { id });
+    assert.equal(r.reason, 'quote-approval', r.text);
+    const j = JSON.parse(r.text);
+    assert.deepEqual(j.error.details.why, [{ t: 'exp', vu: old }]);
+    assert.equal((await get(P + 'qt/' + id)).st, 'open');
+    assert.deepEqual(await stockState(P), s0, 'אין הזמנה ואין שינוי מלאי');
+    assert.equal((await call('qtSet', E1, { id, act: 'req' })).status, 'OK');
+    assert.equal((await call('qtConvert', E1, { id })).reason, 'quote-approval', 'בקשה בלבד אינה אישור');
+    assert.equal((await call('qtSet', MGR, { id, act: 'ok' })).status, 'OK');
+    const ok = await call('qtConvert', E1, { id });
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(ok.result.why[0].t, 'exp');
+    assert.ok((await qlog(id, 'conv'))[0].note.includes('באישור מנהל'));
+    const m = await call('qtConvert', MGR, { id: id2 });
+    assert.equal(m.status, 'OK', m.text);
+    assert.equal((await ords()).length, 2);
+  });
+  it('מחיר שנמוך היום מהמינימום (העלות עלתה): עובד → quote-approval (floor); עם אישור → עובר במחיר השמור (floorOk); מנהל → עובר', async () => {
+    const id = await mk(E1, { items: [{ pid: 'pA', qty: 1, price: 9.9 }] });
+    const id2 = await mk(E1, { items: [{ pid: 'pA', qty: 1, price: 9.9 }] });
+    await prep(async (d) => { await d.doc(P + 'ordcfg/price').set({ pct: 10 }); await d.doc(P + 'prod/pA/p/cost').set({ cost: 12 }); });
+    // ביקורת: הזמנה רגילה של עובד באותו מחיר נחסמת היום
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 9.9 }] })).reason, 'price-floor');
+    const r = await call('qtConvert', E1, { id });
+    assert.equal(r.reason, 'quote-approval', r.text);
+    const why = JSON.parse(r.text).error.details.why;
+    assert.equal(why.length, 1); assert.equal(why[0].t, 'floor'); assert.equal(why[0].pid, 'pA'); assert.equal(why[0].why, 'below-cost'); assert.ok(why[0].min > 9.9);
+    assert.equal((await call('qtConvert', E1B, { id })).reason, 'quote-approval');
+    assert.equal((await ords()).length, 0); assert.equal((await get(P + 'qt/' + id)).st, 'open');
+    assert.equal((await call('qtSet', MGR, { id, act: 'ok' })).status, 'OK');
+    const ok = await call('qtConvert', E1, { id });
+    assert.equal(ok.status, 'OK', ok.text);
+    const o = await get(P + 'ord/' + ok.result.ord.id);
+    assert.equal(o.items[0].price, 9.9); assert.equal(o.items[0].c, 12, 'העלות של יום ההמרה');
+    const m = await call('qtConvert', MGR, { id: id2 });
+    assert.equal(m.status, 'OK', m.text); assert.equal(m.result.why[0].t, 'floor');
+  });
+  it('floorOk לא מתקבל מקלט: createOrder / qtConvert עם floorOk → bad-field; createOrder של עובד מתחת למינימום עדיין נחסם', async () => {
+    await prep((d) => d.doc(P + 'ordcfg/price').set({ pct: 10 }));
+    const id = await mk();
+    for (const u of [E1, MGR]) {
+      assert.equal((await call('createOrder', u, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 3 }], floorOk: true })).reason, 'bad-field');
+      assert.equal((await call('qtConvert', u, { id, floorOk: true })).reason, 'bad-field');
+    }
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 3 }] })).reason, 'price-floor');
+    assert.equal((await ords()).length, 0);
+  });
+  it('לקוח שנחסם אחרי ההצעה: עובד → cust-blocked (ההצעה נשארת open), מנהל → עובר; סוג הלקוח השתנה → quote-vm גם למנהל', async () => {
+    await prep(async (d) => { await d.doc(P + 'cust/c1').set({ name: 'א', phone: '0501234567' }); await d.doc(P + 'cust/c2').set({ name: 'ב', phone: '0501234568' }); });
+    const id = await mk(E1, { custId: 'c1' }), id2 = await mk(E1, { custId: 'c2' });
+    await prep(async (d) => { await d.doc(P + 'cust/c1').update({ blk: true }); await d.doc(P + 'cust/c2').update({ wholesale: true }); });
+    assert.equal((await call('qtConvert', E1, { id })).reason, 'cust-blocked');
+    assert.equal((await get(P + 'qt/' + id)).st, 'open');
+    assert.equal((await ords()).length, 0);
+    const m = await call('qtConvert', MGR, { id });
+    assert.equal(m.status, 'OK', m.text); assert.equal((await get(P + 'ord/' + m.result.ord.id)).custId, 'c1');
+    for (const u of [E1, MGR]) assert.equal((await call('qtConvert', u, { id: id2 })).reason, 'quote-vm', u);
+    assert.equal((await get(P + 'qt/' + id2)).st, 'open');
+    assert.equal((await ords()).length, 1);
+  });
+  it('הרשאות וקלט: סניף אחר → foreign-br; בלי ord → no-perm; מבוטלת → qt-closed; לא קיימת → no-qt; הנחה כללית – רק מנהל ממיר', async () => {
+    const id = await mk();
+    assert.equal((await call('qtConvert', E2, { id })).reason, 'foreign-br');
+    assert.equal((await call('qtConvert', NOORD, { id })).reason, 'no-perm');
+    assert.equal((await call('qtConvert', null, { id })).status, 'UNAUTHENTICATED');
+    assert.equal((await call('qtConvert', E1, { id: 'qnone123' })).reason, 'no-qt');
+    assert.equal((await call('qtSet', E1, { id, act: 'cancel' })).status, 'OK');
+    assert.equal((await call('qtConvert', MGR, { id })).reason, 'qt-closed');
+    const idd = await mk(MGR, { disc: 5, items: [{ pid: 'pA', qty: 1, price: 10 }] });
+    assert.equal((await call('qtConvert', E1, { id: idd })).reason, 'manager-only');
+    const m = await call('qtConvert', MGR, { id: idd });
+    assert.equal(m.status, 'OK', m.text);
+    const o = await get(P + 'ord/' + m.result.ord.id);
+    assert.equal(o.disc, 5); assert.equal(o.gross, 9.5);
+    assert.equal((await ords()).length, 1);
+  });
+  it('מחיר סיטונאי (wsb_) של לקוח אחר: בשמירה → ws-not-linked; בהמרה – קישור wsb_ של cvReq ללקוח אחר → ws-not-linked, אין הזמנה; אותו לקוח → עובר', async () => {
+    await prep(async (d) => {
+      await d.doc(P + 'cust/w1').set({ name: 'עסק1', phone: '0501234567', wholesale: true });
+      await d.doc(P + 'cust/w2').set({ name: 'עסק2', phone: '0501234568', wholesale: true });
+      await d.doc(P + 'prod/pA/p/ws').set({ wp: 8 });
+    });
+    const items = [{ pid: 'pA', qty: 1, price: 8 }];
+    // שמירה: מחיר סיטונאי שנטען בטיוטה ללקוח w1 (ordcfg/wsb_<reqId>) לא נשמר עם לקוח w2
+    const b0 = body({ custId: 'w2', items });
+    await prep((d) => d.doc(`${P}ordcfg/wsb_${b0.reqId}`).set({ cust: 'w1', by: E1, t: 1 }));
+    assert.equal((await call('qtSave', E1, b0)).reason, 'ws-not-linked');
+    const ok = await call('qtSave', E1, Object.assign({}, b0, { custId: 'w1' }));
+    assert.equal(ok.status, 'OK', ok.text);
+    const id = ok.result.id;
+    const q = await get(P + 'qt/' + id);
+    assert.equal(q.custId, 'w1'); assert.equal(q.vm, 'ex');
+    // המרה: אם ל-cvReq של ההצעה נקשר מחיר סיטונאי ללקוח אחר – נדחה, וההצעה לא מסומנת
+    await prep((d) => d.doc(`${P}ordcfg/wsb_${q.cvReq}`).set({ cust: 'w2', by: E1, t: 1 }));
+    assert.equal((await call('qtConvert', E1, { id })).reason, 'ws-not-linked');
+    assert.equal((await get(P + 'qt/' + id)).st, 'open'); assert.equal((await ords()).length, 0);
+    await prep((d) => d.doc(`${P}ordcfg/wsb_${q.cvReq}`).set({ cust: 'w1', by: E1, t: 1 }));
+    const c = await call('qtConvert', E1, { id });
+    assert.equal(c.status, 'OK', c.text);
+    const o = await get(P + 'ord/' + c.result.ord.id);
+    assert.equal(o.custId, 'w1'); assert.equal(o.vm, 'ex'); assert.equal(o.items[0].price, 8);
+  });
+  it('legacy (שורש): המרה יוצרת ord בשורש, המלאי יורד רק בהמרה', async () => {
+    await env.clearFirestore();
+    await prep(async (d) => {
+      const b = d.batch();
+      b.set(d.doc('admins/ql_mgr'), { email: 'lm@x.invalid' });
+      b.set(d.doc('staff/ql_mgr'), { name: 'ql_mgr', role: 'manager', active: true });
+      b.set(d.doc('staff/ql_emp'), { name: 'ql_emp', role: 'employee', active: true });
+      b.set(d.doc('prod/pA'), { name: 'עוגה', price: 10, on: true, q: { _: 5 } });
+      await b.commit();
+    });
+    const r = await call('qtSave', 'ql_emp', { reqId: rid(), cust, items: [{ pid: 'pA', qty: 2, price: 9 }] });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await get('prod/pA')).q._, 5);
+    const c = await call('qtConvert', 'ql_emp', { id: r.result.id });
+    assert.equal(c.status, 'OK', c.text);
+    const o = await get('ord/' + c.result.ord.id);
+    assert.equal(o.total, 18); assert.equal(o.items[0].price, 9);
+    assert.equal((await get('prod/pA')).q._, 3);
+    assert.equal((await get('qt/' + r.result.id)).st, 'conv');
+    assert.equal(await get(`b/largpeami/ord/${c.result.ord.id}`), null);
+  });
+});
