@@ -1222,7 +1222,7 @@ const lidOf=id=>'s'+id;
 const secL=()=>{if(!S.secL||typeof S.secL!=='object'||Array.isArray(S.secL))S.secL={};return S.secL};
 const txOfLid=lid=>S.tx.find(t=>t.src===lid||(Array.isArray(t.srcs)&&t.srcs.includes(lid)));
 const IVK={inv:'חשבונית',cr:'הודעת זיכוי',rcpt:'קבלה',dn:'תעודת משלוח',chk:'צ׳ק',unk:'מסמך שלא זוהה',bad:'התקבל קובץ שלא נקלט',long:'קובץ ארוך – לבדיקה ידנית',q:'בזיהוי…'};
-const IVW={type:'לא חשבונית רגילה',neg:'סכום שלילי או אפס',sup:'ספק לא מוכר',fields:'לא כל השדות זוהו בוודאות',cap:'בגובה התקרה או מעליה',br:'סניף לא ידוע',off:'"נכנס ישר" כבוי',stop:'"עצור הכל" פעיל',dup:'חשד לכפילות',hold:'עוכב לבדיקה',sus:'נשלח עם תוכן חשוד',el:'לא סומנה כזכאית',auth:'שולח לא מאומת'};
+const IVW={type:'לא חשבונית רגילה',neg:'סכום שלילי או אפס',sup:'ספק לא מוכר',fields:'לא כל השדות זוהו בוודאות',cap:'בגובה התקרה או מעליה',br:'סניף לא ידוע',off:'"נכנס ישר" כבוי',stop:'"עצור הכל" פעיל',dup:'חשד לכפילות',hold:'עוכב לבדיקה',sus:'נשלח עם תוכן חשוד',el:'לא סומנה כזכאית',auth:'שולח לא מאומת',long:'קובץ ארוך',act:'PDF עם פקודות משולח מאושר'};
 const IVB={zip:'קובץ מכווץ (zip)',office:'קובץ Office',exe:'קובץ הפעלה',type:'סוג קובץ שלא נתמך',enc:'PDF מוצפן בסיסמה',active:'PDF עם פקודות',big:'גדול מ-10MB',empty:'קובץ ריק',unv:'PDF שלא ניתן לבדוק (מבנה דחוס לא מוכר)',dl:'תקלה בהורדת הקובץ – לבדוק את הקובץ בווצאפ או במייל'};
 const IVE={quota:'נגמרה מכסת הזיהוי של העסק – אפשר להזין ידנית',ai:'הזיהוי לא הצליח – אפשר להזין ידנית',file:'הקובץ לא נקרא'};
 const ivAmt=x=>x.k==='chk'?x.f.amt:x.f.total;
@@ -1314,7 +1314,7 @@ function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act=''
  if(x.st==='q'||x.st==='qw')act='<p class="note" style="margin:6px 0 0">המזכירה מזהה את המסמך…</p>';
  else if(x.st==='cl'&&!x.mine&&!x.stale)act='<p class="note" style="margin:6px 0 0">בטיפול במכשיר אחר</p>';
  else if(x.st==='ok')act=`<div class="secrow">${x.mineOk&&x.auto?(txOfLid(lidOf(x.id))?`<button class="btn g" data-a="secIvUndo" data-id="${id}">ביטול ההכנסה</button>`:'<small class="note">נכנסה במכשיר אחר – אפשר לבטל רק שם</small>'):''}${x.ns?`<button class="chip" data-a="secIvSnd" data-id="${id}">אישור השולח</button>`:''}</div>`;
- else if(x.k==='bad')act=`<p class="note" style="margin:6px 0 0">${esc((x.why||[]).map(w=>IVB[w]||w).join(', '))}. הקובץ לא נפתח ולא נשמר.</p><div class="secrow"><button class="btn g" data-a="secIvNo" data-id="${id}">סגירה</button></div>`;
+ else if(x.k==='bad')act=`<p class="note" style="margin:6px 0 0">${esc((x.why||[]).map(w=>IVB[w]||w).join(', '))}. הקובץ לא נפתח ולא נשמר.</p><div class="secrow">${x.trustOk&&!(IV.L&&IV.L.br)?`<button class="btn" data-a="secIvTrust" data-id="${id}" style="flex:1">✓ אישור השולח – לקלוט ממנו</button>`:''}<button class="btn g" data-a="secIvNo" data-id="${id}">סגירה</button></div>`;
  else{
   if(x.st==='cl'&&x.mine)tg.push('<span class="sectags g">נלקחה במכשיר הזה – לא הושלמה</span>');
   const view=x.np?`<button class="chip" data-a="secIvView" data-id="${id}">צפייה בקובץ</button>`:'';
@@ -1330,12 +1330,18 @@ function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act=''
   else if(x.k==='dn')act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כתעודת משלוח</button>${view}${no}</div>`;
   else if(x.k==='chk')act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">שיוך לחשבונית</button>${view}${no}</div>`;
   else act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">פתיחה והזנה</button>${view}${no}</div>`;
+  if(x.k==='long'&&x.np&&(x.pages||0)<=20)act+=`<div class="secrow"><button class="btn g w" data-a="secIvScan" data-id="${id}">🔎 שהמזכירה תסרוק ותזהה (${x.pages||'?'} עמודים)</button></div>`;
   if(x.ns&&x.sub)act+=`<div class="secrow"><button class="chip" data-a="secIvSnd" data-id="${id}">אישור השולח כ${esc(x.subN||'ספק')}</button></div>`;
   if(ivFrom(x)&&!(IV.L&&IV.L.br))act+=`<div class="secrow"><button class="chip" data-a="secSpam" data-x="${id}">🚫 ספאם – חסימת השולח</button></div>`}
  const sub=[f.date?dfmt(f.date):'',x.k==='chk'?(f.no?'צ׳ק '+f.no:'')+(f.cdate?' · לפירעון '+dfmt(f.cdate):''):f.num?'מס׳ '+f.num:'',x.fn?x.fn:''].filter(Boolean).join(' · ');
  return `<div class="card secinv" id="secIv_${id}" style="margin-bottom:8px"><div class="ivh"><b>${esc(IVK[x.k]||'מסמך')}${supL?' · '+esc(supL):''}</b>${typeof a==='number'?`<span class="iva">${esc(ils(a))}</span>`:''}</div>
  ${sub?`<small class="note ivs">${esc(sub)}</small>`:''}<small class="note ivs">${esc(ivSrc(x))} · ${esc(tm(x.t))}</small>${tg.length?'<div class="sectg">'+tg.join('')+'</div>':''}${sug.join('')}${act}</div>`}
-function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';return ivSetH0()+ivBlkH()}
+function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';return ivSetH0()+ivTrH()+ivBlkH()}
+/* 24.11.2026 (בעל העסק): שולחים שאושרו ל-PDF עם פקודות – רשימה עם ביטול */
+function ivTrH(){const T=(IV.L.cfg||{}).trust||[];if(!T.length)return '';return `<div class="card"><b>שולחים מאושרים ל-PDF עם פקודות</b><p class="note" style="margin:4px 0">קבצים מהם נקלטים רק כשהמייל מאומת, ותמיד ממתינים לאישור שלך.</p>${T.map(t=>`<div class="secrow"><span style="flex:1" dir="ltr">${esc(t.show)}</span><button class="chip" data-a="secIvUntr" data-k="${esc(t.k)}">ביטול</button></div>`).join('')}</div>`}
+ACT.secIvTrust=el=>{const x=ivX(el);if(!x)return;const fr=((x.src||[])[0]||{}).from||'';ask('לאשר את '+fr+' כשולח מוכר? קבצי PDF עם פקודות ממנו ייקלטו (רק ממייל מאומת), ייסרקו ותמיד ימתינו לאישור שלך. הקובץ הזה יורד שוב מהמייל בדקות הקרובות.',async()=>{try{const r=await fnCall('secDecide',{op:'trust',id:x.id});toast(r&&r.requeued?'✓ השולח אושר. הקובץ יורד שוב מהמייל ויופיע כאן בקרוב':'✓ השולח אושר. קבצים הבאים ממנו ייקלטו')}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}},'אישור')};
+ACT.secIvScan=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{await fnCall('secDecide',{op:'scan',id:x.id});toast('✓ המזכירה סורקת את הקובץ')}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}};
+ACT.secIvUntr=el=>{const k=el.dataset.k;ask('לבטל את האישור? קבצי PDF עם פקודות מהשולח הזה ייחסמו שוב.',async()=>{try{const r=await fnCall('secInv',{op:'cfg',untrust:k});if(IV.L&&r.cfg)IV.L.cfg=Object.assign(IV.L.cfg||{},r.cfg);toast('האישור בוטל')}catch(e){err(e)}finally{rerender()}},'ביטול אישור')};
 function ivSetH0(){const R=IV.L;const c=R.cfg||{},off=c.off||[],subs=S.subs.filter(s=>subOk(s)).sort((a,b)=>heCmp(a.name,b.name));
  return `<details class="card secivset" id="secIvSet" style="margin-bottom:8px"><summary>הגדרות "נכנס ישר"</summary>
  <p class="note" style="margin:4px 0 8px">חשבונית רגילה מספק מוכר, שכל השדות שלה זוהו ושהסכום שלה מתחת לתקרה – נכנסת לבד בפתיחה הבאה של האפליקציה, עם אפשרות ביטול. זיכוי, קבלה, תעודת משלוח, צ׳ק, סכום שלילי וחשד לכפילות – תמיד מחכים לאישור שלך.</p>
@@ -1391,7 +1397,8 @@ ACT.secIvOk=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{const c
 ACT.secIvEd=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{const c=x.st==='cl'&&x.mine?x:await ivClaim(x,'man');if(!c)return;const it=await toInbox(c);if(!it)return;ACT.inbEdit({dataset:{id:it.id}})}finally{el.disabled=false;IV.at=0}};
 ACT.secIvNo=el=>{const x=ivX(el);if(!x)return;ask(x.k==='bad'?'לסגור את הכרטיס?':'לדחות את המסמך? הוא לא יירשם, והקובץ יימחק מהתור אחרי 30 יום.',async()=>{const it=S.inbox.find(i=>i.sec===x.id);
  try{await fnCall('secDecide',{op:'rej',id:x.id});if(it){S.inbox=S.inbox.filter(i=>i!==it);delete secL()[x.id];save()}toast(x.k==='bad'?'נסגר':'נדחה')}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}},x.k==='bad'?'סגירה':'דחייה')};
-ACT.secIvView=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{const it=S.inbox.find(i=>i.sec===x.id);if(it&&it.file)return viewImg(it.file,'LargePami_'+x.id.slice(0,8));const du=await ivFile(x);if(!du)return toast('הקובץ כבר לא שמור בתור');await fput('sv'+x.id,du);viewImg('sv'+x.id,'LargePami_'+x.id.slice(0,8),du)}catch(e){err(e)}finally{el.disabled=false}};
+ACT.secIvView=el=>{const x=ivX(el);if(!x)return;if(!x.act)return ivView0(el,x);/* 24.11.2026: PDF עם פקודות (שולח מאושר) – אזהרה לפני פתיחה באפליקציה חיצונית */ask('⚠️ בקובץ הזה יש פקודות (קוד שיכול לרוץ באפליקציית ה-PDF). לפתוח רק אם אתה סומך על השולח. לפתוח?',()=>ivView0(el,x),'פתח בכל זאת')};
+async function ivView0(el,x){el.disabled=true;try{const it=S.inbox.find(i=>i.sec===x.id);if(it&&it.file)return viewImg(it.file,'LargePami_'+x.id.slice(0,8));const du=await ivFile(x);if(!du)return toast('הקובץ כבר לא שמור בתור');await fput('sv'+x.id,du);viewImg('sv'+x.id,'LargePami_'+x.id.slice(0,8),du)}catch(e){err(e)}finally{el.disabled=false}};
 /* קבלה → "סמן כשולם": הקבלה מצורפת לחשבונית (כמו בסריקה האחידה), ונפתח מסך התשלום הקיים. אין הוצאה חדשה */
 ACT.secIvPay=async el=>{const x=ivX(el),t=S.tx.find(z=>z.id===el.dataset.t);if(!x||!t)return;const c=await ivClaim(x,'man');if(!c)return;let du='';try{du=await ivFile(x)}catch(e){}
  if(du){const fid='f'+uid();try{await fput(fid,du);if(!t.file)t.file=fid;else t.rcf=fid}catch(e){}}const lid=lidOf(x.id);t.srcs=Array.isArray(t.srcs)?t.srcs:[];if(!t.srcs.includes(lid))t.srcs.push(lid);
