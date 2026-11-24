@@ -83,6 +83,20 @@ describe('lbl-tpl: מודל התבנית', () => {
     assert.deepEqual(G, [{ w: 50, h: 25, idx: [0, 2, 3], tot: 2 + 999 + 1 }, { w: 40, h: 30, idx: [1, 4], tot: 8 }]);
   });
 
+  it('BUILTIN 1..5: 50×25, base 1..5, עוברות norm בלי שינוי (הלוך-חזור דרך fields/tplOk), בתוך המדבקה, עותק חדש בכל קריאה', () => {
+    for (let n = 1; n <= 5; n++) {
+      const b = T.builtin(n);
+      assert.equal(b.id, 'b' + n); assert.equal(b.base, n); assert.equal(b.w, 50); assert.equal(b.h, 25); assert.equal(b.brand, 'lay');
+      assert.deepEqual(T.norm(T.toJ(b)).els, b.els, 'norm ' + n);
+      const f = T.fields(b, 'u', 1), back = T.tplOk({ id: b.id, v: 1, name: f.name.stringValue, w: f.w.doubleValue, h: f.h.doubleValue, base: +f.base.integerValue, j: f.j.stringValue, at: 1 });
+      assert.deepEqual(back.els, b.els); assert.equal(back.base, n);
+      assert.deepEqual(T.checks(b).filter((r) => r.k === 'out'), [], 'בתוך המדבקה ' + n);
+      b.els[0].x = 999; assert.notEqual(T.builtin(n).els[0].x, 999);
+    }
+    assert.equal(T.builtin(0), null); assert.equal(T.builtin(6), null);
+    assert.deepEqual(T.builtin(4).els.map((e) => e.t), ['box', 'name', 'price', 'reg']);
+  });
+
   it('checks: רכיב מחוץ למדבקה, ברקוד נמוך מ-5 מ"מ, פסים דקים (פחות מ-3 נקודות), טקסט לא נכנס', () => {
     const t = { w: 50, h: 25, els: [el({ id: 'n' }), el({ id: 'o', x: 500, w: 200 }), el({ id: 'b', t: 'bc', y: 240, h: 40, dg: 20 }), el({ id: 'b2', t: 'bc', y: 100, h: 80, dg: 0 })] };
     const R = T.checks(t, { n: { over: true }, b2: { mod: 2 } }), k = R.map((r) => r.id + ':' + r.k).sort();

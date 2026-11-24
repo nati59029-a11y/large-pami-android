@@ -80,7 +80,20 @@ function checks(T,m){const R=[];if(!T||!Array.isArray(T.els))return R;const{W,H}
    const x=m[e.id];if(x&&fin(x.mod)&&x.mod<BC_MOD)R.push({id:e.id,k:'bcThin',msg:'פסי הברקוד דקים מדי – הגדילו את רוחב הברקוד'})}
   const x=m[e.id];if(x&&x.over)R.push({id:e.id,k:'fit',msg:'הטקסט לא נכנס – הגדילו את הרכיב'})}
  return R}
-const API={LIM,DEF,mm2px,mm2pt,dims,isDef,TYPES,IFS,ID_OK,normEl,norm,tplOk,toJ,MASK,fields,szOk,lblsOk,sFields,need,qty,grp,checks};
+/* 5 התבניות המקוריות בפורמט החדש (קנבס 591×295, שוליים 14, רוחב פנימי 563, מרכז 295.5). drawT מצייר אותן זהה לגמרי ל-draw()
+   (ui-lbl-tpl.js: שוויון פיקסלים + מלבני ברקוד, 3 מצבי לוגו). ib:1 – רוחב מוקטן בפריסת "פינות"; ib:'nx' – הברקוד נחתך בין הקופסאות */
+const BI=[null,
+ ['ברקוד ומחיר',[{id:'n',t:'name',x:14,y:19,w:563,h:54,fs:58,min:22,hlIn:1},{id:'b',t:'bc',x:14,y:86,w:563,h:116,dg:28},
+  {id:'p',t:'price',sty:'line',lbl:'מחיר',x:14,y:243,w:563,h:46,fs:46,min:22,al:'c',ib:1,if:'bc'},{id:'p2',t:'price',sty:'line',lbl:'מחיר',x:14,y:148,w:563,h:84,fs:84,min:22,al:'c',ib:1,if:'!bc'}]],
+ ['בלי ברקוד',[{id:'n',t:'name',fit:'wrap2',x:14,y:14,w:563,h:120,hh:50,y1:72,y2:44,fs:54,min:22,hlIn:1},{id:'p',t:'price',x:14,y:140,w:563,h:140,fs:140,ib:1}]],
+ ['מחיר גדול',[{id:'n',t:'name',x:14,y:12,w:563,h:44,fs:40,min:20,hlIn:1},{id:'b',t:'bc',x:54,y:196,w:483,h:56,dg:22,ib:'nx'},
+  {id:'p',t:'price',x:14,y:69,w:563,h:118,fs:118,if:'bc'},{id:'p2',t:'price',x:14,y:95,w:563,h:150,fs:150,ib:1,if:'!bc'}]],
+ ['מבצע',[{id:'x',t:'box',x:6,y:6,w:579,h:70,txt:'מבצע',fs:56,min:24},{id:'n',t:'name',x:14,y:85,w:563,h:38,fs:38,min:18},
+  {id:'p',t:'price',src:'sale',x:14,y:132,w:563,h:96,fs:96},{id:'r',t:'reg',lbl:'מחיר רגיל',x:14,y:245,w:563,h:34,fs:34,min:16,fw:500,ib:1,if:'pp'}]],
+ ['מחיר ליחידה',[{id:'n',t:'name',x:14,y:10,w:563,h:44,fs:40,min:18,hlIn:1},{id:'p',t:'price',x:212.76,y:56,w:354.6,h:96,fs:96},{id:'k',t:'pack',x:29.55,y:85,w:177.3,h:38,fs:38,min:16},
+  {id:'u',t:'unit',x:14,y:162,w:563,h:32,fs:32,min:16,fw:600,ph:1},{id:'b',t:'bc',x:74,y:212,w:443,h:48,dg:20,ib:'nx'}]]];
+const builtin=n=>{const b=BI[n];return b?{id:'b'+n,v:1,name:b[0],w:DEF.w,h:DEF.h,base:n,grid:12,brand:'lay',els:JSON.parse(JSON.stringify(b[1]))}:null};
+const API={LIM,DEF,mm2px,mm2pt,dims,isDef,TYPES,IFS,ID_OK,normEl,norm,tplOk,toJ,MASK,fields,szOk,lblsOk,sFields,need,qty,grp,checks,builtin};
 root.LblTpl=API;
 if(typeof module!=='undefined'&&module.exports)module.exports=API;
 })(typeof window!=='undefined'?window:globalThis);

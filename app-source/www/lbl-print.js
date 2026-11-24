@@ -62,8 +62,9 @@ function mkPdf(labels,seq,wPt,hPt){wPt=wPt||PW;hPt=hPt||PH;const parts=[],offs=[
 /* ---------- לוגו וחותמת כשרות (24.11.2026) ---------- */
 // פריסה: top – פס עליון (לוגו מימין, חותמת משמאל), התוכן מוקטן ומוזז מתחתיו; bot – קופסאות 64×64 בפינות התחתונות, השורה התחתונה מוצרת (ib)
 const BH=64,BX=64;
-function layBox(lay){if(lay==='top'){const s=(H-BH)/H;return{lay,t:{s,dx:Math.round((W-W*s)/2),dy:BH},logo:[W/2+4,4,W/2-10,BH-8],stamp:[6,4,W/2-10,BH-8],ib:0}}
- if(lay==='bot')return{lay,t:null,logo:[W-6-BX,H-6-BX,BX,BX],stamp:[6,H-6-BX,BX,BX],ib:6+BX+6-14};return null}
+// w,h – גודל הקנבס (רשות, ברירת מחדל 591×295)
+function layBox(lay,w,h){w=w||W;h=h||H;if(lay==='top'){const s=(h-BH)/h;return{lay,t:{s,dx:Math.round((w-w*s)/2),dy:BH},logo:[w/2+4,4,w/2-10,BH-8],stamp:[6,4,w/2-10,BH-8],ib:0}}
+ if(lay==='bot')return{lay,t:null,logo:[w-6-BX,h-6-BX,BX,BX],stamp:[6,h-6-BX,BX,BX],ib:6+BX+6-14};return null}
 // מלבני ברקוד מקואורדינטות התוכן לקנבס (אותו setTransform של התצוגה)
 const xfRects=(rects,t)=>t?(rects||[]).map(([x,y,w,h])=>[x*t.s+t.dx,y*t.s+t.dy,w*t.s,h*t.s]):(rects||[]);
 // RGBA → שחור-לבן (במקום). שקיפות = רקע לבן; thr – סף בהירות (ברירת מחדל 150)
@@ -85,13 +86,13 @@ function wrap2(g,t,max,size,min,w){const ws=String(t).split(/\s+/).filter(Boolea
  for(let s=size;s>=min;s-=2){fnt(g,s,w);const ln=[];let cur='';for(const x of ws){const tr=cur?cur+' '+x:x;if(!cur||g.measureText(tr).width<=max)cur=tr;else{ln.push(cur);cur=x}}if(cur)ln.push(cur);
   if(ln.length<=2&&ln.every(l=>g.measureText(l).width<=max))return{s,ln}}
  const h=Math.ceil(ws.length/2);return{s:min,ln:ws.length>1?[ws.slice(0,h).join(' '),ws.slice(h).join(' ')]:[t]}}
-// מילה מודגשת: קופסה שחורה עם טקסט לבן, בצד שמאל למעלה. מחזיר את הרוחב שתפסה
-function hlBox(g,t,y,h){t=String(t||'').trim();if(!t)return 0;const s=fit(g,t,200,h*.62,18);const w=Math.ceil(g.measureText(t).width)+20;
- g.fillStyle='#000';g.fillRect(M,y,w,h);g.fillStyle='#fff';txt(g,t,M+w/2,y+h/2+1,'center');g.fillStyle='#000';return w+10}
-// מחיר גדול: המספר ומשמאלו ש"ח קטן. cx – מרכז הקבוצה
-function bigP(g,v,cx,cy,size,max){const ns=fmtP(v);let s=size;const fitW=()=>{fnt(g,s);const a=g.measureText(ns).width;fnt(g,s*.38);return a+10+g.measureText(SH).width};
- while(s>30&&fitW()>(max||IW))s-=4;fnt(g,s);const a=g.measureText(ns).width;fnt(g,s*.38);const b=g.measureText(SH).width,tot=a+10+b,r=cx+tot/2;
- fnt(g,s);txt(g,ns,r,cy,'right','ltr');fnt(g,s*.38);txt(g,SH,r-a-10,cy+s*.18,'right')}
+// מילה מודגשת: קופסה שחורה עם טקסט לבן, בצד שמאל למעלה (x – רשות, ברירת מחדל M). מחזיר את הרוחב שתפסה
+function hlBox(g,t,y,h,x){t=String(t||'').trim();if(!t)return 0;if(x==null)x=M;const s=fit(g,t,200,h*.62,18);const w=Math.ceil(g.measureText(t).width)+20;
+ g.fillStyle='#000';g.fillRect(x,y,w,h);g.fillStyle='#fff';txt(g,t,x+w/2,y+h/2+1,'center');g.fillStyle='#000';return w+10}
+// מחיר גדול: המספר ומשמאלו ש"ח קטן. cx – מרכז הקבוצה (al 'r' – הקצה הימני, 'l' – השמאלי). cu – סימן המטבע (רשות, ברירת מחדל ש"ח; '' – בלי)
+function bigP(g,v,cx,cy,size,max,cu,al){const ns=fmtP(v),C=cu==null?SH:cu,gp=C?10:0;let s=size;const fitW=()=>{fnt(g,s);const a=g.measureText(ns).width;fnt(g,s*.38);return a+gp+g.measureText(C).width};
+ while(s>30&&fitW()>(max||IW))s-=4;fnt(g,s);const a=g.measureText(ns).width;fnt(g,s*.38);const b=g.measureText(C).width,tot=a+gp+b,r=al==='r'?cx:al==='l'?cx+tot:cx+tot/2;
+ fnt(g,s);txt(g,ns,r,cy,'right','ltr');if(C){fnt(g,s*.38);txt(g,C,r-a-gp,cy+s*.18,'right')}return tot}
 // ברקוד: פסים (או רשימת מלבנים ל-PDF), ומתחת הספרות (LTR). מחזיר true אם צויר
 function bcode(g,code,x,y,w,h,dg,rects){const c=String(code||'').trim();if(!c)return false;const r=barsFor(c);
  if(!r.bars){fit(g,c,w,30,14,500);txt(g,c,x+w/2,y+h/2,'center','ltr');return false}
@@ -130,6 +131,51 @@ function draw(g,tpl,it,opt){const rects=opt&&opt.rects||null,k=Math.max(.5,Math.
   const[x5,w5]=nx(M+60,IW-120);bcode(g,it.code,x5,212,w5,48,20,rects)}
  if(L&&L.t){g.setTransform(1,0,0,1,0,0);if(rects){const X=xfRects(rects,L.t);rects.length=0;X.forEach(r=>rects.push(r))}}
  return rects}
+/* תבנית בפורמט החדש (lbl-tpl.js) – אותם כלי ציור של draw(). הקנבס בגודל התבנית (dims). opt.m – אובייקט: מדדים לבדיקות ({[id]:{mod,over}}).
+   brand 'lay' – לוגו/חותמת לפי הפריסה (כמו draw); 'el' – רכיבי logo/stamp בתבנית. fw 800 = "מודגש מאוד": 700 + קו מתאר (אין קובץ Rubik 800) */
+const AL={r:'right',c:'center',l:'left'},DAL={name:'r',text:'r',exp:'r',hl:'l',logo:'c',stamp:'c'};
+function drawT(g,T,it,opt){const rects=opt&&opt.rects||null,m=opt&&opt.m||null,prev=!!(opt&&opt.prev),D=LblTpl.dims(T.w,T.h),Wt=D.W,Ht=D.H;
+ const k=Math.max(.5,Math.min(1.6,(+it.fs||100)/100)),nm=String(it.name||'').trim()||'שם המוצר',pr=num(it.price)||0;
+ const b=opt&&opt.brand||null,L=b&&T.brand!=='el'?layBox(b.lay,Wt,Ht):null,ib=L?L.ib:0,sc=L&&L.t?L.t.s:1;
+ g.setTransform(1,0,0,1,0,0);g.fillStyle='#fff';g.fillRect(0,0,Wt,Ht);g.fillStyle='#000';g.strokeStyle='#000';
+ if(L){put(g,bImg(b.logo),L.logo,L.t?'r':'c');put(g,bImg(b.stamp),L.stamp,L.t?'l':'c');if(L.t)g.setTransform(L.t.s,0,0,L.t.s,L.t.dx,L.t.dy)}
+ const code=String(it.code||'').trim(),hasBc=!!(code&&barsFor(code).bars),pp=num(it.pp),pk=String(it.pack||'').trim();
+ const cond=c=>!c||(c==='bc'?hasBc:c==='!bc'?!hasBc:c==='pp'?pp!=null:c==='!pp'?pp==null:c==='pack'?!!pk:c==='!pack'?!pk:true);
+ const over=(e,t,mx)=>{if(m&&g.measureText(t).width>mx+.5)(m[e.id]=m[e.id]||{}).over=true};
+ for(const e of T.els){if(!cond(e.if))continue;
+  const al=e.al||DAL[e.t]||'c',fw=e.fw||(e.t==='reg'?500:e.t==='unit'?600:700),ff=fw===800?700:fw,cy=e.y+e.h/2,mx=e.w-(e.ib===1&&ib?2*ib:0);
+  const X=(hw)=>al==='r'?e.x+e.w:al==='l'?e.x+(hw||0):e.x+(hw||0)+(e.w-(hw||0))/2;
+  const put1=(t,x,y,dir)=>{txt(g,t,x,y,AL[al],dir);if(fw===800){const s=parseFloat(g.font.split(' ')[1])||20;g.lineWidth=Math.max(1,s*.05);g.lineJoin='round';g.strokeText(t,x,y)}};
+  const cu=e.cur==null||e.cur==='sh'?SH:e.cur==='ils'?'₪':'',sfx=v=>fmtP(v)+(cu?' '+cu:'');
+  const grey=t=>{if(!prev)return;g.fillStyle='#888';fit(g,t,mx,Math.round((e.fs||32)*.75),Math.max(8,(e.min||16)-2),500);txt(g,t,X(),cy,AL[al]);g.fillStyle='#000'};
+  const line=(t)=>{fit(g,t,mx,e.fs||40,e.min||14,ff);over(e,t,mx);put1(t,X(),cy)};
+  try{switch(e.t){
+  case 'name':{const fs=(e.fs||40)*(e.k===0?1:k),mn=e.min||14,hw=e.hlIn?hlBox(g,it.hl,e.y,e.hh||e.h,e.x):0,w=e.w-hw;
+   if(e.fit==='wrap2'){const w2=wrap2(g,nm,w,fs,mn,ff),lh=w2.s*1.12;fnt(g,w2.s,ff);const y1=e.y1!=null?e.y1:cy,y2=e.y2!=null?e.y2:cy-lh/2;
+    w2.ln.forEach((l,i)=>{over(e,l,w);put1(l,X(hw),w2.ln.length===1?y1:y2+i*lh)})}
+   else{fit(g,nm,w,fs,mn,ff);over(e,nm,w);put1(nm,X(hw),cy)}break}
+  case 'price':{const v=e.src==='sale'&&pp!=null?pp:pr;
+   if(e.sty==='line')line((e.lbl?e.lbl+' ':'')+sfx(v));else bigP(g,v,X(),cy,e.fs||96,mx,cu,al==='c'?'':al);break}
+  case 'reg':{const lb=e.lbl!=null?e.lbl:'מחיר רגיל',ps=sfx(pr),gp=lb?12:0,f0=e.fs||34;let f=f0;fnt(g,f,ff);
+   while(f>(e.min||16)&&g.measureText(lb).width+gp+g.measureText(ps).width>mx){f-=2;fnt(g,f,ff)}
+   const lw=g.measureText(lb).width,pw=g.measureText(ps).width,tot=lw+gp+pw,r=al==='r'?e.x+e.w:al==='l'?e.x+tot:e.x+e.w/2+tot/2,th=Math.max(2,Math.round(f0*4/34)),dy=Math.round(f0*3/34);
+   txt(g,lb,r,cy);txt(g,ps,r-lw-gp,cy);g.fillRect(r-lw-gp-pw-3,cy-dy,pw+6,th);break}
+  case 'unit':{const u=unitPrice(it.price,it.pack);if(u)line(`מחיר ל-${u.per}: ${sfx(u.v)}`);else if(e.ph)grey('הקלידו גודל אריזה (למשל 500 גרם)');break}
+  case 'pack':if(pk)line(pk);break;
+  case 'text':if(e.txt)line(e.txt);break;
+  case 'exp':{const ex=String(it.ex||'').trim(),lb=e.lbl!=null?e.lbl:'בתוקף עד';if(ex)line((lb?lb+' ':'')+ex);else grey((lb?lb+' ':'')+'__.__');break}
+  case 'multi':{const q=Math.floor(+it.mq),p=num(it.mp),c=e.cur==null?'₪':cu;if(q>=2&&q<=99&&p!=null)line(`${q} ב-${fmtP(p)}${c?' '+c:''}`);else grey(`2 ב-20${c?' '+c:''}`);break}
+  case 'hl':hlBox(g,it.hl,e.y,e.h,e.x);break;
+  case 'bc':{let x=e.x,w=e.w;if(e.ib==='nx'&&ib){const a=Math.max(x,M+ib);w=Math.min(x+w,Wt-M-ib)-a;x=a}
+   bcode(g,it.code,x,e.y,w,e.h,e.dgs===0?0:(e.dg||0),rects);if(m&&hasBc)(m[e.id]=m[e.id]||{}).mod=Math.max(1,Math.floor(w/(barsFor(code).bars.length+20)))*sc;break}
+  case 'line':{const sw=e.sw||3;if(e.w>=e.h)g.fillRect(e.x,cy-sw/2,e.w,sw);else g.fillRect(e.x+e.w/2-sw/2,e.y,sw,e.h);break}
+  case 'rect':{const sw=e.sw||3;g.lineWidth=sw;g.strokeRect(e.x+sw/2,e.y+sw/2,e.w-sw,e.h-sw);break}
+  case 'box':{g.fillRect(e.x,e.y,e.w,e.h);if(e.txt){g.fillStyle='#fff';const fs=e.fs||40;fit(g,e.txt,e.w-16,fs,e.min||14,ff);txt(g,e.txt,X(),cy+Math.round(fs*.035),AL[al]);g.fillStyle='#000'}break}
+  case 'logo':case 'stamp':if(b&&T.brand==='el')put(g,bImg(b[e.t]),[e.x,e.y,e.w,e.h],al==='c'?'c':al);break}}catch(x){}}
+ if(L&&L.t){g.setTransform(1,0,0,1,0,0);if(rects){const X=xfRects(rects,L.t);rects.length=0;X.forEach(r=>rects.push(r))}}
+ return rects}
+// תבנית מקורית (מספר 1..5) – draw() כמו היום; תבנית בפורמט החדש (אובייקט) – drawT
+const render=(g,ref,it,opt)=>ref&&typeof ref==='object'?drawT(g,ref,it,opt):draw(g,ref,it,opt);
 
 /* =================== המסך =================== */
 const S={P:null,pB:0,pErr:'',pNo:0,M:null,mB:0,mErr:'',q:'',hits:null,nf:null,cur:null,tpl:1,qty:1,br:'',B:null,C:null,cB:0,c0:0,bOn:null,bLay:null,inV:0,D:null};
@@ -319,5 +365,5 @@ ACT.lblBSave=async el=>{const D=S.D;if(!D||!mgr())return;const c=cfgOk(D);if(D.l
  const f={logo:{stringValue:c.logo},stamp:{stringValue:c.stamp},lay:{stringValue:c.lay},on:{booleanValue:c.on},at:{integerValue:String(Date.now())},by:{stringValue:SY.uid}};
  try{await fsx('/cfg/lbl?'+Object.keys(f).map(k=>'updateMask.fieldPaths='+k).join('&'),{method:'PATCH',body:JSON.stringify({fields:f})});S.C=c;S.bOn=null;S.bLay=null;S.D=null;try{localStorage.setItem(BRK(),JSON.stringify(c))}catch(e){}
   closeDlg();toast('נשמר');rerender()}catch(e){if(el)el.disabled=false;toast(e&&e.offline?'אין חיבור לאינטרנט':'השמירה נכשלה'+(e&&e.code===403?' (אין הרשאה)':''))}};
-API.draw=draw;API.TPL=TPL;API.build=build;API.brand=bOpt;API.ensureImgs=ensureImgs;
+API.draw=draw;API.drawT=drawT;API.render=render;API.TPL=TPL;API.build=build;API.brand=bOpt;API.ensureImgs=ensureImgs;
 })(typeof window!=='undefined'?window:globalThis);

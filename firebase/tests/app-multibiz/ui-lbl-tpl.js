@@ -24,6 +24,12 @@ const BASKETS = [
   [1, 2, 3, 4, 5].map((t, i) => ({ tpl: t, n: [1, 3, 200, 2, 1][i], it: it({ name: 'מעורב ' + t, code: t % 2 ? '7290000000017' : '', pp: t === 4 ? '5' : '', pack: t === 5 ? '1 ק"ג' : '', hl: t === 3 ? 'חם' : '', fs: 80 + t * 10 }) })),
 ];
 
+// מטריצת מדבקות לבדיקת השוויון drawT ↔ draw: שמות, מחירים, ברקודים (EAN-13/8, Code128, לא תקין, בלי), מילה מודגשת, מבצע, אריזה, גודל שם
+const NM = ['לחם', 'צלחות חד פעמיות 20 יח׳', 'עוגת שמרים שוקולד גדולה במיוחד עם אגוזים ופקאן וקינמון', '', 'מילהאחתארוכהמאודמאודמאודמאודמאודמאוד', 'Coca Cola 1.5L'];
+const PR = ['12.9', '0', '7', '99999.99', '', '1234.5'], CD = ['5901234123457', '96385074', 'ABC-123', '', 'קוד', '7290000000017'];
+const HL = ['', 'חדש!', 'מבצע ענק בחנות'], PP = ['', '9.9', '100'], PK = ['', '500 גרם', '1.5 ליטר', 'xyz'], FSZ = [100, 70, 140, 120];
+const ITEMS = Array.from({ length: 24 }, (_, i) => it({ name: NM[i % 6], price: PR[(i * 5 + 1) % 6], code: CD[(i * 7 + 2) % 6], hl: HL[i % 3], pp: PP[(i >> 1) % 3], pack: PK[i % 4], fs: FSZ[(i >> 2) % 4] }));
+
 async function open(browser, www, who) {
   const cfg = { mode: 'new', users: { m: 'biz-o', w: 'biz-o' }, biz: { 'biz-o': { dataRoot: 'b', features: F, name: 'עסק בדיקה' } }, admins: { 'b/biz-o/|m': 1 }, staff: { 'b/biz-o/|w': { perms: { lbl: true } } }, ctx: { deviceScaleFactor: 1 } };
   const log = [];
@@ -76,6 +82,30 @@ const PAGE_LIB = () => {
     let base = null; try { base = JSON.parse(fs.readFileSync(BASE_F, 'utf8')); } catch (e) { /* */ }
     if (base && base.chrome === ver) check('z 2 SHA-256 זהה לקובץ הבסיס (lbl-baseline.json)', Object.keys(base.h).every((k) => base.h[k] === H0[k]), { chrome: ver });
     else console.log('מידע  z 2 קובץ הבסיס נוצר בדפדפן אחר (' + (base && base.chrome) + ' / ' + ver + ') – ההשוואה מול העותק הקפוא (z 1) היא הקובעת');
+    // ---------- d: drawT(BUILTIN[1..5]) מול draw() – שוויון פיקסלים (RGBA), סיביות (toBits) ומלבני ברקוד ----------
+    const d = await page.evaluate(async (IT) => {
+      const T = window.__lbt, LP = LblPrint, LT = LblTpl, W = LP.W, H = LP.H;
+      await Promise.all(Object.values(T.brands).filter(Boolean).map((b) => LP.ensureImgs(b)));
+      const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c.getContext('2d', { willReadFrequently: true }); };
+      const ga = mk(), gb = mk(), bad = []; let n = 0;
+      for (let t = 1; t <= 5; t++) { const B = LT.builtin(t);
+        for (const [bm, br] of Object.entries(T.brands)) for (let i = 0; i < IT.length; i++) for (const prev of [0, 1]) {
+          const o = (x) => Object.assign({ rects: [] }, br ? { brand: br } : {}, prev ? { prev: 1 } : {}, x || {});
+          const ra = LP.draw(ga, t, IT[i], o()), rb = LP.drawT(gb, B, IT[i], o());
+          const a = ga.getImageData(0, 0, W, H).data, b = gb.getImageData(0, 0, W, H).data; let px = 0;
+          for (let j = 0; j < a.length; j++) if (a[j] !== b[j]) px++;
+          const ba = LP.toBits(a, W, H), bb = LP.toBits(b, W, H); let bits = 0; for (let j = 0; j < ba.length; j++) if (ba[j] !== bb[j]) bits++;
+          const rr = JSON.stringify(ra) === JSON.stringify(rb); n++;
+          if (px || bits || !rr) bad.push({ t, bm, i, prev, px, bits, rr, na: ra.length, nb: rb.length });
+        } }
+      // render: מספר → draw (כמו היום), אובייקט → drawT
+      const rr = JSON.stringify(LP.render(ga, 3, IT[0], { rects: [] })) === JSON.stringify(LP.draw(gb, 3, IT[0], { rects: [] })) && JSON.stringify(LP.render(ga, LT.builtin(3), IT[0], { rects: [] })) === JSON.stringify(LP.draw(gb, 3, IT[0], { rects: [] }));
+      // ביקורת: הזזה של פיקסל אחד בשם – הבדיקה מזהה
+      const C = LT.builtin(1); C.els[0].y += 1; LP.draw(ga, 1, IT[0], {}); LP.drawT(gb, C, IT[0], {});
+      const ca = ga.getImageData(0, 0, W, H).data, cb = gb.getImageData(0, 0, W, H).data; let ctl = 0; for (let j = 0; j < ca.length; j++) if (ca[j] !== cb[j]) ctl++;
+      return { n, bad: bad.slice(0, 20), nb: bad.length, rr, ctl }; }, ITEMS);
+    check('d 1 drawT(BUILTIN 1..5) זהה לגמרי ל-draw(): פיקסלים, סיביות ומלבני ברקוד – ' + ITEMS.length + ' מדבקות × 5 תבניות × 3 מצבי לוגו × תצוגה/הדפסה', d.nb === 0 && d.n === ITEMS.length * 30, d);
+    check('d 2 render: מספר → draw(), תבנית → drawT; ביקורת – הזזת השם בפיקסל אחד מתגלה', d.rr && d.ctl > 0, { ctl: d.ctl });
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check('m 99 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));
     await ctx.close(); }
