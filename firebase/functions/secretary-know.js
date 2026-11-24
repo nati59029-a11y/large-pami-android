@@ -292,6 +292,13 @@ async function secCal(request) {
       await db.collection('sec_log').doc().set(C.logData(who.uid, 'mgr', 'permBlock', { tgt: 'rem', note: 'secCal:add' }));
       throw new HttpsError('permission-denied', 'לפי מסך ההרשאות שלך גיטי לא רשאית לקבוע תזכורות. לא נוצר כלום. אפשר לשנות בהגדרות המזכירה ← הרשאות.', { reason: 'perm-deny' });
     }
+    // תיקון בדיקה (ליקוי 1): תזכורת שנקבעת לבד (auto:true – כרטיס "לבד" או התחייבות "לבד") נעצרת ב"עצור הכל" בשרת. לחיצה ידנית – לא
+    if (cid && input.auto === true) {
+      if (PERM.stopBlocks(input, await db.doc('sec_cfg/wa').get())) {
+        await db.collection('sec_log').doc().set(C.logData(who.uid, 'auto', 'autoStopped', { tgt: 'rem', note: 'secCal:add' }));
+        throw pre('stopped', '"עצור הכל" פעיל – גיטי לא קובעת תזכורות לבד. אפשר לאשר בלחיצה.');
+      }
+    }
     if (cid) {
       const ex = await col.doc('sec' + cid).get();
       if (ex.exists) { if (ex.get('by') === who.uid && ex.get('rem') === true) return { ok: true, id: ex.id, already: true }; throw pre('exists', 'התזכורת כבר קיימת'); }

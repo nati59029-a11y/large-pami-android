@@ -64,7 +64,7 @@ async function open(browser, www, o) {
     bodies.push([n, body]);
     const ok = (r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
     if (n === 'secState') return ok(st);
-    if (n === 'secPrefs' && body.op === 'perm') { if (body.m === 'auto' && body.type === 'fin' && !(body.cap >= 0)) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'צריך תקרה' } }) }); return ok({ ok: true, type: body.type, m: body.m, scope: body.scope, saved: body.scope === 'always' && body.m !== 'unset', ...(body.cap !== undefined ? { cap: body.cap } : {}), ...(body.type === 'app' ? { ref: { k: 'app' } } : body.type === 'task' ? { ref: { k: 'tkp', cid: 'tp0123456789abcdef' } } : {}) }); }
+    if (n === 'secPrefs' && body.op === 'perm') { if (body.m === 'auto' && body.type === 'fin' && !(body.cap >= 0)) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'צריך תקרה' } }) }); return ok({ ok: true, type: body.type, m: body.m, scope: body.scope, saved: body.scope === 'always' && body.m !== 'unset', ...(body.cap !== undefined ? { cap: body.cap } : {}), ...(body.type === 'app' ? { ref: { k: 'app' } } : body.type === 'task' ? { ref: { k: 'tkp', cid: 'tp0123456789abcdef' } } : body.type === 'rem' ? { ref: { k: 'tkp', cid: 'tp00000000000000bb' }, stop: true } : {}) }); }
     if (n === 'secGoogle') return ok({ ok: true, configured: true, max: 3, boxes: [{ id: 'b1', addr: 'a@b.co', st: 'ok', clean: false }], cal: { connected: false } });
     if (n === 'secWaCfg') return ok({ ok: true, connected: false });
     if (n === 'cxBotTok') return ok({ dev: { id: 'd1', at: now - 600e3 }, lr: { st: 'needs-login', at: now - 3600e3 }, runs: [] }); // 23.11.2026 (סבב 2): מצב כספית
@@ -148,9 +148,15 @@ async function open(browser, www, o) {
       await page.evaluate(() => { const f = document.querySelector('form[data-f=permQ][data-k=task]'); f.querySelector('input[name=m][value=deny]').checked = true; f.querySelector('input[name=sc][value=always]').checked = true; f.querySelector('button').click(); }); await H.settle(page, 700);
       check('החלטה 1: "אסור" מבטל מיד את הכרטיס שעורר את השאלה', await page.evaluate(() => window.__tpc === 'tp0123456789abcdef' && !window.__tpa));
     }
+    // תיקון בדיקה, ליקוי 1: "עצור הכל" פעיל + תשובה "לבד" לשאלה הראשונה – הכרטיס לא מאושר לבד (השרת מחזיר stop)
+    await page.evaluate(() => { window.__tpa = null; window.__secTpAuto = (cid) => { window.__tpa = cid; return true; }; window.__sec.st.perm.q = { rem: { t: Date.now(), n: 1, note: 'הצעה בשיחה' } }; rerender(); }); await H.settle(page, 500);
+    await page.evaluate(() => { const f = document.querySelector('form[data-f=permQ][data-k=rem]'); f.querySelector('input[name=m][value=auto]').checked = true; f.querySelector('input[name=sc][value=once]').checked = true; f.querySelector('button').click(); }); await H.settle(page, 700);
+    check('ליקוי 1: "עצור הכל" + תשובה "לבד" – הכרטיס לא אושר לבד, והמצב "עצור הכל" נשמר בדף', await page.evaluate(() => window.__tpa === null && window.__sec.st.stop === true));
+    await page.evaluate(() => { window.__sec.st.stop = false; });
     // החלטה 2: כרטיס תזכורת שהשרת סימן auto ("לבד") – נקבע מיד בלי לחיצה, באותה זרימה (secCal add עם cid → tkCard ok)
     await page.evaluate(() => { [window.__secTpAuto, window.__secTpCancel] = window.__tpOrig; ACT.secSetX && ACT.secSetX(); const b = document.querySelector('#secTabs [data-v=chat]'); if (b) b.click(); }); await H.settle(page, 500);
     await page.evaluate(() => window.__secAsk('תזכירי לי לבד מחר להתקשר לספק')); await H.settle(page, 1500);
+    check('אישור "לבד" נשלח לשרת עם auto:true (השרת עוצר אותו ב"עצור הכל")', bodies.some((b) => b[0] === 'secCal' && b[1].op === 'add' && b[1].cid === 'tp00000000000000aa' && b[1].auto === true));
     const add = bodies.filter((b) => b[0] === 'secCal' && b[1].op === 'add' && b[1].cid === 'tp00000000000000aa');
     const okc = bodies.filter((b) => b[0] === 'secPrefs' && b[1].op === 'tkCard' && b[1].st === 'ok' && b[1].cid === 'tp00000000000000aa');
     check('החלטה 2: כרטיס "לבד" – התזכורת נקבעה בלי לחיצה, פעם אחת, וסומנה בשרת', add.length === 1 && okc.length === 1, { add: add.length, ok: okc.length });

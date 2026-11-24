@@ -97,7 +97,7 @@ async function autoRun(){if(!M.auto)return;let n=0;
 root.__secCmtAuto=()=>{M.L=null;M.ld=0;load()};/* מ-sec-perm.js: אחרי תשובה "לבד" לשאלה הראשונה – טעינה מחדש (השרת יחזיר auto) */
 async function okRem(c,force,quiet){c.busy=1;re();
  if(!c.ref&&!(await claim(c)))return;
- try{if(!c.ref){const d={op:'add',title:c.txt.slice(0,120),d:c.d,rem:true,cid:c.cid};if(force)d.force=true;
+ try{if(!c.ref){const d={op:'add',title:c.txt.slice(0,120),d:c.d,rem:true,cid:c.cid};if(force)d.force=true;if(quiet)d.auto=true;/* "לבד" – השרת עוצר ב"עצור הכל" */
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){c.busy=0;re();return ask('התאריך נופל ב'+r.warn.kind+'. לקבוע את התזכורת בכל זאת?',()=>okRem(c,true),'כן, לקבוע')}
    c.ref=r&&r.id||'sec'+c.cid}

@@ -458,12 +458,8 @@ async function secDecide(request) {
     return { ok: true, id };
   }
   let after = null; // פעולות אחרי הטרנזקציה (התראה, יומן)
-  if (op === 'claim' && mode === 'auto') {
-    // 24.11.2026 (החלטת המשתמש 3): "נכנס ישר" שכבר פעיל בעסק = כלל "לבד" קיים. למנהל שעוד לא הגדיר "רישום הוצאה / הכנסה" – "לבד, תמיד"
-    // עם תקרת "נכנס ישר" של העסק (פעם אחת, ביומן permMig). "נכנס ישר" כבוי – לא מפעילים
-    const icfg = SI.invCfgOf(await db.doc('sec_cfg/inv').get());
-    if (icfg.auto !== false) await PERM.legacyAuto(db, uid, 'fin', { cap: icfg.cap }, '"נכנס ישר" לחשבוניות');
-  }
+  // 24.11.2026 (החלטת המשתמש 3, תיקון בדיקה ליקוי 2): "נכנס ישר" לא מעניק "לבד" ל"רישום הוצאה / הכנסה" – הוא דולק כברירת מחדל ולא נשמר מי הפעיל אותו,
+  // כך שאין "בעלים" שהחליט. לכן כל מנהל נשאל בפעם הראשונה (כולל "עד איזה סכום"), והחשבונית ממתינה לאישור עד התשובה
   const r = await db.runTransaction(async (tx) => {
     after = null; // טרנזקציה שרצה שוב – מתחילים נקי
     const au = op === 'claim' && mode === 'auto';
@@ -546,7 +542,8 @@ async function secDecide(request) {
   }
   if (r.deny) {
     if (r.deny.includes('pmAsk')) await PERM.ask(db, uid, 'fin', 'חשבונית ספק – הכנסה אוטומטית');
-    if (r.el) await ref.update({ el: false, why: r.deny }).catch(() => {});
+    // החלטה 1: כשהסיבה היחידה היא "טרם הוגדרה הרשאה" – החשבונית נשארת זכאית (el), כך שאחרי תשובה "לבד" היא נכנסת בסבב הבא של המכשיר
+    if (r.el && !(r.deny.length === 1 && r.deny[0] === 'pmAsk')) await ref.update({ el: false, why: r.deny }).catch(() => {});
     await db.collection('sec_log').doc().set(ilog(uid, 'mgr', 'invAutoNo', { tgt: id, note: r.deny.join(',') }));
     throw new HttpsError('failed-precondition', 'החשבונית לא עומדת בתנאים להכנסה אוטומטית – היא ממתינה לאישור', { reason: 'not-eligible', why: r.deny });
   }

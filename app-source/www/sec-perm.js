@@ -39,9 +39,9 @@ async function save(type,m,scope,cap,btn){
   else if(m==='unset')delete p.m[type];
   delete p.q[type];
   toast(m==='unset'?'✓ חזר ל"טרם הוגדר"':r&&r.saved?'✓ נשמר: '+curL(t,p.m[type]):'✓ רק הפעם – לא נשמר');
-  /* 24.11.2026 (החלטת המשתמש 1): התשובה חלה מיד גם על הפריט שעורר את השאלה – "לבד" מבצע אותו (השרת בודק שוב, כולל תקרה ו"עצור הכל"),
-     "אסור" מבטל אותו (שורה ביומן), "מכינה ואני מאשר" – נשאר לאישור */
-  try{applyRef(r&&r.ref,m)}catch(e){}
+  /* 24.11.2026 (החלטת המשתמש 1): התשובה חלה מיד גם על הפריט שעורר את השאלה – "לבד" מבצע אותו (השרת בודק שוב: הרשאות, ו"עצור הכל" דרך auto:true),
+     "אסור" מבטל אותו (שורה ביומן), "מכינה ואני מאשר" – נשאר לאישור. "עצור הכל" פעיל (r.stop) – לא מבצעים לבד; השרת עוצר גם הוא (auto:true ב-tkCard chk / secCal) */
+  try{if(r&&r.stop===true&&X.st)X.st.stop=true;if(r&&r.stop===true&&m==='auto'){if(r.ref)toast('"עצור הכל" פעיל – הפעולה שעוררה את השאלה נשארת לאישור שלך')}else applyRef(r&&r.ref,m)}catch(e){}
   re();return true}
  catch(e){toast(e&&e.message||'השמירה נכשלה');if(btn)btn.disabled=false;return false}}
 function applyRef(ref,m){if(!ref||!ref.k||(m!=='auto'&&m!=='deny'))return;
@@ -59,7 +59,7 @@ root.__secPermH=()=>{const p=P();if(!p||!p.q)return '';
  const card=t=>{const q=p.q[t.k],k=esc(t.k);
   const r=(n,v,l,dis,chk)=>`<label class="chip" style="min-height:44px"><input type="radio" name="${n}" value="${v}"${chk?' checked':''}${dis?' disabled':''}> ${l}</label>`;
   return `<form class="secli" data-f="permQ" data-k="${k}" style="display:block"><p style="margin:0"><b>${esc(t.l)}</b>${q.n>1?` <span class="sectags">${esc(String(q.n))} פעמים</span>`:''}</p>
-  <p class="note" style="margin:4px 0">גיטי הגיעה בפעם הראשונה לפעולה מהסוג הזה${q.note?' ('+esc(q.note)+')':''}. התשובה תחול מיד גם עליה: "לבד" – גיטי מבצעת אותה עכשיו; "אסור" – היא מבוטלת; "מכינה ואני מאשר" – נשארת לאישור שלך.</p>
+  <p class="note" style="margin:4px 0">גיטי הגיעה בפעם הראשונה לפעולה מהסוג הזה${q.note?' ('+esc(q.note)+')':''}. התשובה תחול מיד גם עליה: "לבד" – גיטי מבצעת אותה עכשיו; ${t.k==='app'?'"אסור" – ההתראות נשארות לטיפול ידני שלך':'"אסור" – היא מבוטלת'}; "מכינה ואני מאשר" – נשארת לאישור שלך.</p>
   <fieldset style="border:0;padding:0;margin:4px 0"><legend class="note">מה גיטי רשאית</legend><div class="secrow" style="flex-wrap:wrap">${r('m','auto',ML.auto+(t.auto?'':' (לא זמין)'),!t.auto)}${r('m','approve',ML.approve,false,true)}${r('m','deny',ML.deny)}</div></fieldset>
   <fieldset style="border:0;padding:0;margin:4px 0"><legend class="note">לכמה זמן</legend><div class="secrow" style="flex-wrap:wrap">${r('sc','always',SCL.always,false,true)}${r('sc','once',SCL.once)}${r('sc','again',SCL.again)}</div></fieldset>
   ${capIn(t,null)}<div class="secrow"><button class="chip" style="min-height:44px">שמור</button></div></form>`};

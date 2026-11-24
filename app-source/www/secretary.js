@@ -2032,13 +2032,13 @@ function tpSync(c,box){const v=f=>box.querySelector(`[data-c=secTpF][data-f=${f}
  if((e=v('tm')))c.tm=/^([01]\d|2[0-3]):[0-5]\d$/.test(e.value)?e.value:'';
  if((e=v('pri')))c.pri=e.checked?'h':''}
 async function tpRem(c,mid,force){c.busy=1;cxRe();
- try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true,cid:c.id};if(c.tm)d.tm=c.tm;/* cid – מזהה קבוע (sec<cid>): אישור חוזר לא יוצר תזכורת שנייה */if(force)d.force=true;
+ try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true,cid:c.id};if(c.au)d.auto=true;/* auto – אישור "לבד": השרת עוצר אותו ב"עצור הכל" */if(c.tm)d.tm=c.tm;/* cid – מזהה קבוע (sec<cid>): אישור חוזר לא יוצר תזכורת שנייה */if(force)d.force=true;
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){const w=r.warn;c.busy=0;cxRe();return ask('התאריך נופל ב'+w.kind+'. לקבוע את התזכורת בכל זאת? (אפשר גם לבחור בכרטיס תאריך אחר, למשל '+dShort(w.next)+')',()=>tpRem(c,mid,true),'כן, לקבוע')}
    c.ref=r&&r.id||''}
   await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'rem',ref:c.ref});
   c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה')}
- catch(e){if(e&&e.reason==='perm-deny')toast(e.message);else if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
+ catch(e){if(e&&(e.reason==='perm-deny'||e.reason==='stopped'))toast(e.message);else if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
  finally{c.busy=0;cxRe()}}
 ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const box=el.closest('[data-card]');if(box)tpSync(c,box);
  const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';if(!mid)return toast('הכרטיס לא נמצא. פתחו את השיחה מחדש');
@@ -2049,18 +2049,19 @@ ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;con
  c.busy=1;cxRe();let x=null;
  try{const rv=X.tpRv===false?false:await cxRvNow();x={id:c.id,txt:c.txt,all:!!c.all,to:c.to||[],due:tpDue(c),pri:c.pri==='h'?'h':'',rv};
   /* 24.11.2026 (סבב 4 חלק א): בדיקה מקדימה בשרת – "יצירת משימה" אסורה במסך ההרשאות → לא נוצרת (השרת רושם ביומן ומחזיר הסבר) */
-  await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'chk',kind:'task'});
+  await fnCall('secPrefs',Object.assign({op:'tkCard',mid,cid:c.id,st:'chk',kind:'task'},c.au?{auto:true}:{}));
   const r=await cxCreate(x);
   let ok=1;try{await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'task'})}catch(e){ok=0}
   c.busy=0;if(!ok){toast('המשימה נפתחה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב (לא תיפתח משימה נוספת)');return}
   doneSt(c.id,'ok');toast(r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה ל'+cxNames(x)+', יעד: '+r.dlL);try{await tkLoad()}catch(e){}}
- catch(e){if(e&&e.reason==='perm-deny'){toast(e.message);return}if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
+ catch(e){if(e&&(e.reason==='perm-deny'||e.reason==='stopped')){toast(e.message);return}if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
  finally{c.busy=0;cxRe()}};
 /* 24.11.2026 (גיטי סבב 4, החלטות 1–2): אישור / ביטול של כרטיס בלי לחיצה – כרטיס "לבד", או תשובה לשאלה הראשונה שחלה מיד על הכרטיס שעורר אותה.
    אישור רק כשיש את כל הפרטים (למשימה – למי; לתזכורת – תאריך); אחרת הכרטיס נשאר לאישור. השרת בודק את ההרשאות שוב (tkCard chk / secCal) */
-window.__secTpAuto=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||!c.txt)return false;const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;
+window.__secTpAuto=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||!c.txt)return false;if(X.st&&X.st.stop===true)return false;/* "עצור הכל" – לא לבד (גם השרת בודק: auto:true) */
+ const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;
  if(c.kind==='rem'?!c.d:(!cxOn()||(!c.all&&!(c.to||[]).length)))return false;
- ACT.secTpOk({dataset:{id:cid,mid},closest:()=>null});return true}catch(e){return false}};
+ c.au=1;Promise.resolve(ACT.secTpOk({dataset:{id:cid,mid},closest:()=>null})).finally(()=>{c.au=0});return true}catch(e){return false}};
 window.__secTpCancel=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||c.ref)return false;const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;ACT.secTpNo({dataset:{id:cid,mid}});return true}catch(e){return false}};
 ACT.secTpNo=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';
  if(c.ref)return toast('התזכורת כבר נקבעה. לחצו "אישור" כדי לסיים');

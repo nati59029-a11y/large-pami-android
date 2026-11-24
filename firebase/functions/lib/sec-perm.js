@@ -217,12 +217,39 @@ async function legacyAuto(db, uid, type, o, note) {
   return done;
 }
 
+// "עצור הכל" עוצר אישור "לבד" (input.auto === true) – בשרת, לפני היצירה (tkCard chk, secCal add). ws – המסמך sec_cfg/wa. לחיצה ידנית – לא נעצרת
+function stopBlocks(input, ws) {
+  if (!input || input.auto !== true) return false;
+  const st = ws && ws.exists ? ws.get('stop') : null;
+  return !!(st && st.on === true);
+}
+// כלל מענה במייל (sec_rules) מעניק "לבד" מכלל קיים רק כשהוא עדיין פעיל כאוטומטי וכשהמענה האוטומטי במייל דולק בעסק (no – סיבות autoBlock)
+const mailRuleLegacy = (rule, no) => !!rule && rule.auto === true && rule.autoOff !== true && rule.on !== false && !(no || []).includes('ruleOff') && !(no || []).includes('off');
+
+// מועד ההפעלה של מסך ההרשאות בעסק (sec_cfg/main.permAt) – נקבע בפעם הראשונה שנדרש (תיקון בדיקה: "לבד" מכלל קיים רק לכלל שאושר לפני כן)
+async function epochOf(db) {
+  const ref = db.doc('sec_cfg/main');
+  const s = await ref.get();
+  const v = s.exists ? s.get('permAt') : undefined;
+  if (Number.isFinite(v)) return v;
+  const now = Date.now();
+  if (s.exists) await ref.set({ permAt: now }, { merge: true }).catch(() => {});
+  return now;
+}
+// האם מותר להעניק "לבד" מכלל קיים (החלטה 3): הכלל עדיין פעיל כ"לבד" (active) ואושר לפני הפעלת מסך ההרשאות (at < permAt)
+async function legacyOk(db, opt) {
+  const o = obj(opt);
+  if (o.legacy !== true || !Number.isFinite(o.at) || o.at <= 0) return false;
+  return o.at < (await epochOf(db));
+}
+
 // לנקודות הביצוע: '' = מותר לבד; אחרת קוד הסיבה (WHY). בלי הגדרה – גם רושם שאלה לאותו מנהל. אין בעלים – לאישור, בלי שאלה.
-// opt.legacy – הפעולה באה מכלל שכבר מסומן "לבד" (החלטה 3): בלי הגדרה – מיגרציה ל"לבד" במקום שאלה. opt.ref – הפריט שעורר את השאלה
+// opt.legacy – הפעולה באה מכלל שעדיין מסומן "לבד" (החלטה 3), opt.at – מתי הכלל אושר "לבד" (ms). בלי הגדרה, ורק לכלל שאושר לפני הפעלת
+// מסך ההרשאות – מיגרציה ל"לבד" במקום שאלה. opt.ref – הפריט שעורר את השאלה
 async function blockWhy(db, uid, type, o, note, opt) {
   if (!uidOk(uid)) return 'pmOwner';
   let r = decide(await readRec(db, uid), type, o);
-  if (r.d === 'ask' && opt && opt.legacy && (await legacyAuto(db, uid, type, opt, note))) r = decide(await readRec(db, uid), type, o);
+  if (r.d === 'ask' && (await legacyOk(db, opt)) && (await legacyAuto(db, uid, type, opt, note))) r = decide(await readRec(db, uid), type, o);
   if (r.d === 'auto') return '';
   if (r.d === 'ask') await ask(db, uid, type, note, opt && opt.ref);
   return r.why;
@@ -245,4 +272,4 @@ function isOtp(text, title) {
   return OTP_NUM.test(s) || /סיסמ|password|passcode/i.test(s);
 }
 
-module.exports = { COLL, TYPES, KEYS, MODES, SCOPES, CAP_MAX, WHY, permOf, pqOf, recFrom, readRec, decide, isAuto, parseSet, noteOf, nextRec, writeRec, refOf, ask, legacyAuto, blockWhy, stateOf, isOtp };
+module.exports = { COLL, TYPES, KEYS, MODES, SCOPES, CAP_MAX, WHY, permOf, pqOf, recFrom, readRec, decide, isAuto, parseSet, noteOf, nextRec, writeRec, refOf, ask, legacyAuto, legacyOk, epochOf, stopBlocks, mailRuleLegacy, blockWhy, stateOf, isOtp };

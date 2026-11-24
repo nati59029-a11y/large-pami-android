@@ -376,6 +376,14 @@ async function secPrefs(request) {
       throw pre('stopped', '"עצור הכל" פעיל – גיטי לא מכינה הזמנות מספקים עכשיו. לא נוצר כלום.');
     }
   }
+  // תיקון בדיקה (ליקוי 1): אישור "לבד" (auto:true – כרטיס auto, או תשובה "לבד" לשאלה הראשונה) נעצר ב"עצור הכל" כאן, בשרת, לפני היצירה.
+  // לחיצה ידנית (בלי auto) – לא נעצרת, כמו בכל המזכירה (החלטה 31)
+  if (input.op === 'tkCard' && input.st === 'chk' && input.auto === true) {
+    if (PERM.stopBlocks(input, await db.doc('sec_cfg/wa').get())) {
+      await db.collection('sec_log').doc().set(logData(who.uid, 'auto', 'autoStopped', { tgt: input.kind === 'rem' ? 'rem' : 'task', note: 'tkCard' }));
+      throw pre('stopped', '"עצור הכל" פעיל – גיטי לא מבצעת לבד. אפשר לאשר את הכרטיס בלחיצה.');
+    }
+  }
   if (input.op === 'tkCard' && input.st === 'chk') return { ok: true };
   // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל. תפיסת הצעת התחייבות (cmt claim) – לא נרשמת ולא נספרת
   if (!(input.op === 'cmt' && input.st === 'claim')) await db.runTransaction(async (tx) => {
@@ -494,7 +502,11 @@ async function secPrefs(request) {
     let ref = null; // החלטת המשתמש 1: הפריט שעורר את השאלה – האפליקציה מבצעת / מבטלת אותו לפי התשובה
     await PERM.writeRec(db, who.uid, (rec) => { ref = PERM.refOf(((rec.pq || {})[s.type] || {}).ref); return PERM.nextRec(rec, s, t); }, logData(who.uid, 'mgr', s.m === 'unset' ? 'permUnset' : s.save ? 'permSet' : 'permOnce', { tgt: s.type, note: PERM.noteOf(s) }));
     out = { type: s.type, m: s.m, scope: s.scope, saved: s.save && s.m !== 'unset' };
-    if (ref && s.m !== 'unset') out.ref = ref;
+    if (ref && s.m !== 'unset') {
+      out.ref = ref;
+      const ws = await db.doc('sec_cfg/wa').get();
+      out.stop = !!(ws.exists && ws.get('stop') && ws.get('stop').on === true); // "עצור הכל" – האפליקציה לא מבצעת "לבד" (וגם השרת חוסם)
+    }
     if (s.cap !== undefined) out.cap = s.cap;
   } else if (input.op === 'permAsk') {
     // 24.11.2026 (סבב 4 חלק א): המכשיר (התראות מהטלפון – sec-notif.js) הגיע לביצוע לבד בסוג 'app' בלי הגדרה – שאלה למנהל עצמו. רק הסוג הזה

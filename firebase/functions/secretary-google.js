@@ -1652,7 +1652,7 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   if (hasFile(x)) no.push('file');
   { // 24.11.2026 (סבב 4 חלק א): מסך ההרשאות – טיוטת הזמנה ללקוח יוצאת במייל ("שליחת מייל"), לפי המנהל שהפעיל שליחה לבד ללקוח (לא ידוע – לאישור)
     const oa = as.exists && as.get('on') && typeof as.get('on') === 'object' ? as.get('on')[o.custId] : null;
-    const pw = await PERM.blockWhy(db, (oa && typeof oa.by === 'string' && oa.by) || '', 'mail', {}, 'טיוטת הזמנה ללקוח במייל', { legacy: true }); // legacy – לקוח שכבר אושר "לבד" (החלטה 3)
+    const pw = await PERM.blockWhy(db, (oa && typeof oa.by === 'string' && oa.by) || '', 'mail', {}, 'טיוטת הזמנה ללקוח במייל', { legacy: true, at: oa && oa.at }); // legacy – לקוח שאושר "לבד" לפני מסך ההרשאות (החלטה 3)
     if (pw) no.push(pw);
   }
   const key = G.sha('ord|' + o.custId).slice(0, 20);
@@ -2019,7 +2019,9 @@ async function tryAuto(db, id, x, r, rep0, now) {
   };
   const no = G.autoBlock({ stop: WA.waCfgOf(ws).stop.on, on: rep.auto, held: !!rep.held, rule, x, r, neverCls: W.NEVER_AUTO, now });
   // 24.11.2026 (סבב 4 חלק א): מסך ההרשאות – "שליחת מייל" חייבת להיות "לבד" אצל המנהל שאישר את הכלל (לא נשמר – מי שהפעיל את המענה האוטומטי במייל; לא ידוע – לאישור). "עצור הכל" כבר נבדק ב-autoBlock
-  const pw = await PERM.blockWhy(db, rule.okBy || rule.by || (rps.exists && rps.get('by')) || '', 'mail', {}, 'תשובה אוטומטית במייל', { legacy: true }); // legacy – כלל שכבר אושר כאוטומטי (החלטה 3)
+  const pw = await PERM.blockWhy(db, rule.okBy || rule.by || (rps.exists && rps.get('by')) || '', 'mail', {}, 'תשובה אוטומטית במייל',
+    // legacy (החלטה 3) – רק לכלל שעדיין פעיל כאוטומטי, כשהמענה האוטומטי במייל דולק בעסק, ושאושר לפני מסך ההרשאות (תיקון בדיקה, ליקוי 3)
+    { legacy: PERM.mailRuleLegacy(rule, no), at: rule.okAt || rule.t });
   if (pw) no.push(pw);
   // החלטה (א): כלל בלי נתון חי – מותר (הטקסט הקבוע של הכלל). כלל עם נתון חי – הנתון חייב להיות קיים, ציבורי ובתוקף; אחרת לא שולחים
   const filled = K.tplKeys(rule.a).length ? K.fillTpl(rule.a, r.fm) : String(rule.a).trim();
@@ -2095,7 +2097,7 @@ async function tryMrAuto(db, id, x, r, now) {
   const bx = mailCfgOf(ms).boxes[x.box];
   if (!bx || bx.st !== 'ok') base.push('notConnected');
   if (!G.addrOf(to)) base.push('to');
-  const pw = await PERM.blockWhy(db, rule.uid, 'mail', {}, 'כלל אישי "לבד" במייל', { legacy: true }); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
+  const pw = await PERM.blockWhy(db, rule.uid, 'mail', {}, 'כלל אישי "לבד" במייל', { legacy: rule.auto === true && rule.on !== false && C.cfgOf(cs, '').learn, at: rule.autoAt || (rule.ask && rule.ask.at) }); // 24.11.2026 (סבב 4 חלק א): ההרשאות של בעל הכלל
   if (pw) base.push(pw);
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: WA.waCfgOf(ws).stop.on, owner: await MLC().ownerOk(db, rule.uid, 'mail'), rule, match: r.mrPick || null,
     inText: String(x.subj || '') + '\n' + String(x.text || ''), outText: String(r.text || ''), cls: r.cls, chk: false, unsure: false, extra: base });

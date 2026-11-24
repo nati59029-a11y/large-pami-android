@@ -101,7 +101,7 @@ function fakeDb(docs) {
   const snap = (p) => ({ exists: !!state.docs[p], data: () => state.docs[p], get: (k) => (state.docs[p] || {})[k] });
   const upd = (p, up) => { const o = state.docs[p]; for (const [k, v] of Object.entries(up)) { const ks = k.split('.'); let c = o; for (let i = 0; i < ks.length - 1; i++) c = c[ks[i]] = c[ks[i]] && typeof c[ks[i]] === 'object' ? c[ks[i]] : {}; if (isDel(v)) delete c[ks[ks.length - 1]]; else c[ks[ks.length - 1]] = v; } };
   const db = {
-    doc: (p) => ({ p, get: async () => snap(p) }),
+    doc: (p) => ({ p, get: async () => snap(p), set: async (v) => { state.docs[p] = Object.assign(state.docs[p] || {}, JSON.parse(JSON.stringify(v))); } }),
     collection: () => ({ doc: () => ({ log: true }) }),
     runTransaction: async (fn) => fn({
       get: async (ref) => snap(ref.p),
@@ -180,8 +180,9 @@ describe('החלטה 1: התשובה הראשונה חלה מיד על הפרי�
 describe('החלטה 3: כלל "לבד" קיים – מיגרציה עצלה ל"לבד, תמיד" לסוג שלו בלבד', () => {
   it('בעל כלל בלי הגדרה: blockWhy עם legacy → לבד, נשמר עם mig, שורה אחת ביומן', async () => {
     const { db, state } = fakeDb(main());
-    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true }), '');
-    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true }), '');
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true, at: 1000 }), '');
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true, at: 1000 }), '');
+    assert.ok(Number.isFinite(state.docs['sec_cfg/main'].permAt), 'מועד הפעלת מסך ההרשאות נשמר');
     assert.deepEqual(P.permOf(state.docs['sec_perm/' + A]).mail.mig, 1);
     assert.equal(state.log.filter((l) => l.act === 'permMig').length, 1);
     assert.equal(P.permOf(state.docs['sec_perm/' + A]).wa, undefined, 'לא מפעיל סוגים אחרים');
@@ -190,7 +191,7 @@ describe('החלטה 3: כלל "לבד" קיים – מיגרציה עצלה ל"
   it('לא דורס הגדרה קיימת ("אסור" נשאר אסור), ובלי legacy – שאלה רגילה', async () => {
     const d = main(); d['sec_perm/' + A] = { perm: { mail: { m: 'deny' } }, pq: {} };
     const { db, state } = fakeDb(d);
-    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true }), 'pmDeny');
+    assert.equal(await P.blockWhy(db, A, 'mail', {}, 'כלל', { legacy: true, at: 1000 }), 'pmDeny');
     assert.equal(await P.blockWhy(db, A, 'wa', {}, 'x'), 'pmAsk');
     assert.equal(state.log.filter((l) => l.act === 'permMig').length, 0);
   });
@@ -208,6 +209,40 @@ describe('החלטה 3: כלל "לבד" קיים – מיגרציה עצלה ל"
     assert.equal(NF.legacyRules({ a: { on: true, act: 'task', v: 2 } }), false);
     assert.equal(NF.legacyRules({ a: { on: false, act: 'ign' } }), false);
     assert.equal(NF.legacyRules(null), false);
+  });
+});
+
+describe('תיקון בדיקה (סבב 4 החלטות, סבב 1)', () => {
+  it('ליקוי 1: "עצור הכל" עוצר אישור "לבד" (auto:true) בשרת; לחיצה ידנית – לא', () => {
+    const ws = (on) => ({ exists: true, get: (k) => (k === 'stop' ? { on } : undefined) });
+    assert.equal(P.stopBlocks({ auto: true }, ws(true)), true);
+    assert.equal(P.stopBlocks({ auto: true }, ws(false)), false);
+    assert.equal(P.stopBlocks({}, ws(true)), false, 'לחיצה ידנית');
+    assert.equal(P.stopBlocks({ auto: 'true' }, ws(true)), false);
+    assert.equal(P.stopBlocks({ auto: true }, { exists: false }), false);
+  });
+  it('ליקוי 2: "נכנס ישר" (ברירת מחדל דולקת) לא מעניק "לבד" ל"רישום הוצאה" – secretary-inv לא קורא ל-legacyAuto', () => {
+    const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../functions/secretary-inv.js'), 'utf8');
+    assert.ok(!/legacyAuto|legacy:\s*true/.test(src));
+  });
+  it('ליקוי 3: כלל מענה במייל מעניק "לבד" רק כשהוא פעיל כאוטומטי והמענה האוטומטי במייל דולק', () => {
+    const r = { auto: true, on: true };
+    assert.equal(P.mailRuleLegacy(r, []), true);
+    assert.equal(P.mailRuleLegacy(Object.assign({}, r, { autoOff: true }), []), false, 'כלל שכובה');
+    assert.equal(P.mailRuleLegacy(Object.assign({}, r, { on: false }), []), false);
+    assert.equal(P.mailRuleLegacy(r, ['off']), false, 'מענה אוטומטי כבוי בעסק');
+    assert.equal(P.mailRuleLegacy(r, ['ruleOff']), false);
+    assert.equal(P.mailRuleLegacy(r, ['held', 'thread']), true, 'חסימה זמנית אחרת – הכלל עדיין "לבד"');
+  });
+  it('הערה: "לבד" מכלל קיים רק לכלל שאושר לפני הפעלת מסך ההרשאות (permAt); כלל חדש – שאלה ראשונה', async () => {
+    const d = main(); d['sec_cfg/main'].permAt = 5000;
+    const { db, state } = fakeDb(d);
+    assert.equal(await P.legacyOk(db, { legacy: true, at: 4000 }), true);
+    assert.equal(await P.legacyOk(db, { legacy: true, at: 6000 }), false);
+    assert.equal(await P.legacyOk(db, { legacy: true }), false, 'בלי מועד אישור – לא');
+    assert.equal(await P.legacyOk(db, { legacy: false, at: 1 }), false);
+    assert.equal(await P.blockWhy(db, A, 'wa', {}, 'כלל חדש', { legacy: true, at: 6000 }), 'pmAsk');
+    assert.equal(state.log.filter((l) => l.act === 'permMig').length, 0);
   });
 });
 
