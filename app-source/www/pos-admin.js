@@ -18,6 +18,8 @@ const WHO_HE={sa:'רק מנהל־על',own:'רק בעל העסק',mgr:'מנהל'
 const RANK={mgr:1,own:2,sa:3};
 const DAYS=['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
 const SEC_HE=Object.fromEntries(SC.SECS);
+const HE=window.PosCfgHe||{val:(k,v)=>String(v),help:(k,f)=>f||''};
+const vHe=(r,o)=>HE.val(r.k,o);
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const VIEWS=['posAdm','posCfgSec','posCfgLog','posSa','posStatus'];
 function load(){if(M.busy||M.err)return;M.busy=1;fnCall('posCfg',{}).then(r=>{M.c=r}).catch(e=>{M.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{M.busy=0;if(VIEWS.includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})}
@@ -35,15 +37,15 @@ const shown=r=>!(M.c&&M.c.off&&M.c.off[r.k])&&(M.adv||!r.adv||(M.c&&M.c.src&&M.c
 const ag=r=>r.u==='ag';
 const money=v=>v==null?'':String(v/100);
 function fmt(r,v){if(v===null||v===undefined)return 'לא הוגדר';if(r.t==='bool')return v?'כן':'לא';if(ag(r)&&typeof v==='number')return '₪'+(v/100).toLocaleString('he-IL');
- if(r.t==='days')return v.map(d=>DAYS[d]).join(' ');if(Array.isArray(v))return v.map(x=>ag(r)?'₪'+x/100:x).join(', ');if(typeof v==='object')return JSON.stringify(v);return String(v)}
+ if(r.t==='days')return v.map(d=>DAYS[d]).join(' ');if(r.t==='enum'&&r.k)return vHe(r,v);if(r.t==='list'&&r.k&&Array.isArray(v))return v.map(x=>vHe(r,x)).join(', ');if(Array.isArray(v))return v.map(x=>ag(r)?'₪'+x/100:x).join(', ');if(typeof v==='object')return JSON.stringify(v);return String(v)}
 const unit=r=>({ag:' (₪)',pct:' (%)',min:' (דקות)',day:' (ימים)',yr:' (שנים)'})[r.u]||'';
 
 /* שדה לפי סוג (שם השדה: pa_<מפתח>; obj: pa_<מפתח>__<שדה>) */
 function input(r,v,nm,dis){const d=dis?' disabled':'';
  switch(r.t){
   case 'bool':return `<select name="${nm}"${d}><option value="1"${v?' selected':''}>כן</option><option value="0"${!v?' selected':''}>לא</option></select>`;
-  case 'enum':return `<select name="${nm}"${d}>${r.vals.map(o=>`<option value="${esc(String(o))}"${o===v?' selected':''}>${esc(String(o))}</option>`).join('')}</select>`;
-  case 'list':return `<div>${r.vals.map(o=>`<label class="chip"><input type="checkbox" name="${nm}" value="${esc(o)}"${(v||[]).includes(o)?' checked':''}${d}> ${esc(o)}</label>`).join(' ')}</div>`;
+  case 'enum':return `<select name="${nm}"${d}>${r.vals.map(o=>`<option value="${esc(String(o))}"${o===v?' selected':''}>${esc(vHe(r,o))}</option>`).join('')}</select>`;
+  case 'list':return `<div>${r.vals.map(o=>`<label class="chip"><input type="checkbox" name="${nm}" value="${esc(o)}"${(v||[]).includes(o)?' checked':''}${d}> ${esc(vHe(r,o))}</label>`).join(' ')}</div>`;
   case 'days':return `<div>${DAYS.map((n,i)=>`<label class="chip"><input type="checkbox" name="${nm}" value="${i}"${(v||[]).includes(i)?' checked':''}${d}> ${n}</label>`).join(' ')}</div>`;
   case 'time':return `<input type="time" name="${nm}" value="${esc(v||'')}" dir="ltr"${d}>`;
   case 'date':return `<input type="date" name="${nm}" value="${esc(v||'')}" dir="ltr"${d}>`;
@@ -68,8 +70,8 @@ function field(r){const c=M.c,v=c.cfg[r.k],ok=can(r.k),nm='pa_'+r.k;
  const lock=ok?'':` <span class="tag t4">${esc(WHO_HE[whoOf(r.k)]||'נעול')}</span>`;
  const sens=r.sens?' <span class="tag t1">רגישה</span>':'';
  const br=r.brOk?' <span class="tag t3">אפשר לסניף</span>':'';
- const help=r.help?`<small class="note">${esc(r.help)}</small>`:'';
- if(r.t==='obj'){const fs=Object.entries(r.fields).map(([f,fd])=>`<label class="f"><span>${esc(fd.he||f)}${unit(fd)}</span>${input(fd,v&&v[f],nm+'__'+f,!ok)}</label>`).join('');
+ const hl=HE.help(r.k,r.help);const help=hl?`<small class="note">${esc(hl)}</small>`:'';
+ if(r.t==='obj'){const fs=Object.entries(r.fields).map(([f,fd])=>`<label class="f"><span>${esc(fd.he||f)}${unit(fd)}</span>${input(Object.assign({},fd,{k:r.k+'.'+f}),v&&v[f],nm+'__'+f,!ok)}</label>`).join('');
   return `<div class="f" data-k="${esc(r.k)}"><span><b>${esc(r.he)}</b>${unit(r)}${sens}${lock}</span>${fs}${help}</div>`}
  return `<label class="f" data-k="${esc(r.k)}"><span>${esc(r.he)}${unit(r)}${sens}${br}${lock}</span>${input(r,v,nm,!ok)}${help}</label>`}
 const rowsOf=sec=>SC.ROWS.filter(r=>r.sec===sec&&shown(r));
@@ -85,7 +87,7 @@ V.posAdm=()=>{const T='ניהול קופה';if(!on()||!mgr())return deny(T);
  const st=c.on?(c.st==='susp'?'<span class="tag t4">מושעית</span>':c.st==='trial'?'<span class="tag t1">ניסיון</span>':'<span class="tag t3">פעילה</span>'):'<span class="tag t4">סגורה</span>';
  const secs=SC.SECS.filter(([s])=>rowsOf(s).length).map(([s,n])=>`<button class="opt" data-a="go" data-v="posCfgSec" data-arg="${s}"><span>${esc(n)}<small>${rowsOf(s).length} הגדרות</small></span>${ico('chev')}</button>`).join('');
  let found='';
- if(q){const ql=q.toLowerCase();const hits=SC.ROWS.filter(x=>!(c.off&&c.off[x.k])&&(x.he.includes(q)||x.k.toLowerCase().includes(ql)||(x.help||'').includes(q))).slice(0,30);
+ if(q){const ql=q.toLowerCase();const hits=SC.ROWS.filter(x=>!(c.off&&c.off[x.k])&&(x.he.includes(q)||x.k.toLowerCase().includes(ql)||HE.help(x.k,x.help).includes(q))).slice(0,30);
   found=`<div class="card"><h3 style="margin-top:0">תוצאות (${hits.length})</h3>${hits.length?hits.map(x=>`<button class="opt" data-a="go" data-v="posCfgSec" data-arg="${x.sec}"><span>${esc(x.he)}<small>${esc(SEC_HE[x.sec])} · ${esc(fmt(x,c.cfg[x.k]))}</small></span>${ico('chev')}</button>`).join(''):'<div class="empty">לא נמצא</div>'}</div>`}
  const recent=c.upd?`<p class="note" style="margin:6px 0 0">שינוי אחרון: ${esc(new Date(c.upd).toLocaleString('he-IL'))} · גרסה ${esc(String(c.ver))}</p>`:'';
  const h=`<div class="card"><h3 style="margin-top:0">קופה ${st}</h3><p class="note" style="margin:0">סוג העסק: ${esc(c.type)} · ${r==='sa'?'משנה כמנהל־על':r==='own'?'בעל העסק':'מנהל'}</p>${recent}
