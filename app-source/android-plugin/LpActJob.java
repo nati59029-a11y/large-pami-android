@@ -33,6 +33,7 @@ import org.json.JSONObject;
  */
 public class LpActJob extends JobService {
     static final long MAX_AGE = 7L * 24 * 3600 * 1000;
+    static final long RCV_MAX_AGE = 48L * 3600 * 1000; // delivery receipt: the server token expires after 48 hours (push-act.js GRP_H)
     static final String FAIL = "לא הצלחנו לבצע מההתראה: ";
     static final String TAP = " – לחצו לפתיחה";
     /** Bumped on sign-out: a try that is already running then shows nothing to the next user. */
@@ -79,7 +80,10 @@ public class LpActJob extends JobService {
         }
     }
 
-    /** Group message arrived: tell the server it was received (same address check as the buttons). */
+    /**
+     * Group message arrived: tell the server it was received (same address check as the buttons).
+     * "Received" means the message reached the phone - even when the user turned off the notification channel and nothing was shown.
+     */
     static void receipt(Context c, Map<String, String> d) {
         if (LpNotif.s(d, "at").isEmpty()) return;
         URL url = LpActReceiver.allowed(c, LpNotif.s(d, "u"));
@@ -141,7 +145,7 @@ public class LpActJob extends JobService {
         }
         String a = x.getString("a");
         long t0 = x.getLong("t0", 0);
-        boolean old = System.currentTimeMillis() - t0 > MAX_AGE;
+        boolean old = System.currentTimeMillis() - t0 > ("rcv".equals(a) ? RCV_MAX_AGE : MAX_AGE);
         // delivery receipt: never shows anything - epoch -1 never matches, so fail() is silent
         final int ep = "rcv".equals(a) ? -1 : ep0;
         URL url = a == null ? null : LpActReceiver.allowed(c, x.getString("url"));

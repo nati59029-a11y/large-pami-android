@@ -1,6 +1,6 @@
 'use strict';
-// אישור קבלה בקבוצות (24.11.2026): טלפון עם APK שתומך בכפתורים מקבל על הודעה בקבוצה הודעת data בלבד עם אסימון חד־פעמי (kind 'grp'),
-// ושולח ברקע 'rcv' ל-pushAct, שכותב grp/{gid}/r/{uid}.d. טלפון ישן – ההודעה הרגילה של היום.
+// אישור קבלה בקבוצות (24.11.2026): טלפון עם APK שתומך באישור קבלה (pushRcvAt – רישום עם rcv:1) מקבל על הודעה בקבוצה הודעת data בלבד עם אסימון חד־פעמי (kind 'grp'),
+// ושולח ברקע 'rcv' ל-pushAct, שכותב grp/{gid}/r/{uid}.d. טלפון ישן, וגם APK עם כפתורים בלבד – ההודעה הרגילה של היום.
 // מול אמולטור Firestore (חלק מ-test:multibiz:3): onMsg עם שליחה מדומה, ו-push-act._core.act נקרא ישירות עם זמן קבוע ושם מדומה.
 const { describe, it, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -44,8 +44,8 @@ describe('קבוצות – אישור קבלה מהטלפון (rcv)', { skip: !E
         const P = 'b/' + biz + '/';
         b.set(d.doc('b/' + biz), { name: biz, status: 'active', dataRoot: 'b', features: { tasks: true, groups } });
         b.set(d.doc(P + 'admins/m1'), { email: 'm1@x.invalid' });
-        b.set(d.doc(P + 'staff/m1'), { name: 'המנהל', active: true, pushTokens: [F('m1', biz)], pushAct: [F('m1', biz)], pushActAt: AT(F('m1', biz)) });
-        for (const u of ['e1', 'e3', 'ex']) b.set(d.doc(P + 'staff/' + u), { name: 'עובד ' + u, active: true, pushTokens: [F(u, biz)], pushAct: [F(u, biz)], pushActAt: AT(F(u, biz)) });
+        b.set(d.doc(P + 'staff/m1'), { name: 'המנהל', active: true, pushTokens: [F('m1', biz)], pushAct: [F('m1', biz)], pushActAt: AT(F('m1', biz)), pushRcvAt: AT(F('m1', biz)) });
+        for (const u of ['e1', 'e3', 'ex']) b.set(d.doc(P + 'staff/' + u), { name: 'עובד ' + u, active: true, pushTokens: [F(u, biz)], pushAct: [F(u, biz)], pushActAt: AT(F(u, biz)), pushRcvAt: AT(F(u, biz)) });
         b.set(d.doc(P + 'staff/e2'), { name: 'עובד e2', active: true, pushTokens: [F('e2', biz)] }); // APK ישן – בלי pushAct
         b.set(d.doc(P + 'grp/g1'), { name: 'משמרת', mem: ['e1', 'e2', 'e3'], ao: false, md: true, by: 'm1', t: 1 });
         b.set(d.doc(P + 'grp/g1/r/e3'), { t: 1, mu: true }); // השתיק
@@ -53,7 +53,7 @@ describe('קבוצות – אישור קבלה מהטלפון (rcv)', { skip: !E
       }
       // לארג' פעמי legacy בשורש (אין b/largpeami)
       b.set(d.doc('admins/rm'), { email: 'rm@x.invalid' });
-      b.set(d.doc('staff/r1'), { name: 'דנה', active: true, pushTokens: [F('r1')], pushAct: [F('r1')], pushActAt: AT(F('r1')) });
+      b.set(d.doc('staff/r1'), { name: 'דנה', active: true, pushTokens: [F('r1')], pushAct: [F('r1')], pushActAt: AT(F('r1')), pushRcvAt: AT(F('r1')) });
       b.set(d.doc('grp/g1'), { name: 'כולם', mem: ['r1'], ao: false, md: true, by: 'rm', t: 1 });
       b.set(d.doc(PA.devPath(F('r1'))), { biz: 'largpeami', uid: 'r1', t: T0 });
       await b.commit();
@@ -87,6 +87,45 @@ describe('קבוצות – אישור קבלה מהטלפון (rcv)', { skip: !E
     const pd = await get('pact/' + PA.hashOf(nw.msg.act.at));
     assert.deepEqual({ biz: pd.biz, uid: pd.uid, kind: pd.kind, id: pd.id, acts: pd.acts, mt: pd.mt, gp: pd.gp, exp: pd.exp }, { biz: A, uid: 'm1', kind: 'grp', id: 'g1', acts: ['rcv'], mt: MT, gp: 'b', exp: NOW + 48 * 3600e3 });
     assert.ok(!JSON.stringify(pd).includes(nw.msg.act.at), 'רק הגיבוב נשמר');
+  });
+
+  it('APK עם כפתורים בלבד (pushActAt בלי pushRcvAt) – ההודעה הרגילה של היום, ולא נוצר מסמך pact', async () => {
+    const T0 = Date.now() - 60e3;
+    await prep((d) => d.doc('b/' + A + '/staff/m1').update({ pushRcvAt: {} }));
+    // pushRcvAt ישן מ-pushActAt (רישום act:1 אחר כך בלי rcv שלא נמחק) – גם לא
+    await prep((d) => d.doc('b/' + A + '/staff/e1').update({ pushRcvAt: { [PA.hashOf(F('e1', A))]: T0 - 1000 } }));
+    const calls = [];
+    const send = async (toks, msg, g) => { calls.push({ toks, msg, g }); return toks.map((t) => ({ token: t, ok: true })); };
+    const out = await G.onMsg(A, 'g1', 'mx2', { by: 'e3', byN: 'e3', t: MT, k: 't', txt: 'היי' }, { send, now: NOW, cmt: false });
+    assert.equal(out.ok, true);
+    for (const u of ['m1', 'e1']) {
+      const c = calls.find((x) => x.toks.includes(F(u, A)));
+      assert.ok(c, 'קיבל התראה: ' + u);
+      assert.deepEqual(c.msg, { title: 'משמרת', body: 'עובד e3: היי' }, 'בלי act: ' + u);
+      assert.deepEqual(RMC.fcmPayload(c.toks, Object.assign({ id: 'g1' }, c.msg), { data: { k: 'grp' }, tag: 'grp_g1' }).notification, { title: 'משמרת', body: 'עובד e3: היי' });
+    }
+    let n = -1;
+    await prep(async (d) => { n = (await d.collection('pact').get()).size; });
+    assert.equal(n, 0, 'לא נוצר אסימון');
+  });
+
+  it('טלפון עם אישור קבלה – הודעת data עם אסימון; נמען שכבר קיבל / קרא (r.d או r.t >= t) – ההודעה הרגילה, בלי אסימון', async () => {
+    await prep(async (d) => { await d.doc(R('m1')).set({ d: MT }); await d.doc('b/' + A + '/grp/g1').update({ ao: true }); });
+    const calls = [];
+    const send = async (toks, msg, g) => { calls.push({ toks, msg, g }); return toks.map((t) => ({ token: t, ok: true })); };
+    await G.onMsg(A, 'g1', 'mx3', { by: 'e3', byN: 'e3', t: MT, k: 't', txt: 'א' }, { send, now: NOW, cmt: false });
+    const by = (u) => calls.find((x) => x.toks.includes(F(u, A)));
+    assert.equal(by('m1').msg.act, undefined, 'כבר התקבלה – בלי אסימון');
+    assert.match(by('e1').msg.act.at, PA.TOKEN_RE, 'e1 – אסימון (אין לו r)');
+    let n = -1;
+    await prep(async (d) => { n = (await d.collection('pact').get()).size; });
+    assert.equal(n, 1);
+    // הודעה חדשה יותר – שוב אסימון; r.t >= t – בלי
+    calls.length = 0;
+    await prep((d) => d.doc(R('e1')).set({ t: MT + 10 }));
+    await G.onMsg(A, 'g1', 'mx4', { by: 'e3', byN: 'e3', t: MT + 10, k: 't', txt: 'ב' }, { send, now: NOW, cmt: false });
+    assert.match(by('m1').msg.act.at, PA.TOKEN_RE, 'הודעה חדשה מ-r.d – אסימון');
+    assert.equal(by('e1').msg.act, undefined, 'r.t >= t – בלי אסימון');
   });
 
   it('אסימון תקין: מסמך חדש – d, u, n בלבד; שימוש חוזר – נדחה', async () => {

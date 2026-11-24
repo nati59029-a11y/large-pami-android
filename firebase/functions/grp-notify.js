@@ -12,9 +12,11 @@
 // ההתראה: כותרת = שם הקבוצה, גוף = "<שולח>: <תחילת ההודעה>" או "<שולח>: 📷 תמונה" / "<שולח>: 🎬 סרטון".
 //   tag לכל קבוצה (grp_<gid>) – הודעה חדשה מחליפה את ההתראה הקודמת של אותה קבוצה. במסך נעול מוסתר (private). data: { k: 'grp', id: gid }.
 //   בלי כפתורים. טלפון ישן / בלי תמיכה בכפתורים – הודעת notification רגילה, בדיוק כמו קודם (fcmPayload בלי act).
-//   אישור קבלה (24.11.2026): טלפון עם APK שתומך בכפתורים (tokensAct) – הודעת data בלבד, priority high (sendItem), עם אסימון חד־פעמי
+//   אישור קבלה (24.11.2026): רק טלפון שה-APK שלו שולח אישור קבלה (tokensRcv – רישום עם rcv:1; APK עם כפתורים בלבד מקבל את ההודעה הרגילה) – הודעת data בלבד, priority high (sendItem), עם אסימון חד־פעמי
 //   (push-act.js, kind 'grp', acts ריק = בלי כפתורים). הטלפון מציג את ההתראה בעצמו (אותה כותרת, גוף, tag, private) ושולח ברקע 'rcv' ל-pushAct,
 //   שכותב grp/{gid}/r/{uid}.d – כך השולח רואה ✓✓ אפור גם כשהאפליקציה של הנמען סגורה.
+//   "התקבל" = ההודעה הגיעה לטלפון – גם אם המשתמש כיבה בטלפון את ערוץ ההתראות (ההתראה לא הוצגה), כמו ✓✓ אפור בווטסאפ.
+//   נמען שכבר קרא / קיבל את ההודעה (r.d או r.t >= t) – לא נוצר אסימון, ההודעה הרגילה.
 // בנוסף: grp/{gid}.last = { txt (עד 120), byN, t, k } – רק אם ההודעה חדשה מ-last הקיים (טרנזקציה; הודעה שמגיעה באיחור לא דורסת).
 // 24.11.2026: אחרי ההתראות – זיהוי התחייבויות בקבוצה שפתוחה לגיטי (lib/sec-cmt.js; הצעה בלבד, sec_cmt).
 // אזור: europe-west1 בלבד (כמו secMailWork – טריגר Firestore), בלי ניסיון חוזר (כדי לא לשלוח התראה פעמיים).
@@ -79,7 +81,9 @@ async function onMsg(bizId, gid, mid, m, opts) {
     const g = gs.data() || {};
     const admins = (await db.collection('admins').get()).docs.map((d) => d.id).filter((u) => ID_RE.test(u));
     const staffOf = async (u) => { const s = await db.doc('staff/' + u).get(); return s.exists ? s.data() || {} : null; };
-    const muted = async (u) => { const r = await db.doc('grp/' + gid + '/r/' + u).get(); return r.exists && r.get('mu') === true; };
+    const rC = new Map(); // grp/{gid}/r/{u} – נקרא פעם אחת לנמען (השתקה + אישור קבלה)
+    const rOf = async (u) => { if (!rC.has(u)) { const r = await db.doc('grp/' + gid + '/r/' + u).get(); rC.set(u, r.exists ? r.data() || {} : null); } return rC.get(u); };
+    const muted = async (u) => { const r = await rOf(u); return !!r && r.mu === true; };
     const snd = await staffOf(m.by);
     const name = clean((snd && snd.name) || m.byN).slice(0, 100);
     const msg = msgOf(m, name, g.name);
@@ -102,8 +106,16 @@ async function onMsg(bizId, gid, mid, m, opts) {
       try {
         const toks = await RM.tokensOf(db, u);
         if (!toks.length) continue;
+        // רק טלפונים עם אישור קבלה (tokensRcv) – הודעת data עם אסימון. כל השאר (גם APK עם כפתורים בלבד) – ההודעה הרגילה של היום
         let actT = new Set();
-        try { actT = new Set(await RM.tokensAct(db, u, o.now)); } catch (e) { logger.warn('grpMsg: act tokens failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
+        try { actT = new Set(await RM.tokensRcv(db, u, o.now)); } catch (e) { logger.warn('grpMsg: rcv tokens failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
+        if (actT.size) {
+          try {
+            const r = await rOf(u);
+            const n = (v) => (Number.isInteger(v) ? v : -1);
+            if (r && (n(r.d) >= t || n(r.t) >= t)) actT = new Set(); // כבר התקבלה / נקראה – אין טעם באסימון
+          } catch (e) { /* קריאה נכשלה – ממשיכים עם אסימון (push-act ממילא לא מוריד ערכים) */ }
+        }
         const res = await RM.sendItem(send, toks, actT, msg, gid, { bizId: biz.bizId, uid: u, kind: 'grp', id: gid, mt: t, gp: bizId ? 'b' : 'r', show: '', now: o.now });
         if (res.some((x) => x.ok)) sent++;
         await RM.dropTokens(db, u, res.filter((x) => !x.ok && RM.BAD_TOKEN.includes(x.code)).map((x) => x.token));

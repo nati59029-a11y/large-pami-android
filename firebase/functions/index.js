@@ -128,6 +128,9 @@ exports.scanDocument = onCall(
 //   pushPlainAt { <sha256>: זמן } – הרישום האחרון בלי act של טלפון שנמצא ב-pushAct (מסכים ישנים / חזרה ל-APK בלי כפתורים).
 //   הכלל (tokensAct ב-secretary-remind.js): כפתורים רק אם pushActAt קיים, מלפני פחות מ-30 יום, ואין אחריו pushPlainAt. אחרת – ההודעה הרגילה.
 //   שתי המפות נשמרות רק לטלפונים שעדיין ב-pushTokens, ונכתבות רק במסמך שיש בו pushAct (או ברישום עם act:1).
+//   pushRcvAt { <sha256>: זמן } (24.11.2026) – הרישום האחרון עם act:1 וגם rcv:1 (ה-APK שולח אישור קבלה בקבוצות; הדגל מ-Java, PushGatePlugin.state).
+//     act נשלח (0/1) בלי rcv:1 – נמחק (APK בלי אישור קבלה, או חזרה ל-APK ישן). בלי act בכלל (מסכים ישנים / orders/api.js) – לא משתנה (וממילא pushPlainAt עוצר את הכפתורים).
+//     tokensRcv (secretary-remind.js) – רק לטלפונים האלה grp-notify שולח הודעת data עם אסימון; כל השאר מקבלים את ההודעה הרגילה. אותו כלל ימים ואותו ניקוי כמו pushActAt.
 //   push_dev/{sha256} { biz, uid, t } (בשורש) – למי הטלפון רשום עכשיו בכל העסקים; נכתב בכל רישום. pushAct דורש שהשיוך יתאים (push-act.js).
 // מכשיר אחד למשתמש (16.11.2026, one-device.js): קלט אופציונלי s = מזהה הכניסה (אותו s של devClaim).
 //   s של הטלפון הנוכחי (dev_cur/{uid}.phone.sh) – נרשם, phone.fh = sha256(הטלפון), וכל שאר הטלפונים של המשתמש יוצאים (pushTokens / pushAct / push_dev).
@@ -140,6 +143,7 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
   const input = inputObject(request);
   const token = typeof input.token === 'string' ? input.token.trim() : '';
   const act = input.act === 1 || input.act === true ? 1 : input.act === 0 || input.act === false ? 0 : null; // null = לא נשלח – בלי שינוי
+  const rcv = act !== null && (input.rcv === 1 || input.rcv === true); // אישור קבלה – רק יחד עם act; בלי rcv = אין
   if (token.length < 20 || token.length > 4096 || !TOKEN_RE.test(token)) {
     throw new HttpsError('invalid-argument', 'מזהה הטלפון להתראות לא תקין', { reason: 'bad-token' });
   }
@@ -189,12 +193,15 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     const keptH = new Set(kept.map((t) => PA.hashOf(t)));
     const mapIn = (f) => { const v = s.get(f); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; };
     const prune = (m) => Object.fromEntries(Object.entries(m || {}).filter(([k, v]) => keptH.has(k) && typeof v === 'number'));
-    const actAt = prune(mapIn('pushActAt')), plainAt = prune(mapIn('pushPlainAt'));
+    const actAt = prune(mapIn('pushActAt')), plainAt = prune(mapIn('pushPlainAt')), rcvAt = prune(mapIn('pushRcvAt'));
     if (act === 1) actAt[h] = now;
     if (act === 0) { delete actAt[h]; delete plainAt[h]; }
+    if (act === 1 && rcv) rcvAt[h] = now;
+    else if (act !== null) delete rcvAt[h];
     if (act === null && prev.includes(token)) plainAt[h] = now; // מסכים ישנים – הכפתורים נעצרים עד רישום חדש עם act:1
     const upd = Object.assign({ pushTokens: kept }, hadAct || act === 1 ? { pushAct: acts, pushActAt: actAt } : {},
-      (hadAct || act === 1) && (mapIn('pushPlainAt') || Object.keys(plainAt).length) ? { pushPlainAt: plainAt } : {});
+      (hadAct || act === 1) && (mapIn('pushPlainAt') || Object.keys(plainAt).length) ? { pushPlainAt: plainAt } : {},
+      (hadAct || act === 1) && (mapIn('pushRcvAt') || Object.keys(rcvAt).length) ? { pushRcvAt: rcvAt } : {});
     if (ref === mgrRef) tx.set(ref, Object.assign(upd, { upd: now }));
     else tx.update(ref, upd);
     // השיוך הגלובלי של הטלפון (שרת בלבד) – גם בלי act. טלפון שעבר לעסק אחר: השיוך עובר איתו, והעסק הקודם כבר לא יכול לפעול דרכו
