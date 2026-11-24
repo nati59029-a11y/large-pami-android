@@ -1042,6 +1042,8 @@ async function createOrder(request) {
 // לא נחשף כ-callable/HTTP – רק דרך _core (כמו saveCore ב-customers.js). createOrder עצמה לא השתנתה: src:'staff', בלי sec.
 // p.floorOk (24.11.2026, רשות) – רק qtConvert שולח true (הצעה שמנהל אישר): המחירים השמורים לא נבדקים מול המינימום של היום.
 //   createOrder והמזכירה לא שולחים אותו (כבוי). רק הערך הבוליאני true מפעיל.
+// p.qt (24.11.2026, רשות) – רק qtConvert שולח: מזהה ההצעה נשמר בהזמנה החדשה (ord.qt), כדי שההמרה תוודא שההזמנה o{cvReq} באמת נוצרה ממנה.
+//   לא מקלט (createOrder לא מקבל qt – onlyKeys), ולא נכתב בהזמנה קיימת (dup).
 async function createCore(db, w, p) {
   const { reqId, br, cust, raw, note, custId, input, disc } = p;
   const ref = db.doc('ord/o' + reqId);
@@ -1078,6 +1080,7 @@ async function createCore(db, w, p) {
     const doc = Object.assign({ no, src: p.src || 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now }, { vm: pc.vm, vr: pc.vat }, sums(total, pc.vm, pc.vat, disc));
     if (disc) doc.disc = disc;
     if (p.sec) doc.sec = p.sec;
+    if (typeof p.qt === 'string' && p.qt) doc.qt = p.qt;
     if (note) doc.note = note;
     if (custId) doc.custId = custId;
     if (cell && cell.n + Object.keys(cell).length > 2) doc.cell = cell;

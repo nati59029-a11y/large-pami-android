@@ -166,6 +166,9 @@ async function qtSet(request) {
 //        ← "דורש אישור" = פג תוקף ו/או מחיר שנכשל היום ב-AC.staffOk (priceRun של עובד, שורה-שורה, מול העלות/המחירון/המינימום של היום)
 //          → עובד בלי apr.st==='ok' → quote-approval { why:[{t:'exp',vu} | {t:'floor',pid,n,min,why}] }; מנהל / עובד עם אישור – עובר
 //        ← createCore(reqId: cvReq) ← רק אחרי הצלחה: st:'conv', ord:{id,no} + יומן בהצעה (conv) ובהזמנה (quote).
+//   הגנה (סבב 2): ההזמנה שנוצרת מסומנת ord.qt = id (מהשרת בלבד). ההצעה מסומנת conv רק אם ord/o{cvReq}.qt === id –
+//   cvReq גלוי בקריאה, ומי ש"תופס" אותו ב-createOrder מקבל רק חסימה של ההמרה (qt-bad), לא קישור. הזמנה קיימת של ההצעה
+//   (ניסיון חוזר אחרי כשל חלקי) – משלימים את הסימון לפני בדיקות התוקף/המינימום/הסניף. סניף: O.brOf (פעיל ומותר), כמו createOrder.
 //   אידמפוטנטי: cvReq קבוע → לחיצה כפולה / שתי קריאות במקביל = הזמנה אחת (createCore מחזיר dup), וההצעה מסומנת פעם אחת (טרנזקציה).
 //   כישלון ב-createCore → ההצעה נשארת 'open' (שום דבר לא נכתב). כישלון אחרי ההזמנה (נדיר) → קריאה חוזרת משלימה את הסימון (dup).
 //   floorOk ל-createCore = true רק לעובד שההצעה אושרה לו בידי מנהל (נקבע כאן, לא מהקלט). מנהל – priceRun ממילא לא בודק מינימום.
@@ -200,6 +203,25 @@ async function today(db, w, d, raw, custId) {
   return { vm: pc.vm, bad: fl };
 }
 const whyTxt = (why) => why.map((x) => (x.t === 'exp' ? `פג תוקף (${x.vu})` : `"${x.n}" ₪${x.price} מתחת למינימום${x.min != null ? ` ₪${x.min}` : ''}`)).join('; ');
+// סימון "הומרה" – בטרנזקציה, רק אם ההזמנה o{cvReq} קיימת ונוצרה מההצעה הזו (ord.qt === id, נכתב רק בשרת). אחרת qt-bad.
+//   ההצעה כבר conv (קריאה מקבילה) → אותה תוצאה (dup). why – לרישום ביומן בלבד.
+async function mark(db, w, id, cvReq, why, aprTxt) {
+  let out = null;
+  await db.runTransaction(async (tx) => {
+    const { ref, d: q } = await loadQt(tx, db, w, id);
+    if (q.st === 'conv') { out = { id, st: 'conv', ord: q.ord, dup: true, why: [] }; return; }
+    const oRef = db.doc('ord/o' + cvReq);
+    const o = await tx.get(oRef);
+    if (!o.exists || o.get('qt') !== id) throw pre('qt-bad', 'מזהה ההמרה של ההצעה כבר שימש להזמנה אחרת – צרו הצעה חדשה');
+    const no = o.get('no');
+    const t = Date.now();
+    tx.update(ref, { st: 'conv', ord: { id: oRef.id, no }, conv: { by: w.uid, at: t }, upd: t });
+    tx.set(logRef(db, id), O.logData(w, 'conv', `הזמנה #${no}${q.st === 'cancel' ? ' · ההצעה בוטלה במקביל' : ''}${why.length ? ` · ${aprTxt}: ${whyTxt(why)}` : ''}`));
+    tx.set(O.logRef(db, oRef.id), O.logData(w, 'quote', `נוצרה מהצעת מחיר #${q.no}`));
+    out = { id, st: 'conv', ord: { id: oRef.id, no }, dup: false, why };
+  });
+  return out;
+}
 async function qtConvert(request) {
   const w = await O.who(request);
   const input = inputObject(request);
@@ -207,34 +229,28 @@ async function qtConvert(request) {
   const id = O.idOf(input.id, 'הצעה');
   const db = T.tdb();
   const { d } = await loadQt(null, db, w, id);
-  const done = (q) => ({ id, st: 'conv', ord: q.ord, dup: true, why: [] });
-  if (d.st === 'conv') return done(d);
+  if (d.st === 'conv') return { id, st: 'conv', ord: d.ord, dup: true, why: [] };
   if (d.st !== 'open') throw pre('qt-closed', 'ההצעה בוטלה');
   if (typeof d.cvReq !== 'string' || !d.cvReq) throw pre('qt-bad', 'ההצעה פגומה');
+  // ניסיון חוזר אחרי כשל חלקי (ההזמנה נוצרה, הסימון לא): משלימים לפני בדיקות התוקף/המינימום/סניף – ההזמנה כבר קיימת.
+  // הזמנה קיימת שלא נוצרה מההצעה (מישהו "תפס" את cvReq ב-createOrder) → qt-bad (בתוך mark), בלי לקשר.
+  const ex = await db.doc('ord/o' + d.cvReq).get();
+  if (ex.exists) return mark(db, w, id, d.cvReq, [], '');
   if (d.disc && !isMgr(w)) throw deny('manager-only', 'בהצעה יש הנחה כללית – רק מנהל יכול להפוך אותה להזמנה');
+  const br = O.brOf(w, d.br); // סניף פעיל ומותר – כמו createOrder (bad-br / foreign-br)
   const raw = rawOf(d.items);
   const custId = typeof d.custId === 'string' ? d.custId : '';
   const now = Date.now();
-  const td = await today(db, w, d, raw, custId);
+  const td = await today(db, w, Object.assign({}, d, { br }), raw, custId);
   if (td.vm !== d.vm) throw pre('quote-vm', 'סוג הלקוח השתנה (עסקי/פרטי) מאז ההצעה – צרו הצעה חדשה');
   const why = (expired(d, now) ? [{ t: 'exp', vu: d.vu }] : []).concat(td.bad);
   const apr = !!(d.apr && d.apr.st === 'ok');
   if (why.length && !isMgr(w) && !apr) {
     throw new HttpsError('failed-precondition', `ההצעה דורשת אישור מנהל: ${whyTxt(why)}`, { reason: 'quote-approval', why });
   }
-  const r = await O.createCore(db, w, { reqId: d.cvReq, br: d.br, cust: d.cust, raw, note: typeof d.note === 'string' ? d.note : '', custId, input: {},
-    disc: d.disc || undefined, src: 'staff', floorOk: apr && !isMgr(w) });
-  let out = null;
-  await db.runTransaction(async (tx) => {
-    const { ref, d: q } = await loadQt(tx, db, w, id);
-    if (q.st === 'conv') { out = done(q); return; } // קריאה מקבילה כבר סימנה
-    const t = Date.now();
-    tx.update(ref, { st: 'conv', ord: { id: r.id, no: r.no }, conv: { by: w.uid, at: t }, upd: t });
-    tx.set(logRef(db, id), O.logData(w, 'conv', `הזמנה #${r.no}${q.st === 'cancel' ? ' · ההצעה בוטלה במקביל' : ''}${why.length ? ` · ${apr && !isMgr(w) ? 'באישור מנהל' : 'מנהל'}: ${whyTxt(why)}` : ''}`));
-    tx.set(O.logRef(db, r.id), O.logData(w, 'quote', `נוצרה מהצעת מחיר #${q.no}`));
-    out = { id, st: 'conv', ord: { id: r.id, no: r.no }, dup: false, why };
-  });
-  return out;
+  await O.createCore(db, w, { reqId: d.cvReq, br, cust: d.cust, raw, note: typeof d.note === 'string' ? d.note : '', custId, input: {},
+    disc: d.disc || undefined, src: 'staff', floorOk: apr && !isMgr(w), qt: id });
+  return mark(db, w, id, d.cvReq, why, apr && !isMgr(w) ? 'באישור מנהל' : 'מנהל');
 }
 
 const wrap = (name, fn) => T.scoped(async (request) => {

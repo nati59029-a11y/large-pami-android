@@ -466,3 +466,58 @@ describe('qtConvert – המרת הצעה להזמנה', () => {
     assert.equal(await get(`b/largpeami/ord/${c.result.ord.id}`), null);
   });
 });
+
+// סבב 2 (ליקויי בדיקה 3-שרת-המרה_סבב-1): cvReq "תפוס", ניסיון חוזר אחרי כשל חלקי, סניף מושבת
+describe('qtConvert – סבב 2: הזמנה זרה, השלמה אחרי כשל, סניף פעיל', () => {
+  const P = `b/${A}/`;
+  async function mk(u, x) { const r = await call('qtSave', u || E1, body(x)); assert.equal(r.status, 'OK', r.text); return r.result.id; }
+  it('cvReq שנתפס ב-createOrder (הזמנה זרה) → qt-bad, ההצעה לא מקושרת; הזמנה מהמרה מסומנת ord.qt; qt לא מתקבל מקלט', async () => {
+    const id = await mk();
+    const cv = (await get(P + 'qt/' + id)).cvReq; // החוקים מתירים לעובד לקרוא את ההצעה
+    await assertSucceeds(db(E1).doc(P + 'qt/' + id).get());
+    assert.equal((await call('createOrder', E1, { reqId: cv, br: 'br1', cust: { name: 'אחר', phone: '0509999999' }, items: [{ pid: 'pA', qty: 1, price: 10 }], qt: id })).reason, 'bad-field');
+    const fake = await call('createOrder', E1, { reqId: cv, br: 'br1', cust: { name: 'אחר', phone: '0509999999' }, items: [{ pid: 'pA', qty: 1, price: 10 }] });
+    assert.equal(fake.status, 'OK', fake.text);
+    assert.equal((await get(P + 'ord/' + fake.result.id)).qt, undefined);
+    for (const u of [E1, MGR]) assert.equal((await call('qtConvert', u, { id })).reason, 'qt-bad', u);
+    const q = await get(P + 'qt/' + id);
+    assert.equal(q.st, 'open'); assert.equal(q.ord, undefined);
+    assert.equal((await coll(`${P}qt/${id}/log`)).filter((x) => x.act === 'conv').length, 0);
+    // הצעה אחרת – המרה רגילה מסמנת את ההזמנה בשרת
+    const id2 = await mk();
+    const r = await call('qtConvert', E1, { id: id2 });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await get(P + 'ord/' + r.result.ord.id)).qt, id2);
+  });
+  it('ניסיון חוזר אחרי כשל חלקי (ההזמנה קיימת, ההצעה open, ובינתיים פגה והמחיר מתחת למינימום) → משלים את הסימון בלי quote-approval ובלי הזמנה/מלאי נוספים', async () => {
+    const id = await mk();
+    const r = await call('qtConvert', E1, { id });
+    assert.equal(r.status, 'OK', r.text);
+    // דימוי כשל אחרי createCore: ההצעה חוזרת ל-open בלי קישור, פגה, והעלות עלתה
+    await prep(async (d) => {
+      const q0 = (await d.doc(P + 'qt/' + id).get()).data();
+      delete q0.ord; delete q0.conv;
+      await d.doc(P + 'qt/' + id).set(Object.assign(q0, { st: 'open', vu: plus(ilDay(Date.now()), -3) }));
+      await d.doc(P + 'ordcfg/price').set({ pct: 10 }); await d.doc(P + 'prod/pA/p/cost').set({ cost: 12 });
+    });
+    const s0 = await stockState(P);
+    const again = await call('qtConvert', E1, { id });
+    assert.equal(again.status, 'OK', again.text);
+    assert.equal(again.result.ord.id, r.result.ord.id); assert.equal(again.result.st, 'conv');
+    const q = await get(P + 'qt/' + id);
+    assert.equal(q.st, 'conv'); assert.deepEqual(q.ord, r.result.ord);
+    assert.deepEqual(await stockState(P), s0, 'אין הזמנה נוספת ואין שינוי מלאי');
+  });
+  it('סניף שהושבת אחרי ההצעה → bad-br (כמו createOrder), גם למנהל; לא נוצרת הזמנה', async () => {
+    const id = await mk();
+    await prep(async (d) => {
+      const b = (await d.doc('b/' + A).get()).data();
+      b.org.branches = b.org.branches.map((x) => (x.id === 'br1' ? Object.assign({}, x, { on: false }) : x));
+      await d.doc('b/' + A).update({ org: b.org });
+    });
+    assert.equal((await call('createOrder', E1B, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 10 }] })).reason, 'bad-br', 'ביקורת');
+    for (const u of [E1, MGR]) assert.equal((await call('qtConvert', u, { id })).reason, 'bad-br', u);
+    assert.equal((await coll(P + 'ord')).length, 0);
+    assert.equal((await get(P + 'qt/' + id)).st, 'open');
+  });
+});
