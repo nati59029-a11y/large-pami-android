@@ -103,6 +103,7 @@ function impOn(dir) {
   j.importEnabled = true;
   j.hkSync = false; // 0.1.21: יתרות הקפה – כבוי בעותק של הבדיקה (הבדיקות הקודמות לא משתנות); הבדיקות של hkSnap מדליקות דרך sel()
   j.branch.switch.ms = 8000; j.branch.switch.settle = 800; // 0.1.13: בבדיקה – המתנה קצרה לבחירת סניף שלא נקלטת
+  j.branch.switch.reloadMs = 6000; // 0.1.22: בבדיקה – המתנה קצרה לטעינה מחדש של כספית אחרי החלפת סניף
   fs.writeFileSync(f, JSON.stringify(j));
 }
 test.after(async () => {
@@ -715,7 +716,7 @@ test('ניסיון חוזר: הקובץ של הריצה כבר ב"טעינות �
   delete srv.runId; srv.exportN.price = 2;
 });
 
-test('"טעינות קודמות" נטענת באיחור → מחכים לה ומעלים פעם אחת; לא מופיעה בכלל → selector-miss בלי העלאה ובלי קובץ בתור', async () => {
+test('"טעינות קודמות" נטענת באיחור → מחכים לה ומעלים פעם אחת; לא מופיעה בכלל (0.1.22: אין טעינות אחרונות) → מעלים פעם אחת; כותרת בלי טבלה → selector-miss בלי העלאה ובלי קובץ בתור', async () => {
   const cp = caspitPage();
   await cp.evaluate(() => { localStorage.setItem('histlate', '1'); });
   await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
@@ -725,7 +726,15 @@ test('"טעינות קודמות" נטענת באיחור → מחכים לה ו
   let s = await waitRun(t0);
   assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
   assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  // 0.1.22 – כמו בכספית האמיתית (25.11): בלי טעינות מהזמן האחרון אין כותרת ואין טבלה → אין טעינות קודמות, מעלים; אחרי ההעלאה הטבלה מופיעה
   await cp.evaluate(() => { localStorage.removeItem('histlate'); localStorage.setItem('histnone', '1'); });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ impHash: {} }); });
+  nImp = imports.length; t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  await cp.evaluate(() => { localStorage.removeItem('histnone'); localStorage.setItem('histhead', '1'); });
   await sw.evaluate(async () => { await chrome.storage.local.set({ impHash: {} }); });
   nImp = imports.length; t0 = Date.now();
   await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
@@ -735,7 +744,7 @@ test('"טעינות קודמות" נטענת באיחור → מחכים לה ו
   const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
   const q = (await Promise.all(tabs.map((p) => p.evaluate(() => document.querySelectorAll('#queue tr').length).catch(() => 0)))).reduce((a, b) => a + b, 0);
   assert.equal(q, 0, 'הקובץ שלנו לא נוסף לתור');
-  await cp.evaluate(() => localStorage.removeItem('histnone'));
+  await cp.evaluate(() => localStorage.removeItem('histhead'));
   srv.exportN.price = 2;
 });
 
@@ -847,6 +856,25 @@ test('ייבוא עם שגויים בכספית → import-errors (עם המספ
   assert.match(s.st.lastRun.msg, /בתהליך/);
   await cp.evaluate(() => localStorage.removeItem('imphang'));
   await sw.evaluate(async () => { (await self.__cxTest.sel()).importWaitMs = 600000; });
+});
+
+// 0.1.22 – 25.11: כספית דחתה פריטים חדשים (ברקוד קיים) והריצה נעצרה לפני עדכון המחירים. עכשיו: המחירים נשלחים, והריצה "נכשלה" עם import-errors.
+// גם הסטטוס של כספית האמיתית: "טעינה הסתיימה בהצלחה – קיימים פריטים שלא נטענו ראה קובץ שגיאות" (stfin)
+test('0.1.22 שגויים בפריטים החדשים לא עוצרים את עדכון המחירים; הסטטוס "טעינה הסתיימה בהצלחה" מזוהה כסיום', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { for (const k of ['preq', 'imperr', 'imphang', 'histnone', 'histhead', 'histlate']) localStorage.removeItem(k); localStorage.setItem('imperrNew', '1'); localStorage.setItem('stfin', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1; srv.exportN.price = 2;
+  const n0 = srv.ops('importResult').length, nImp = imports.length, t0 = Date.now();
+  try {
+    await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+    const s = await waitRun(t0);
+    assert.equal(s.st.lastRun.code, 'import-errors', JSON.stringify(s.st.lastRun));
+    assert.equal(imports.length, nImp + 2, 'גם קובץ המחירים הועלה');
+    const ir = srv.ops('importResult').slice(n0);
+    assert.deepEqual(ir.map((x) => [x.kind, x.ok, x.errors]), [['new', false, 1], ['price', true, 0]]);
+    assert.match(ir[1].status, /הסתיימה בהצלחה/);
+  } finally { await cp.evaluate(() => { localStorage.removeItem('imperrNew'); localStorage.removeItem('stfin'); }); }
 });
 
 test('העלאה לכספית כבויה (importEnabled:false): קטלוג ומכירות בלבד – בלי export לשרת ובלי ייבוא; הריצה "הצליחה" עם imp:off; הודעה בחלון', async () => {
@@ -1026,6 +1054,33 @@ test('0.1.13 (ד) מעבר לנחל לכיש לא נקלט → branch-switch (י
     r = await syncOneDay();
     assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
     assert.ok((await picks()).startsWith('יהודה הנשיא;'), 'קודם חזרה ליהודה הנשיא: ' + (await picks()));
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+});
+// 0.1.22 – תקלה 25.11 בכספית האמיתית: השם החדש מופיע בפקד מיד, אבל הבחירה נשמרת רק כשכספית טוענת את הדף מחדש (אחרי כמה שניות).
+// עד 0.1.21 התוסף עבר למסך הדוח לפני כן → הדוח של "נחל לכיש" יצא של יהודה הנשיא (branch-same).
+test('0.1.22 החלפת סניף שנשמרת רק בטעינה מחדש של כספית (brFail=lag): מחכים לטעינה → נחל לכיש נשלח, חזרה ליהודה הנשיא', async () => {
+  await ls({ brFail: 'lag', brLagMs: '2500', brPicks: null });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ salesHash: {} }); }); // אותו יום כבר נשלח בבדיקה הקודמת – בלי זה "אותו קובץ"
+  try {
+    const { s, sales } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(sales.length, 1);
+    const bks = [...new Set(sales[0].lines.map((l) => l.bk))].sort();
+    assert.equal(bks.length, 2, 'שני הסניפים נשלחו: ' + bks.join(','));
+    assert.equal(await picks(), 'נחל לכיש;יהודה הנשיא;', 'בחירה אחת לכל כיוון, בלי ניסיון חוזר');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, brLagMs: null, store: 'יהודה הנשיא' }); }
+});
+test('0.1.22 השם מופיע בפקד אבל הבחירה לא נשמרת ואין טעינה מחדש (brFail=lost): התוסף טוען מחדש בעצמו, בוחר שוב, ואז branch-switch (לא branch-same)', async () => {
+  await ls({ brFail: 'lost', brPicks: null });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ salesHash: {} }); }); // אותו יום כבר נשלח בבדיקה הקודמת – בלי זה "אותו קובץ"
+  try {
+    const { s, sales, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.code, 'branch-switch', JSON.stringify(s.st.lastRun));
+    assert.equal(rep.err.code, 'branch-switch');
+    assert.equal(sales.length, 1); assert.ok(sales[0].lines.every((l) => l.bk === '1'), 'רק יהודה הנשיא');
+    assert.equal(await picks(), 'נחל לכיש;נחל לכיש;', 'שני ניסיונות בחירה');
     assert.equal(await store0(), 'יהודה הנשיא');
   } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
 });

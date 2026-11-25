@@ -46,6 +46,15 @@ const STORE = () => localStorage.getItem('store') || 'יהודה הנשיא';
     const nm = o.textContent.trim(), bf = localStorage.getItem('brFail') || '';
     localStorage.setItem('brPicks', (localStorage.getItem('brPicks') || '') + nm + ';');
     if ((bf === 'switch' && nm === 'נחל לכיש') || (bf === 'restore' && nm === 'יהודה הנשיא')) return;
+    // 0.1.22 (כמו בכספית האמיתית, 25.11): השם מופיע בפקד מיד, והבחירה נשמרת רק בטעינה מחדש של כספית אחרי brLagMs.
+    // מעבר מסך לפני כן (שינוי hash) מבטל את השמירה. brFail=lost – השם מופיע, אבל לא נשמר ואין טעינה מחדש
+    if (bf === 'lag' || bf === 'lost') {
+      f.querySelector('.selected-store').textContent = "לארג' פעמי-" + nm;
+      if (bf === 'lost') return;
+      const h0 = location.hash;
+      setTimeout(() => { if (location.hash !== h0) return; localStorage.setItem('store', nm); location.reload(); }, +(localStorage.getItem('brLagMs') || 4000));
+      return;
+    }
     localStorage.setItem('store', nm);
     setTimeout(() => location.reload(), 300);
   }));
@@ -343,8 +352,10 @@ function render() {
       document.querySelectorAll('#hist .cx').forEach((b) => { b.onclick = () => ev.push('cancel'); });
       document.querySelectorAll('#hist .hl').forEach((b) => { b.onclick = (e) => { e.preventDefault(); ev.push('histlink'); }; });
     };
-    // histlate: הטבלה מופיעה באיחור (3 שניות); histnone: הטבלה לא מופיעה בכלל
-    if (localStorage.getItem('histlate')) setTimeout(drawH, 3000); else if (!localStorage.getItem('histnone')) drawH();
+    // histlate: הטבלה מופיעה באיחור (3 שניות); histnone: אין כותרת ואין טבלה עד שיש טעינה (כמו בכספית האמיתית, 25.11 – אחרי ההעלאה הטבלה מופיעה);
+    // histhead: הכותרת "טעינות קודמות" בלי טבלה (לא ידוע מה קרה – לא מעלים). imperrNew – שגוי רק בפריטים חדשים; stfin – הסטטוס של כספית האמיתית
+    if (localStorage.getItem('histhead')) document.getElementById('hist').innerHTML = '<h4>טעינות קודמות</h4>';
+    else if (localStorage.getItem('histlate')) setTimeout(drawH, 3000); else if (!localStorage.getItem('histnone')) drawH();
     document.getElementById('run').onclick = async () => {
       ev.push('run');
       if (!Q.length) { document.querySelector('.result').textContent = 'שגיאה: אין קבצים'; return; }
@@ -354,7 +365,7 @@ function render() {
         const n = (await r.json()).n, L = H(), id = Math.max(...L.map((x) => x.id)) + 1;
         L.push({ id, name: q.f.name, tn: q.tn, st: 'בתהליך', c: '' });
         localStorage.setItem(HK, JSON.stringify(L));
-        setTimeout(() => { if (localStorage.getItem('imphang')) return; const M = H(), x = M.find((y) => y.id === id); const e = +(localStorage.getItem('imperr') || 0); x.st = 'בוצע'; x.c = 'שגויים: ' + e + ', נטענו: ' + (n - e); localStorage.setItem(HK, JSON.stringify(M)); drawH(); }, 1500);
+        setTimeout(() => { if (localStorage.getItem('imphang')) return; const M = H(), x = M.find((y) => y.id === id); const e = localStorage.getItem('imperrNew') && /חדשים/.test(x.tn) ? 1 : +(localStorage.getItem('imperr') || 0); x.st = localStorage.getItem('stfin') ? (e ? 'טעינה הסתיימה בהצלחה - קיימים פריטים שלא נטענו ראה קובץ שגיאות' : 'טעינה הסתיימה בהצלחה') : 'בוצע'; x.c = 'שגויים: ' + e + ', נטענו: ' + (n - e); localStorage.setItem(HK, JSON.stringify(M)); drawH(); }, 1500);
       }
       drawQ(); drawH();
     };
