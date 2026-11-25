@@ -157,16 +157,16 @@ const PAGE_LIB = () => {
     const r0 = await page.evaluate(() => ({ br: LblPrint.brand(), row: !!document.querySelector('#main [data-c=lblBOn]') }));
     check('r 0 עסק אחר (לא לארג\' פעמי): אין לוגו/חותמת ברירת מחדל', r0.br === null && !r0.row, r0);
     await search(page, '5901234123457');
-    const r1 = await page.evaluate(() => { const B = [...document.querySelectorAll('#main [data-a=lblTpl]')]; const c = document.querySelector('#main canvas[data-lbl-t="c:mine"]');
-      return { n: B.length, v: B.map((b) => b.dataset.v), on: (B.find((b) => b.getAttribute('aria-pressed') === 'true') || {}).dataset, t3: (B.find((b) => b.dataset.v === '3') || {}).innerText, cw: c && c.width, ch: c && c.height, mine: (B.find((b) => b.dataset.v === 'c:mine') || {}).innerText }; });
-    check('r 1 בחירת תבנית: 5 המקוריות + "שלי" (40×30, קנבס 472×354); תבנית 3 ערוכה; מחוקה ו-v לא מוכר – לא מוצגות; ברירת המחדל של העסק (lbls.def) נבחרה',
-      r1.n === 6 && JSON.stringify(r1.v) === JSON.stringify(['1', '2', '3', '4', '5', 'c:mine']) && r1.on && r1.on.v === 'c:mine' && /ערוכה/.test(r1.t3) && r1.cw === 472 && r1.ch === 354 && /40×30/.test(r1.mine), r1);
+    const r1 = await page.evaluate(() => { const L = LblPrint.tList(), c = document.querySelector('#main canvas[data-lbl-t]');
+      return { n: document.querySelectorAll('#main canvas[data-lbl-t]').length, v: L.map((x) => String(x.r)), on: c && c.dataset.lblT, t3: !!(L.find((x) => x.r === 3) || {}).T, cw: c && c.width, ch: c && c.height, mine: document.getElementById('lblTN').innerText }; });
+    check('r 1 שקופיות: 5 המקוריות + "שלי" (40×30, קנבס 472×354); תבנית 3 ערוכה; מחוקה ו-v לא מוכר – לא מוצגות; ברירת המחדל של העסק (lbls.def) מוצגת לבד',
+      r1.n === 1 && JSON.stringify(r1.v) === JSON.stringify(['1', '2', '3', '4', '5', 'c:mine']) && r1.on === 'c:mine' && r1.t3 && r1.cw === 472 && r1.ch === 354 && /40×30/.test(r1.mine), r1);
     const flds = () => page.evaluate(() => ['ex', 'mq', 'mp'].filter((k) => document.querySelector('#main #lblEd [data-k=' + k + ']')));
     const f1 = await flds();
-    await page.click('#main [data-a=lblTpl][data-v="1"]'); await H.settle(page, 300);
+    await page.evaluate(() => ACT.lblTpl({ dataset: { v: '1' } })); await H.settle(page, 300);
     const f2 = await flds();
     check('r 2 שדות "בתוקף עד" ומבצע כמות – רק בתבנית שצריכה אותם', JSON.stringify(f1) === '["ex","mq","mp"]' && f2.length === 0, { f1, f2 });
-    await page.click('#main [data-a=lblTpl][data-v="c:mine"]'); await H.settle(page, 300);
+    await page.evaluate(() => ACT.lblTpl({ dataset: { v: 'c:mine' } })); await H.settle(page, 300);
     await page.fill('#main #lblEd [data-k=ex]', '31.12.26'); await page.fill('#main #lblEd [data-k=mq]', '2'); await page.fill('#main #lblEd [data-k=mp]', '20');
     await page.click('#main [data-a=lblQn][data-v="100"]'); await H.settle(page, 200);
     const q100 = await page.evaluate(() => ({ v: document.querySelector('#main [data-i=lblQty]').value, on: document.querySelector('#main [data-a=lblQn][aria-pressed=true]').dataset.v, chips: [...document.querySelectorAll('#main [data-a=lblQn]')].map((b) => b.dataset.v).join(',') }));
@@ -176,7 +176,7 @@ const PAGE_LIB = () => {
     const row = (await page.evaluate(() => LblPrint.last && LblPrint.last[0])) || {};
     check('r 3 כפתורי כמות 1/10/20/50/100; "הדפס" (100, בלי אישור): עותק התבנית T בשורה, tpl "c:mine", בתוקף עד ומבצע כמות – PDF של 100 עמודים בגודל 113.39×85.04 נק\'',
       q100.v === '100' && q100.on === '100' && q100.chips === '1,10,20,50,100' && !p100.ask && p100.count === 100 && JSON.stringify(p100.boxes) === '["0 0 113.39 85.04"]' && row.tpl === 'c:mine' && row.n === 100 && row.T && row.T.id === 'mine' && row.T.w === 40 && row.T.els.length === 5 && row.it.ex === '31.12.26' && row.it.mq === '2' && row.it.mp === '20', { q100, ask: p100.ask, count: p100.count, boxes: p100.boxes, row: Object.assign({}, row, { T: row.T && row.T.id }) });
-    await search(page, '5901234123457'); await page.click('#main [data-a=lblTpl][data-v="1"]'); await H.settle(page, 200);
+    await search(page, '5901234123457'); await page.evaluate(() => ACT.lblTpl({ dataset: { v: '1' } })); await H.settle(page, 200);
     await page.evaluate(() => { window.__opened = []; LblPrint.last = null; });
     await page.fill('#main [data-i=lblQty]', '1000'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 300);
     const t1000 = await toasts(page), n1000 = await page.evaluate(() => window.__opened.length + (LblPrint.last ? 1 : 0));
@@ -221,7 +221,7 @@ const PAGE_LIB = () => {
     for (const who of ['m', 'w']) {
       const { ctx, page, log } = await open(browser, www, who, { biz: 'largpeami', st: ST });
       await goLbl(page);
-      const r = await page.evaluate(() => { const b = LblPrint.brand(); return { lay: b && b.lay, logo: b ? (b.logo ? b.logo.slice(0, 22) : '') : null, stamp: b && b.stamp ? b.stamp.slice(0, 22) : '', row: !!document.querySelector('#main [data-c=lblBOn]') }; });
+      const r = await page.evaluate(() => { const b = LblPrint.brand(); return { lay: b && b.lay, logo: b ? (b.logo ? b.logo.slice(0, 22) : '') : null, stamp: b && b.stamp ? b.stamp.slice(0, 22) : '', row: !document.querySelector('#main [data-c=lblBOn]') && (go('lblS'), /לוגו וכשרות/.test(document.getElementById('main').innerText)) }; });
       const ok = cfgF ? r.logo === '' && r.stamp === 'data:image/png;base64,' && r.lay === 'bot' && r.row : r.logo === 'data:image/png;base64,' && r.stamp === 'data:image/png;base64,' && r.lay === 'top' && r.row;
       check(`l ${nm} (${who === 'm' ? 'מנהל' : 'עובד'}): ` + (cfgF ? 'הלוגו לא חוזר, החותמת – ברירת המחדל' : 'לוגו לארג\' פעמי וחותמת הבד"ץ מופיעים לבד, פס עליון'), ok, r);
       if (shots && !cfgF && who === 'm') { await search(page, '5901234123457'); await H.settle(page, 800); await page.locator('#lblEd').screenshot({ path: path.join(shots, 'l-default.png') }); }
