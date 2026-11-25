@@ -79,7 +79,10 @@ if(typeof inbDrop==='function'){const o=inbDrop;inbDrop=function(id){let it=null
 /* 23.11.2026: "שלח לתמחור" – מנהל שולח ידנית הוצאה של ספק עם צילום (למשל חשבונית שלא נכנסה). אותו מזהה (rqOf של הקובץ),
    כך שחשבונית שכבר בתמחור לא תיכנס פעמיים (השרת מחזיר dup). הצילום נקרא מהטלפון */
 PI.send=id=>{try{const t=S.tx.find(x=>x.id===id);if(!t||!t.file)return toast('אין צילום להוצאה הזו');const c=cat(t.cat);if(!c||c.beh!=='sup')return toast('רק הוצאה של ספק');
- if(!on())return toast('תמחור לא פעיל בעסק');const rq=ID_OK(t.src)?rqOf('o'+t.src):rqOf(t.file);/* הוצאה של עובד: אותו מזהה כמו בשרת */if(done().includes(rq)||qGet().some(x=>x.rq===rq&&x.t==='c'))return toast('ההוצאה כבר נשלחה לתמחור');
+ if(!on())return toast('תמחור לא פעיל בעסק');const rq=ID_OK(t.src)?rqOf('o'+t.src):rqOf(t.file);/* הוצאה של עובד: אותו מזהה כמו בשרת */{/* 25.11.2026: בקשה שעוד ממתינה בתור – מנסים שוב עכשיו (במקום "כבר נשלחה"). בקשה שהסתיימה (גם בכשל) – אפשר לשלוח שוב;
+   אם החשבונית כבר בתמחור השרת מחזיר dup ולא נוצרת כפילות, ואם נוצרה בלי שורות (rf) – היא מתמלאת */
+ const L=qGet(),q=L.find(x=>x.rq===rq&&x.t==='c');if(q){q.nx=0;qSet(L);later(300);closeDlg();return toast('ההוצאה כבר בתור לתמחור – מנסה שוב עכשיו')}
+ if(done().includes(rq))wr(DK,done().filter(x=>x!==rq))}
  const s=t.sub?subById(t.sub):null;if(s&&s.prOff)return toast('הספק מסומן "לא נכנס לתמחור" בכרטיס הספק');
  add({t:'c',rq,fid:t.file,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||''),date:DATE_OK(t.date)?t.date:''});closeDlg();toast('נשלח לתמחור – יופיע ברשימה בעוד דקה-שתיים')}catch(e){toast('השליחה נכשלה')}};
 ACT.piSend=el=>PI.send(el.dataset.id);
@@ -110,8 +113,12 @@ async function run(j){
  let P0=null;
  if(j.cr){if(j.fid)await upImg(j);return}
  if(!j.r){P0=await pages(j.fid);const parts=P0.map(p=>({inline_data:p}));
-  const txt=await shAIcall({contents:[{parts:[{text:''}].concat(parts)}],generationConfig:{responseMimeType:'application/json',temperature:0}},'srv',PI.tmo,false,'invlines');
-  const x=PricingLines.invLines(String(txt||''),await vatOf());j.r={sup:x.sup,inv:x.inv,date:x.date,lines:x.lines};
+  const ai=ps=>shAIcall({contents:[{parts:[{text:''}].concat(ps)}],generationConfig:{responseMimeType:'application/json',temperature:0}},'srv',PI.tmo,false,'invlines');
+  let x;try{x=PricingLines.invLines(String(await ai(parts)||''),await vatOf())}
+  catch(e){/* 25.11.2026: חשבונית של כמה עמודים שלא הספיקה בזמן – מזהים עמוד-עמוד ומחברים את השורות */
+   if(parts.length<2||!(e&&(e.ab||e.http===504||e.rs==='time-budget'||e.rs==='timeout'||e.st==='DEADLINE_EXCEEDED')))throw e;
+   x={sup:'',inv:'',date:'',lines:[]};for(const p of parts){const y=PricingLines.invLines(String(await ai([p])||''),await vatOf());x.sup=x.sup||y.sup;x.inv=x.inv||y.inv;x.date=x.date||y.date;x.lines=x.lines.concat(y.lines||[])}}
+  j.r={sup:x.sup,inv:x.inv,date:x.date,lines:x.lines};
   const L=qGet(),k=L.findIndex(y=>y.rq===j.rq&&y.t===j.t);if(k>=0){L[k].r=j.r;qSet(L)}}
  const r=j.r,d={reqId:j.rq,sup:String(j.sup||r.sup||'').slice(0,60),inv:String(j.inv||r.inv||'').slice(0,30),date:DATE_OK(j.date)?j.date:(DATE_OK(r.date)?r.date:''),lines:(r.lines||[]).slice(0,100)};
  if(ID_OK(j.supId))d.supId=j.supId;

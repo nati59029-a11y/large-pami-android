@@ -22,8 +22,9 @@ $('connect').addEventListener('click', async () => {
   b.disabled = true; b.textContent = 'בודק…';
   const r = await send({ t: 'connect', token: $('tok').value });
   b.disabled = false; b.textContent = 'חבר';
+  // קודם מרעננים את המסך (שם העסק, מצב החיבור) ורק אחר כך ההודעה – כדי ש"מחובר" לא יופיע ליד שם עסק ישן ("—")
+  await load().catch(() => {});
   if (r.ok) { $('tok').value = ''; msg('✓ מחובר' + (r.biz ? ' ל' + r.biz : ''), 'ok'); } else msg(CODE_MSG[r.code] || self.CxPlan.msgOf(r.code), 'bad');
-  load();
 });
 $('disconnect').addEventListener('click', async () => {
   if (!confirm('לנתק את המחשב הזה? הסנכרון האוטומטי ייפסק עד שתחברו שוב עם קוד חדש.')) return;

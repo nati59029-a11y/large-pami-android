@@ -13,8 +13,8 @@
 //   (lib/pricing-lines.js – עותק זהה תו-בתו של www/pricing-lines.js). מע"מ – ordcfg/main.vat (כמו vatOf באפליקציה).
 // כותרת: ספק = subName מההוצאה, אחרת מהזיהוי; supId = sub אם תקין; מספר חשבונית ותאריך – מההוצאה, אחרת מהזיהוי.
 // יצירה – createCore של piCreate (אותו ניקוי, src 'worker', by = השולח, byName כמו w.uname). אחר כך הצילום – imgCore (כמו piImg).
-// כשל בזיהוי (Gemini / מכסה / קובץ שלא מתאים לזיהוי): החשבונית **לא** נוצרת (נרשם ביומן). הסיבה: במסך העריכה אין "נסה לזהות שוב"
-//   ואין הוספת שורות, וחשבונית ריקה הייתה חוסמת (dup) את הטלפון של העובד, שבגרסה הנוכחית ממשיך לנסות בעצמו עם ניסיונות חוזרים.
+// כשל בזיהוי (25.11.2026, במקום "לא נוצרת"): עמוד-עמוד, ואם עדיין נכשל – תור pinvq וניסיונות חוזרים (piRetry). אחרי הניסיון
+//   האחרון, או כשהקובץ לא מתאים לזיהוי בכלל, נוצרת חשבונית עם הצילום ובלי שורות (rf: 1) – כל חשבונית מגיעה לתמחור.
 //   זיהוי שהצליח אבל בלי שורות – נוצרת חשבונית עם 0 שורות, בדיוק כמו בטלפון.
 // "חוסרים" (hsOnInv, hs.js) – נשאר בטלפון בלבד; השרת לא קורא לו.
 // תקופת מעבר (עד שלב 2): APK קיים ממשיך לזהות בעצמו (ההוק על pushItem ב-www/pricing.js), ולכן רוב החשבוניות מזוהות פעמיים –
@@ -24,6 +24,7 @@
 // כל דילוג נרשם ביומן: logger.info('piInbox skip', { reason, biz }) – בלי פרטים אישיים ובלי תוכן הצילום.
 // אזור: europe-west1 בלבד, בלי ניסיון חוזר. שגיאה נרשמת ביומן (בלי תוכן הצילום ובלי פרטים אישיים) ולא נזרקת.
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const logger = require('firebase-functions/logger');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const { NEW_REGION } = require('./lib/region');
@@ -110,25 +111,94 @@ async function vatOf(db) {
   } catch (e) { return undefined; }
 }
 
-// הזיהוי – כמו scanDocument kind 'invlines'. מחזיר { text } או זורק (המכסה כבר טופלה)
-async function recognize(uid, bizId, files, o) {
+// הזיהוי – כמו scanDocument kind 'invlines'. מחזיר { text } או זורק (המכסה כבר טופלה).
+// 25.11.2026: deadline ו-timeoutMs נקבעים מבחוץ (scanAll) – בשרת יש יותר זמן מאשר לטלפון שמחכה לתשובה.
+async function recognize(uid, bizId, files, o, deadline, timeoutMs) {
   const key = o.key != null ? o.key : GEMINI_API_KEY.value();
   if (!key) throw Object.assign(new Error('no-key'), { r: 'no-key' });
-  const t = scan.timesFor('invlines');
-  const deadline = Date.now() + t.budgetMs;
   const caps = await scan.bizCaps(bizId, SCAN_DAILY_LIMIT.value());
   const usage = await scan.reserveScan(uid, caps.perUser, caps.bizDaily, files.length, caps.bizKey, caps.period);
   const stats = { sent: 0 };
   try {
     const body = scan.buildGeminiBody('invlines', files);
     const base = String(o.base || GEMINI_API_BASE.value()).replace(/\/+$/, '');
-    const r = await scan.callGemini(base, key, body, t.timeoutMs, scan.KINDS.invlines.pro, { deadline, stats });
+    const r = await scan.callGemini(base, key, body, timeoutMs, scan.KINDS.invlines.pro, { deadline, stats });
     return { text: r.text };
   } catch (e) {
     // כמו scanDocument: מוחזר למונה רק ניסיון שבו שום בקשה לא יצאה ל-Gemini
     if (stats.sent === 0) await scan.refundScan(uid, usage.day);
     throw e;
   }
+}
+
+// 25.11.2026 (חשבונית סופר קייק, 3 עמודים, נפלה על time-budget אחרי 100 שניות): כל חשבונית, בכל גודל, נכנסת לתמחור.
+// 1. יותר זמן: עד SRV.total לכל הזיהוי (הפונקציה רצה עד 540 שניות), ועד SRV.call לכל מודל.
+// 2. חשבונית של כמה תמונות שנכשלה בבת אחת – מזהים עמוד-עמוד ומחברים את השורות (כל בקשה קטנה ומהירה יותר).
+// 3. עדיין נכשל – נשמר בתור pinvq (עם הצילום) ו-piRetry מנסה שוב לפי Q_DELAYS. אחרי הניסיון האחרון נוצרת חשבונית
+//    לתמחור עם הצילום ובלי שורות (rf: 1), כדי שתמיד תופיע ברשימה.
+// הזמנים מוכפלים ביחס של SCAN_TIME_SCALE (באמולטור בלבד), כמו שאר הזיהויים.
+const SRV = { total: 470000, first: 240000, call: 180000 };
+const Q_DELAYS = [15, 30, 60, 120, 240, 480].map((m) => m * 60000); // אחרי ניסיון 1..6; ניסיון 7 = האחרון
+const Q_MAX = Q_DELAYS.length + 1;
+const Q_CH = 700000;
+const NO_SPLIT = ['daily-limit', 'key-invalid', 'no-key'];
+// קובץ שהזיהוי לא יכול לקבל בכלל – אין טעם לנסות שוב: נכנס מיד לתמחור עם הצילום ובלי שורות
+const NO_RETRY = ['bad-file', 'bad-file-count', 'bad-type', 'empty', 'too-big'];
+const scale = () => scan.timesFor('invlines').budgetMs / 100000;
+const why = (e) => String((e && e.details && e.details.reason) || (e && e.r) || 'scan-failed').slice(0, 40);
+
+async function scanAll(owner, bizId, files, vat, o) {
+  const k = scale(), t0 = Date.now(), end = t0 + SRV.total * k, call = SRV.call * k;
+  try {
+    const r = await recognize(owner, bizId, files, o, Math.min(end, t0 + SRV.first * k), call);
+    return PL.invLines(String(r.text || ''), vat);
+  } catch (e) {
+    if (files.length < 2 || NO_SPLIT.includes(why(e))) throw e;
+    logger.info('piInbox: page by page', { biz: bizId, pages: files.length, reason: why(e) });
+  }
+  const out = { sup: '', inv: '', date: '', lines: [] };
+  for (let i = 0; i < files.length; i++) {
+    const left = end - Date.now();
+    const r = await recognize(owner, bizId, [files[i]], o, Date.now() + left / (files.length - i), call);
+    const x = PL.invLines(String(r.text || ''), vat);
+    out.sup = out.sup || x.sup; out.inv = out.inv || x.inv; out.date = out.date || x.date;
+    out.lines = out.lines.concat(x.lines || []);
+  }
+  return out;
+}
+
+// הכותרת + יצירה + צילום (משותף לטריגר, לניסיון החוזר ולגיבוי האחרון). x = תוצאת הזיהוי, או null = בלי שורות
+async function createWith(w, d, reqId, x, P0, extra) {
+  x = x || { lines: [] };
+  const hdr = {
+    reqId,
+    sup: String(s_(d.subName) || x.sup || '').slice(0, 60),
+    inv: String(s_(d.inv) || x.inv || '').slice(0, 30),
+    date: DATE_OK(d.date) ? d.date : (DATE_OK(x.date) ? x.date : ''),
+    lines: (x.lines || []).slice(0, 100),
+  };
+  if (ID_OK(d.sub)) hdr.supId = d.sub;
+  const cr = await P.createCore(w, hdr);
+  if (cr.dup) return { ok: true, r: 'dup', id: cr.id };
+  if (extra) await T.tdb().doc('pinv/' + cr.id).update(extra);
+  let img = 0;
+  try { img = await P.imgCore(cr.id, imgOf(P0)); } catch (e) { logger.warn('piInbox: image not stored', { bizId: w.bizId, name: e && e.name, code: e && e.code }); }
+  return { ok: true, r: 'created', id: cr.id, n: hdr.lines.length, img };
+}
+
+// תור לניסיון חוזר: pinvq/{inbox id} + הצילום ב-pinvq/{id}/p/{k}. רק השרת קורא וכותב (החוקים סוגרים את האוסף)
+async function enqueue(owner, id, d, P0, reason, now) {
+  const db = T.tdb();
+  const ref = db.doc('pinvq/' + id);
+  const du = imgOf(P0);
+  const np = Math.ceil(du.length / Q_CH);
+  for (let k = 0; k < np; k++) await ref.collection('p').doc(String(k)).set({ data: du.slice(k * Q_CH, (k + 1) * Q_CH) });
+  const keep = { cat: d.cat, sub: d.sub, subName: d.subName, inv: d.inv, date: d.date };
+  await ref.set({ owner, d: JSON.stringify(keep), np, n: 1, nx: now + Q_DELAYS[0], at: now, why: reason });
+}
+async function dequeue(ref, np) {
+  for (let k = 0; k < np; k++) { try { await ref.collection('p').doc(String(k)).delete(); } catch (e) { /* */ } }
+  await ref.delete();
 }
 
 // הליבה. bizId = null לשורש (legacy). doc = מסמך ה-inbox. o – לבדיקות בלבד ({ key, base })
@@ -173,31 +243,88 @@ async function onInbox(bizId, id, doc, opts) {
     let x;
     try {
       const { files } = scan.validateScanInput({ kind: 'invlines', files: P0 }, SCAN_MAX_FILE_MB.value() * 1024 * 1024);
-      const r = await recognize(owner, biz.bizId, files, o);
-      x = PL.invLines(String(r.text || ''), await vatOf(db));
+      x = await scanAll(owner, biz.bizId, files, await vatOf(db), o);
     } catch (e) {
-      const reason = (e && e.details && e.details.reason) || (e && e.r) || 'scan-failed';
-      logger.warn('piInbox: recognition failed, pinv not created', { bizId: biz.bizId, reason, code: e && e.code });
-      return { ok: false, r: 'scan', reason };
+      const reason = why(e);
+      if (NO_RETRY.includes(reason)) {
+        const r = await createWith(w, d, reqId, null, P0, { rf: 1 });
+        logger.warn('piInbox: file not readable, pinv created without lines', { bizId: biz.bizId, reason });
+        return Object.assign(r, { reason });
+      }
+      logger.warn('piInbox: recognition failed, queued for retry', { bizId: biz.bizId, reason, code: e && e.code });
+      try { await enqueue(owner, id, d, P0, reason, Date.now()); } catch (e2) { logger.error('piInbox: enqueue failed', { bizId: biz.bizId, name: e2 && e2.name, code: e2 && e2.code }); }
+      return { ok: false, r: 'scan', reason, q: 1 };
     }
-    const hdr = {
-      reqId,
-      sup: String(s_(d.subName) || x.sup || '').slice(0, 60),
-      inv: String(s_(d.inv) || x.inv || '').slice(0, 30),
-      date: DATE_OK(d.date) ? d.date : (DATE_OK(x.date) ? x.date : ''),
-      lines: (x.lines || []).slice(0, 100),
-    };
-    if (ID_OK(d.sub)) hdr.supId = d.sub;
-    const cr = await P.createCore(w, hdr);
-    if (cr.dup) return skip('dup', { id: cr.id });
-    let img = 0;
-    try { img = await P.imgCore(cr.id, imgOf(P0)); } catch (e) { logger.warn('piInbox: image not stored', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
-    logger.info('piInbox: pinv created', { bizId: biz.bizId, n: hdr.lines.length, np: img });
-    return { ok: true, r: 'created', id: cr.id, n: hdr.lines.length, img };
+    const r = await createWith(w, d, reqId, x, P0);
+    if (r.r === 'dup') return skip('dup', { id: r.id });
+    logger.info('piInbox: pinv created', { bizId: biz.bizId, n: r.n, np: r.img });
+    return r;
   });
 }
 
-const OPTS = { region: NEW_REGION, retry: false, timeoutSeconds: 300, memory: '512MiB', maxInstances: 5, secrets: [GEMINI_API_KEY] };
+// ניסיון חוזר לפריט אחד בתור (בתוך העסק). מחזיר קוד תוצאה
+async function retryOne(biz, qs, now, opts) {
+  const o = opts || {};
+  const prefix = T.bizPrefix(biz);
+  return T.runInBiz({ bizId: biz.bizId, prefix, biz, uid: '' }, async () => {
+    const db = T.tdb();
+    const ref = db.doc('pinvq/' + qs.id);
+    const q = qs.data() || {};
+    const id = qs.id, owner = String(q.owner || ''), np = Number(q.np) || 0;
+    let d = {};
+    try { d = JSON.parse(q.d || '{}') || {}; } catch (e) { d = {}; }
+    const reqId = rqOf('o' + id);
+    if ((await db.doc('pinv/i' + reqId).get()).exists) { await dequeue(ref, np); return 'dup'; } // נוצרה בינתיים (למשל "שלח לתמחור")
+    let du = '';
+    for (let k = 0; k < np; k++) { const c = await ref.collection('p').doc(String(k)).get(); du += c.exists ? String(c.get('data') || '') : ''; }
+    const P0 = du ? pagesOf(du) : [];
+    if (!P0.length || !ID_RE.test(owner)) { await dequeue(ref, np); return 'bad'; }
+    const [staff, admin] = await Promise.all([db.doc('staff/' + owner).get(), db.doc('admins/' + owner).get()]);
+    const w = { uid: owner, role: 'employee', staff, admin, biz, bizId: biz.bizId, superadmin: false };
+    try { P.feats(w); } catch (e) { await dequeue(ref, np); return 'feature-off'; }
+    let n = (Number(q.n) || 1) + 1;
+    let x = null, reason = '';
+    try {
+      const { files } = scan.validateScanInput({ kind: 'invlines', files: P0 }, SCAN_MAX_FILE_MB.value() * 1024 * 1024);
+      x = await scanAll(owner, biz.bizId, files, await vatOf(db), o);
+    } catch (e) { reason = why(e); }
+    if (NO_RETRY.includes(reason)) n = Q_MAX;
+    if (x) {
+      const r = await createWith(w, d, reqId, x, P0);
+      await dequeue(ref, np);
+      logger.info('piRetry: pinv created', { bizId: biz.bizId, n: r.n, tries: n });
+      return r.r;
+    }
+    if (n < Q_MAX) {
+      await ref.update({ n, nx: now + Q_DELAYS[n - 1], why: reason });
+      logger.warn('piRetry: recognition failed again', { bizId: biz.bizId, reason, tries: n });
+      return 'later';
+    }
+    // הניסיון האחרון: נכנסת לתמחור עם הצילום ובלי שורות, כדי שלא תיעלם
+    const r = await createWith(w, d, reqId, null, P0, { rf: 1 });
+    await dequeue(ref, np);
+    logger.warn('piRetry: gave up recognition, pinv created without lines', { bizId: biz.bizId, reason, tries: n });
+    return r.r === 'dup' ? 'dup' : 'empty';
+  });
+}
+
+// כל הפריטים שהגיע זמנם, בכל העסקים עם מדף או הזמנות. מחזיר { id: קוד }
+async function retryDue(now, opts) {
+  const t = now || Date.now(), stop = Date.now() + 420000 * scale(), out = {};
+  const seen = new Set(), L = [];
+  for (const b of [...await T.bizzesWith('shelf'), ...await T.bizzesWith('orders')]) if (!seen.has(b.bizId)) { seen.add(b.bizId); L.push(b); }
+  for (const biz of L) {
+    if (biz.status !== 'active') continue;
+    const qs = await getFirestore().collection(T.bizPrefix(biz) + 'pinvq').where('nx', '<=', t).limit(10).get();
+    for (const s of qs.docs) {
+      if (Date.now() > stop) return out;
+      try { out[s.id] = await retryOne(biz, s, t, opts); } catch (e) { out[s.id] = 'error'; logger.error('piRetry failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
+    }
+  }
+  return out;
+}
+
+const OPTS = { region: NEW_REGION, retry: false, timeoutSeconds: 540, memory: '512MiB', maxInstances: 5, secrets: [GEMINI_API_KEY] };
 const fail = (e) => { logger.error('piInbox failed', { reason: 'internal', name: e && e.name, code: e && e.code }); };
 const run = (bizId, ev, opts) => Promise.resolve().then(() => onInbox(bizId, ev.params.id, ev.data && typeof ev.data.data === 'function' ? ev.data.data() : null, opts)).catch(fail);
 exports.piInbox = onDocumentCreated(Object.assign({ document: 'inbox/{id}' }, OPTS), (ev) => run(null, ev));
@@ -205,4 +332,8 @@ exports.piInboxB = onDocumentCreated(Object.assign({ document: 'b/{bizId}/inbox/
   if (!T.BIZ_RE.test(String(ev.params.bizId || ''))) return null;
   return run(ev.params.bizId, ev);
 });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { onInbox, eligible, pagesOf, imgOf, rqOf, run } });
+exports.piRetry = onSchedule({ region: NEW_REGION, schedule: 'every 15 minutes', timeZone: 'Asia/Jerusalem', timeoutSeconds: 540, memory: '512MiB', maxInstances: 1, secrets: [GEMINI_API_KEY] }, async () => {
+  const r = await retryDue(Date.now());
+  if (Object.keys(r).length) logger.info('piRetry', { n: Object.keys(r).length, r: Object.values(r) });
+});
+Object.defineProperty(exports, '_core', { enumerable: false, value: { onInbox, eligible, pagesOf, imgOf, rqOf, run, retryDue, retryOne, Q_DELAYS, Q_MAX } });

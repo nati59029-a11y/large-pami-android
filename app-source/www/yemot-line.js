@@ -96,7 +96,7 @@ window.ylOk=()=>{try{return typeof isW==='function'&&isW()?!!(SY.perms&&typeof S
 const fbOpt=()=>`<button class="opt" data-a="ylFb" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">לקוחות משוב בימות<small>רשימת הטלפונים מהמשוב וצינתוק בתשלום</small></span>${ico('chev')}</button>`;
 ACT.ylFb=()=>{if(window.yfOpen)window.yfOpen()};
 // כניסת מנהל ל"שליחת צינתוקים" (yemot-fblist.js, window.ytOpen; משימה 2026-11-18). בלי הקובץ – לא מוצג.
-const tzOpt=()=>`<button class="opt" data-a="ylTz" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">שליחת צינתוקים<small>ללקוחות דפי המשוב או לכל הלקוחות · מנהל</small></span>${ico('chev')}</button>`;
+const tzOpt=()=>`<button class="opt" data-a="ylTz" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">שליחת צינתוקים<small>ללקוחות דפי המשוב, לכל הלקוחות, או רק למי שנרשם בעצמו · מנהל</small></span>${ico('chev')}</button>`;
 ACT.ylTz=()=>{if(window.ytOpen)window.ytOpen()};
 // כניסת מנהל ל"מספרים בקו" (yemot-fblist.js, window.ynOpen; משימה 2026-11-19). בלי הקובץ – לא מוצג.
 const numOpt=()=>`<button class="opt" data-a="ylNum" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">מספרים בקו<small>כמה נרשמו, חיפוש מספר, וחסימה בלקוחות משוב</small></span>${ico('chev')}</button>`;

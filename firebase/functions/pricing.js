@@ -267,13 +267,23 @@ async function createCore(w, input) {
   const db = T.tdb();
   const ref = db.doc('pinv/i' + reqId);
   const now = Date.now();
-  let dup = false;
+  let dup = false, refill = false;
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
+    // 25.11.2026: חשבונית שהשרת יצר בלי שורות כי הזיהוי נכשל (rf: 1) – "שלח לתמחור" ממלא אותה בשורות מהזיהוי החדש.
+    // רק כשעוד לא התחילו לטפל בה (st 'new', 0 שורות, בלי נעילה פעילה) ורק כשהזיהוי החדש מצא שורות. הצילום נשאר.
+    if (s.exists && lines.length && s.get('rf') === 1 && s.get('st') === 'new' && !(Number(s.get('n')) > 0) && !fresh(s.get('lk'), now)) {
+      const up = Object.assign({ upd: now, n: lines.length, lines, rf: FieldValue.delete() }, h);
+      for (const k of ['sup', 'inv', 'date']) if (s.get(k)) delete up[k]; // כותרת מההוצאה נשמרת
+      if (s.get('supId')) delete up.supId;
+      tx.update(ref, up);
+      refill = true;
+      return;
+    }
     if (s.exists) { dup = true; return; }
     tx.set(ref, Object.assign({ st: 'new', src: w.role === 'manager' ? 'scan' : 'worker', by: w.uid, byName: w.uname, at: now, upd: now, n: lines.length, lines }, h));
   });
-  return { ok: true, id: ref.id, dup };
+  return Object.assign({ ok: true, id: ref.id, dup }, refill ? { refill: true } : {});
 }
 
 // piClaim({ id }) – כניסה לטיפול: נועל אם פנוי / שלי / הנעילה פגה. מחזיר את החשבונית + נתוני מלאי לכל שורה (גם עלות וסיטונאי)

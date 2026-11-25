@@ -238,6 +238,109 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
     assert.equal(await get(`b/${A}/pinv/${pidOf(s.id)}`), null);
   });
 
+  // 25.11.2026: כל חשבונית נכנסת לתמחור – יותר זמן, עמוד-עמוד, ותור ניסיונות חוזרים (pinvq + piRetry)
+  const T0 = () => Date.now();
+  const later = (n) => T0() + X.Q_DELAYS.slice(0, n).reduce((a, b) => a + b, 0) + 1000;
+  it('זיהוי נכשל – נשמר בתור pinvq עם הצילום (ניסיון 1, הבא בעוד רבע שעה)', async () => {
+    GM.state.mode = 'badkey';
+    const f = jpeg(300, 3);
+    const s = await stage(`b/${A}/`, E1, EXP(), f);
+    const r = await run(A, s);
+    assert.equal(r.r, 'scan'); assert.equal(r.q, 1);
+    const q = await get(`b/${A}/pinvq/${s.id}`);
+    assert.ok(q, 'pinvq נוצר');
+    assert.equal(q.owner, E1); assert.equal(q.n, 1); assert.equal(q.np, 1); assert.equal(q.why, 'key-invalid');
+    assert.ok(q.nx > Date.now() + 14 * 60000 && q.nx <= Date.now() + 15 * 60000);
+    assert.equal((await get(`b/${A}/pinvq/${s.id}/p/0`)).data, f);
+    assert.equal(JSON.parse(q.d).subName, 'תבניכל');
+  });
+
+  it('ניסיון חוזר מצליח – נוצרת חשבונית לתמחור עם השורות והצילום, והתור נמחק', async () => {
+    GM.state.mode = 'badkey';
+    const f = jpeg(300, 4);
+    const s = await stage(`b/${A}/`, E1, EXP(), f);
+    await run(A, s);
+    assert.deepEqual(await X.retryDue(T0()), {}, 'לפני הזמן – לא מנסים');
+    GM.state.mode = 'ok';
+    const r = await X.retryDue(later(1));
+    assert.equal(r[s.id], 'created', JSON.stringify(r));
+    const p = await get(`b/${A}/pinv/${pidOf(s.id)}`);
+    assert.equal(p.n, 3); assert.equal(p.sup, 'תבניכל'); assert.equal(p.by, E1); assert.equal(p.byName, 'דני העובד'); assert.equal(p.rf, undefined);
+    assert.equal((await get(`b/${A}/pinv/${pidOf(s.id)}/p/0`)).data, f);
+    assert.equal(await get(`b/${A}/pinvq/${s.id}`), null);
+    assert.deepEqual(await coll(`b/${A}/pinvq/${s.id}/p`), []);
+  });
+
+  it('נכשל בכל הניסיונות – אחרי האחרון נכנסת לתמחור עם הצילום ובלי שורות (rf), לא נעלמת', async () => {
+    GM.state.mode = 'badkey';
+    const f = jpeg(300, 5);
+    const s = await stage(`b/${A}/`, E1, EXP(), f);
+    await run(A, s);
+    for (let i = 1; i < X.Q_MAX - 1; i++) {
+      const r = await X.retryDue(later(i));
+      assert.equal(r[s.id], 'later', 'ניסיון ' + (i + 1));
+      assert.equal((await get(`b/${A}/pinvq/${s.id}`)).n, i + 1);
+    }
+    const r = await X.retryDue(later(X.Q_MAX));
+    assert.equal(r[s.id], 'empty');
+    const p = await get(`b/${A}/pinv/${pidOf(s.id)}`);
+    assert.equal(p.st, 'new'); assert.equal(p.n, 0); assert.equal(p.rf, 1); assert.equal(p.np, 1); assert.equal(p.inv, '777');
+    assert.equal((await get(`b/${A}/pinv/${pidOf(s.id)}/p/0`)).data, f);
+    assert.equal(await get(`b/${A}/pinvq/${s.id}`), null);
+    // "שלח לתמחור" מהמנהל (piCreate עם אותו מזהה) ממלא את החשבונית הריקה בשורות; הכותרת מההוצאה והצילום נשארים
+    const T = require('../functions/lib/tenant.js'), P = require('../functions/pricing.js')._core;
+    const biz = await T.loadBiz(A);
+    const w = { uid: MGR, role: 'manager', uname: 'המנהל', biz, bizId: A };
+    const line = { n: 'קמח', qty: 2, cost: 10 };
+    const c = await T.runInBiz({ bizId: A, prefix: `b/${A}/`, biz, uid: MGR }, () => P.createCore(w, { reqId: X.rqOf('o' + s.id), sup: 'אחר', inv: '1', lines: [line] }));
+    assert.equal(c.refill, true); assert.equal(c.dup, false);
+    const p2 = await get(`b/${A}/pinv/${pidOf(s.id)}`);
+    assert.equal(p2.n, 1); assert.equal(p2.lines[0].n, 'קמח'); assert.equal(p2.rf, undefined);
+    assert.equal(p2.sup, 'תבניכל'); assert.equal(p2.inv, '777'); assert.equal(p2.np, 1);
+    // שליחה נוספת – כבר יש שורות: כפילות, בלי שינוי
+    const c2 = await T.runInBiz({ bizId: A, prefix: `b/${A}/`, biz, uid: MGR }, () => P.createCore(w, { reqId: X.rqOf('o' + s.id), lines: [line, line] }));
+    assert.equal(c2.dup, true);
+    assert.equal((await get(`b/${A}/pinv/${pidOf(s.id)}`)).n, 1);
+  });
+
+  it('בזמן ההמתנה החשבונית נשלחה ידנית לתמחור ("שלח לתמחור") – התור נמחק בלי זיהוי נוסף', async () => {
+    GM.state.mode = 'badkey';
+    const s = await stage(`b/${A}/`, E1, EXP(), jpeg());
+    await run(A, s);
+    await prep((d) => d.doc(`b/${A}/pinv/${pidOf(s.id)}`).set({ st: 'new', n: 2, lines: [] }));
+    GM.reset();
+    const r = await X.retryDue(later(1));
+    assert.equal(r[s.id], 'dup');
+    assert.equal(invReqs().length, 0);
+    assert.equal(await get(`b/${A}/pinvq/${s.id}`), null);
+    assert.equal((await get(`b/${A}/pinv/${pidOf(s.id)}`)).n, 2, 'לא השתנה');
+  });
+
+  it('חשבונית ארוכה (3 עמודים) שלא מצליחה בבת אחת – מזוהה עמוד-עמוד והשורות מחוברות', async () => {
+    GM.state.invMaxImg = 1;
+    const U = [jpeg(80, 1), jpeg(80, 2), jpeg(80, 3)];
+    const s = await stage(`b/${A}/`, E1, EXP(), 'PAGES:' + JSON.stringify(U));
+    const r = await run(A, s);
+    assert.equal(r.r, 'created', JSON.stringify(r));
+    const p = await get(`b/${A}/pinv/${pidOf(s.id)}`);
+    assert.equal(p.n, 9, 'שלושה עמודים × 3 שורות');
+    assert.equal(await get(`b/${A}/pinvq/${s.id}`), null);
+    const one = invReqs().filter((x) => x.body.contents[0].parts.filter((y) => y.inline_data).length === 1);
+    assert.equal(one.length, 3, 'בקשה לכל עמוד');
+  });
+
+  it('legacy (שורש): זיהוי נכשל – התור בשורש, והניסיון החוזר יוצר pinv בשורש', async () => {
+    GM.state.mode = 'badkey';
+    const s = await stage('', LE, EXP(), jpeg(120, 6));
+    await run(null, s);
+    assert.ok(await get('pinvq/' + s.id));
+    GM.state.mode = 'ok';
+    const r = await X.retryDue(later(1));
+    assert.equal(r[s.id], 'created', JSON.stringify(r));
+    assert.ok(await get('pinv/' + pidOf(s.id)));
+    assert.equal(await get('pinvq/' + s.id), null);
+  });
+
   it('זיהוי בלי שורות (תשובה לא תקינה) – נוצרת חשבונית עם 0 שורות, כמו בטלפון', async () => {
     GM.state.mode = 'garbage';
     const s = await stage(`b/${A}/`, E1, EXP(), jpeg());

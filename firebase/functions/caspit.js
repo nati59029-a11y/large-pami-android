@@ -31,6 +31,13 @@ const PV_PART = 200; // שורות בכל חלק של התצוגה המקדימ�
 const BUDGET = 200000; // אישור: עד 200 שניות לקריאה, והטלפון ממשיך בקריאה נוספת
 const CFG = 'cxcfg/main';
 const SEEN = 'cxcfg/seen'; // { codes:[כל הקודים שהופיעו בקטלוגים שאושרו] }
+// 26.11.2026: ברקודים של הקטלוג האחרון שאושר → קוד בכספית. { s:'ברקוד\tקוד\n…' } (מחרוזת אחת – בלי אלפי שדות במסמך).
+// cxExport new לא שולח (ולא נותן קוד חדש) למוצר שהברקוד שלו כבר בכספית – כספית דוחה אותו ("ברקוד כבר קיים בקטלוג פריטים")
+const SEEN_BC = 'cxcfg/seenBc';
+const bcKey = (b) => CC.bcNorm(b);
+function bcMapOf(snap) { const m = new Map(); const t = snap && snap.exists ? snap.get('s') : ''; if (typeof t === 'string') for (const ln of t.split('\n')) { const i = ln.indexOf('\t'); if (i > 0) m.set(ln.slice(0, i), ln.slice(i + 1)); } return m; }
+const prodBcs = (p) => [p && p.barcode].concat(p && Array.isArray(p.bcx) ? p.bcx : []).map(bcKey).filter(Boolean);
+const bcHit = (m, p) => { for (const b of prodBcs(p)) if (m.has(b)) return { bc: b, cx: m.get(b) }; return null; };
 const STALE = 'מאז התצוגה המקדימה נשמר סנכרון או קובץ לכספית. מציגים שוב.';
 
 async function mgrW(request) { const w = await O.who(request); if (w.role !== 'manager') throw O.deny('manager-only', 'הפעולה מותרת למנהל בלבד'); return w; }
@@ -256,8 +263,11 @@ async function cxApply(w, input) {
   // ליקוי 6: כל הקודים שהופיעו בקטלוג (גם מסוננים ושורות שבוטל סימונן) נשמרים כתפוסים – קוד 900000+ לפריט חדש לא יתנגש בהם
   const seenRef = db.doc(SEEN);
   const codes = new Set(((await seenRef.get()).get('codes')) || []);
-  (await ref.collection('in').get()).docs.forEach((d) => (d.get('items') || []).forEach((x) => codes.add(x.c)));
+  const bcs = new Map();
+  (await ref.collection('in').get()).docs.forEach((d) => (d.get('items') || []).forEach((x) => { codes.add(x.c); for (const b of x.bcs || []) { const k = bcKey(b); if (k && !bcs.has(k)) bcs.set(k, x.c); } }));
   await seenRef.set({ codes: [...codes], at: Date.now() });
+  // הקטלוג האחרון בלבד (המצב הנוכחי בכספית). כישלון כאן (למשל מסמך גדול מדי) לא מפיל את האישור – רק מדלגים על ההגנה בקובץ הפריטים החדשים
+  try { await db.doc(SEEN_BC).set({ s: [...bcs].map(([b, c]) => b + '\t' + c).join('\n'), n: bcs.size, run, at: Date.now() }); } catch (e) { logger.warn('cxApply: seenBc not saved', { biz: w.bizId || '', n: bcs.size, msg: String((e && e.message) || '').slice(0, 200) }); }
   await db.runTransaction(async (tx) => {
     const x = await tx.get(ref), c = await tx.get(cref);
     if (x.get('st') === 'done') return;
@@ -383,8 +393,15 @@ async function cxExport(w, input) {
   // ליקוי 5: הכול בטרנזקציה – מוצרי המועמדים וההגדרות נקראים בתוכה; מוצר שכבר קיבל קוד (cx) בקריאה מקבילה – מדולג.
   // ליקוי 6: תפוסים = cxItem + כל הקודים שהופיעו בקטלוג (cxcfg/seen).
   const linked = new Set([...S.X.values()].map((x) => x.pid).filter(Boolean));
-  const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && p.on !== false).map(([id]) => id);
-  if (max !== Infinity) { const pend = [...S.X.values()].filter((x) => x.nw && S.P.has(x.pid)).length; if (cand.length + pend > max) throw over(cand.length + pend); }
+  // 26.11.2026: ברקוד שכבר קיים בכספית (הקטלוג האחרון) – לא נשלח ולא מקבל קוד חדש; מוחזר ב-dup כדי שהמנהל יבדוק (מוצר כפול / לא מקושר)
+  const BC = bcMapOf(await db.doc(SEEN_BC).get());
+  const dup = [];
+  const dupOf = (pid, p, c) => { const h = bcHit(BC, p); if (h) dup.push({ pid, n: String(p.name || '').slice(0, 80), bc: h.bc, cx: h.cx, c: c || '' }); return !!h; };
+  const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && p.on !== false && !dupOf(id, p)).map(([id]) => id);
+  // פריט שנשלח וטרם נקלט: הברקוד בכספית תחת הקוד שלו עצמו – כבר נקלט (הקישור יגיע בסנכרון הקטלוג), לא שולחים שוב ולא "כפול"
+  const pendOk = (c, x) => x.nw && S.P.has(x.pid) && !bcHit(BC, S.P.get(x.pid));
+  for (const [c, x] of S.X) { if (!x.nw || !S.P.has(x.pid)) continue; const h = bcHit(BC, S.P.get(x.pid)); if (h && h.cx !== c) dupOf(x.pid, S.P.get(x.pid), c); }
+  if (max !== Infinity) { const pend = [...S.X].filter(([c, x]) => pendOk(c, x)).length; if (cand.length + pend > max) throw over(cand.length + pend); }
   let added = 0, made = [];
   if (cand.length) {
     await db.runTransaction(async (tx) => {
@@ -394,7 +411,7 @@ async function cxExport(w, input) {
       const ps = [];
       for (let i = 0; i < cand.length; i += 300) ps.push(...await tx.getAll(...cand.slice(i, i + 300).map((id) => db.doc('prod/' + id))));
       const taken = new Set([...S.X.keys()].concat(seen.exists ? seen.get('codes') || [] : []));
-      const todo = ps.filter((x) => x.exists && !x.get('cx') && x.get('on') !== false).sort((a, b) => String(a.get('name')).localeCompare(String(b.get('name')), 'he'));
+      const todo = ps.filter((x) => x.exists && !x.get('cx') && x.get('on') !== false && !bcHit(BC, x.data())).sort((a, b) => String(a.get('name')).localeCompare(String(b.get('name')), 'he'));
       let n = c0.next;
       for (const ps1 of todo) {
         const pid = ps1.id, p = ps1.data();
@@ -413,12 +430,12 @@ async function cxExport(w, input) {
   const catN = new Map((await db.collection('cat').get()).docs.map((d) => [d.id, d.get('name') || '']));
   const rows = [];
   for (const [c, x] of [...S.X].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    if (!x.nw || !S.P.has(x.pid)) continue;
+    if (!pendOk(c, x)) continue;
     const p = S.P.get(x.pid);
     rows.push({ c, bc: p.barcode || '', n: p.name, p: typeof p.price === 'number' ? p.price : 0, cost: S.cost.has(x.pid) ? S.cost.get(x.pid) : null, c1: p.cat ? catN.get(p.cat) || '' : '', c2: p.sub ? catN.get(p.sub) || '' : '', sup: p.sup || '' });
   }
   O.ixDrop(w);
-  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })) };
+  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })), dupN: dup.length, dup: dup.slice(0, 200) };
 }
 
 async function bumpGen(db) { await db.runTransaction(async (tx) => { const c = cfgOf(await tx.get(db.doc(CFG))); tx.set(db.doc(CFG), { gen: c.gen + 1 }, { merge: true }); }); }

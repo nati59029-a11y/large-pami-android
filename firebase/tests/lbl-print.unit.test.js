@@ -118,7 +118,8 @@ describe('lbl-print – הדפסת מדבקות', () => {
     const offs = s.slice(xr).split('\n').slice(3).filter((l) => / 00000 n $/.test(l)).map((l) => +l.slice(0, 10));
     offs.forEach((o, i) => assert.ok(s.slice(o).startsWith((i + 1) + ' 0 obj'), 'אובייקט ' + (i + 1)));
     assert.match(s, /0 35\.433 141\.732 35\.433 re/);
-    assert.equal(LP.expand([{ n: 0 }, { n: 500 }, { n: 'x' }]).length, 1 + 200 + 1, 'כמות 1–200');
+    assert.equal(LP.expand([{ n: 0 }, { n: 500 }, { n: 'x' }]).length, 1 + 500 + 1, 'כמות 1–999');
+    assert.equal(LP.expand([{ n: 999 }, { n: 1000 }, { n: 5000 }]).length, 3 * 999, 'עד 999 בשורה');
   });
 
   it('toBits: 1 ביט לפיקסל, לבן = 1, שורות מרופדות לבית', () => {
@@ -129,7 +130,7 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.deepEqual([...b], [0x7f, 0x80, 0xff, 0xc0]);
   });
   // לוגו וחותמת כשרות (24.11.2026)
-  it('layBox: top – פס 64 והתוכן מוקטן (~78%) וממורכז; bot – קופסאות 64×64 בפינות התחתונות בתוך המדבקה, והשורה התחתונה מוצרת מהן', () => {
+  it('layBox: top – פס 64 והתוכן מוקטן (~78%) וממורכז; bot – קופסאות 124×64 (רחבות) בפינות התחתונות בתוך המדבקה, והשורה התחתונה מוצרת מהן', () => {
     const t = LP.layBox('top');
     assert.ok(Math.abs(t.t.s - (LP.H - 64) / LP.H) < 1e-12 && t.t.s > 0.77 && t.t.s < 0.79);
     assert.equal(t.t.dy, 64);
@@ -139,10 +140,10 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.ok(t.logo[0] > t.stamp[0] + t.stamp[2], 'לוגו מימין, חותמת משמאל, בלי חפיפה');
     const b = LP.layBox('bot');
     assert.equal(b.t, null);
-    assert.deepEqual([b.logo[2], b.logo[3], b.stamp[2], b.stamp[3]], [64, 64, 64, 64]);
-    assert.ok(b.logo[0] + 64 <= LP.W && b.logo[1] + 64 <= LP.H && b.stamp[0] >= 0 && b.stamp[1] + 64 <= LP.H);
+    assert.deepEqual([b.logo[2], b.logo[3], b.stamp[2], b.stamp[3]], [124, 64, 124, 64]);
+    assert.ok(b.logo[0] + 124 <= LP.W && b.logo[1] + 64 <= LP.H && b.stamp[0] >= 0 && b.stamp[1] + 64 <= LP.H && b.stamp[0] + 124 < b.logo[0]);
     assert.ok(b.logo[0] > LP.W / 2 && b.stamp[0] < LP.W / 2, 'לוגו בימין, חותמת בשמאל');
-    assert.ok(14 + b.ib >= b.stamp[0] + 64 && LP.W - 14 - b.ib <= b.logo[0], 'השורה התחתונה לא נוגעת בקופסאות');
+    assert.ok(14 + b.ib >= b.stamp[0] + b.stamp[2] && LP.W - 14 - b.ib <= b.logo[0], 'השורה התחתונה לא נוגעת בקופסאות');
     assert.equal(LP.layBox(''), null);
     assert.equal(LP.layBox('x'), null);
   });
@@ -181,6 +182,18 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.equal(LP.imgOk(''), false);
     assert.equal(LP.imgOk(null), false);
     assert.equal(LP.imgOk({}), false);
+  });
+
+  it('mkPdf עם גודל לכל מדבקה (pw/ph): MediaBox לפי המדבקה, הפסים מומרים לפי הגודל שלה; בלי pw/ph – בדיוק כמו קודם', () => {
+    const pw = 40 / 25.4 * 72, ph = 30 / 25.4 * 72, w = 472, h = 354;
+    const L = [fake(LP.W, LP.H, [[0, 0, LP.W, LP.H / 2]]), Object.assign(fake(w, h, [[0, 0, w, h / 2]]), { pw, ph })];
+    const { s, boxes, count } = pdfInfo(LP.mkPdf(L, [0, 1, 1]));
+    assert.equal(count, 3);
+    assert.deepEqual(boxes.map((b) => b.join(' ')), ['0 0 141.73 70.87', '0 0 113.39 85.04', '0 0 113.39 85.04']);
+    assert.match(s, /q 113\.39 0 0 85\.04 0 0 cm \/Im0 Do Q\n0 g\n0 42\.52 113\.386 42\.52 re/);
+    assert.match(s, /\/Width 472 \/Height 354/);
+    const L2 = [fake(LP.W, LP.H, [[1, 2, 3, 4]])], a = LP.mkPdf(L2, [0, 0]), b = LP.mkPdf([Object.assign({}, L2[0], { pw: undefined, ph: 0 })], [0, 0]);
+    assert.deepEqual([...a], [...b]);
   });
 
   it('mkPdf בלי לוגו – בדיוק אותם בייטים כמו לפני השינוי (טביעת SHA-256)', () => {

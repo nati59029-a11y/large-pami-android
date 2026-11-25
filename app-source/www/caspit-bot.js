@@ -6,6 +6,8 @@
    לבדוק אם בדיסק יש גרסה חדשה ולהיטען מחדש אם בטוח. מכירות היום: שורת "עודכנו עד HH:MM" (i.tp).
    0.1.12: בריצה שנכשלה בהעלאה לכספית – "פירוט מסך הייבוא" מקופל (r.scr: כותרות, טבלאות ומספר שורות, כפתורים, שדה הקובץ, חלון קופץ).
    "סנכרן עכשיו" (18.11): בקשה למחשב החנות (cxBotTok op:'now'); התוסף 0.1.5 בודק כל דקה. בזמן המתנה / ריצה – רענון כל 20 שניות, רק כשהמסך פתוח וגלוי.
+   לקוחות הקפה מכספית (24.11, סבב 2): כרטיס נפרד מתחת לכרטיס הרובוט (hkCardH) לפי hkGet – אין תמונה / ממתין לאישור (תצוגה מקדימה + "אשר ייבוא",
+   hkApprove בלולאה עד done עם התקדמות) / פעיל (הריצה הלילית האחרונה + רשימת "לבדוק" עם "טופל" – hkChkDone). מנהל בלבד (השרת אוכף: functions/hk-import.js).
    רכיבי העיצוב הקיימים בלבד (.card .btn .kg .k .li .note .f). משתמש ב: V, ACT, FRM, fnCall, esc, toast, dlg, closeDlg, ask, rerender, cur, fd, saveFile, SY, APP_REPO. */
 (function(){
 'use strict';
@@ -13,6 +15,7 @@ if(typeof ACT==='undefined'||typeof V==='undefined')return;
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const B={i:null,err:'',ld:0};
 const NEW_ALL=100000; /* "ללא הגבלה" לפריטים חדשים (24.11.2026) */
+const nf=n=>Number(n||0).toLocaleString('he-IL');
 const REPO=()=>typeof APP_REPO==='string'&&/^[\w.-]+\/[\w.-]+$/.test(APP_REPO)&&!/__/.test(APP_REPO)?APP_REPO:'nati59029-a11y/large-pami-android'; /* APP_REPO נקבע בבנייה (main.yml); בלי – המאגר הזה */
 const dt=t=>t?new Date(t).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
 const dd=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)?d.slice(8)+'/'+d.slice(5,7):'—';
@@ -23,7 +26,7 @@ const ERR={'import-errors':'כספית טענה את הקובץ עם שורות 
  limit:'יותר מדי שינויים לכספית בבת אחת – הרובוט עצר. אפשר להעלות את המגבלה למטה, או לשלוח את הקבצים מכאן.',auth:'החיבור בוטל. צריך לחבר מחדש עם קוד חדש.','min-ver':'צריך לעדכן את התוסף לגרסה חדשה.',disabled:'הסנכרון האוטומטי כבוי.',
  network:'אין חיבור לאינטרנט במחשב החנות.',offline:'אין חיבור לאינטרנט במחשב החנות.',timeout:'הפעולה לקחה יותר מדי זמן.',server:'תקלה זמנית בשרת.',rate:'יותר מדי פניות היום.',stale:'הנתונים השתנו באמצע – ננסה שוב.',busy:'סנכרון אחר רץ באותו זמן.',
  tab:'תקלה זמנית בלשונית של כספית.',stuck:'העדכון התחיל ולא הסתיים (Chrome נסגר באמצע, או שהדף של כספית נתקע).',parse:'לא הצלחנו לקרוא את הקובץ מכספית.','first-manual':'את הקטלוג הראשון מסנכרנים כאן באפליקציה.',fail:'הסנכרון נכשל.'};
-const errTxt=(code,msg)=>ERR[code]||msg||ERR.fail;
+const errTxt=(code,msg)=>ERR[code]||msg||(ERR.fail+(code&&code!=='fail'?' (קוד: '+String(code).slice(0,40)+')':'')); // 25.11: קוד לא מוכר – מציגים אותו (בלי הודעה מהרובוט, למשל במכירות היום) כדי שאפשר לדעת את הסיבה
 window.cxErrTxt=errTxt; /* 24.11.2026: גם למסך "מכירות כספית" (עדכון שעתי שנכשל) */
 /* פירוט התקלה מהתוסף (מסך וצעד) – מוצג בנוסף להסבר הכללי, כדי לדעת איפה הריצה נעצרה */
 const errDet=e=>{if(!e)return'';const m=String(e.msg||'').trim(),st=String(e.step||'').trim();return m&&ERR[e.code]&&m!==ERR[e.code]?'פירוט: '+m+(st?' (צעד '+st+')':''):''};
@@ -73,13 +76,52 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
    if(i.tf&&i.tf.s&&!(i.tp&&i.tp.at>i.tf.at))h+=`<p class="note" role="alert">⚠ העדכון של מכירות היום בשעה ${esc(String(i.tf.s).slice(11))}:00 נכשל: ${esc(errTxt(i.tf.c))}</p>`;
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}${errDet(lr)?`<br><bdi>${esc(errDet(lr))}</bdi>`:''}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
+   if(i.nwDup&&i.nwDup.n>0)h+=`<p class="note" role="alert">⚠ ${nf(i.nwDup.n)} מוצרים לא נשלחו לכספית כפריטים חדשים – הברקוד שלהם כבר קיים בכספית תחת קוד אחר (כנראה מוצר כפול באפליקציה, או מוצר שלא קושר). כדאי לבדוק:</p><div class="note" style="max-height:30vh;overflow:auto">${(i.nwDup.l||[]).map(d=>`<div>${esc(d.n||'')} · ברקוד ${esc(d.bc||'')} · בכספית קוד ${esc(d.cx||'')}</div>`).join('')}${i.nwDup.n>(i.nwDup.l||[]).length?`<div>ועוד ${nf(i.nwDup.n-(i.nwDup.l||[]).length)}…</div>`:''}</div>`;
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;
    if(i.first)h+='<p class="note">קודם מסנכרנים כאן קטלוג ראשון (בחירת קובץ למעלה). עד אז הרובוט קולט רק מכירות.</p>';
    h+=`<button class="btn g w" ${big} data-a="cxBotRuns">הריצות האחרונות (${(i.runs||[]).length})</button><div class="row" style="margin-top:8px"><button class="btn g grow" ${big} data-a="cxBotNew">חיבור מחשב אחר</button><button class="btn g grow" ${big} data-a="cxBotRev">ניתוק</button></div>`}
   h+=`<form data-f="cxBotMaxF" style="margin-top:12px"><label class="f"><span>פריטים חדשים שהרובוט טוען לכספית בכל ריצה${+i.newMax>=NEW_ALL?' – עכשיו: ללא הגבלה':''}</span><input name="n" type="number" inputmode="numeric" min="0" max="${NEW_ALL}" step="1" value="${+i.newMax>=NEW_ALL?'':+i.newMax||0}" placeholder="מספר" style="min-height:48px"></label><label style="display:flex;align-items:center;gap:8px;min-height:44px"><input type="checkbox" name="all" ${+i.newMax>=NEW_ALL?'checked':''} style="width:22px;height:22px"> ללא הגבלה</label><p class="note" style="margin-top:0">1 = בדיקה ראשונה עם פריט אחד. "ללא הגבלה" – הרובוט טוען לכספית את כל הפריטים החדשים בכל ריצה. עם מספר – מעל המגבלה הרובוט עוצר ומודיע.</p><button class="btn g w" ${big}>שמירה</button></form>`;
   if(i.sa)h+=`<details style="margin-top:12px"><summary style="min-height:44px;display:flex;align-items:center"><b>דוח היכרות (מנהל־על)</b></summary>${(i.disc||[]).length?i.disc.map(x=>`<button class="btn g w" style="min-height:48px;margin-top:6px" data-a="cxBotDisc" data-k="${esc(x.id)}">${dt(x.at)} · ${Math.ceil((x.size||0)/1024)} KB</button>`).join(''):'<p class="note">עוד לא נשלח דוח. שולחים מחלון התוסף: "מצב היכרות" ← "שליחה".</p>'}</details>`}
  h+=`<div class="row" style="margin-top:12px"><button class="btn g grow" ${big} data-a="cxBotDl">הורדת התוסף</button><button class="btn g grow" ${big} data-a="cxBotGuide">הוראות התקנה</button></div></div>`;
- return h};
+ return h+hkCardH()};
+
+/* ---------- לקוחות הקפה מכספית (24.11, סבב 2) ---------- */
+const HK={g:null,err:'',ld:0,hide:0,run:0,prog:''};
+async function hkLoad(){if(HK.ld)return;HK.ld=1;try{HK.g=await fnCall('hkGet',{});HK.err='';HK.hide=0}catch(e){if(e&&e.reason==='manager-only')HK.hide=1;else HK.err=e&&e.message||'הטעינה נכשלה'}HK.ld=0;if(cur().v==='cxSync')rerender()}
+const ag=n=>ils((+n||0)/100); /* השרת שומר באגורות */
+const kv=(l,v,c)=>`<div class="k${c?' '+c:''}"><small>${l}</small><b>${v}</b></div>`;
+const hkLi=(x,btn)=>`<div class="li" style="cursor:default;align-items:center"><div class="m"><b><bdi>${esc(x.name||'לקוח כספית '+(x.xc||''))}</bdi></b><small>מספר לקוח בכספית ${esc(String(x.xc||''))}${typeof x.bal==='number'?' · יתרה '+ag(x.bal):''}${typeof x.diff==='number'&&x.diff?(x.diff<0?' · ירידה של '+ag(-x.diff):' · חיוב של '+ag(x.diff)):''}${x.day?' · '+dd(x.day):''}</small><small>${esc(x.msg||'')}</small></div>${btn?`<button class="btn g s" style="min-height:48px;padding:4px 14px;flex:none" data-a="hkDone" data-id="${esc(x.id)}">טופל</button>`:''}</div>`;
+function hkCardH(){if(HK.hide)return'';if(!HK.g&&!HK.err)hkLoad();const g=HK.g;
+ let h='<div class="card"><h3 style="margin-top:0">לקוחות הקפה מכספית</h3>';
+ if(HK.err)h+=`<p class="note">${esc(HK.err)}</p><button class="btn g w" ${big} data-a="hkRe">נסו שוב</button>`;
+ else if(!g)h+='<p class="note">טוען…</p>';
+ else if(HK.run)h+=`<p class="note" role="status" id="hkprog">${esc(HK.prog||'מאשר…')}</p><p class="note">אל תסגרו את האפליקציה עד שהאישור מסתיים.</p>`;
+ else if(g.st==='none')h+='<p class="note" style="margin-top:0">הרובוט יביא את רשימת הלקוחות מכספית בריצה הלילית. אחר כך תופיע כאן תצוגה מקדימה לאישור – עד האישור לא נוצר שום לקוח.</p>';
+ else if((g.st==='pend'||g.st==='apr')&&g.pend){const p=g.pend,v=p.pv||{},L=v.chkL||[];
+  h+=`<p class="note" style="margin-top:0">ממתין לאישור – עוד לא נוצר שום לקוח. כל הלקוחות ייכנסו כלקוחות פרטיים, עם יתרת פתיחה לכל מי שהיתרה שלו אינה 0.</p>
+  <div class="kg">${kv('תאריך התמונה',dd(p.day))}${kv('לקוחות',+v.n||0)}${kv('חדשים',+v.new||0)}${kv('מותאמים ללקוח קיים',+v.match||0)}${kv('לבדוק',+v.chk||0,v.chk?'neg':'')}${kv('סך היתרות',ag(v.sum))}${kv('עם יתרה שלילית',+v.neg||0)}${kv('עם יתרה 0',+v.zero||0)}</div>
+  ${v.chk?`<p class="note">ב"לבדוק" לא ייווצר כלום – מטפלים בהם ידנית אחרי האישור. סך היתרות שייכנסו בפועל (בלי "לבדוק"): ${ag(v.sumOk)}.</p>`:''}
+  <p class="note" role="alert"><b>בדקו שסך החובות תואם לדוח 'דוח לקוחות - הקפה' בכספית לפני האישור.</b></p>
+  ${g.st==='apr'&&g.apr?`<p class="note" role="status">האישור התחיל ולא הסתיים (${+g.apr.pos||0} מתוך ${+g.apr.n||0}). לחצו "המשך אישור" כדי להשלים.</p>`:''}
+  <button class="btn w" ${big} data-a="hkApr">${g.st==='apr'?'המשך אישור':'אשר ייבוא'}</button>
+  ${L.length?`<details style="margin-top:8px"><summary style="min-height:48px;display:flex;align-items:center"><b>לבדוק (${L.length}${v.chk>L.length?' מתוך '+v.chk:''})</b></summary>${L.map(x=>hkLi(x,false)).join('')}</details>`:''}`}
+ else if(g.st==='on'){const n=g.night,f=g.first,L=g.chk||[];
+  h+=n?`<div class="kg">${kv('ריצה לילית אחרונה',dd(n.day))}${kv('חיובים שנוספו',+n.add||0)}${kv('בסכום',ag(n.sum))}${kv('לקוחות חדשים',+n.new||0)}${kv('ירידות יתרה (לבדוק)',+n.neg||0,n.neg?'neg':'')}</div><p class="note">נקלט ${dt(n.at)} · ${+n.n||0} לקוחות בתמונה${n.del?' · '+n.del+' שנמחקו באפליקציה (לא נוצרים שוב)':''}${n.pend?' · '+n.pend+' חיובים ללקוחות שממתינים לבדיקה ('+ag(n.psum)+') – לא נכנסו':''}${n.full?' · '+n.full+' חיובים נוספים באותו יום ('+ag(n.fsum)+') – ייכנסו מחר':''}</p>`
+   :`<p class="note" style="margin-top:0">הייבוא הראשון אושר${f?' ('+dt(f.at)+')':''}. הריצה הלילית הבאה תוסיף חיובים חדשים מכספית.</p>`;
+  h+=`<div class="sec"><h3>לבדוק (${L.length})</h3></div>${L.length?L.map(x=>hkLi(x,true)).join(''):'<p class="note">אין פריטים פתוחים.</p>'}`}
+ h+=`<button class="btn g w" ${big} data-a="hkRe" style="margin-top:8px">רענן</button></div>`;
+ return h}
+const hkSet=t=>{HK.prog=t;const e=document.getElementById('hkprog');if(e)e.textContent=t;else if(cur().v==='cxSync')rerender()};
+ACT.hkRe=()=>{HK.err='';HK.g=null;rerender()};
+ACT.hkApr=()=>{const g=HK.g,p=g&&g.pend;if(!p||HK.run)return;const v=p.pv||{};
+ ask(`לאשר ייבוא של ${+v.n||0} לקוחות מכספית (${+v.new||0} חדשים, ${+v.match||0} מותאמים, ${+v.chk||0} לבדוק), סך יתרות ${ag(v.sum)}?`,async()=>{
+  HK.run=1;HK.prog='מאשר…';rerender();let r=null,k=0;
+  try{do{r=await fnCall('hkApprove',{sid:p.sid});hkSet('אושרו '+(+r.pos||0)+' מתוך '+(+r.n||0)+' לקוחות…')}while(r&&!r.done&&++k<100);
+   HK.run=0;const c=(r&&r.c)||{};
+   dlg(`<h3>${r&&r.done?'הייבוא הסתיים':'הייבוא עוד לא הסתיים'}</h3><div class="kg">${kv('לקוחות חדשים',+c.new||0)}${kv('מותאמים ללקוח קיים',+c.match||0)}${kv('יתרות פתיחה',+c.ob||0)}${kv('לבדוק',+c.chk||0,c.chk?'neg':'')}${kv('סך יתרות הפתיחה',ag(c.sum))}</div><p class="note">${r&&r.done?'עכשיו אפשר לעבור על כרטיסי הלקוחות: להזין קבלות ולמחוק לקוחות לא רלוונטיים. את "לבדוק" מסמנים "טופל" כאן.':'לחצו שוב "המשך אישור".'}</p><button class="btn g w" ${big} data-a="closeDlg">סגור</button>`)}
+  catch(e){HK.run=0;toast(e&&e.message||'הפעולה נכשלה')}
+  HK.g=null;HK.ld=0;hkLoad()},'אשר ייבוא')};
+ACT.hkDone=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('hkChkDone',{id});toast('סומן כטופל');if(HK.g&&HK.g.chk)HK.g.chk=HK.g.chk.filter(x=>x.id!==id);rerender()}catch(e){el.disabled=false;toast(e&&e.message||'הפעולה נכשלה')}};
 
 ACT.cxBotRe=()=>{B.err='';B.i=null;rerender()};
 /* "עדכון המחשב": מצב + בקשה לתוסף לבדוק את הדיסק ולהיטען מחדש. ההורדה עצמה – המשימה ב-Windows (כל 10 דקות, אחרי הרצה חוזרת של install-auto-update.cmd) */
@@ -102,7 +144,7 @@ ACT.cxBotUpdGo=async el=>{if(el)el.disabled=true;try{await fnCall('cxBotTok',{op
 function updWait(){if(B.ut||updSt(B.i)!=='wait')return;B.ut=setTimeout(async()=>{B.ut=0;if(!document.hidden&&document.querySelector('#dlg[open] [data-a=cxBotUpdGo]')){await load();updRe();updWait()}},20000)}
 /* "סנכרן עכשיו": בקשה אחת בכל פעם (השרת מסרב לבקשה כפולה / בזמן ריצה). אין הגבלה יומית */
 ACT.cxBotNow=async el=>{if(el)el.disabled=true;try{await fnCall('cxBotTok',{op:'now'});toast('נשלח למחשב החנות')}catch(e){toast(e&&e.message||'הפעולה נכשלה')}load()};
-window.cxBotReset=()=>{B.err='';B.i=null};
+window.cxBotReset=()=>{B.err='';B.i=null;if(!HK.run){HK.err='';HK.g=null}};
 /* חיבור: קוד חדש (מוצג פעם אחת). מחשב שמחובר עכשיו מתנתק */
 const mk=async()=>{try{const r=await fnCall('cxBotTok',{op:'new'});
  dlg(`<h3>קוד חיבור למחשב</h3><p class="note"><b>הקוד מוצג פעם אחת בלבד.</b> במחשב: סמל התוסף ← "חיבור לאפליקציה והגדרות" ← מדביקים ← "חבר". לא שולחים את הקוד לאף אחד, ומוחקים אותו אחרי החיבור.</p><div class="card" style="word-break:break-all;direction:ltr;text-align:left"><code id="cxBotTok">${esc(r.token)}</code></div><div class="row"><button class="btn grow" ${big} data-a="cxBotCopy">העתקה</button><button class="btn g grow" ${big} data-a="closeDlg">סגור</button></div>`);
