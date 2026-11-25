@@ -1348,7 +1348,7 @@ test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת �
     const up = hkUps(n0);
     assert.equal(up.length, 1, 'פעם אחת (לא לכל סניף)');
     const b = up[0];
-    assert.deepEqual(Object.keys(b).sort(), ['day', 'kind', 'op', 'rows', 'run', 'ver'], JSON.stringify(Object.keys(b)));
+    assert.deepEqual(Object.keys(b).sort(), ['day', 'op', 'rows', 'run', 'ver'], JSON.stringify(Object.keys(b)));
     assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.equal(b.day, today);
     assert.deepEqual(b.rows, fx.HK_WANT);
     const txt = JSON.stringify(srv.calls.slice(n0)) + JSON.stringify(s.st.lastRun);
