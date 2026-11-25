@@ -35,7 +35,7 @@ function start(o) {
       if (op === 'upload' && b.partial !== undefined && S.noPartial) return send(400, { ok: false, reason: 'bad-field', msg: 'שדה לא מוכר' });
       if (op === 'hello' && b.req !== undefined) { if (b.req !== S.req || S.taken) return send(409, { ok: false, reason: 'req-gone', msg: 'הבקשה כבר טופלה' }); S.taken = true; }
       if (op === 'hello') return send(200, { ok: true, runId: S.runId || 'srvrun' + S.calls.length, minVer: '0.0.1', biz: { name: 'עסק בדיקה' }, days: S.days, schedule: { at: '03:00', tz: 'Asia/Jerusalem' }, limits: { price: 500, newMax: 50 } });
-      if (op === 'upload') return send(200, { ok: true });
+      if (op === 'upload' || op === 'hkSnap') return send(200, { ok: true });
       if (op === 'preview') return send(200, { ok: true, cnt: { nw: 1, in: 2 } });
       if (op === 'apply') return send(200, { ok: true, done: true, res: { nw: 1 } });
       if (op === 'export') {

@@ -1328,7 +1328,7 @@ test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספי
 
 // ---------- 0.1.21: יתרות הקפה (hkSnap) ----------
 // כספית המדומה (hkXlsx=1): "יצוא לאקסל" ב-#/hakafa-customers מחזיר xlsx עם 22 עמודות (fixtures/data.js hkXlsx); כל יצוא נרשם ב-hkXs לפי הסניף
-const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'upload' && c.kind === 'hkSnap');
+const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'hkSnap');
 async function hkOn(mode, ms) {
   if (!caspitPage()) { const pg = await ctx.newPage(); await pg.goto('https://caspit.valu.co.il/bo#/'); await pg.evaluate(() => localStorage.setItem('auth', '1')); }
   await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית נשארה בנחל לכיש – הריצה מחזירה ליהודה הנשיא

@@ -964,7 +964,7 @@ function hoursInfo(A, months) {
 
 // ---------- יתרות הקפה (0.1.21) ----------
 // בריצה הלילית בלבד (לא בשעתית): "יצוא לאקסל" של #/hakafa-customers (capture: נקודת קצה אם הוגדרה, אחרת המסך – הזרימה hkSnap),
-// פענוח (lib/hk.js) ושליחה לשרת: upload { kind:'hkSnap', run, day, rows:[{ xc, tz, name, ph, addr, bal }] } – רק השדות האלה.
+// פענוח (lib/hk.js) ושליחה לשרת: op 'hkSnap' { run, day, rows:[{ xc, tz, name, ph, addr, bal }] } – רק השדות האלה.
 // הרשימה זהה בשני הסניפים → פעם אחת, בסניף הבית (brHome לפני). דגל: selectors.json hkSync:true.
 // כישלון לא מפיל את הריצה: נרשם ב-flags.hk ({ code, msg }) ונשלח בדיווח (info.flags.hk, info.hk) – הריצה עצמה "הצליחה".
 // נזרקות (כמו בשעות): wrong-page / needs-login / branch-restore / auth; תקלה זמנית (רשת, שרת, זמן) – ניסיון חוזר רגיל, ובניסיון האחרון – flags.hk.
@@ -986,7 +986,7 @@ async function hkStep(run) {
     if (X.rows.length > HK.MAX_ROWS) throw P.err('hk-limit', `${X.rows.length} לקוחות הקפה – מעל המגבלה (${HK.MAX_ROWS}). לא נשלח.`);
     stage = 'send';
     const day = D.dayStr(Date.now(), (await sched()).tz);
-    await (await api()).call('upload', { run: U.rid('hk'), kind: 'hkSnap', day, rows: X.rows });
+    await (await api()).call('hkSnap', { run: U.rid('hk'), day, rows: X.rows });
     return { n: X.rows.length, skip: X.skip, bad: X.bad, dup: X.dup, day, via: f.via };
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
