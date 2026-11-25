@@ -215,7 +215,7 @@ describe('שלב 2 – ברירת מחדל לעסק חדש; עסקים קיימ�
     assert.deepEqual(await S.bizCaps(B, 100), { perUser: 100, bizDaily: 50 });
     await prep((d) => d.doc(`b/${A}/private/info`).set({ adv: { limits: { scanDaily: 7 } } }));
     assert.deepEqual(await S.bizCaps(A, 100), { perUser: 100, bizDaily: 7 });
-    assert.deepEqual(await S.bizCaps(L, 100), { perUser: 100, bizDaily: null });
+    assert.deepEqual(await S.bizCaps(L, 100), { perUser: null, bizDaily: null }); // 25.11.2026: לארג' פעמי – גם בלי תקרה למשתמש
   });
   it('מנהל־על עדיין יכול לכבות; כבוי = feature-off בלי Gemini', async () => {
     await call('createBusiness', SUPER, { bizId: 'biz-new', name: 'חדש', ownerEmail: 'new2@example.invalid', ownerPhone: '0501234567' });
@@ -294,6 +294,23 @@ describe('שלב 2 – סוגי הגבלה (setScanQuota), מנהל־על בלב
     assert.equal((await getDoc(`b/${A}/private/info`)).scanQuota, undefined);
     assert.equal((await S().bizCaps(A, 100)).bizDaily, 1);
   });
+  it('הודעה למנהל (25.11.2026): סימון 80% ו-100% במונה העסק ובמונה המשתמש – פעם אחת לתקופה; תקרה למשתמש מעל 100 אפשרית', async () => {
+    await prep((d) => d.doc(`b/${A}/private/info`).set({ adv: { limits: { scanDaily: 5, scanPerUserDaily: 150 } } }));
+    assert.equal((await S().bizCaps(A, 100)).perUser, 150, 'מנהל־על יכול לקבוע יותר מ-100');
+    assert.equal((await S().bizCaps('largpeami', 100)).perUser, null, 'לארג\' פעמי – בלי תקרה');
+    for (let i = 1; i <= 3; i++) assert.equal((await call('scanDocument', U.all, CLS())).status, 'OK');
+    let b = await getDoc(`b/${A}/scan_usage/_biz`);
+    assert.equal(b.w80, undefined, '3 מתוך 5 – עוד לא 80%');
+    assert.equal((await call('scanDocument', U.all, CLS())).status, 'OK');
+    b = await getDoc(`b/${A}/scan_usage/_biz`);
+    assert.equal(b.w80, b.day, '4 מתוך 5 = 80%'); assert.equal(b.w100, undefined);
+    assert.equal((await call('scanDocument', U.all, CLS())).status, 'OK');
+    b = await getDoc(`b/${A}/scan_usage/_biz`);
+    assert.equal(b.w100, b.day, '5 מתוך 5 = 100%');
+    assert.equal((await call('scanDocument', U.all, CLS())).reason, 'biz-daily-limit');
+    assert.equal((await getDoc(`b/${A}/scan_usage/_biz`)).count, 5);
+  });
+
   it('עסק אחר לא מושפע מהגדרה של עסק א\'', async () => {
     await call('setScanQuota', SUPER, { bizId: A, mode: 'limit', period: 'day', n: 0 });
     assert.equal((await call('scanDocument', U.all, CLS())).reason, 'biz-daily-limit');

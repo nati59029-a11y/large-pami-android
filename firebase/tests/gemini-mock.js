@@ -111,8 +111,8 @@ function payAnswer(body) {
   if (typeof r === 'string' && Object.hasOwn(PAYRULE, r)) r = PAYRULE[r];
   return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
 }
-const state = { payrule: null, bayscan: null, bayscanSeq: [], dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.payrule = null; state.bayscan = null; state.bayscanSeq = []; state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+const state = { payrule: null, bayscan: null, bayscanSeq: [], dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, invMaxImg: 0, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.payrule = null; state.bayscan = null; state.bayscanSeq = []; state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.invMaxImg = 0; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
@@ -235,6 +235,8 @@ function start() {
       if (state.mode === 'noanswer') return send(200, { candidates: [], promptFeedback: { blockReason: 'SAFETY' } });
       if (state.mode === 'badreq') return send(400, { error: { message: 'bad request' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });
+      // invMaxImg (25.11.2026): בקשת invlines עם יותר תמונות מזה – עמוס (503), כמו חשבונית ארוכה שלא מספיקה בזמן
+      if (kind === 'invlines' && state.invMaxImg && ((body.contents || [])[0] || { parts: [] }).parts.filter((p) => p.inline_data).length > state.invMaxImg) return send(503, { error: { message: 'overloaded' } });
       return send(200, rawAnswer(kind, body));
     });
   });
