@@ -147,6 +147,47 @@ describe('ימות 2026-11-18: שליחת צינתוקים מהקו (sendLineTzi
     assert.equal(tzlTz().length, 1); assert.equal(arrTz().length, 0);
   });
 
+  it('2026-11-25 free: preview – רק הרשימה החינמית, בלי עלות ובלי קריאת לקוחות המשוב; לא שולח', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    const f = await call('u_mgr', { action: 'preview', target: 'free' });
+    assert.equal(f.status, 'OK', f.text);
+    assert.equal(f.result.free, 3); assert.equal(f.result.paid, 0); assert.equal(f.result.total, 3); assert.equal(f.result.cost, 0); assert.equal(f.result.capped, false);
+    assert.equal(M.calls('RunTzintuk').length, 0, 'preview לא שולח');
+    assert.equal(M.calls('GetTemplateEntries').length, 0, 'לא קורא את לקוחות המשוב');
+  });
+
+  it('2026-11-25 send free: רק tzl: (חינם), אף צינתוק בתשלום, המונה החודשי לא זז; גם מעל המכסה של המשוב – נשלח', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    await writeDoc(env, 'yemot_state/fblist', { templateId: 900, tzOn: false, sentCount: 5, tzMonth: { month: monthNow(), count: 7 } });
+    const id = rid();
+    const r = await call('u_mgr', { action: 'send', target: 'free', requestId: id });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.status, 'done'); assert.equal(r.result.sent, 3); assert.equal(r.result.paidSent, 0); assert.equal(r.result.cost, 0); assert.equal(r.result.target, 'free');
+    assert.equal(tzlTz().length, 1); assert.equal(arrTz().length, 0, 'בלי שום צינתוק בתשלום');
+    const rec = await readDoc(env, 'yemot_tzsend/' + id);
+    assert.equal(rec.status, 'done'); assert.equal(rec.target, 'free'); assert.equal(rec.freeTz, 'sent'); assert.equal(rec.fbTzSent, undefined);
+    assert.deepEqual((await readDoc(env, 'yemot_state/fblist')).tzMonth, { month: monthNow(), count: 7 }, 'המונה בתשלום לא השתנה');
+    assert.equal((await readDoc(env, 'yemot_state/tzsend')).lockAt, null);
+    M.state.requests = [];
+    const r2 = await call('u_mgr', { action: 'send', target: 'free', requestId: id });
+    assert.equal(r2.status, 'OK', r2.text); assert.equal(r2.result.duplicate, true); assert.equal(M.state.requests.length, 0);
+  });
+
+  it('2026-11-25 free: החינמי נכשל בוודאות – failed; השלמה שולחת שוב רק tzl:, בלי בתשלום', async () => {
+    await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
+    await writeDoc(env, 'yemot_test/fault', { at: 'tz-free-before' });
+    const id = rid();
+    let r;
+    try { r = await call('u_mgr', { action: 'send', target: 'free', requestId: id }); } finally { await writeDoc(env, 'yemot_test/fault', { at: 'none' }); }
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.status, 'failed'); assert.equal(r.result.failed, 3); assert.equal(r.result.sent, 0);
+    assert.equal(tzlTz().length, 0); assert.equal(arrTz().length, 0);
+    M.state.requests = [];
+    const c = await call('u_mgr', { action: 'send', target: 'free', requestId: id, resume: true });
+    assert.equal(c.status, 'OK', c.text); assert.equal(c.result.status, 'done'); assert.equal(c.result.sent, 3);
+    assert.equal(tzlTz().length, 1); assert.equal(arrTz().length, 0, 'בלי בתשלום');
+  });
+
   it('פסק זמן בצינתוק בתשלום – uncertain, לא נספר; ניסיון חוזר (אותו requestId) לא שולח', async () => {
     await fbSetup(env, FB); M.state.tzl.mivtzaim = FREE.slice();
     M.setMode('tzphones', 'hang');
