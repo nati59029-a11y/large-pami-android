@@ -1,8 +1,9 @@
 'use strict';
 // שליחת צינתוק מהמסך "שלוחות הקו" בלי מבצע (משימה 2026-11-18).
-//   sendLineTzintuk – מנהל בלבד. קלט { action:'preview'|'send', target:'fb'|'all', requestId }.
+//   sendLineTzintuk – מנהל בלבד. קלט { action:'preview'|'send', target:'fb'|'all'|'free', requestId }.
 //     target 'fb'  – צינתוק בתשלום רק ללקוחות המשוב (רשימת התפוצה "לקוחות משוב", לא חסומים), גם למי שברשימה החינמית.
 //     target 'all' – RunTzintuk tzl:<רשימה חינמית> (חינם), ובנוסף צינתוק בתשלום ללקוחות משוב שאינם ברשימה החינמית. כל מספר מקבל אחד.
+//     target 'free' (משימה 2026-11-25) – רק RunTzintuk tzl:<רשימה חינמית> (מי שנרשם בעצמו בקו). חינם. בלי שום צינתוק בתשלום ובלי קריאת לקוחות המשוב.
 //     preview – רק קריאה (כמה יקבלו, עלות משוערת). לא שולח.
 //     send    – שולח. אותו requestId שוב = לא שולח (מחזיר את מה שנרשם). שליחה אחת בכל רגע (נעילה ב-yemot_state/tzsend).
 //     send + resume:true (סבב 2) – "השלם את מי שלא קיבל": רק לרשומה שהסתיימה ב-'partial' או 'failed' (בלי שום חלק לא ודאי).
@@ -41,6 +42,11 @@ const bad = () => new HttpsError('invalid-argument', 'קלט לא תקין', { r
 // כמה יקבלו: free = מספרים ברשימה החינמית (רק ב-all), paid = לקוחות משוב לא חסומים (ב-all – פחות מי שברשימה החינמית).
 // (משימה 2026-11-23) skipped = לקוחות משוב שיצאו מהרשימה החינמית (בעצמם או ע"י מנהל) – לא מקבלים בתשלום, בשני הסוגים.
 async function counts(ctx, cfg, fbs, target, db) {
+  if (target === 'free') {
+    // רק הרשימה החינמית: בלי לקוחות משוב, בלי תשלום (paid תמיד 0, ולכן אף פעם לא מעל המכסה)
+    const free = new Set((await tzlEntries(ctx, cfg.list)).map((p) => normPhone(p) || p)).size;
+    return { free, paid: 0, total: free, cost: 0, skipped: 0, max: cfg.fbTzMax, capped: false, listReady: true };
+  }
   const tplId = fbs.templateId;
   const fb = Number.isInteger(tplId) && tplId > 0
     ? [...new Set((await getTemplateEntries(ctx, tplId)).filter((e) => !e.blocked).map((e) => normPhone(e.phone)).filter(Boolean))] : [];
@@ -70,7 +76,7 @@ async function run(request, key, base) {
   // מנהל בלבד – נבדק לפני כל פנייה לימות
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'רק מנהל יכול לשלוח צינתוק.', { reason: 'manager-only' });
   const input = inputObject(request);
-  if (!['preview', 'send'].includes(input.action) || !['fb', 'all'].includes(input.target)) throw bad();
+  if (!['preview', 'send'].includes(input.action) || !['fb', 'all', 'free'].includes(input.target)) throw bad();
   if (input.action === 'send' && (typeof input.requestId !== 'string' || !ID_RE.test(input.requestId))) throw new HttpsError('invalid-argument', 'הבקשה לא תקינה. נסו שוב.', { reason: 'bad-request-id' });
   if (!key) throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.', { reason: 'no-key' });
   let ctx;
@@ -155,11 +161,11 @@ async function run(request, key, base) {
       message: `לא נשלח צינתוק: ${pre.paid} מספרים בתשלום – מעל המכסה (${pre.max}).` });
   }
 
-  // 2. החינמי (רק ב-all): tzl:<רשימה>
+  // 2. החינמי (ב-all וב-free): tzl:<רשימה>
   // בהשלמה: רק אם החינמי נכשל בוודאות בפעם הקודמת
   let freeSt = P ? (P.freeTz || null) : null;
   const freeN0 = P && P.result && Number.isInteger(P.result.free) ? P.result.free : 0;
-  if (target === 'all' && (P ? P.freeTz === 'failed' : pre.free > 0)) {
+  if ((target === 'all' || target === 'free') && (P ? P.freeTz === 'failed' : pre.free > 0)) {
     await recRef.update({ freeTz: 'pending' });
     let called = false;
     try {
@@ -176,9 +182,11 @@ async function run(request, key, base) {
 
   // 3. בתשלום: לקוחות המשוב (ב-all – רק מי שאינו ברשימה החינמית). קבוצות, רישום ו-uncertain – ב-fbTzintuk.
   // בהשלמה: רק אם הבתשלום נכשל (failed/partial), ורק למי שאינו ב-fbTzSent. אחרת – מה שנרשם בפעם הקודמת.
-  const doPaid = !P || RESUMABLE.includes(P.fbTz);
+  // ב-free: אף פעם לא בתשלום – לא קוראים ל-fbTzintuk בכלל.
+  const doPaid = target !== 'free' && (!P || RESUMABLE.includes(P.fbTz));
   const fb = doPaid ? await Y.fbTzintuk(db, ctx, cfg, fbs, recRef, P ? P.fbTzSent : [], null, { keepFree: target === 'fb' })
-    : { st: P.fbTz || 'empty', sent: Array.isArray(P.fbTzSent) ? P.fbTzSent : [], total: Number.isInteger(P.fbTzTotal) ? P.fbTzTotal : 0 };
+    : !P ? { st: 'empty', sent: [], total: 0 }
+      : { st: P.fbTz || 'empty', sent: Array.isArray(P.fbTzSent) ? P.fbTzSent : [], total: Number.isInteger(P.fbTzTotal) ? P.fbTzTotal : 0 };
   // fbTzintuk שנכשל לפני שקרא את הרשימה מחזיר total:0 – לפי הבדיקה המקדימה, כדי לא לדווח "נשלח" (סבב 2)
   const paidTotal = fb.st === 'capped' ? 0 : ['failed', 'partial', 'uncertain'].includes(fb.st) ? Math.max(fb.total, pre.paid) : fb.total;
   const paidLeft = Math.max(0, paidTotal - fb.sent.length);
