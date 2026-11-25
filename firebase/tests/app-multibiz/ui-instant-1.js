@@ -144,7 +144,8 @@ const tileTxt = (pg) => pg.evaluate(() => { const b = document.querySelector('[d
     await pg.evaluate(() => { WS = 'home'; NAV = [{ v: 'wk' }]; ACT.pmGo(); }); await sleep(1500);
     const pv = await idbVal(pg, 'pm|2026-11');
     check('7ח 403 על "השכר שלי": נתוני השכר לא מוצגים, והעותק של החודש נמחק מהמכשיר (לא יופיע שוב בפתיחה הבאה)', !(await main(pg)).includes(ils(EST.ו)) && /אין לך הרשאה/.test(await main(pg)) && pv !== null && JSON.parse(pv).v === null, { m: (await main(pg)).slice(0, 200), pv });
-    await pg.evaluate(() => go('dr')); await sleep(1500);
+    // מחכים לתשובת 403 מהשרת (עד 8 שניות) ולא זמן קבוע – במכונה איטית 1.5 שניות לא תמיד הספיקו (24.11.2026)
+    await pg.evaluate(() => go('dr')); await waitFor(async () => /נסה שוב/.test(await main(pg)), 8000); await sleep(300);
     check('7ט 403 על סיכום היום: העותק יורד, מוצגת שגיאה עם "נסה שוב", והעותק נמחק מהמכשיר', !/אושר|ממתין לאישור/.test(await main(pg)) && /נסה שוב/.test(await main(pg)) && (await idbVal(pg, 'dr')) === 'null', { m: (await main(pg)).slice(0, 200), v: await idbVal(pg, 'dr') });
     FORB = new Set();
     // 8. יציאה מהחשבון מוחקת גם את עותקי התצוגה
