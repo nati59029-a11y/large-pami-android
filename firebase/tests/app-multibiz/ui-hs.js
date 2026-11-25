@@ -363,7 +363,9 @@ const u2m = (q) => new URLSearchParams(q).getAll('updateMask.fieldPaths').sort()
   await waitFor(() => mp.evaluate(() => !!document.querySelector('#hsImgP [data-a=hsImgBig]')), 4000);
   await mp.click('#hsImgP [data-a=hsImgBig]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('#dlg[open] img.hs-zi')));
   await mp.click('#dlg img.hs-zi'); await sleep(150);
-  check('46 נגיעה בתמונה בטופס: תצוגה מוגדלת, נגיעה נוספת מגדילה עוד, וכפתור שיתוף', await mp.evaluate(() => document.querySelector('#dlg img.hs-zi').classList.contains('z') && !!document.querySelector('#dlg [data-a=hsImgShare]')));
+  // 24.11.2026 (img-zoom.js, ed9891e): נגיעה בתמונה בחלון פותחת את מסך הצפייה המלא (הגדלה, שמירה בגלריה, שיתוף) במקום ההגדלה הפנימית
+  check('46 נגיעה בתמונה בטופס: נפתח מסך הצפייה המלא עם התמונה, הגדלה וכפתור שיתוף', await mp.evaluate(() => { const v = document.getElementById('viewer'); return !!v && !v.hidden && getComputedStyle(v).display !== 'none' && !!v.querySelector('img') && !!v.querySelector('[data-a=vwShare]') && !!v.querySelector('[data-a=vwZoom]'); }));
+  await mp.evaluate(() => { try { vwClose(); } catch (e) { /* */ } });
   await shot(mp, shots, 'hs-8-תמונה-מוגדלת');
   check('46א החלון בלי גלילה לרוחב (360px)', await noOverflow(mp));
   await mp.evaluate(() => closeDlg());
