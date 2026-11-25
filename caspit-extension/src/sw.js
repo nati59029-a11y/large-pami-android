@@ -605,7 +605,13 @@ async function brRead(tab, cfg, ms) {
     await sleep(700);
   }
 }
-// בחירת סניף ובדיקה שנקלטה (הטקסט הנבחר מכיל את השם, והמסך התייצב). כישלון → code (branch-switch / branch-restore), בלי לנחש
+// סימון של הדף הנוכחי (בעולם המבודד – נעלם כשהדף נטען מחדש). → true אם הסימון tok עדיין שם (null = לא נקרא)
+const brMarkIn = (tok, set) => { if (set) { self.__cxBrTok = tok; return true; } return self.__cxBrTok === tok; };
+async function brSame(tab, tok) { try { return !!(await inIso(tab, brMarkIn, [tok, false])); } catch (e) { return null; } }
+// בחירת סניף ובדיקה שנקלטה. כישלון → code (branch-switch / branch-restore), בלי לנחש.
+// 0.1.22 (תקלה 25.11: הדוח של נחל לכיש יצא של יהודה הנשיא): כספית מציגה את השם החדש בפקד מיד, אבל הבחירה נשמרת רק כשכספית
+// טוענת את הדף מחדש בעצמה. לכן: מחכים לטעינה מחדש של כספית (עד reloadMs); אם לא הגיעה – טוענים מחדש בעצמנו.
+// רק אחרי טעינה מחדש בודקים שהשם נשאר. לא נשאר → בוחרים שוב (עד 2 ניסיונות), ואחר כך code.
 async function brSet(tab, name, code) {
   const cfg = await brCfg();
   if (!cfg) throw P.err(code, 'אין הגדרה לפקד הסניף');
@@ -614,19 +620,35 @@ async function brSet(tab, name, code) {
   if (r.cur === name) return { same: true };
   for (let k = 0; k < 2; k++) {
     if ((await boState(tab)) === 'off') throw wrongPage();
+    const tok = U.rid('b');
+    await inIso(tab, brMarkIn, [tok, true]).catch(() => null);
     const p = await inIso(tab, brPickIn, [cfg, name, GUARD]).catch(() => null);
     if (p && p.wrong) throw wrongPage();
     if (p && p.why === 'no-opt') throw P.err(code, `האפשרות "${name}" לא נמצאה בפקד הסניף`);
+    // 1) השם מופיע בפקד
     const end = Date.now() + (+cfg.ms || 30e3);
+    let shown = false;
     while (Date.now() < end) {
       await sleep(700);
       r = await brRead(tab, cfg, 0);
-      if (r && r.cur === name) {
-        await sleep(+cfg.settle || 2000); // כספית מרעננת את הנתונים / טוענת את הדף מחדש אחרי ההחלפה
-        r = await brRead(tab, cfg, 15e3);
-        if (r && r.cur === name && (await boState(tab)) === 'bo') return { ok: true };
-      }
+      if (r && r.cur === name) { shown = true; break; }
     }
+    if (!shown) continue;
+    // 2) כספית טוענת את הדף מחדש (הסימון נעלם)
+    const rEnd = Date.now() + (+cfg.reloadMs || 20e3);
+    let reloaded = false;
+    while (Date.now() < rEnd) {
+      const st = await boState(tab);
+      if (st === 'off') throw wrongPage();
+      if (st === 'bo' && (await brSame(tab, tok)) === false) { reloaded = true; break; }
+      await sleep(700);
+    }
+    if (!reloaded) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); }
+    if ((await boState(tab)) === 'off') throw wrongPage();
+    // 3) אחרי הטעינה מחדש – השם עדיין נבחר
+    await sleep(+cfg.settle || 2000);
+    r = await brRead(tab, cfg, 15e3);
+    if (r && r.cur === name && (await boState(tab)) === 'bo') return { ok: true, reloaded };
   }
   throw P.err(code, `הבחירה בסניף "${name}" לא נקלטה בכספית (מוצג: ${(r && r.cur) || 'לא ידוע'})`);
 }
@@ -1120,12 +1142,22 @@ const STEP = {
     }
   },
   hk: (run) => hkStep(run), // 0.1.21: יתרות הקפה – כישלון לא מפיל את הריצה
-  exportNew: (run) => exportImport(run, 'new'),
+  // 0.1.22: תקלה בפריטים החדשים (מעל המגבלה, שגויים בכספית, זמן) לא עוצרת את עדכון המחירים – נרשמת ב-flags.nw ומדווחת בסוף (report).
+  // נזרקות מיד רק תקלות של המסך / החיבור / התור, שבהן גם עדכון המחירים לא יכול לעבוד בבטחה
+  async exportNew(run) {
+    try { return await exportImport(run, 'new'); } catch (e) {
+      const code = e && typeof e.code === 'string' ? e.code : 'tab';
+      if (!NW_SOFT.has(code)) throw e;
+      run.flags.nw = Object.assign({ code, msg: String((e && e.message) || P.msgOf(code)).slice(0, 290) }, e && e.scr ? { scr: e.scr } : {});
+      return { err: code };
+    }
+  },
   exportPrice: (run) => exportImport(run, 'price'),
   async report(run) {
     // 0.1.13: הסניף הנוסף נכשל (מעבר / דוח / branch-same) – הכול נשלח כרגיל, והריצה מסתיימת "נכשלה" עם הקוד (דיווח ב-finalize, בלי ניסיון חוזר)
     if (run.flags && run.flags.br) throw P.err(run.flags.br.code, run.flags.br.msg);
     if (run.flags && run.flags.hrs) throw P.err(run.flags.hrs.code, run.flags.hrs.msg); // 0.1.14: שעות העובדים נכשלו – כל השאר נשלח
+    if (run.flags && run.flags.nw) throw P.err(run.flags.nw.code, run.flags.nw.msg, run.flags.nw.scr ? { scr: run.flags.nw.scr } : undefined); // 0.1.22: הפריטים החדשים נכשלו – המחירים נשלחו
     await (await api()).call('report', { run: run.srv, kind: 'run', st: 'ok', steps: run.log, info: summary(run) });
     return {};
   },
@@ -1145,6 +1177,7 @@ async function applyLoop(sub, log) {
   }
   throw P.err('server', 'השמירה בשרת לא הסתיימה');
 }
+const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout']); // 0.1.22: תקלות בפריטים חדשים שלא עוצרות את עדכון המחירים
 async function exportImport(run, kind) {
   const L = run.limits || U.LIMITS;
   const max = kind === 'new' ? Math.min(L.newMax, U.LIMITS.newMax) : Math.min(L.price, U.LIMITS.price);
@@ -1198,7 +1231,9 @@ async function waitImport(tab, name, after, ms) {
     const row = H && H.rows.filter((r) => r.id > after && r.name === name).sort((a, b) => b.id - a.id)[0];
     if (row) {
       last = row;
-      if (/בוצע/.test(row.st)) return Object.assign({ fin: 'ok' }, row);
+      // 0.1.22: בכספית האמיתית (25.11) הסטטוס הסופי הוא "טעינה הסתיימה בהצלחה" (גם "– קיימים פריטים שלא נטענו ראה קובץ שגיאות").
+      // השגויים נקבעים לפי "שגויים: N" – לא לפי המילה "שגיאות" בסטטוס
+      if (/בוצע|הסתיימה/.test(row.st)) return Object.assign({ fin: 'ok' }, row);
       if (/שגיא|נכשל|בוטל/.test(row.st)) return Object.assign({ fin: 'fail' }, row);
     }
     if (Date.now() > end) return Object.assign({ fin: 'timeout' }, last || {});
