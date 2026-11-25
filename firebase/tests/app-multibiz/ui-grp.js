@@ -129,7 +129,9 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'big.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(31 * 1024 * 1024) }); await waitFor(() => wp.evaluate(() => window.__T.some((x) => /30MB/.test(x))), 5000);
   check('5ג סרטון מעל 30MB: הודעה ברורה, בלי העלאה ובלי הודעה', (await wp.evaluate(() => window.__T)).some((x) => /30MB/.test(x)) && !LOG.some((l) => l.st || (l.m === 'POST' && !/:runQuery$/.test(l.R))), await wp.evaluate(() => window.__T));
   LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'x.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(100) }); await sleep(500);
-  check('5ד פורמט לא נתמך: הודעה ובלי שליחה', /פורמט/.test(await toasts(wp)) && !LOG.some((l) => l.st || (l.m === 'POST' && !/:runQuery$/.test(l.R))));
+  // 25.11.2026: נכשל לסירוגין ב-CI בלבד. "שליחה" = העלאה ל-Storage או POST (לא הורדה של תמונה/סרטון קיימים שמוצגים שוב); ה-toast נבדק גם מהרישום (__T); פירוט בכשל
+  const s5d = LOG.filter((l) => (l.st && l.m !== 'GET') || (l.m === 'POST' && !/:runQuery$/.test(l.R))).map((l) => l.m + ' ' + (l.R || l.url));
+  check('5ד פורמט לא נתמך: הודעה ובלי שליחה', /פורמט/.test((await wp.evaluate(() => window.__T.join('|'))) + '|' + (await toasts(wp))) && !s5d.length, { sent: s5d, all: LOG.map((l) => l.m + ' ' + (l.R || l.url)) });
   // השתקה
   // 23.11: ההשתקה בוטלה (mu רק false) – אין מתג השתקה במסך
   check('6 השתקה בוטלה: אין מתג השתקה בקבוצה', await wp.evaluate(() => !document.querySelector('input[data-c=grMute]')));
