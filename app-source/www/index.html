@@ -3593,18 +3593,13 @@ async function fbAI(p){const k=shKey();if(!k)throw new Error('אין מפתח ז
  f.chk=(Array.isArray(o.uncertain)?o.uncertain:[]).map(x=>mp[x]||(FB_RK.includes(x)?'r'+FB_RK.indexOf(x):'')).filter(Boolean);return f}
 /* דפים שעוד לא אושרו עוברים זיהוי מחדש פעם אחת בגרסה המשופרת; הערכים הקודמים נשמרים להשוואה */
 function fbMig(){if((FBL.v||0)>=2)return;FBL.pend.forEach(p=>{if(p.man)return;if(!fbIsEmpty(p.f))p.prev=JSON.parse(JSON.stringify(p.f));p.st='q';p.err='';p.tries=0;p.nx=0;p.ed=p.ed||[]});FBL.v=2;fbSave()}
-let FBRUN=false,FBT=null;
-/* חצות הבאה לפי שעון ישראל (+דקה), כשהמכסה היומית מתאפסת */
-const fbMidnight=()=>{const now=Date.now();try{const P=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Jerusalem',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}).formatToParts(new Date(now)),g=t=>+((P.find(x=>x.type===t)||{}).value||0),sec=(g('hour')%24)*3600+g('minute')*60+g('second');return now+(86400-sec)*1000+60000}catch(e){return now+3600000}};
+let FBRUN=false,FBT=null;/* חצות הבאה לפי שעון ישראל (+דקה), כשהמכסה היומית מתאפסת */const fbMidnight=()=>{const now=Date.now();try{const P=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Jerusalem',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}).formatToParts(new Date(now)),g=t=>+((P.find(x=>x.type===t)||{}).value||0),sec=(g('hour')%24)*3600+g('minute')*60+g('second');return now+(86400-sec)*1000+60000}catch(e){return now+3600000}};
 const fbIsEmpty=f=>!(f.inv||f.amt||f.love||f.imp||f.name||f.phone||f.addr||f.r.some(Boolean));
 async function fbRun(){if(FBRUN||!fbAdmin())return;FBRUN=true;fbMig();
  try{for(;;){const now=Date.now(),p=FBL.pend.find(x=>x.st==='q'&&(!x.nx||x.nx<=now));if(!p)break;p.st='ai';fbSave();if(['fb','fbRev'].includes(cur().v))fbRef();
   try{const r=await fbAI(p),here=cur().v==='fbRev'&&cur().a===p.id;if(here)fbKeep();const ed=p.ed||[],chk=r.chk.filter(x=>!ed.includes(x));
    FBK7.forEach(k=>{if(ed.includes(k))return;if(r[k])p.f[k]=r[k];else if(p.f[k]&&!chk.includes(k))chk.push(k)});for(let i=0;i<6;i++)if(!ed.includes('r'+i)&&r.r[i])p.f.r[i]=r.r[i];p.f.chk=chk;p.st='ok';p.err='';p.tries=0;p.nx=0}
-  catch(e){p.err=(e&&e.message)||'שגיאה';if(/אין מפתח/.test(p.err)){p.st='fail'}
-   /* 25.11.2026: הגעה למכסת הזיהויים (429) – כל התור נעצר עד אחרי חצות (שעון ישראל), במקום לנסות דף אחרי דף ולשלוח בקשה כל שנייה. הניסיון לא נספר לדף */
-   else if(e&&(e.http===429||e.st==='RESOURCE_EXHAUSTED')){const t=fbMidnight();p.st='q';FBL.pend.forEach(x=>{if(x.st==='q')x.nx=Math.max(x.nx||0,t)});p.err='הגעת למכסת הזיהויים. הזיהוי ימשיך לבד אחרי חצות';fbSave();if(['fb','fbRev'].includes(cur().v))fbRef();break}
-   else{p.tries=(p.tries||0)+1;const q=/מגבלת השימוש/.test(p.err);p.st='q';p.nx=Date.now()+Math.min(q?600000:300000,15000*Math.pow(2,Math.min(p.tries,6)))}}
+  catch(e){p.err=(e&&e.message)||'שגיאה';if(/אין מפתח/.test(p.err)){p.st='fail'}/* 25.11.2026: הגעה למכסת הזיהויים (429) – כל התור נעצר עד אחרי חצות (שעון ישראל), במקום לנסות דף אחרי דף ולשלוח בקשה כל שנייה. הניסיון לא נספר לדף */else if(e&&(e.http===429||e.st==='RESOURCE_EXHAUSTED')){const t=fbMidnight();p.st='q';FBL.pend.forEach(x=>{if(x.st==='q')x.nx=Math.max(x.nx||0,t)});p.err='הגעת למכסת הזיהויים. הזיהוי ימשיך לבד אחרי חצות';fbSave();if(['fb','fbRev'].includes(cur().v))fbRef();break}else{p.tries=(p.tries||0)+1;const q=/מגבלת השימוש/.test(p.err);p.st='q';p.nx=Date.now()+Math.min(q?600000:300000,15000*Math.pow(2,Math.min(p.tries,6)))}}
   fbSave();if(cur().v==='fbRev'&&cur().a===p.id)rerender();else if(['fb','fbRev'].includes(cur().v))fbRef()}}finally{FBRUN=false}
  clearTimeout(FBT);const w=FBL.pend.filter(x=>x.st==='q'&&x.nx>Date.now()).map(x=>x.nx);if(w.length)FBT=setTimeout(fbRun,Math.max(2000,Math.min(...w)-Date.now()+500))}
 window.addEventListener('online',()=>{FBL.pend.forEach(p=>{if(p.st==='q')p.nx=0});fbRun();fbInbox().catch(()=>{})});
