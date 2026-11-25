@@ -40,6 +40,8 @@ async function caspitRoute(route) {
   if (p === '/api/me') return JSONR({ email: 'owner@example.co.il', phone: '052-1234567', token: 'Zx9kQ2mP7vL4nR8sT1wY6bC3', items: [{ id: 4580123412341234, name: 'x' }] });
   // משימות של כספית (run-as-job) והקובץ שלהן
   if (/^\/bo\/merkaz\/(items\/(full_)?report\.xlsx|reports\/sales_items)$/.test(p)) return JSONR({ job_id: 7, success: true });
+  // 0.1.21: "יצוא לאקסל" של לקוחות הקפה (כספית המדומה, hkXlsx) – xlsx כמו באמיתי; bad=1 – כותרות לא מוכרות
+  if (p === '/bo/hakafa/customers_export.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.hkXlsx(X, u.searchParams.get('bad') === '1')) });
   if (p === '/bo/files/get_job_result') {
     const f = u.searchParams.get('filename') || '';
     if (f === 'catalogs_with_barcodes.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.catalogXlsx(X)) });
@@ -99,6 +101,7 @@ function impOn(dir) {
   const f = path.join(dir, 'selectors.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.equal(j.importEnabled, true, 'במוצר – פעיל (מ-0.1.4)');
   j.importEnabled = true;
+  j.hkSync = false; // 0.1.21: יתרות הקפה – כבוי בעותק של הבדיקה (הבדיקות הקודמות לא משתנות); הבדיקות של hkSnap מדליקות דרך sel()
   j.branch.switch.ms = 8000; j.branch.switch.settle = 800; // 0.1.13: בבדיקה – המתנה קצרה לבחירת סניף שלא נקלטת
   fs.writeFileSync(f, JSON.stringify(j));
 }
@@ -1321,6 +1324,67 @@ test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספי
     const st = JSON.stringify(await sw.evaluate(() => chrome.storage.local.get(['hrsSt', 'hrsSeen'])));
     for (const w of HRS_NAMES) assert.ok(!st.includes(w), 'שם / שעה באחסון: ' + w);
   } finally { await sw.evaluate(() => chrome.storage.local.remove('hrsSeen')); await hrsOff(); }
+});
+
+// ---------- 0.1.21: יתרות הקפה (hkSnap) ----------
+// כספית המדומה (hkXlsx=1): "יצוא לאקסל" ב-#/hakafa-customers מחזיר xlsx עם 22 עמודות (fixtures/data.js hkXlsx); כל יצוא נרשם ב-hkXs לפי הסניף
+const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'hkSnap');
+async function hkOn(mode, ms) {
+  if (!caspitPage()) { const pg = await ctx.newPage(); await pg.goto('https://caspit.valu.co.il/bo#/'); await pg.evaluate(() => localStorage.setItem('auth', '1')); }
+  await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית נשארה בנחל לכיש – הריצה מחזירה ליהודה הנשיא
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/bo/.test(x.url()))) { await p.reload(); await p.waitForLoadState('load'); } // הסניף שבמסך = הסניף שבנתונים
+  await sw.evaluate(async (w) => { const S = await self.__cxTest.sel(); S.hkSync = true; if (w) S.flows.hkSnap[1].ms = w; }, ms || 0);
+}
+async function hkOff() {
+  await ls({ hkXlsx: null, hkXs: null, store: 'יהודה הנשיא' });
+  await sw.evaluate(async () => { const S = await self.__cxTest.sel(); S.hkSync = false; S.flows.hkSnap[1].ms = 30000; });
+}
+test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת ביהודה הנשיא, רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
+  await hkOn('1');
+  try {
+    const n0 = srv.calls.length;
+    const { s, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    const up = hkUps(n0);
+    assert.equal(up.length, 1, 'פעם אחת (לא לכל סניף)');
+    const b = up[0];
+    assert.deepEqual(Object.keys(b).sort(), ['day', 'op', 'rows', 'run', 'ver'], JSON.stringify(Object.keys(b)));
+    assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.equal(b.day, today);
+    assert.deepEqual(b.rows, fx.HK_WANT);
+    const txt = JSON.stringify(srv.calls.slice(n0)) + JSON.stringify(s.st.lastRun);
+    for (const w of fx.HK_SECRETS) assert.ok(!txt.includes(w), 'עמודה שאסור לשלוח: ' + w);
+    assert.ok(!JSON.stringify(rep).includes('ברקוביץ'), 'בדיווח – רק מספרים');
+    assert.deepEqual([rep.info.hk.n, rep.info.hk.skip, rep.info.hk.bad], [3, 2, 0], JSON.stringify(rep.info.hk));
+    assert.ok(!rep.info.flags.hk);
+    const sl = rep.steps.map((x) => x.s);
+    assert.ok(sl.indexOf('hours') < sl.indexOf('hk') && sl.indexOf('hk') < sl.indexOf('exportNew'), sl.join(','));
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('hkXs')), 'יהודה הנשיא;', 'יצוא אחד, בסניף הבית');
+    assert.equal(await store0(), 'יהודה הנשיא', 'לא נשאר בנחל לכיש');
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'בלי "לקוח חדש" / "טעינת לקוחות" / "עריכה"');
+  } finally { await hkOff(); }
+});
+test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנפרד; המכירות וההעלאות לכספית נשלחו והריצה הצליחה; קובץ במבנה לא מוכר → hk-format', async () => {
+  await hkOn('none', 3000);
+  try {
+    const n0 = srv.calls.length;
+    const { s, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', 'כישלון היתרות לא מכשיל את הריצה: ' + JSON.stringify(s.st.lastRun));
+    assert.equal(hkUps(n0).length, 0);
+    assert.equal(rep.st, 'ok'); assert.equal(rep.info.flags.hk.code, 'hk-export', JSON.stringify(rep.info.flags));
+    assert.equal(rep.info.hk.err, 'hk-export');
+    assert.equal(s.st.lastRun.sum.flags.hk.code, 'hk-export', 'מסומן בנפרד בסיכום הריצה');
+    assert.ok(rep.info.sales[days[1]], 'המכירות נקלטו (או שאותו קובץ כבר נשלח)');
+    assert.ok(srv.calls.slice(n0).some((c) => c.op === 'export'), 'ההעלאות לכספית רצו');
+    assert.equal(await store0(), 'יהודה הנשיא');
+    await ls({ hkXlsx: 'bad' });
+    const n1 = srv.calls.length;
+    const r2 = await syncOneDay();
+    assert.equal(r2.s.st.lastRun.st, 'ok');
+    assert.equal(hkUps(n1).length, 0);
+    const f = r2.rep.info.flags.hk;
+    assert.equal(f.code, 'hk-format'); assert.equal(f.fmt.hi, 0); assert.equal(f.fmt.rows, 2); assert.equal(f.fmt.why, 'hdr');
+    assert.ok(!JSON.stringify(r2.rep).includes('ברקוביץ'), 'בלי שמות באבחון');
+  } finally { await hkOff(); }
 });
 
 test('ניתוק: הקוד נמחק', async () => {

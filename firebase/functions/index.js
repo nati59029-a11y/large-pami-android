@@ -298,8 +298,10 @@ Object.assign(exports, require('./ar'));
 Object.assign(exports, require('./ar-remind'));
 // ייבוא מתוכנה קודמת (15.11.2026, שלב 6): arImp (תצוגה מקדימה / ייבוא במנות של 25), arImpVoid (ביטול קבוצה = void), arImpList. ar-import.js
 Object.assign(exports, require('./ar-import'));
+// לקוחות הקפה מכספית (24.11.2026): hkGet (מצב / תצוגה מקדימה / "לבדוק"), hkApprove ("אשר ייבוא ראשון", במנות), hkChkDone ("טופל", סבב 2) – מנהל בלבד. hk-import.js (התמונה עצמה – cxBot op:'hkSnap')
+Object.assign(exports, require('./hk-import'));
 
-// לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
+// לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js). 24.11.2026: delCust – מחיקת לקוח בודד (מנהל)
 Object.assign(exports, require('./customers'));
 
 // המזכירה העסקית – שלב 1 (2026-11-11): secState, secConsent, secSetup (מנהל העסק), secAdminGet, secAdminSetCfg, secAdminReadChat (מנהל־על),

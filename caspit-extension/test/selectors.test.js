@@ -166,7 +166,7 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; עו�
   assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
   // פרטיות: לא מחכים על הכותרת עם שם העובד
   assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
-  assert.equal(SEL.v, 9);
+  assert.equal(SEL.v, 10); // 0.1.21: hkSnap
 });
 
 test('selectors.json v9 (0.1.14): זרימות השעות – רק קריאה; לא לוחצים "עריכה" / "עובד חדש" / "הוספת כניסה ויציאה" / "הצג רק מנהלים" / יצוא של הרשימה', () => {
@@ -446,4 +446,16 @@ test('deniedLink (0.1.12): "מבצעים" מותר (למרות "בצע"), "הו�
   const X = require('../src/lib/selectors.js');
   for (const t of ['מבצעים', 'מבצע', 'רשימת מבצעים', 'דוח אמצעי תשלום', 'סיכום קופה יומי']) assert.equal(X.deniedLink(t), false, t);
   for (const t of ['הוספת מבצעים', 'ייבוא מבצעים', 'הוסף מבצע', 'ביצוע חיוב', 'מחיקת מבצע', 'הוסף אמצעי תשלום', 'ייבוא תקבולים']) assert.equal(X.deniedLink(t), true, t);
+});
+
+test('selectors.json v10 (0.1.21): hkSnap – רק #/hakafa-customers, לוחץ רק "יצוא לאקסל" (at), דגל hkSync פועל', () => {
+  assert.equal(SEL.hkSync, true);
+  const F = SEL.flows.hkSnap;
+  assert.deepEqual(F.map((x) => x.op), ['nav', 'waitFor', 'click']);
+  assert.equal(F[0].hash, '#/hakafa-customers');
+  assert.ok(F.slice(1).every((x) => x.at === '#/hakafa-customers' && x.stop));
+  const c = F[2];
+  assert.ok(c.capture && c.safe && !c.submit);
+  assert.ok(c.t.textAny.every((x) => /^(ייצוא|יצוא) לאקסל$/.test(x)), JSON.stringify(c.t));
+  for (const t of c.t.textAny) assert.ok(!SEL_DENY.some((w) => t.includes(w)), t);
 });
