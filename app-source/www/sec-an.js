@@ -61,7 +61,7 @@ const D=new Map();/* מצב מקומי לכל טיוטה: { q:{pid:כמות}, bu
 const dOf=id=>{if(!D.has(id))D.set(id,{q:{},busy:0,st:''});return D.get(id)};
 const ods=()=>A.r&&Array.isArray(A.r.od)?A.r.od:[];
 function odH(o){const s=dOf(o.id),dis=s.busy?' disabled':'';
- if(s.st)return `<div class="secli" data-od="${esc(o.id)}"><p><b>${esc(o.sup)}</b> <span class="sectags${s.st==='ok'?' g':''}">${s.st==='ok'?'אושר ✓':'נדחה'}</span></p>${s.st==='ok'?`<p class="note">נוסף לרשימה "להזמין מספקים". שום דבר לא נשלח לספק.</p>${typeof V!=='undefined'&&typeof V.oxSup==='function'?'<div class="secrow"><button class="chip" data-a="odList" style="min-height:44px">לרשימה "להזמין מספקים"</button></div>':''}`:''}</div>`;
+ if(s.st)return `<div class="secli" data-od="${esc(o.id)}"><p><b>${esc(o.sup)}</b> <span class="sectags${s.st==='ok'?' g':''}">${s.st==='ok'?'אושר ✓':'נדחה'}</span></p>${s.st==='ok'?`<p class="note">נוסף לרשימה "להזמין מספקים". שום דבר לא נשלח לספק.${s.skip&&s.skip.length?' כבר היו ברשימה ולא נוספו שוב: '+esc(s.skip.join(', '))+'.':''}</p>${typeof V!=='undefined'&&typeof V.oxSup==='function'?'<div class="secrow"><button class="chip" data-a="odList" style="min-height:44px">לרשימה "להזמין מספקים"</button></div>':''}`:''}</div>`;
  const q=p=>s.q[p]!==undefined?s.q[p]:o.lines.find(l=>l.pid===p).qty;
  const tot=o.lines.filter(l=>typeof l.cost==='number').reduce((a,l)=>a+l.cost*(+q(l.pid)||0),0),priced=o.lines.some(l=>typeof l.cost==='number');
  return `<div class="secli" data-od="${esc(o.id)}"><p style="margin:0"><b>${esc(o.sup)}</b> <span class="sectags">${o.lines.length} מוצרים</span>${o.day?` <span class="sectags">${esc(dS(o.day))}</span>`:''}</p>
@@ -80,7 +80,8 @@ ACT.odOk=async el=>{const id=el.dataset.id,o=ods().find(x=>x.id===id),s=dOf(id);
  if(!lines.length)return toast('לא נשארו מוצרים בטיוטה. כדי לוותר עליה – "דחייה"');
  if(lines.some(l=>l.qty>100000))return toast('כמות גדולה מדי');
  s.busy=1;re();
- try{const r=await fnCall('secPrefs',{op:'od',id,st:'ok',lines});s.busy=0;s.st=r&&r.already?(r.st==='no'?'no':'ok'):'ok';re();toast(r&&r.already?'הטיוטה כבר הוכרעה':'✓ נוסף לרשימה "להזמין מספקים" ('+lines.length+')');try{if(root.__so)root.__so.L=null}catch(e){}}
+ try{const r=await fnCall('secPrefs',{op:'od',id,st:'ok',lines});s.busy=0;s.st=r&&r.already?(r.st==='no'?'no':'ok'):'ok';s.skip=r&&Array.isArray(r.skipped)?r.skipped.map(x=>String(x.n||'')):[];re();
+  toast(r&&r.already?'הטיוטה כבר הוכרעה':(r&&r.n?'✓ נוסף לרשימה "להזמין מספקים" ('+r.n+')':'לא נוסף דבר')+(s.skip.length?' · כבר ברשימה, לא נוסף שוב: '+s.skip.join(', '):''));try{if(root.__so)root.__so.L=null}catch(e){}}
  catch(e){s.busy=0;re();toast(e&&e.reason==='perm-no'?'מנהל־העל הגדיר: טיוטת הזמנה מספק – אסור':e&&e.reason==='not-found'?'הטיוטה כבר לא קיימת':(e&&e.message)||'האישור נכשל')}};
 ACT.odNo=async el=>{const id=el.dataset.id,s=dOf(id);if(s.busy||s.st)return;s.busy=1;re();
  try{const r=await fnCall('secPrefs',{op:'od',id,st:'no'});s.busy=0;s.st=r&&r.already?(r.st==='ok'?'ok':'no'):'no';re();toast(r&&r.already?'הטיוטה כבר הוכרעה':'הטיוטה נדחתה')}

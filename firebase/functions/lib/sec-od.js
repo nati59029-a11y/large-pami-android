@@ -9,13 +9,14 @@
 //     • "טיוטת הזמנה מספק: אסור" (sec_cfg/perm) – לא נוצר כלום.
 //     • ספק שיש לו טיוטה ממתינה, או שטיוטה שלו נדחתה ב-7 הימים האחרונים – לא מקבל טיוטה חדשה. טיוטה ממתינה מעל 7 ימים – 'old' (לא נמחקת).
 //     • מזהה קבוע לספק וליום (create): ריצה כפולה לא יוצרת כפילות.
-//     • תקרות: עד 5,000 מוצרים, 8,000 תנועות מלאי (28 יום), 3,000 שורות "להזמין מספקים", 20 ספקים × 30 שורות; תקרת זמן 20 שניות לפני הכתיבה.
+//     • תקרות: עד 5,000 מוצרים, 8,000 תנועות מלאי (28 יום), 5,000 שורות פתוחות ב"להזמין מספקים" (מעל זה – לא מציעים באותו יום, openCut) ו-5,000 שורות היסטוריה (180 יום), 20 ספקים × 30 שורות; תקרת זמן 20 שניות לפני הכתיבה.
 //   decide(db, uid, input, t, logData) – אישור / דחייה (secPrefs op:'od'):
 //     • אישור – השורות שנשארו (כמויות אחרי עריכה; כמות 0 / שורה שהוסרה – לא נכנסת) נכנסות לרשימה הקיימת "להזמין מספקים"
 //       (supord/sg<id>_p_<pid>, st:'open', src:'sec', br:'_'), טרנזקציה אחת עם סימון הטיוטה ורישום ביומן (odOk).
 //       שום דבר לא נשלח לספק ולא משנה מלאי – בדיוק כמו "להזמין מספקים" מהליקוט (ord-pick.js).
 //     • דחייה – סימון ורישום (odNo). טיוטה שכבר הוכרעה – already, בלי כתיבה.
 //     • "אסור" שהוגדר אחרי יצירת הטיוטה – האישור נחסם (perm-no).
+//     • מוצר שכבר פתוח ב"להזמין מספקים" (open/ord, כל מקור) – מדלגים עליו ומחזירים skipped (תיקון סבב 1).
 
 const crypto = require('node:crypto');
 const AN = require('./sec-an');
@@ -24,7 +25,8 @@ const PERM = require('./sec-perm');
 const ID_RE = /^od[0-9a-f]{12}_\d{8}$/;
 const PID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 const OLD_MS = 7 * 864e5, NO_MS = 7 * 864e5, TIME_MAX = 20000;
-const LIM = Object.freeze({ prods: 5000, moves: 8000, so: 3000 });
+const LIM = Object.freeze({ prods: 5000, moves: 8000, open: 5000, hist: 5000 });
+const OPEN_ST = ['open', 'ord'];
 const NB = '_'; // כמו orders.js: עסק בלי סניפים / שורה של כל העסק
 const skOf = (k) => crypto.createHash('sha1').update(String(k), 'utf8').digest('hex').slice(0, 12);
 const idOf = (sk, day) => 'od' + skOf(sk) + '_' + day.replace(/-/g, '');
@@ -49,15 +51,22 @@ async function daily(db, now) {
   }
   for (const d of recent.docs) if (d.get('k') === 'od' && d.get('st') === 'no' && (d.get('stAt') || 0) >= now - NO_MS) busy.add(d.get('sk'));
   if (out.old) await b0.commit();
-  const [ps, ms, ss] = await Promise.all([
+  const [ps, ms, os] = await Promise.all([
     db.collection('prod').select('name', 'sup', 'q', 'on', 'nc').limit(LIM.prods).get(),
     db.collection('stockLog').where('at', '>=', now - AN.OD.WIN * 864e5).orderBy('at', 'desc').select('prod', 'delta', 'why', 'at').limit(LIM.moves).get(),
-    db.collection('supord').select('pid', 'n', 'sup', 'qty', 'st', 'at').limit(LIM.so).get()]);
+    // תיקון סבב 1: שתי שאילתות מסוננות (לא מדגם של האוסף שרק גדל) – כל השורות הפתוחות (להזמין / הוזמן, כל מקור),
+    // וההיסטוריה של 180 הימים האחרונים מהחדשה. שאילתות על שדה אחד – בלי אינדקס מורכב
+    db.collection('supord').where('st', 'in', OPEN_ST).select('pid', 'n', 'sup', 'qty', 'st', 'at').limit(LIM.open).get()]);
   if (ps.empty) return Object.assign(out, { noProd: true });
+  // יותר שורות פתוחות מהתקרה – אי אפשר להבטיח שאין כפילות: לא מציעים היום (נרשם ביומן השרת)
+  if (os.size >= LIM.open) return Object.assign(out, { openCut: true });
+  const hs = await db.collection('supord').where('at', '>=', now - AN.OD.HIST_DAYS * 864e5).orderBy('at', 'desc').select('pid', 'n', 'sup', 'qty', 'st', 'at').limit(LIM.hist).get();
+  const soM = new Map();
+  for (const d of os.docs.concat(hs.docs)) soM.set(d.id, d.data()); // שורה שמופיעה בשתיהן – פעם אחת
   const moves = ms.docs.map((d) => d.data());
   // התנועות קוצרו – הקצב מחושב רק מהתקופה שנקראה במלואה (מהישנה שנקראה ועד עכשיו)
   const movesFrom = ms.size >= LIM.moves && moves.length ? moves[moves.length - 1].at : undefined;
-  const R = AN.ordSuggest({ now, prods: ps.docs.map((d) => Object.assign({ id: d.id }, d.data())), moves, movesFrom, so: ss.docs.map((d) => d.data()) });
+  const R = AN.ordSuggest({ now, prods: ps.docs.map((d) => Object.assign({ id: d.id }, d.data())), moves, movesFrom, so: [...soM.values()] });
   out.stat = R.stat;
   const todo = R.drafts.filter((g) => { if (busy.has(g.sk)) { out.skip++; return false; } return true; });
   if (!todo.length) return out;
@@ -121,17 +130,16 @@ async function decide(db, uid, input, t, logData) {
     if (!PERM.canPropose(PERM.permOf(pm.exists ? pm.data() : null), 'ord')) { const e = new Error('מנהל־העל הגדיר: טיוטת הזמנה מספק – אסור'); e.odDeny = 'perm-no'; throw e; }
     const L = (ds.get('lines') || []).filter((l) => l && want.has(l.pid));
     if (L.length !== want.size) throw bad('bad-input', 'מוצר שלא בטיוטה');
-    const refs = L.map((l) => db.doc('supord/' + soIdOf(id, l.pid)));
-    const cur = await tx.getAll(...refs);
-    const so = [];
-    L.forEach((l, i) => {
-      so.push(refs[i].id);
-      if (cur[i].exists) return; // כבר נכנס (לא אמור לקרות – הטיוטה עדיין ממתינה); לא דורסים
-      tx.set(refs[i], { pid: l.pid, n: String(l.n || '').slice(0, 80), qty: want.get(l.pid), sup: String(ds.get('sup') || '').slice(0, 60), br: NB, st: 'open', src: 'sec', od: id, by: uid, at: t, upd: t });
-    });
-    tx.update(ref, { st: 'ok', stBy: uid, stAt: t, fin: L.map((l) => ({ pid: l.pid, qty: want.get(l.pid) })), so });
-    tx.set(db.collection('sec_log').doc(), logData(uid, 'mgr', 'odOk', { tgt: id, note: String(ds.get('sup') || '').slice(0, 60) + ': ' + L.length + ' מוצרים' }));
-    return { st: 'ok', n: L.length, so };
+    // תיקון סבב 1: מוצר שכבר פתוח ב"להזמין מספקים" (להזמין / הוזמן, מכל מקור – גם מליקוט שנוסף אחרי יצירת הטיוטה) – לא נוסף שוב.
+    // נקרא בתוך הטרנזקציה (עד 30 מוצרים בטיוטה – שאילתת in אחת)
+    const os = await tx.get(db.collection('supord').where('pid', 'in', L.map((l) => l.pid)));
+    const openP = new Set(os.docs.filter((d) => OPEN_ST.includes(d.get('st'))).map((d) => d.get('pid')));
+    const add = L.filter((l) => !openP.has(l.pid)), skipped = L.filter((l) => openP.has(l.pid)).map((l) => ({ pid: l.pid, n: String(l.n || '').slice(0, 80), why: 'open' }));
+    const so = add.map((l) => soIdOf(id, l.pid));
+    add.forEach((l, i) => tx.set(db.doc('supord/' + so[i]), { pid: l.pid, n: String(l.n || '').slice(0, 80), qty: want.get(l.pid), sup: String(ds.get('sup') || '').slice(0, 60), br: NB, st: 'open', src: 'sec', od: id, by: uid, at: t, upd: t }));
+    tx.update(ref, Object.assign({ st: 'ok', stBy: uid, stAt: t, fin: add.map((l) => ({ pid: l.pid, qty: want.get(l.pid) })), so }, skipped.length ? { skip: skipped } : {}));
+    tx.set(db.collection('sec_log').doc(), logData(uid, 'mgr', 'odOk', { tgt: id, note: String(ds.get('sup') || '').slice(0, 60) + ': ' + add.length + ' מוצרים' + (skipped.length ? ', ' + skipped.length + ' כבר ברשימה' : '') }));
+    return { st: 'ok', n: add.length, so, skipped };
   });
 }
 

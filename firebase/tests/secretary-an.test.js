@@ -186,3 +186,28 @@ describe('גיטי – מרכז שליטה ואישורים (secReports op:an, s
     await assertFails(db.doc(`b/${A}/sec_an/${id}`).delete());
   });
 });
+
+describe('גיטי – תיקון סבב 1: בלי כפילות ב"להזמין מספקים"', () => {
+  it('תיקון סבב 1: אחרי יצירת הטיוטה ליקוט הוסיף את אותו מוצר ל"להזמין מספקים" – האישור מדלג עליו (אין כפילות) ומחזיר skipped', async () => {
+    await seed(); BIZ = await T.loadBiz(A); await run('2026-12-01T08:10');
+    const id0 = (await drafts())[0].id;
+    await prep((d) => d.doc(`b/${A}/supord/ord9_p_p2`).set({ ord: 'ord9', no: 9, br: '_', pid: 'p2', n: 'גבינה', qty: 4, sup: 'תנובה', st: 'open', by: M1, at: Date.now(), upd: Date.now() }));
+    const r = await call('secPrefs', M1, { op: 'od', id: id0, st: 'ok', lines: [{ pid: 'p1', qty: 19 }, { pid: 'p2', qty: 11 }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.n, 1); assert.deepEqual(r.result.skipped.map((x) => [x.pid, x.why]), [['p2', 'open']]);
+    const so = (await coll(`b/${A}/supord`)).filter((x) => x.st === 'open');
+    assert.deepEqual(so.filter((x) => x.pid === 'p2').map((x) => x.id), ['ord9_p_p2'], 'גבינה – שורה אחת בלבד');
+    assert.deepEqual(so.filter((x) => x.pid === 'p1').map((x) => x.src), ['sec']);
+    const g = await get(`b/${A}/sec_an/${id0}`); assert.deepEqual(g.skip.map((x) => x.pid), ['p2']); assert.match((await logs(/^odOk$/))[0].note, /1 כבר ברשימה/);
+  });
+  it('תיקון סבב 1: שורה פתוחה ב"להזמין מספקים" חוסמת הצעה גם כשיש הרבה שורות סגורות לפניה (שאילתה מסוננת, לא מדגם)', async () => {
+    await seed(); BIZ = await T.loadBiz(A);
+    await prep(async (d) => {
+      const b = d.batch();
+      for (let i = 0; i < 300; i++) b.set(d.doc(`b/${A}/supord/a${String(i).padStart(4, '0')}_p_x`), { pid: 'x' + i, n: 'ישן', qty: 1, sup: 'תנובה', st: 'done', br: '_', at: 1 });
+      b.set(d.doc(`b/${A}/supord/zzzz_p_p1`), { pid: 'p1', n: 'חלב', qty: 3, sup: 'תנובה', st: 'ord', br: '_', at: IL('2026-11-30T10:00') });
+      await b.commit();
+    });
+    await run('2026-12-01T08:10');
+    assert.deepEqual((await drafts())[0].lines.map((l) => l.pid), ['p2'], 'חלב כבר הוזמן – לא מוצע');
+  });
+});

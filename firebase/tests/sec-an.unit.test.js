@@ -59,6 +59,14 @@ describe('מגמות – trends', () => {
     assert.equal(AN.trends(G(12000), { anPct: 20, anMin: 2000 }).anoms.length, 1, 'ספים מותאמים');
     assert.equal(AN.trends(F(300), { anPct: 30, anMin: 500 }).anoms.length, 0);
   });
+  it('תיקון סבב 1: אגורות בדיוק על הסף – 667.2 מול 867.36 (+30%, +200.16) – חריגה; אגורה אחת פחות – לא; מינימום באגורות', () => {
+    const m3 = (v) => mo(0, v, [e('X', v)]);
+    const F = (h, cur) => fin({ '2026-07': m3(h), '2026-08': m3(h), '2026-09': m3(h), '2026-10': m3(cur) });
+    assert.deepEqual(AN.trends(F(667.2, 867.36), {}).anoms.map((a) => [a.avg, a.v, a.diff, a.pct]), [[667.2, 867.36, 200.16, 30]]);
+    assert.equal(AN.trends(F(667.2, 867.35), {}).anoms.length, 0);
+    assert.equal(AN.trends(F(666.1, 866.1), { anPct: 30, anMin: 200 }).anoms.length, 1, 'בדיוק 200.00 ₪ (+30.03%)');
+    assert.equal(AN.trends(F(666.1, 866.09), { anPct: 30, anMin: 200 }).anoms.length, 0, '199.99 ₪');
+  });
   it('פחות מ-3 חודשי היסטוריה / חודש חסר באמצע – לא בודקים חריגות (hist:false), עם הערה', () => {
     const f = base(); delete f.months['2026-07'];
     const t = AN.trends(f, {});
@@ -149,6 +157,13 @@ describe('הצעות הזמנה – ordSuggest', () => {
     assert.equal(r.stat.noData, 1, 'קמח: מכירות בלי מלאי ובלי היסטוריה');
     const r2 = AN.ordSuggest({ now: NOW, prods: [{ id: 'p1', name: 'חלב', sup: 'תנובה', nc: true }], moves: [], so: so.map((x) => Object.assign({}, x, { at: x.at + 15 * D })) });
     assert.equal(r2.drafts.length, 0, 'עוד לא עבר המרווח הממוצע');
+  });
+  it('תיקון סבב 1: מלאי שלילי – לא אמין: לפי היסטוריית ההזמנות, ובלי היסטוריה – לא מוצע', () => {
+    const p = [{ id: 'a', name: 'א', sup: 'ס', q: { _: -3 } }];
+    const r = AN.ordSuggest({ now: NOW, prods: p, moves: [mv('a', -10, 'pos', 1)] });
+    assert.equal(r.drafts.length, 0); assert.equal(r.stat.noData, 1);
+    const so = [{ pid: 'a', qty: 5, st: 'done', at: NOW - 20 * D }, { pid: 'a', qty: 7, st: 'done', at: NOW - 10 * D }];
+    assert.deepEqual(AN.ordSuggest({ now: NOW, prods: p, moves: [mv('a', -10, 'pos', 1)], so }).drafts[0].lines.map((l) => [l.m, l.qty]), [['h', 6]]);
   });
   it('לא מציעים: כבר ב"להזמין מספקים" (פתוח / הוזמן), בלי ספק, לא זמין; אין נתונים בכלל – ריק', () => {
     const prods = [{ id: 'a', name: 'א', sup: 'ס', q: { _: 0 } }, { id: 'b', name: 'ב', q: { _: 0 } }, { id: 'c', name: 'ג', sup: 'ס', q: { _: 0 }, on: false }];

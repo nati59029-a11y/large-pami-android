@@ -14,7 +14,7 @@
 // 3. anLine(tr) – שורה אחת לסיכום הבוקר.
 // 4. ordSuggest(o) – הצעות הזמנה מספקים (טיוטה בלבד, ראו lib/sec-od.js):
 //    א. לפי קצב מכירות ומלאי: מכירות נטו ב-28 הימים האחרונים (stockLog: קופה pos, כספית cx, הזמנות לקוח order, פחות החזרות posret/cancel),
-//       כשהמלאי אמין (prod.q מספרי ולא מסומן "לא נספר" nc). מלאי שמספיק לפחות מ-7 ימים → כמות ל-21 ימים פחות המלאי.
+//       כשהמלאי אמין (prod.q מספרי, לא שלילי, ולא מסומן "לא נספר" nc). מלאי שמספיק לפחות מ-7 ימים → כמות ל-21 ימים פחות המלאי.
 //    ב. אחרת – לפי היסטוריית ההזמנות מהספק (supord שהוזמנו/הגיעו, 180 יום): לפחות 2 ימי הזמנה; כשעבר מרווח הזמן הממוצע – הכמות הממוצעת.
 //    ג. אחרת – לא מציעים (noData). מוצר בלי ספק (prod.sup), לא זמין (on:false), או שכבר ב"להזמין מספקים" (פתוח/הוזמן) – לא מוצע.
 
@@ -69,7 +69,9 @@ function anomsOf(fin, m, kind, P, part) {
     const avg = rnd((hv[0] + hv[1] + hv[2]) / 3);
     if (!(avg > 0)) continue;
     const diff = rnd(v - avg);
-    if (diff >= P.anMin && v >= avg * (1 + P.anPct / 100)) L.push(Object.assign({ k: kind, n, m, v, avg, diff, pct: pct(v, avg) }, part ? { part: true } : {}));
+    // תיקון סבב 1: השוואה באגורות שלמות (667.2 × 1.3 = 867.3600000000001 בעשרוני) – גם לאחוז וגם למינימום
+    const vc = Math.round(v * 100), ac = Math.round(avg * 100);
+    if (vc - ac >= Math.round(P.anMin * 100) && vc * 100 >= Math.round(ac * (100 + P.anPct))) L.push(Object.assign({ k: kind, n, m, v, avg, diff, pct: pct(v, avg) }, part ? { part: true } : {}));
   }
   return { ok: true, L };
 }
@@ -159,7 +161,7 @@ function ordSuggest(o) {
     const sup = clean(p.sup, 60), n = clean(p.name, 80) || p.id;
     if (open.has(p.id)) { stat.open++; continue; }
     const s = Math.max(0, Math.round((sold.get(p.id) || 0) * 1000) / 1000);
-    const q = p.nc === true ? null : stockOf(p.q);
+    const q0 = p.nc === true ? null : stockOf(p.q), q = q0 !== null && q0 >= 0 ? q0 : null; // מלאי שלילי (מכירה בלי הכנסת מלאי) – לא אמין
     let line = null;
     if (s > 0 && q !== null) {
       const rate = s / days, cover = Math.max(0, q) / rate;
