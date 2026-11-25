@@ -362,12 +362,12 @@ async function pOut(pdf,C){if(C===undefined)C=typeof shNat==='function'?shNat():
 // במחשב: עמוד תמונות בגודל המדבקה במסגרת נסתרת + print(). בכרום שנפתח עם --kiosk-printing זה יוצא ישר למדפסת, בלי חלון.
 // בלי הדגל – חלון ההדפסה של כרום (בלי לשונית חדשה). בטלפון ובדפדפן נייד – ה-PDF כמו קודם
 const isDesk=()=>!/Android|iPhone|iPad|Mobi/i.test(navigator.userAgent||'');
-// תמונת הטקסט להדפסה במחשב: אותו ציור (draw/drawT) בפי HK ברזולוציה, ואז שחור-לבן – קצוות חלקים גם אחרי ההקטנה לרזולוציית המדפסת.
+// תמונת הטקסט להדפסה במחשב: אותו ציור (draw/drawT) בפי HK ברזולוציה, עם החלקת קצוות (בלי סף שחור-לבן) – מנהל ההתקן ממיר לנקודות המדפסת.
 // setTransform בתוך הציור מוחלט – העטיפה מכפילה אותו ב-HK. הפסים לא מצוירים כאן (rects) – הם SVG
 const HK=3;
 const hiCtx=(g,k)=>{g.setTransform(k,0,0,k,0,0);return new Proxy(g,{get(t,p){if(p==='setTransform')return(a,b,c,d,e,f)=>t.setTransform(a*k,b*k,c*k,d*k,e*k,f*k);const v=t[p];return typeof v==='function'?v.bind(t):v},set(t,p,v){t[p]=v;return true}})};
-const hiPng=(b,br)=>new Promise((ok,no)=>{const D=b.T?LblTpl.dims(b.T.w,b.T.h):{W,H},c=document.createElement('canvas');c.width=D.W*HK;c.height=D.H*HK;const x=c.getContext('2d'),g=hiCtx(x,HK),o=br?{rects:[],brand:br}:{rects:[]};
- if(b.T)drawT(g,b.T,b.it,o);else draw(g,b.tpl,b.it,o);x.setTransform(1,0,0,1,0,0);const d=x.getImageData(0,0,c.width,c.height);bw1(d.data,c.width,c.height);x.putImageData(d,0,0);
+const hiPng=(b,br)=>new Promise((ok,no)=>{const D=b.T?LblTpl.dims(b.T.w,b.T.h):{W,H},c=document.createElement('canvas');c.width=D.W*HK;c.height=D.H*HK;const x=c.getContext('2d');x.imageSmoothingQuality='high';const g=hiCtx(x,HK),o=br?{rects:[],brand:br}:{rects:[]};
+ if(b.T)drawT(g,b.T,b.it,o);else draw(g,b.tpl,b.it,o);x.setTransform(1,0,0,1,0,0);
  c.toBlob(q=>q?ok(URL.createObjectURL(q)):no(new Error('התמונה לא נוצרה')),'image/png')});
 // פסי הברקוד – SVG וקטורי (כמו ב-PDF): כרום מצייר אותם ברזולוציה של המדפסת, בלי עיוות של הקטנת תמונה
 const svgOf=lb=>`<svg viewBox="0 0 ${lb.w} ${lb.h}" preserveAspectRatio="none" shape-rendering="crispEdges">${(lb.rects||[]).map(r=>`<rect x="${+r[0].toFixed(2)}" y="${+r[1].toFixed(2)}" width="${+r[2].toFixed(2)}" height="${+r[3].toFixed(2)}"/>`).join('')}</svg>`;
