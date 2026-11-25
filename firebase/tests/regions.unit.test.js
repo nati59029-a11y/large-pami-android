@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'piInbox', 'piInboxB', 'posBackupDaily', 'posOpsWatch', 'posSaleSend', 'ptkPush', 'ptkPushB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'shTick', 'syncLegacyAdmin', 'syncLegacyStaff', 'tkPush', 'tkPushB']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'cxBot', 'cxBotWatch', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'piInbox', 'piInboxB', 'piRetry', 'posBackupDaily', 'posOpsWatch', 'posSaleSend', 'ptkPush', 'ptkPushB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'shTick', 'syncLegacyAdmin', 'syncLegacyStaff', 'tkPush', 'tkPushB']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -119,6 +119,12 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
       assert.ok(e.maxInstances >= 1 && e.maxInstances <= 5, 'maxInstances נמוך');
       assert.ok((e.secretEnvironmentVariables || []).some((x) => x.key === 'GEMINI_API_KEY'), n + ' – סוד GEMINI_API_KEY');
     }
+    // 25.11.2026: תור ניסיונות חוזרים לזיהוי שנכשל – piRetry מתוזמן, europe-west1, מופע אחד, עם GEMINI_API_KEY
+    const q = ep(ex.piRetry);
+    assert.deepEqual(regions(ex.piRetry), ['europe-west1']);
+    assert.ok(q.scheduleTrigger, 'piRetry מתוזמן');
+    assert.equal(q.maxInstances, 1);
+    assert.ok((q.secretEnvironmentVariables || []).some((x) => x.key === 'GEMINI_API_KEY'), 'piRetry – סוד GEMINI_API_KEY');
   });
   it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
     const e = ep(ex.runImportChunk);
