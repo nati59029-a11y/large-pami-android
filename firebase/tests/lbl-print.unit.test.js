@@ -118,7 +118,8 @@ describe('lbl-print – הדפסת מדבקות', () => {
     const offs = s.slice(xr).split('\n').slice(3).filter((l) => / 00000 n $/.test(l)).map((l) => +l.slice(0, 10));
     offs.forEach((o, i) => assert.ok(s.slice(o).startsWith((i + 1) + ' 0 obj'), 'אובייקט ' + (i + 1)));
     assert.match(s, /0 35\.433 141\.732 35\.433 re/);
-    assert.equal(LP.expand([{ n: 0 }, { n: 500 }, { n: 'x' }]).length, 1 + 200 + 1, 'כמות 1–200');
+    assert.equal(LP.expand([{ n: 0 }, { n: 500 }, { n: 'x' }]).length, 1 + 500 + 1, 'כמות 1–999');
+    assert.equal(LP.expand([{ n: 999 }, { n: 1000 }, { n: 5000 }]).length, 3 * 999, 'עד 999 בשורה');
   });
 
   it('toBits: 1 ביט לפיקסל, לבן = 1, שורות מרופדות לבית', () => {
@@ -181,6 +182,18 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.equal(LP.imgOk(''), false);
     assert.equal(LP.imgOk(null), false);
     assert.equal(LP.imgOk({}), false);
+  });
+
+  it('mkPdf עם גודל לכל מדבקה (pw/ph): MediaBox לפי המדבקה, הפסים מומרים לפי הגודל שלה; בלי pw/ph – בדיוק כמו קודם', () => {
+    const pw = 40 / 25.4 * 72, ph = 30 / 25.4 * 72, w = 472, h = 354;
+    const L = [fake(LP.W, LP.H, [[0, 0, LP.W, LP.H / 2]]), Object.assign(fake(w, h, [[0, 0, w, h / 2]]), { pw, ph })];
+    const { s, boxes, count } = pdfInfo(LP.mkPdf(L, [0, 1, 1]));
+    assert.equal(count, 3);
+    assert.deepEqual(boxes.map((b) => b.join(' ')), ['0 0 141.73 70.87', '0 0 113.39 85.04', '0 0 113.39 85.04']);
+    assert.match(s, /q 113\.39 0 0 85\.04 0 0 cm \/Im0 Do Q\n0 g\n0 42\.52 113\.386 42\.52 re/);
+    assert.match(s, /\/Width 472 \/Height 354/);
+    const L2 = [fake(LP.W, LP.H, [[1, 2, 3, 4]])], a = LP.mkPdf(L2, [0, 0]), b = LP.mkPdf([Object.assign({}, L2[0], { pw: undefined, ph: 0 })], [0, 0]);
+    assert.deepEqual([...a], [...b]);
   });
 
   it('mkPdf בלי לוגו – בדיוק אותם בייטים כמו לפני השינוי (טביעת SHA-256)', () => {
