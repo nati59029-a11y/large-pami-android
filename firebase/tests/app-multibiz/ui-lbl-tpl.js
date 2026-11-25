@@ -86,7 +86,6 @@ const PAGE_LIB = () => {
   const goLbl = async (page) => { await page.evaluate(() => go('lbl')); await H.settle(page, 1500); };
   const search = async (page, q) => { await page.fill('#main [data-i=lblQ]', q); await page.press('#main [data-i=lblQ]', 'Enter'); await H.settle(page, 500); };
   const toasts = (page) => page.evaluate(() => [...document.querySelectorAll('.toast')].map((e) => e.textContent).join(' | '));
-  const BKT = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('lp-lbl-basket') || '[]'));
   const printed = async (page, sel) => { await page.evaluate(() => { window.__opened = []; }); await page.click(sel); await H.settle(page, 600);
     const ask = await page.evaluate(() => { const d = document.querySelector('#dlg'); return d && d.open && d.querySelector('[data-a=yes]') ? d.innerText : ''; });
     if (ask) { await page.click('#dlg [data-a=yes]'); await H.settle(page, 600); }
@@ -167,33 +166,28 @@ const PAGE_LIB = () => {
     await page.fill('#main #lblEd [data-k=ex]', '31.12.26'); await page.fill('#main #lblEd [data-k=mq]', '2'); await page.fill('#main #lblEd [data-k=mp]', '20');
     await page.click('#main [data-a=lblQn][data-v="100"]'); await H.settle(page, 200);
     const q100 = await page.evaluate(() => ({ v: document.querySelector('#main [data-i=lblQty]').value, on: document.querySelector('#main [data-a=lblQn][aria-pressed=true]').dataset.v, chips: [...document.querySelectorAll('#main [data-a=lblQn]')].map((b) => b.dataset.v).join(',') }));
-    await page.click('#main [data-a=lblAdd]'); await H.settle(page, 500);
-    const bk1 = await BKT(page);
-    const row = bk1[0] || {};
-    check('r 3 כפתורי כמות 1/10/20/50/100; הוספה לסל: עותק התבנית T בשורה, tpl "c:mine", 100 מדבקות, בתוקף עד ומבצע כמות',
-      q100.v === '100' && q100.on === '100' && q100.chips === '1,10,20,50,100' && bk1.length === 1 && row.tpl === 'c:mine' && row.n === 100 && row.T && row.T.id === 'mine' && row.T.w === 40 && row.T.els.length === 5 && row.it.ex === '31.12.26' && row.it.mq === '2' && row.it.mp === '20', { q100, row: Object.assign({}, row, { T: row.T && row.T.id }) });
+    // "הדפס" מדפיס ישר (בלי סל). כאן – מסלול ה-PDF (טלפון/דפדפן נייד), כדי להשוות בבייטים; מסלול המחשב – ui-lbl.js (m 10b)
+    await page.evaluate(() => Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 13) Mobile', configurable: true }));
+    const p100 = await printed(page, '#main [data-a=lblAdd]');
+    const row = (await page.evaluate(() => LblPrint.last && LblPrint.last[0])) || {};
+    check('r 3 כפתורי כמות 1/10/20/50/100; "הדפס" (100, בלי אישור): עותק התבנית T בשורה, tpl "c:mine", בתוקף עד ומבצע כמות – PDF של 100 עמודים בגודל 113.39×85.04 נק\'',
+      q100.v === '100' && q100.on === '100' && q100.chips === '1,10,20,50,100' && !p100.ask && p100.count === 100 && JSON.stringify(p100.boxes) === '["0 0 113.39 85.04"]' && row.tpl === 'c:mine' && row.n === 100 && row.T && row.T.id === 'mine' && row.T.w === 40 && row.T.els.length === 5 && row.it.ex === '31.12.26' && row.it.mq === '2' && row.it.mp === '20', { q100, ask: p100.ask, count: p100.count, boxes: p100.boxes, row: Object.assign({}, row, { T: row.T && row.T.id }) });
     await search(page, '5901234123457'); await page.click('#main [data-a=lblTpl][data-v="1"]'); await H.settle(page, 200);
+    await page.evaluate(() => { window.__opened = []; LblPrint.last = null; });
     await page.fill('#main [data-i=lblQty]', '1000'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 300);
-    const t1000 = await toasts(page), n1000 = (await BKT(page)).length;
-    await page.fill('#main [data-i=lblQty]', '999'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 500);
-    const bk2 = await BKT(page);
-    check('r 4 כמות: 1000 נדחית ("1 עד 999"), 999 מתקבלת; שורה של תבנית מקורית – בלי T', /1 עד 999/.test(t1000) && n1000 === 1 && bk2.length === 2 && bk2[1].n === 999 && bk2[1].tpl === 1 && !bk2[1].T, { t1000, n1000, n: bk2.length });
-    const pb = await page.evaluate(() => [...document.querySelectorAll('#main [data-a=lblPrint]')].map((b) => ({ g: b.dataset.g, t: b.innerText, h: b.nextElementSibling && b.nextElementSibling.innerText })));
-    // 50×25 קודם (אף שנוספה שנייה), אחר כך שאר הגדלים לפי סדר ההופעה בסל
-    check('r 5 שני גדלים בסל: כפתור הדפסה לכל גודל (50×25 ראשון), והנחיה לחלון ההדפסה לפי הגודל', pb.length === 2 && /50×25/.test(pb[0].t) && /999/.test(pb[0].t) && /50×25/.test(pb[0].h) && /40×30/.test(pb[1].t) && /100 מדבקות/.test(pb[1].t) && /40×30\u2069? מ"מ/.test(pb[1].h) && !/50×25/.test(pb[1].h), pb);
-    if (shots) await page.screenshot({ path: path.join(shots, 'r-basket.png'), fullPage: true });
-    const p0 = await printed(page, '#main [data-a=lblPrint][data-g="0"]');
-    const eq0 = await page.evaluate(async ([src, a]) => { const L = LblPrint.bk().filter((r) => !r.T), OLD = window.__lbt.frozen(src), c = await LblPrint.build(L);
-      // שלב 1 הגביל ל-200 בשורה: אותו סל עם 200 – זהה בבייטים לעותק הקפוא
+    const t1000 = await toasts(page), n1000 = await page.evaluate(() => window.__opened.length + (LblPrint.last ? 1 : 0));
+    await page.fill('#main [data-i=lblQty]', '999');
+    const p0 = await printed(page, '#main [data-a=lblAdd]');
+    const eq0 = await page.evaluate(async ([src, a]) => { const L = LblPrint.last, OLD = window.__lbt.frozen(src), c = await LblPrint.build(L);
+      // שלב 1 הגביל ל-200 בשורה: אותה שורה עם 200 – זהה בבייטים לעותק הקפוא
       const L2 = L.map((r) => Object.assign({}, r, { n: 200 })), b = await OLD.build(L2, LblPrint.brand()), b2 = await LblPrint.build(L2);
-      const eq = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]); return { old: eq([...b2], [...b]), now: eq(a, [...c]) }; }, [FROZEN, p0.a || []]);
-    check('r 6 הדפסת 50×25 (999 > 300): חלון אישור, ואחריו PDF של 999 עמודים (זהה ל-build); אותו סל ב-200 – זהה בבייטים לשלב 1', /להדפיס 999 מדבקות/.test(p0.ask) && p0.count === 999 && JSON.stringify(p0.boxes) === '["0 0 141.73 70.87"]' && eq0.old && eq0.now && /הסר מהסל/.test(p0.dlg), { ask: p0.ask, count: p0.count, boxes: p0.boxes, eq0 });
-    const p1 = await printed(page, '#main [data-a=lblPrint][data-g="1"]');
-    check('r 7 הדפסת 40×30 (100): בלי אישור, PDF של 100 עמודים בגודל 113.39×85.04 נק\'', !p1.ask && p1.count === 100 && JSON.stringify(p1.boxes) === '["0 0 113.39 85.04"]' && /40×30/.test(p1.dlg), { ask: p1.ask, count: p1.count, boxes: p1.boxes });
-    await page.evaluate(() => { const L = LblPrint.bk(); for (let i = 0; i < 5; i++) L.push(JSON.parse(JSON.stringify(L[1]))); rerender(); }); await H.settle(page, 300);
-    const big = await page.evaluate(() => document.getElementById('main').innerText);
-    const p2 = await printed(page, '#main [data-a=lblPrint][data-g="0"]'), t5k = await toasts(page);
-    check('r 8 יותר מ-5,000 מדבקות בגודל אחד: אזהרה בסל, ההדפסה נחסמת', /עד 5,000 מדבקות/.test(big) && !p2.count && /עד 5,000/.test(t5k), { t5k, p2: p2.count });
+      const eq = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]); return { old: eq([...b2], [...b]), now: eq(a, [...c]), T: !!L[0].T, tpl: L[0].tpl, n: L[0].n }; }, [FROZEN, p0.a || []]);
+    check('r 4 כמות: 1000 נדחית ("1 עד 999") בלי הדפסה; 999 > 300: חלון אישור, ואחריו PDF של 999 עמודים 50×25 (זהה ל-build); תבנית מקורית – בלי T; ב-200 – זהה בבייטים לשלב 1',
+      /1 עד 999/.test(t1000) && n1000 === 0 && /להדפיס 999 מדבקות/.test(p0.ask) && p0.count === 999 && JSON.stringify(p0.boxes) === '["0 0 141.73 70.87"]' && eq0.old && eq0.now && !eq0.T && eq0.tpl === 1 && eq0.n === 999, { t1000, n1000, ask: p0.ask, count: p0.count, boxes: p0.boxes, eq0 });
+    await page.evaluate(() => { delete navigator.userAgent; });
+    const nb = await page.evaluate(() => ({ bk: /סל ההדפסה|הוסף לסל/.test(document.getElementById('main').innerText), pr: !!document.querySelector('#main [data-a=lblPrint]') }));
+    check('r 5 אין סל במסך: אין "סל ההדפסה", אין "הוסף לסל" ואין כפתורי הדפסת סל', !nb.bk && !nb.pr, nb);
+    if (shots) await page.screenshot({ path: path.join(shots, 'r-print.png'), fullPage: true });
     // שמירה: PATCH עם updateMask; 403 → במכשיר בלבד ונשלח שוב בכניסה הבאה
     const T1 = { id: 'new1', name: 'חדשה', w: 50, h: 25, grid: 12, brand: 'lay', els: MINE.els.slice(0, 2) };
     const s1 = await page.evaluate((T) => LblPrint.tSave(T), T1);

@@ -126,18 +126,26 @@ async function open(browser, www, who, calls) {
     await page.evaluate(() => { const c = document.getElementById('__shot'); if (c) c.remove(); });
     check('m 9 5 תבניות × 2 פריסות: פסי הברקוד בתוך המדבקה ולא על הלוגו / החותמת (תבניות 2, 4 – בלי ברקוד)', Object.entries(geo).every(([k, g]) => g.inside && !g.hit && (/[24]$/.test(k) ? g.n === 0 : g.n > 0)), geo);
     // הדפסה = תצוגה: ה-PDF שנשלח בנוי עם אותו brand; בלי לוגו – זהה ל-build בלי brand
-    await search(page, '5901234123457'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 500);
-    const pdfEq = async () => { await page.evaluate(() => { window.__opened = []; }); await page.click('#main [data-a=lblPrint]'); await H.settle(page, 1200);
-      const r = await page.evaluate(async () => { const u = window.__opened.pop(); if (!u) return null; const a = new Uint8Array(await (await fetch(u)).arrayBuffer()); const L = JSON.parse(localStorage.getItem('lp-lbl-basket'));
+    // הדפסה = תצוגה: "הדפס" שולח ישר (בלי סל). מסלול ה-PDF (טלפון/דפדפן נייד) – בנוי עם אותו brand; בלי לוגו – זהה ל-build בלי brand
+    const pdfEq = async () => { await search(page, '5901234123457');
+      await page.evaluate(() => { window.__opened = []; Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 13) Mobile', configurable: true }); });
+      await page.click('#main [data-a=lblAdd]'); await H.settle(page, 1200);
+      const r = await page.evaluate(async () => { delete navigator.userAgent; const u = window.__opened.pop(); if (!u) return null; const a = new Uint8Array(await (await fetch(u)).arrayBuffer()); const L = LblPrint.last;
         const eq = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]); const b = LblPrint.brand();
         return { brand: !!b, lay: b && b.lay, withB: b ? eq(a, await LblPrint.build(L, b)) : null, noB: eq(a, await LblPrint.build(L, null)) }; });
-      await page.evaluate(() => closeDlg()); await H.settle(page, 200); return r; };
+      return r; };
     const q1 = await pdfEq();
     await page.selectOption('#main select[data-c=lblBLay]', 'top'); await H.settle(page, 400);
     const q2 = await pdfEq();
     await page.click('#main [data-c=lblBOn]'); await H.settle(page, 400);
     const q3 = await pdfEq();
-    check('m 10 PDF: עם לוגו (bot ואז top לכל הסל) – בדיוק build עם אותו brand ושונה מבלי; כיבוי – זהה לבלי לוגו', q1 && q1.brand && q1.lay === 'bot' && q1.withB && !q1.noB && q2 && q2.lay === 'top' && q2.withB && !q2.noB && q3 && !q3.brand && q3.noB, { q1, q2, q3 });
+    check('m 10 PDF: עם לוגו (bot ואז top לכל ההדפסה) – בדיוק build עם אותו brand ושונה מבלי; כיבוי – זהה לבלי לוגו', q1 && q1.brand && q1.lay === 'bot' && q1.withB && !q1.noB && q2 && q2.lay === 'top' && q2.withB && !q2.noB && q3 && !q3.brand && q3.noB, { q1, q2, q3 });
+    await search(page, '5901234123457'); const noBk = await page.evaluate(() => !/סל ההדפסה|הוסף לסל/.test(document.getElementById('main').innerText) && !document.querySelector('#main [data-a=lblPrint]') && document.querySelector('#main [data-a=lblAdd]').innerText.trim());
+    await page.evaluate(() => { window.__opened = []; }); await page.click('#main [data-a=lblQn][data-v="10"]'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 1500);
+    const dk = await page.evaluate(() => { const f = document.getElementById('lblPf'), D = f && f.contentDocument, im = D ? [...D.images] : [];
+      return { f: !!f, n: D ? D.querySelectorAll('.p').length : 0, u: new Set(im.map((x) => x.src)).size, w: im[0] && im[0].naturalWidth, h: im[0] && im[0].naturalHeight, css: D ? D.querySelector('style').textContent.match(/@page\{[^}]*\}/)[0] : '',
+        opened: window.__opened.length, dlg: !!document.querySelector('#dlg[open]'), toast: [...document.querySelectorAll('.toast')].map((e) => e.textContent).join(' | '), cur: !document.getElementById('lblEd'), rows: LblPrint.last.length, n0: LblPrint.last[0].n }; });
+    check('m 10b מחשב: "הדפס" מדפיס ישר (בלי סל, בלי לשונית חדשה, בלי חלון אישור) – 10 עמודים בגודל 50×25 מ"מ, תמונה אחת 591×295', noBk === 'הדפס' && dk.f && dk.n === 10 && dk.u === 1 && dk.w === 591 && dk.h === 295 && /size:50\.00mm 25\.00mm;margin:0/.test(dk.css) && !dk.opened && !dk.dlg && /נשלח להדפסה \(10 מדבקות\)/.test(dk.toast) && dk.cur && dk.rows === 1 && dk.n0 === 10, { noBk, dk });
     await page.evaluate(() => go('home')); await H.settle(page, 1500); await goLbl(page);
     const row2 = await page.evaluate(() => { const c = document.querySelector('#main [data-c=lblBOn]'), s = document.querySelector('#main [data-c=lblBLay]'); return { on: !!(c && c.checked), lay: s && s.value }; });
     check('m 11 כניסה חדשה למסך – הבחירה חוזרת לברירת המחדל של העסק', row2.on && row2.lay === 'bot', row2);
