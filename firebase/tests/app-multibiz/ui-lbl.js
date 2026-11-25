@@ -91,6 +91,7 @@ async function open(browser, www, who, calls) {
     const pngs = await page.evaluate(() => { const mk = (w, h, f) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); f(g); return c.toDataURL('image/png').split(',')[1]; };
       return { logo: mk(360, 120, (g) => { g.fillStyle = '#e8d9a0'; g.fillRect(0, 0, 360, 120); g.fillStyle = '#7a1f1f'; g.font = 'bold 72px Arial'; g.textBaseline = 'middle'; g.fillText('LOGO', 40, 62); g.fillStyle = '#787878'; g.fillRect(40, 100, 280, 10); }),
         stamp: mk(200, 200, (g) => { g.strokeStyle = '#123'; g.lineWidth = 14; g.beginPath(); g.arc(100, 100, 86, 0, 7); g.stroke(); g.fillStyle = '#123'; g.font = 'bold 60px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('כשר', 100, 104); }) }; });
+    await page.evaluate(() => go('lblS')); await H.settle(page, 800); 
     const row0 = await page.evaluate(() => ({ set: !!document.querySelector('#main [data-a=lblBSet]'), on: !!document.querySelector('#main [data-c=lblBOn]') }));
     await page.click('#main [data-a=lblBSet]'); await H.settle(page, 400);
     await page.setInputFiles('#dlg input[data-c=lblBUp][data-k=logo]', { name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(pngs.logo, 'base64') }); await H.settle(page, 600);
@@ -134,23 +135,31 @@ async function open(browser, www, who, calls) {
         const eq = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]); const b = LblPrint.brand();
         return { brand: !!b, lay: b && b.lay, withB: b ? eq(a, await LblPrint.build(L, b)) : null, noB: eq(a, await LblPrint.build(L, null)) }; });
       return r; };
-    const q1 = await pdfEq();
-    await page.selectOption('#main select[data-c=lblBLay]', 'top'); await H.settle(page, 400);
+    await goLbl(page); const q1 = await pdfEq();
+    await page.evaluate(() => go('lblS')); await H.settle(page, 800); await page.selectOption('#main select[data-c=lblBLay]', 'top'); await H.settle(page, 400); await goLbl(page);
     const q2 = await pdfEq();
-    await page.click('#main [data-c=lblBOn]'); await H.settle(page, 400);
+    await page.evaluate(() => go('lblS')); await H.settle(page, 800); await page.click('#main [data-c=lblBOn]'); await H.settle(page, 400); await goLbl(page);
     const q3 = await pdfEq();
     check('m 10 PDF: עם לוגו (bot ואז top לכל ההדפסה) – בדיוק build עם אותו brand ושונה מבלי; כיבוי – זהה לבלי לוגו', q1 && q1.brand && q1.lay === 'bot' && q1.withB && !q1.noB && q2 && q2.lay === 'top' && q2.withB && !q2.noB && q3 && !q3.brand && q3.noB, { q1, q2, q3 });
     await search(page, '5901234123457'); const noBk = await page.evaluate(() => !/סל ההדפסה|הוסף לסל/.test(document.getElementById('main').innerText) && !document.querySelector('#main [data-a=lblPrint]') && document.querySelector('#main [data-a=lblAdd]').innerText.trim());
     await page.evaluate(() => { window.__opened = []; }); await page.click('#main [data-a=lblQn][data-v="10"]'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 1500);
     const dk = await page.evaluate(() => { const f = document.getElementById('lblPf'), D = f && f.contentDocument, im = D ? [...D.images] : [];
       return { f: !!f, n: D ? D.querySelectorAll('.p').length : 0, u: new Set(im.map((x) => x.src)).size, w: im[0] && im[0].naturalWidth, h: im[0] && im[0].naturalHeight, css: D ? D.querySelector('style').textContent.match(/@page\{[^}]*\}/)[0] : '',
-        opened: window.__opened.length, dlg: !!document.querySelector('#dlg[open]'), toast: [...document.querySelectorAll('.toast')].map((e) => e.textContent).join(' | '), cur: !document.getElementById('lblEd'), rows: LblPrint.last.length, n0: LblPrint.last[0].n, bars: D ? D.querySelectorAll('.p')[0].querySelectorAll('svg rect').length : 0, vb: D ? D.querySelector('svg').getAttribute('viewBox') : '' }; });
+        opened: window.__opened.length, dlg: !!document.querySelector('#dlg[open]'), toast: [...document.querySelectorAll('.toast')].map((e) => e.textContent).join(' | '), cur: (document.querySelector('#main #lblEd [data-k=name]') || {}).value === '', rows: LblPrint.last.length, n0: LblPrint.last[0].n, bars: D ? D.querySelectorAll('.p')[0].querySelectorAll('svg rect').length : 0, vb: D ? D.querySelector('svg').getAttribute('viewBox') : '' }; });
     check('m 10b מחשב: "הדפס" מדפיס ישר (בלי סל, בלי לשונית חדשה, בלי חלון אישור) – 10 עמודים בגודל 50×25 מ"מ, תמונה אחת 1773×885 (פי 3) + פסי ברקוד וקטוריים (SVG)', noBk === 'הדפס' && dk.f && dk.n === 10 && dk.u === 1 && dk.w === 1773 && dk.h === 885 && /size:50\.00mm 25\.00mm;margin:0/.test(dk.css) && !dk.opened && !dk.dlg && /נשלח להדפסה \(10 מדבקות\)/.test(dk.toast) && dk.cur && dk.rows === 1 && dk.n0 === 10 && dk.bars > 20 && dk.vb === '0 0 591 295', { noBk, dk });
     if (shots) { await page.evaluate(() => { const f = document.getElementById('lblPf'); f.style.cssText = 'position:fixed;left:0;top:0;width:820px;height:420px;border:0;z-index:99999;background:#fff'; f.contentDocument.body.style.zoom = '4'; });
       await H.settle(page, 300); await page.frameLocator('#lblPf').locator('.p').first().screenshot({ path: path.join(shots, 'desk-print.png') }); }
-    await page.evaluate(() => go('home')); await H.settle(page, 1500); await goLbl(page);
+    await page.evaluate(() => go('home')); await H.settle(page, 1500); await page.evaluate(() => go('lblS')); await H.settle(page, 800); 
     const row2 = await page.evaluate(() => { const c = document.querySelector('#main [data-c=lblBOn]'), s = document.querySelector('#main [data-c=lblBLay]'); return { on: !!(c && c.checked), lay: s && s.value }; });
-    check('m 11 כניסה חדשה למסך – הבחירה חוזרת לברירת המחדל של העסק', row2.on && row2.lay === 'bot', row2);
+    check('m 11 כניסה חדשה – הבחירה האחרונה (כבוי) נשמרה', !row2.on && ST.cfg.on.booleanValue === false, row2);
+    await goLbl(page);
+    const car = await page.evaluate(async () => { const r = []; const st = () => ({ cv: document.querySelectorAll('#main canvas[data-lbl-t]').length, t: document.getElementById('lblTN').textContent, k: [...document.querySelectorAll('#main #lblEd [data-k]')].map((e) => e.dataset.k).join(',') });
+      r.push(st()); for (let i = 0; i < 6; i++) { ACT.lblNav({ dataset: { d: '1' } }); await new Promise((x) => setTimeout(x, 50)); r.push(st()); } return r; });
+    check('m 13 תצוגה אחת גדולה: מתחיל ב"ברקוד ומחיר", חצים עוברים בין 6 שקופיות, בכל אחת רק השדות שלה, האחרונה טקסט חופשי', car.every((x) => x.cv === 1) && /ברקוד ומחיר/.test(car[0].t) && car[0].k === 'name,price,code,hl' && car[1].k === 'name,price,hl' && car[3].k === 'name,price,pp' && /pack/.test(car[4].k) && car[5].t === 'טקסט חופשי' && car[5].k === 'ft' && /ברקוד ומחיר/.test(car[6].t), car);
+    await page.evaluate(() => { window.__opened = []; ACT.lblNav({ dataset: { d: '-1' } }); }); await H.settle(page, 200);
+    await page.fill('#main #lblEd [data-k=ft]', 'שורה ראשונה\nשורה שנייה'); await page.click('#main [data-a=lblAdd]'); await H.settle(page, 1500);
+    const fr = await page.evaluate(() => LblPrint.last && LblPrint.last[0]);
+    check('m 14 טקסט חופשי מודפס (בלי שם ומחיר)', fr && fr.tpl === 6 && fr.it.ft === 'שורה ראשונה\nשורה שנייה', fr);
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check('m 12 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));
     await ctx.close(); }
@@ -159,7 +168,7 @@ async function open(browser, www, who, calls) {
     await goLbl(page);
     await search(page, '7290000000888');
     const w1 = await page.evaluate(() => ({ inv: !!document.querySelector('#main [data-a=lblNewInv]'), man: !!document.querySelector('#main form[data-f=lblNew]'), set: !!document.querySelector('#main [data-a=lblBSet]'), on: !!document.querySelector('#main [data-c=lblBOn]') }));
-    check('w 1 עובד עם "מדבקות" בלי "הזמנות": אין "מוצר חדש במלאי", יש מוצר ידני; הלוגו של העסק מופיע; אין הגדרות', !w1.inv && w1.man && w1.on && !w1.set, w1);
+    check('w 1 עובד עם "מדבקות" בלי "הזמנות": אין "מוצר חדש במלאי", יש מוצר ידני; אין לוגו והגדרות במסך הראשי', !w1.inv && w1.man && !w1.on && !w1.set, w1);
     await page.fill('#main form[data-f=lblNew] [name=name]', 'מוצר ידני (דוגמה)'); await page.fill('#main form[data-f=lblNew] [name=price]', '5');
     await page.evaluate(() => document.querySelector('#main form[data-f=lblNew]').requestSubmit()); await H.settle(page, 800);
     const w2 = await val(page, '#main #lblEd [data-k=name]');
