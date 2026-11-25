@@ -569,7 +569,7 @@ describe('שלב 5 – מגבלת שימוש לפי עסק', () => {
   it('עסק בלי הגדרה: תקרת ברירת מחדל (הנחה) – 50 ביום; לארג\' פעמי בלי הגדרה – בלי תקרת עסק', async () => {
     const S = require('../functions/lib/scan');
     assert.deepEqual(await S.bizCaps(B, 100), { perUser: 100, bizDaily: S.BIZ_DEFAULT_DAILY });
-    assert.deepEqual(await S.bizCaps(L, 100), { perUser: 100, bizDaily: null });
+    assert.deepEqual(await S.bizCaps(L, 100), { perUser: null, bizDaily: null }); // 25.11.2026: לארג' פעמי – גם בלי תקרה למשתמש
   });
 });
 

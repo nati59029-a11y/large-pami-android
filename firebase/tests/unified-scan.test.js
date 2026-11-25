@@ -215,7 +215,7 @@ describe('שלב 2 – ברירת מחדל לעסק חדש; עסקים קיימ�
     assert.deepEqual(await S.bizCaps(B, 100), { perUser: 100, bizDaily: 50 });
     await prep((d) => d.doc(`b/${A}/private/info`).set({ adv: { limits: { scanDaily: 7 } } }));
     assert.deepEqual(await S.bizCaps(A, 100), { perUser: 100, bizDaily: 7 });
-    assert.deepEqual(await S.bizCaps(L, 100), { perUser: 100, bizDaily: null });
+    assert.deepEqual(await S.bizCaps(L, 100), { perUser: null, bizDaily: null }); // 25.11.2026: לארג' פעמי – גם בלי תקרה למשתמש
   });
   it('מנהל־על עדיין יכול לכבות; כבוי = feature-off בלי Gemini', async () => {
     await call('createBusiness', SUPER, { bizId: 'biz-new', name: 'חדש', ownerEmail: 'new2@example.invalid', ownerPhone: '0501234567' });
