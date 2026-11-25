@@ -32,7 +32,7 @@ async function scenario(browser, www, sa, shots) {
     let R = { ok: true };
     if (n === 'cxCfg') R = { cfg: { skip: ['1000'], last: { run: 'r', at: 1 } }, items: 10, br: '_', sa };
     if (n === 'cxBotTok' && d.op === 'upd') { if (st.oldSrv) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'פעולה לא מוכרת', details: { reason: 'bad-op' } } }) }); st.ureq = { id: 'qupd0001', at: Date.now(), took: null, res: null }; R = { ok: true, req: { id: 'qupd0001', at: st.ureq.at } }; }
-    if (n === 'cxBotTok' && d.op === 'info') R = { now: Date.now(), reqMs: 600000, ureq: st.ureq || null, updVer: '0.1.10', tp: st.tp || null, dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'עדכון מחירים: התור ריק אחרי בחירת הקובץ', step: 'queue', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, li: st.dev ? { kind: 'price', at: T0, id: 25521, status: 'בוצע', errors: 0, loaded: 1 } : null, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
+    if (n === 'cxBotTok' && d.op === 'info') R = { now: Date.now(), reqMs: 600000, ureq: st.ureq || null, updVer: '0.1.10', tp: st.tp || null, tf: st.tf || null, dev: st.dev, sd: st.dev ? '2026-11-16' : null, lr: st.dev ? { id: 'r2', at: T0, st: 'fail', code: 'selector-miss', msg: 'עדכון מחירים: התור ריק אחרי בחירת הקובץ', step: 'queue', manual: false } : null, newMax: 1, limits: { price: 500, newMax: 50 }, first: false, sa, li: st.dev ? { kind: 'price', at: T0, id: 25521, status: 'בוצע', errors: 0, loaded: 1 } : null, runs: st.dev ? RUNS : [], disc: sa ? [{ id: 'd1', at: T0, size: 2048 }] : undefined };
     if (n === 'cxBotTok' && d.op === 'new') { st.dev = { id: 'ab12cd34', at: T0, last: T0 + 60e3, ver: '0.1.0', ua: '', upd: { at: T0, ok: false, ver: '0.1.0', err: 'bad-hash', fails: 2, rx: T0 } }; R = { token: 'biz-o.' + 'A'.repeat(43), id: 'ab12cd34' }; }
     if (n === 'cxBotTok' && d.op === 'revoke') { st.dev = null; R = { ok: true }; }
     if (n === 'cxBotDisc') R = { id: 'd1', at: T0, size: 30, data: JSON.stringify({ pages: [{ p: '#/catalogs' }] }) };
@@ -77,6 +77,13 @@ async function scenario(browser, www, sa, shots) {
   await page.evaluate(() => { cxBotReset(); rerender(); }); await H.settle(page, 700);
   v = await q();
   check(P + '3ה שורת "מכירות היום": עודכנו עד 13:00 – חלקי', new RegExp('מכירות היום \\(' + tday.slice(8) + '\\/' + tday.slice(5, 7) + '\\) עודכנו מהמחשב עד השעה 13:00 – חלקי').test(v.text), v.text.slice(0, 800));
+  // 25.11.2026: כישלון של מכירות היום עם קוד שהאפליקציה לא מכירה – מוצג הקוד עצמו (לא רק "הסנכרון נכשל")
+  st.tf = { s: tday + ' 16', c: 'branch-switch', at: T0 + 1 };
+  await page.evaluate(() => { cxBotReset(); rerender(); }); await H.settle(page, 700);
+  v = await q();
+  check(P + '3ה1 כישלון מכירות היום בקוד לא מוכר: "הסנכרון נכשל (קוד: branch-switch)"', /העדכון של מכירות היום בשעה 16:00 נכשל: הסנכרון נכשל\.? \(קוד: branch-switch\)/.test(v.text), v.text.slice(Math.max(0, v.text.indexOf('עודכנו מהמחשב') - 60), v.text.indexOf('עודכנו מהמחשב') + 400));
+  st.tf = null;
+  await page.evaluate(() => { cxBotReset(); rerender(); }); await H.settle(page, 700);
   await page.click('[data-a=cxBotUpd]'); await H.settle(page, 500);
   v = await q();
   check(P + '3ו חלון "עדכון המחשב": גרסה 0.1.10, מצב תקין, כפתור פעיל', /גרסה מותקנת\s*0\.1\.10/.test(v.text) && /מצב\s*תקין/.test(v.text) && await page.evaluate(() => !document.querySelector('#dlg [data-a=cxBotUpdGo]').disabled) && fine(v), { small: v.small, t: v.text.slice(0, 300) });
