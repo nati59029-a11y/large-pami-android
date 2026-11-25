@@ -78,6 +78,8 @@ if(typeof window==='undefined'||typeof ACT==='undefined'||typeof V==='undefined'
 /* =================== ציור המדבקה (קנבס 591×295) =================== */
 const F='Rubik,"IBM Plex Sans Hebrew",Assistant,Arial,sans-serif',M=14,IW=W-2*M,SH='ש"ח';
 const TPL=[[1,'ברקוד ומחיר'],[2,'בלי ברקוד'],[3,'מחיר גדול'],[4,'מבצע'],[5,'מחיר ליחידה']];
+// 6 – "טקסט חופשי": שקופית אחרונה במסך בלבד (לא ב-TPL, כדי לא לשנות את העורך ואת הסל)
+const FTL=4,FTN=160,ftLines=s=>String(s==null?'':s).slice(0,FTN).split('\n').map(x=>x.trim()).filter(Boolean).slice(0,FTL);
 const fnt=(g,s,w)=>{g.font=`${w||700} ${Math.round(s)}px ${F}`};
 function fit(g,t,max,size,min,w){let s=size;fnt(g,s,w);while(s>min&&g.measureText(t).width>max){s-=2;fnt(g,s,w)}return s}
 function txt(g,t,x,y,al,dir){g.direction=dir||'rtl';g.textAlign=al||'right';g.textBaseline='middle';g.fillText(t,x,y)}
@@ -126,6 +128,10 @@ function draw(g,tpl,it,opt){const rects=opt&&opt.rects||null,k=Math.max(.5,Math.
   if(pp!=null){const lb='מחיר רגיל',ps=`${fmtP(pr)} ${SH}`;let f4=34;fnt(g,f4,500);if(ib)while(f4>16&&g.measureText(lb).width+12+g.measureText(ps).width>IW-2*ib){f4-=2;fnt(g,f4,500)}
    const lw=g.measureText(lb).width,pw=g.measureText(ps).width,r=cx+(lw+12+pw)/2;
    txt(g,lb,r,262);txt(g,ps,r-lw-12,262);g.fillRect(r-lw-12-pw-3,259,pw+6,4)}}
+ else if(tpl===6){/* טקסט חופשי (25.11.2026): עד FTL שורות, כל שורה במרכז ומוקטנת עד שנכנסת. בפינות למטה – מעל הלוגו והחותמת */
+  const ls=ftLines(it.ft),y0=M,y1=L&&!L.t?H-6-BX-4:H-M;
+  if(!ls.length){if(opt&&opt.prev){g.fillStyle='#888';fit(g,'טקסט חופשי',IW,44,16,500);txt(g,'טקסט חופשי',cx,(y0+y1)/2,'center');g.fillStyle='#000'}}
+  else{const lh=(y1-y0)/ls.length;ls.forEach((l,i)=>{fit(g,l,IW,Math.min(lh*.95,Math.min(150,lh*.8)*k),14);txt(g,l,cx,y0+lh*(i+.5),'center')})}}
  else{name1(32,40,18,44);bigP(g,pr,W*.66,104,96,W*.6);const pk=String(it.pack||'').trim();if(pk){fit(g,pk,W*.3,38,16);txt(g,pk,W*.2,104,'center')}
   const u=unitPrice(it.price,it.pack);if(u){const t=`מחיר ל-${u.per}: ${fmtP(u.v)} ${SH}`;fit(g,t,IW,32,16,600);txt(g,t,cx,178,'center')}else if(opt&&opt.prev){g.fillStyle='#888';fit(g,'הקלידו גודל אריזה (למשל 500 גרם)',IW,24,14,500);txt(g,'הקלידו גודל אריזה (למשל 500 גרם)',cx,178,'center');g.fillStyle='#000'}
   const[x5,w5]=nx(M+60,IW-120);bcode(g,it.code,x5,212,w5,48,20,rects)}
@@ -184,7 +190,7 @@ const mgr=()=>(typeof isA==='function'&&isA())||!!(SY&&SY.sa);
 const ok=()=>!!SY&&!SY.mg&&(mgr()||(typeof isW==='function'&&isW()&&!!(SY.perms&&SY.perms.lbl===true)));
 const dec=d=>Object.assign({id:idOf(d)},Object.fromEntries(Object.entries(d.fields||{}).map(([k,v])=>[k,fvj(v)])));
 const typing=()=>{const a=document.activeElement;return!!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
-const redraw=()=>{try{const v=cur().v;if((v==='lbl'||(/^lblD/.test(v)&&!(root.LblDesign&&LblDesign.busy())))&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}};
+const redraw=()=>{try{const v=cur().v;if((v==='lbl'||v==='lblS'||(/^lblD/.test(v)&&!(root.LblDesign&&LblDesign.busy())))&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}};
 // שורת סל: {it,tpl,n,T?} – T עותק התבנית (מה שבסל הוא מה שיודפס). בלי T – תבנית מקורית 1..5 (draw)
 const bkGet=()=>{if(S.B)return S.B;try{const a=JSON.parse(localStorage.getItem(BK)||'[]');S.B=Array.isArray(a)?a.filter(x=>{if(!x||!x.it)return false;if(x.T){x.T=rowT(x.T);return!!x.T}return TPL.some(t=>t[0]===x.tpl)}):[]}catch(e){S.B=[]}return S.B};
 const bkSave=()=>{try{localStorage.setItem(BK,JSON.stringify(S.B||[]))}catch(e){}};
@@ -269,17 +275,31 @@ let scStop=null,scT=0;
 function scOn(){if(scStop||!window.PosBarcode||!PosBarcode.listen)return;try{scStop=PosBarcode.listen(onScan,{beep:true})}catch(e){scStop=null;return}
  scT=setInterval(()=>{let on=false;try{on=cur().v==='lbl'}catch(e){}if(!on){clearInterval(scT);scT=0;try{scStop()}catch(e){}scStop=null}},1000)}
 
-const refOf=v=>/^[1-5]$/.test(v)?+v:String(v||'');
+const refOf=v=>/^[1-6]$/.test(v)?+v:String(v||'');
 const prevs=()=>{const it=S.cur;if(!it)return;const b=bOpt(),go=()=>document.querySelectorAll('#main canvas[data-lbl-t]').forEach(c=>{try{const r=refOf(c.dataset.lblT);render(c.getContext('2d'),tOf(r)||r,it,b?{prev:1,brand:b}:{prev:1})}catch(e){}});
  go();if(b)ensureImgs(b).then(()=>{if(cur().v==='lbl')go()});try{if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{if(cur().v==='lbl')go()})}catch(e){}};
 let raf=0;const prevSoon=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;prevs()})};
 const cv=(r,T)=>{const D=T?LblTpl.dims(T.w,T.h):{W,H};return `<canvas data-lbl-t="${esc(String(r))}" width="${D.W}" height="${D.H}" style="width:100%;height:auto;display:block;background:#fff;border-radius:6px"></canvas>`};
 const ef=(l,k,v,x)=>`<label class="f" style="margin:0"><span>${l}</span><input data-i="lblE" data-k="${k}" value="${esc(v==null?'':v)}" autocomplete="off" ${x||''}></label>`;
 
+/* תצוגה אחת גדולה (25.11.2026): השקופיות – התבניות ואחריהן "טקסט חופשי" (6). בכל שקופית – רק השדות שהיא משתמשת בהם */
+const sl=()=>tList().concat([{r:6,l:'טקסט חופשי',T:null}]);
+const blank=()=>({s:'x',id:'',name:'',price:'',code:'',fs:100,hl:'',pp:'',pack:'',ex:'',mq:'',mp:'',ft:''});
+function fl(r){if(r===6)return{ft:1,fs:1};const T=tOf(r);
+ if(!T){const n=typeof r==='number'?r:1;return{name:1,price:1,fs:1,code:n!==2&&n!==4,hl:n!==4,pp:n===4,pack:n===5}}
+ const E=T.els||[],has=f=>E.some(f),nd=LblTpl.need(T);
+ return{name:has(e=>e.t==='name'),fs:has(e=>e.t==='name'&&e.k!==0),price:has(e=>e.t==='price'||e.t==='reg'||e.t==='unit'),code:has(e=>e.t==='bc'||e.if==='bc'||e.if==='!bc'),hl:has(e=>e.t==='hl'||(e.t==='name'&&e.hlIn)),pp:nd.pp,pack:nd.pack,ex:nd.ex,mq:nd.mq}}
+const uTxt=()=>{const c=S.cur;if(!c)return '';const F=fl(S.tpl),u=unitPrice(c.price,c.pack),a=[];if(F.pack)a.push(u?`מחיר ל-${u.per}: ${ils(u.v)}`:'מחיר ליחידה: הקלידו גודל אריזה (גרם, ק"ג, מ"ל, ליטר)');if(F.code&&c.code&&!barsFor(c.code).bars)a.push('הברקוד לא תקין להדפסה');return a.join(' · ')};
+const nav=d=>{const L=sl(),i=Math.max(0,L.findIndex(x=>x.r===S.tpl));S.tpl=L[(i+d+L.length)%L.length].r;S.tU=1;rerender()};
+// החלקה בטלפון: שמאלה – הבאה, ימינה – הקודמת
+const swp=()=>{const c=document.getElementById('lblCar');if(!c||c.dataset.sw)return;c.dataset.sw='1';let x0=null,y0=0;
+ c.addEventListener('touchstart',e=>{const t=e.touches[0];x0=t.clientX;y0=t.clientY},{passive:true});
+ c.addEventListener('touchend',e=>{if(x0==null)return;const t=e.changedTouches[0],dx=t.clientX-x0,dy=t.clientY-y0;x0=null;if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)*1.5)nav(dx<0?1:-1)},{passive:true})};
+
 V.lbl=()=>{const T='הדפסת מדבקות';if(!ok())return{t:T,h:'<div class="empty">אין לך הרשאה להדפסת מדבקות</div>'};
- if(!S.inV){S.inV=1;S.bOn=null;S.bLay=null;S.t0=0;const t=setInterval(()=>{let on=false;try{on=cur().v==='lbl'}catch(e){}if(!on){clearInterval(t);S.inV=0}},1000)} // בחירת הלוגו להדפסה – מתאפסת בכל כניסה
+ if(!S.inV){S.inV=1;S.bOn=null;S.bLay=null;S.t0=0;S.tpl=1;S.tU=0;const t=setInterval(()=>{let on=false;try{on=cur().v==='lbl'}catch(e){}if(!on){clearInterval(t);S.inV=0}},1000)} // כל כניסה – מתחילים מ"ברקוד ומחיר" (או מתבנית ברירת המחדל של העסק)
  if(!S.c0&&!S.cB)setTimeout(loadCfg,0);if(!S.t0&&!S.tB)setTimeout(loadTpl,0);if(S.t0&&typeof S.tpl==='string'&&!tOf(S.tpl))S.tpl=1;scOn();if(S.P===null&&!S.pB)setTimeout(loadInv,0);if(S.M===null&&!S.mB)setTimeout(loadMan,0);
- const BR=brs(),it=S.cur;
+ const BR=brs();let it=S.cur;
  const st=S.P===null||S.pB?'טוען מלאי…':S.pNo?'המלאי זמין כשתוספת ההזמנות פעילה בעסק. אפשר להקליד מוצר ידני.':S.pErr?S.pErr:`${inv().length} מוצרים במלאי`;
  let h=`<div class="card"><form data-f="lblQ" autocomplete="off"><label class="f" style="margin:0"><span>ברקוד או שם מוצר</span><input name="q" data-i="lblQ" data-pos-scan value="${esc(S.q)}" placeholder="סרקו, הקלידו ברקוד או התחילו לכתוב שם" enterkeyhint="search"></label>
   <div class="row" style="margin-top:8px;gap:8px"><button class="btn grow">חפש</button><label class="btn g grow" style="cursor:pointer;text-align:center">צלם ברקוד<input type="file" accept="image/*" capture="environment" data-c="lblCam" hidden></label></div></form>
@@ -289,20 +309,25 @@ V.lbl=()=>{const T='הדפסת מדבקות';if(!ok())return{t:T,h:'<div class="
  if(S.nf){const ox=oxOn();h+=`<div class="card" style="border:2px solid var(--acc)"><b>המוצר לא נמצא במלאי</b>${ox?'<p class="note" style="margin:4px 0 8px">אפשר להוסיף אותו למלאי (טופס המוצר המלא) – והמדבקה תוכן מיד.</p><button class="btn w" data-a="lblNewInv">מוצר חדש במלאי</button><p style="margin:12px 0 0"><b>או: מדבקה למוצר ידני</b> <small class="note">(בלי להוסיף למלאי)</small></p>':''}<p class="note" style="margin:4px 0 8px">הקלידו שם ומחיר. המוצר יישמר בענן ויופיע בחיפוש הבא בכל המכשירים של העסק.</p>
   <form data-f="lblNew" autocomplete="off">${fld('שם המוצר','name',S.nf.name,'text','required maxlength="120"')}<div class="row" style="gap:8px"><label class="f grow"><span>מחיר (₪)</span><input name="price" inputmode="decimal" required placeholder="0.00"></label><label class="f grow"><span>גודל אריזה (לא חובה)</span><input name="pack" maxlength="30" placeholder="500 גרם / 1.5 ליטר"></label></div>
   ${fld('ברקוד (לא חובה)','barcode',S.nf.barcode,'text','maxlength="40" dir="ltr" inputmode="numeric"')}<div class="row" style="gap:8px"><button class="btn${ox?' g':''} grow">שמור והמשך</button><button type="button" class="btn g grow" data-a="lblNfX">ביטול</button></div></form></div>`}
- if(it){const u=unitPrice(it.price,it.pack),nd=LblTpl.need(tOf(S.tpl));
+ if(!it&&!S.nf&&!(S.hits&&S.hits.length))it=S.cur=blank(); // אין מוצר – מדבקה ריקה (הקלדה ידנית / טקסט חופשי)
+ if(it){const L=sl();let ix=L.findIndex(x=>x.r===S.tpl);if(ix<0){ix=0;S.tpl=L[0].r}const x=L[ix],F=fl(S.tpl),ab='min-width:48px;min-height:48px;padding:0 10px;font-size:1.6rem;line-height:1';
+  const lab=(x.r===6?esc(x.l):typeof x.r==='number'?x.r+'. '+x.l+(x.T?' (ערוכה)':''):esc(x.l))+(x.T&&!LblTpl.isDef(x.T.w,x.T.h)?` · ${szT(x.T.w,x.T.h)} מ"מ`:'');
   h+=`<div class="card" id="lblEd"><div class="sec" style="margin-top:0"><h3>עריכת המדבקה</h3>${it.s==='m'?'<span class="tag">מוצר ידני</span>':''}${it.s==='p'&&oxOn()?'<button class="btn s g" data-a="lblEditP">עריכת מוצר</button>':''}</div>${it.s==='p'?`<p class="note" id="lblPN" style="margin:0 0 8px">שינוי כאן חל רק על המדבקה.${oxOn()?' לשינוי מחיר במלאי, בקופה ובכספית לחצו "עריכת מוצר".':''}</p>`:''}
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${tList().map(x=>{const on=S.tpl===x.r,T=x.T,lab=(typeof x.r==='number'?x.r+'. '+x.l+(T?' (ערוכה)':''):esc(x.l))+(T&&!LblTpl.isDef(T.w,T.h)?` · ${szT(T.w,T.h)} מ"מ`:'');
-   return `<button type="button" data-a="lblTpl" data-v="${esc(String(x.r))}" aria-pressed="${on}" style="padding:6px;border-radius:10px;border:2px solid ${on?'var(--acc)':'var(--line)'};background:transparent;color:inherit;cursor:pointer;font:inherit">${cv(x.r,T)}<small style="display:block;margin-top:4px${on?';color:var(--acc);font-weight:700':''}">${lab}</small></button>`}).join('')}</div>
+  <div class="row" style="gap:6px;align-items:center;flex-wrap:nowrap"><button type="button" class="btn g" data-a="lblNav" data-d="-1" aria-label="המדבקה הקודמת" style="${ab}">›</button>
+  <div id="lblCar" class="grow" style="min-width:0;max-width:720px;margin:0 auto;touch-action:pan-y">${cv(x.r,x.T)}</div>
+  <button type="button" class="btn g" data-a="lblNav" data-d="1" aria-label="המדבקה הבאה" style="${ab}">‹</button></div>
+  <div style="text-align:center;margin-top:6px"><b id="lblTN" style="color:var(--acc)">${lab}</b> <small class="note">(${ix+1} מתוך ${L.length})</small></div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:10px">
-  ${ef('שם המוצר','name',it.name,'maxlength="120"')}${ef('מחיר (₪)','price',it.price,'inputmode="decimal"')}${ef('ברקוד','code',it.code,'dir="ltr" maxlength="40"')}
-  <label class="f" style="margin:0"><span>גודל השם</span><select data-c="lblFs">${[70,80,90,100,110,120,130,140].map(v=>`<option value="${v}"${+it.fs===v?' selected':''}>${v}%</option>`).join('')}</select></label>
-  ${ef('מילה מודגשת (לא חובה)','hl',it.hl,'maxlength="14" placeholder="חדש! / מבצע"')}${ef('מחיר מבצע (תבנית 4)','pp',it.pp,'inputmode="decimal"')}${ef('גודל אריזה (תבנית 5)','pack',it.pack,'maxlength="30" placeholder="500 גרם"')}${nd.ex?ef('בתוקף עד','ex',it.ex,'maxlength="10" placeholder="31.12.26"'):''}${nd.mq?ef('מבצע כמות – יחידות (2–99)','mq',it.mq,'inputmode="numeric" maxlength="2" placeholder="2"')+ef('מבצע כמות – מחיר (₪)','mp',it.mp,'inputmode="decimal" placeholder="20"'):''}</div>
-  <small class="note" id="lblU" style="display:block;margin-top:6px">${u?`מחיר ל-${u.per}: ${ils(u.v)}`:'מחיר ליחידה: הקלידו גודל אריזה (גרם, ק"ג, מ"ל, ליטר)'}${it.code&&!barsFor(it.code).bars?' · הברקוד לא תקין להדפסה':''}</small>
-  <div class="row" style="gap:8px;margin-top:10px;align-items:flex-end"><label class="f" style="margin:0;max-width:120px"><span>כמות מדבקות</span><input type="number" min="1" max="999" step="1" inputmode="numeric" data-i="lblQty" value="${esc(String(S.qty))}"></label><button class="btn grow" data-a="lblAdd">הדפס</button><button class="btn g" data-a="lblX">ביטול</button></div>
+  ${F.ft?`<label class="f" style="margin:0;grid-column:1/-1"><span>טקסט חופשי (עד ${FTL} שורות)</span><textarea data-i="lblE" data-k="ft" rows="${FTL}" maxlength="${FTN}" placeholder="כתבו כאן – כל שורה בשורה נפרדת">${esc(it.ft||'')}</textarea></label>`:''}
+  ${F.name?ef('שם המוצר','name',it.name,'maxlength="120"'):''}${F.price?ef('מחיר (₪)','price',it.price,'inputmode="decimal"'):''}${F.code?ef('ברקוד','code',it.code,'dir="ltr" maxlength="40"'):''}
+  ${F.fs?`<label class="f" style="margin:0"><span>${F.ft?'גודל הטקסט':'גודל השם'}</span><select data-c="lblFs">${[70,80,90,100,110,120,130,140].map(v=>`<option value="${v}"${+it.fs===v?' selected':''}>${v}%</option>`).join('')}</select></label>`:''}
+  ${F.hl?ef('מילה מודגשת (לא חובה)','hl',it.hl,'maxlength="14" placeholder="חדש! / מבצע"'):''}${F.pp?ef('מחיר מבצע','pp',it.pp,'inputmode="decimal"'):''}${F.pack?ef('גודל אריזה','pack',it.pack,'maxlength="30" placeholder="500 גרם"'):''}${F.ex?ef('בתוקף עד','ex',it.ex,'maxlength="10" placeholder="31.12.26"'):''}${F.mq?ef('מבצע כמות – יחידות (2–99)','mq',it.mq,'inputmode="numeric" maxlength="2" placeholder="2"')+ef('מבצע כמות – מחיר (₪)','mp',it.mp,'inputmode="decimal" placeholder="20"'):''}</div>
+  ${F.pack||F.code?`<small class="note" id="lblU" style="display:block;margin-top:6px">${esc(uTxt())}</small>`:''}
+  <div class="row" style="gap:8px;margin-top:10px;align-items:flex-end"><label class="f" style="margin:0;max-width:120px"><span>כמות מדבקות</span><input type="number" min="1" max="999" step="1" inputmode="numeric" data-i="lblQty" value="${esc(String(S.qty))}"></label><button class="btn grow" data-a="lblAdd">הדפס</button><button class="btn g" data-a="lblX">${it.s==='x'?'ניקוי':'ביטול'}</button></div>
   <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${QN.map(v=>`<button type="button" class="chip" data-a="lblQn" data-v="${v}" aria-pressed="${+S.qty===v}">${v}</button>`).join('')}</div>
   ${it.s==='m'&&mgr()?'<button class="btn g s" style="margin-top:8px" data-a="lblMDel">מחק את המוצר הידני</button>':''}</div>`;
-  setTimeout(prevs,0)}
- h+=brandH()+`<div class="card"><div class="row" style="gap:8px;align-items:center"><span class="grow"><b>עיצוב תבניות</b><small class="note" style="display:block">תבניות משלך, גדלים ותבנית ברירת מחדל</small></span><button class="btn s g" data-a="go" data-v="lblD">עיצוב תבניות</button></div></div>`;
+  setTimeout(()=>{prevs();swp()},0)}
+ h+=`<div class="card"><div class="row" style="gap:8px;align-items:center"><span class="grow"><b>הגדרות</b><small class="note" style="display:block">לוגו וכשרות, עיצוב תבניות</small></span><button class="btn s g" data-a="go" data-v="lblS">הגדרות</button></div></div>`;
  return{t:T,h}};
 
 window.lblTile=k=>ok()?(k==='add'?`<button class="tile" data-a="addGo" data-v="lbl" style="font-size:1rem">${ico('doc')}הדפסת מדבקות</button>`:`<button class="tile" data-a="go" data-v="lbl" style="font-size:1.15rem;text-align:center;border-color:var(--acc);color:var(--acc)">${ico('doc')}הדפסת מדבקות</button>`):'';
@@ -313,27 +338,28 @@ CHG.lblCam=async el=>{const f=el.files[0];el.value='';if(!f)return;if(typeof shD
  if(!c)return toast('לא נקרא ברקוד. צלמו קרוב ובמיקוד, או הקלידו ידנית');lookup(c)};
 CHG.lblBr=el=>{S.br=el.value;if(S.cur&&S.cur.s==='p'){const p=inv().find(x=>x.id===S.cur.id);if(p)S.cur.price=String(unitP(p,S.br))}rerender()};
 ACT.lblPick=el=>{const s=el.dataset.s,id=el.dataset.id,p=(s==='m'?(S.M||[]):inv()).find(x=>x.id===id);if(p)pick({s,p})};
-ACT.lblTpl=el=>{const v=String(el.dataset.v||'');S.tpl=/^[1-5]$/.test(v)?+v:/^c:[A-Za-z0-9_-]{1,40}$/.test(v)&&tOf(v)?v:1;S.tU=1;rerender()};
+ACT.lblNav=el=>nav(el.dataset.d==='-1'?-1:1);
+ACT.lblTpl=el=>{const v=String(el.dataset.v||'');S.tpl=/^[1-6]$/.test(v)?+v:/^c:[A-Za-z0-9_-]{1,40}$/.test(v)&&tOf(v)?v:1;S.tU=1;rerender()};
 const QN=[1,10,20,50,100];
 ACT.lblQn=el=>{const v=+el.dataset.v;if(!QN.includes(v))return;S.qty=v;const i=document.querySelector('#main [data-i=lblQty]');if(i)i.value=String(v);document.querySelectorAll('#main [data-a=lblQn]').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.v===v)))};
 ACT.lblX=()=>{S.cur=null;rerender()};ACT.lblNfGo=()=>{const t=String(S.q||'').trim();S.hits=null;S.nf=looksCode(t)?{barcode:t,name:''}:{barcode:'',name:t};rerender()};ACT.lblNfX=()=>{S.nf=null;rerender()};
-INP.lblE=el=>{if(!S.cur)return;S.cur[el.dataset.k]=el.value;prevSoon();if(el.dataset.k==='price'||el.dataset.k==='pack'||el.dataset.k==='code'){const u=unitPrice(S.cur.price,S.cur.pack),n=document.getElementById('lblU');
- if(n)n.textContent=(u?`מחיר ל-${u.per}: ${ils(u.v)}`:'מחיר ליחידה: הקלידו גודל אריזה (גרם, ק"ג, מ"ל, ליטר)')+(S.cur.code&&!barsFor(S.cur.code).bars?' · הברקוד לא תקין להדפסה':'')}};
+INP.lblE=el=>{if(!S.cur)return;S.cur[el.dataset.k]=el.value;prevSoon();if(/^(price|pack|code)$/.test(el.dataset.k)){const n=document.getElementById('lblU');if(n)n.textContent=uTxt()}};
 CHG.lblFs=el=>{if(S.cur){S.cur.fs=+el.value||100;prevs()}};
 INP.lblQty=el=>{S.qty=el.value};
 const pOk=v=>{const n=num(v);return n!=null&&n>=0&&n<=100000};
 const mFields=x=>{const f={name:{stringValue:x.name},price:{doubleValue:x.price},at:{integerValue:String(Date.now())},by:{stringValue:SY.uid}};if(x.barcode)f.barcode={stringValue:x.barcode};if(x.pack)f.pack={stringValue:x.pack};return f};
 async function mSave(x){const ex=x.barcode&&(S.M||[]).find(m=>m.barcode===x.barcode),id=x.id||(ex&&ex.id)||(/^[0-9A-Za-z-]{1,40}$/.test(x.barcode||'')?'bc_'+x.barcode:rid());
  const d=await fsx('/lblp/'+id,{method:'PATCH',body:JSON.stringify({fields:mFields(x)})});const m=d&&d.fields?dec(d):Object.assign({id},x);S.M=(S.M||[]).filter(q=>q.id!==m.id).concat([m]);return m}
-ACT.lblAdd=async el=>{const it=S.cur;if(!it)return;const nm=String(it.name||'').trim();if(!nm)return toast('חסר שם מוצר');if(nm.length>120)return toast('שם המוצר: עד 120 תווים');
- if(!pOk(it.price))return toast('המחיר לא תקין');if(S.tpl===4&&!pOk(it.pp))return toast('בתבנית מבצע צריך מחיר מבצע');
- if(it.code&&!barsFor(it.code).bars)return toast('הברקוד לא תקין להדפסה (עד 40 תווים באנגלית ובספרות)');
+ACT.lblAdd=async el=>{const it=S.cur;if(!it)return;const F=fl(S.tpl),ft=ftLines(it.ft).join('\n');if(F.ft&&!ft)return toast('כתבו טקסט למדבקה');
+ const nm=String(it.name||'').trim();if(F.name&&!nm)return toast('חסר שם מוצר');if(nm.length>120)return toast('שם המוצר: עד 120 תווים');
+ if(F.price&&!pOk(it.price))return toast('המחיר לא תקין');if(S.tpl===4&&!pOk(it.pp))return toast('בתבנית מבצע צריך מחיר מבצע');
+ if(F.code&&it.code&&!barsFor(it.code).bars)return toast('הברקוד לא תקין להדפסה (עד 40 תווים באנגלית ובספרות)');
  const n=Math.floor(+S.qty);if(!(n>=1&&n<=LblTpl.LIM.q))return toast('כמות: 1 עד 999');
  const T=tOf(S.tpl),nd=LblTpl.need(T),ex=String(it.ex||'').trim(),mq=String(it.mq||'').trim(),mp=String(it.mp||'').trim();
  if(nd.ex&&ex.length>LblTpl.LIM.ex)return toast('בתוקף עד: עד 10 תווים');
  if(nd.mq&&(mq||mp)&&!(/^\d{1,2}$/.test(mq)&&+mq>=2&&+mq<=99&&pOk(mp)))return toast('מבצע כמות: 2 עד 99 יחידות ומחיר תקין');
- const x={name:nm,price:String(num(it.price)),code:String(it.code||'').trim(),fs:+it.fs||100,hl:String(it.hl||'').trim().slice(0,14),pp:it.pp===''||it.pp==null?'':String(num(it.pp)),pack:String(it.pack||'').trim().slice(0,30)};
- if(nd.ex&&ex)x.ex=ex;if(nd.mq&&mq&&mp){x.mq=String(+mq);x.mp=String(num(mp))}
+ const x={name:nm,price:String(pOk(it.price)?num(it.price):0),code:String(it.code||'').trim(),fs:+it.fs||100,hl:String(it.hl||'').trim().slice(0,14),pp:it.pp===''||it.pp==null?'':String(num(it.pp)),pack:String(it.pack||'').trim().slice(0,30)};
+ if(F.ft)x.ft=ft;if(nd.ex&&ex)x.ex=ex;if(nd.mq&&mq&&mp){x.mq=String(+mq);x.mp=String(num(mp))}
  const row={it:x,tpl:S.tpl,n};if(T)row.T=JSON.parse(JSON.stringify(T));
  const go=async()=>{if(!await lblGo(el,[row],{tot:n}))return;
  // מוצר ידני: גודל האריזה נשמר גם במוצר עצמו (בענן) לפעם הבאה
@@ -399,10 +425,20 @@ ACT.lblEditP=async()=>{const it=S.cur;if(!it||it.s!=='p'||!oxOn()||typeof window
 /* ---------- לוגו וכשרות: שורה מעל הסל + הגדרות (מנהל) ---------- */
 const LAYS=[['top','פס עליון'],['bot','בפינות למטה']];
 const SAMPLE={name:'שם המוצר (דוגמה)',price:'12.90',code:'5901234123457',fs:100,hl:'',pp:'',pack:''};
-function brandH(){const c=bC(),M=mgr(),set=M?'<button class="btn s g" data-a="lblBSet">הגדרות</button>':'';if(!bHas(c))return M?`<div class="card"><div class="row" style="gap:8px;align-items:center"><b class="grow">לוגו וכשרות</b>${set}</div><small class="note">עדיין לא הועלו לוגו או חותמת כשרות</small></div>`:'';
- const on=bOn();return `<div class="card"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><label class="cb grow" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-c="lblBOn"${on?' checked':''}> <b>לוגו וכשרות</b></label>${on?`<select data-c="lblBLay" aria-label="פריסה">${LAYS.map(([v,l])=>`<option value="${v}"${bLay()===v?' selected':''}>${l}</option>`).join('')}</select>`:''}${set}</div><small class="note">חל על כל ההדפסה הזו. בכל כניסה למסך – חוזר לברירת המחדל של העסק.</small></div>`}
-CHG.lblBOn=el=>{S.bOn=!!el.checked;rerender()};
-CHG.lblBLay=el=>{S.bLay=el.value==='bot'?'bot':'top';rerender()};
+/* 25.11.2026: לוגו וכשרות עברו למסך "הגדרות מדבקות" (lblS). הבחירה (מודפס / לא, פס עליון / בפינות למטה) נשמרת לעסק ב-cfg/lbl (on, lay)
+   ונשארת בכל כניסה ובכל המכשירים. שינוי – מנהל (כמו העלאת התמונות); עובד רואה את המצב */
+function brandH(){const c=bC(),M=mgr(),set=M?'<button class="btn s g" data-a="lblBSet">העלאת לוגו וחותמת</button>':'';if(!bHas(c))return M?`<div class="card"><div class="row" style="gap:8px;align-items:center"><b class="grow">לוגו וכשרות</b>${set}</div><small class="note">עדיין לא הועלו לוגו או חותמת כשרות</small></div>`:'';
+ const on=bOn(),ln=(LAYS.find(x=>x[0]===bLay())||LAYS[0])[1];
+ if(!M)return `<div class="card"><b>לוגו וכשרות</b><small class="note" style="display:block">${on?'מודפס · '+esc(ln):'לא מודפס'} · נקבע על ידי מנהל</small></div>`;
+ return `<div class="card"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><label class="cb grow" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-c="lblBOn"${on?' checked':''}> <b>לוגו וכשרות</b></label>${on?`<select data-c="lblBLay" aria-label="פריסה">${LAYS.map(([v,l])=>`<option value="${v}"${bLay()===v?' selected':''}>${l}</option>`).join('')}</select>`:''}${set}</div><small class="note">נשמר לכל ההדפסות ולכל המכשירים בעסק, עד שתשנו כאן.</small></div>`}
+async function bQuick(p){if(!mgr())return;const o=S.C,c=cfgOk(Object.assign({},bC(),p));S.C=c;S.bOn=null;S.bLay=null;rerender();
+ const f={on:{booleanValue:c.on},lay:{stringValue:c.lay},at:{integerValue:String(Date.now())},by:{stringValue:SY.uid}};
+ try{await fsx('/cfg/lbl?'+Object.keys(f).map(k=>'updateMask.fieldPaths='+k).join('&'),{method:'PATCH',body:JSON.stringify({fields:f})});try{localStorage.setItem(BRK(),JSON.stringify(c))}catch(e){}toast('נשמר')}
+ catch(e){S.C=o;rerender();toast(e&&e.offline?'אין חיבור לאינטרנט – לא נשמר':'השמירה נכשלה'+(e&&e.code===403?' (אין הרשאה)':''))}}
+CHG.lblBOn=el=>bQuick({on:!!el.checked});
+CHG.lblBLay=el=>bQuick({lay:el.value==='bot'?'bot':'top'});
+V.lblS=()=>{const T='הגדרות מדבקות';if(!ok())return{t:T,h:'<div class="empty">אין לך הרשאה להדפסת מדבקות</div>'};if(!S.c0&&!S.cB)setTimeout(loadCfg,0);
+ return{t:T,h:(S.c0?brandH():'<div class="card"><small class="note">טוען…</small></div>')+`<div class="card"><div class="row" style="gap:8px;align-items:center"><span class="grow"><b>עיצוב תבניות</b><small class="note" style="display:block">תבניות משלך, גדלים ותבנית ברירת מחדל</small></span><button class="btn s g" data-a="go" data-v="lblD">עיצוב תבניות</button></div></div>`}};
 // עיבוד תמונה: עד 240×120, שחור-לבן (bw1), PNG; מקטינים שוב אם מעל ~30KB
 function bProc(src,thr){const w=src.naturalWidth||src.width,h=src.naturalHeight||src.height;if(!w||!h)return '';let k=Math.min(1,240/w,120/h);
  for(let n=0;n<8;n++){const cw=Math.max(1,Math.round(w*k)),ch=Math.max(1,Math.round(h*k)),c=document.createElement('canvas');c.width=cw;c.height=ch;const g=c.getContext('2d');g.drawImage(src,0,0,cw,ch);
