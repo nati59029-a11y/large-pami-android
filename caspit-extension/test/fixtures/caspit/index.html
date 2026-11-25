@@ -46,6 +46,15 @@ const STORE = () => localStorage.getItem('store') || 'יהודה הנשיא';
     const nm = o.textContent.trim(), bf = localStorage.getItem('brFail') || '';
     localStorage.setItem('brPicks', (localStorage.getItem('brPicks') || '') + nm + ';');
     if ((bf === 'switch' && nm === 'נחל לכיש') || (bf === 'restore' && nm === 'יהודה הנשיא')) return;
+    // 0.1.22 (כמו בכספית האמיתית, 25.11): השם מופיע בפקד מיד, והבחירה נשמרת רק בטעינה מחדש של כספית אחרי brLagMs.
+    // מעבר מסך לפני כן (שינוי hash) מבטל את השמירה. brFail=lost – השם מופיע, אבל לא נשמר ואין טעינה מחדש
+    if (bf === 'lag' || bf === 'lost') {
+      f.querySelector('.selected-store').textContent = "לארג' פעמי-" + nm;
+      if (bf === 'lost') return;
+      const h0 = location.hash;
+      setTimeout(() => { if (location.hash !== h0) return; localStorage.setItem('store', nm); location.reload(); }, +(localStorage.getItem('brLagMs') || 4000));
+      return;
+    }
     localStorage.setItem('store', nm);
     setTimeout(() => location.reload(), 300);
   }));

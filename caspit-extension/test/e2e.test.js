@@ -103,6 +103,7 @@ function impOn(dir) {
   j.importEnabled = true;
   j.hkSync = false; // 0.1.21: יתרות הקפה – כבוי בעותק של הבדיקה (הבדיקות הקודמות לא משתנות); הבדיקות של hkSnap מדליקות דרך sel()
   j.branch.switch.ms = 8000; j.branch.switch.settle = 800; // 0.1.13: בבדיקה – המתנה קצרה לבחירת סניף שלא נקלטת
+  j.branch.switch.reloadMs = 6000; // 0.1.22: בבדיקה – המתנה קצרה לטעינה מחדש של כספית אחרי החלפת סניף
   fs.writeFileSync(f, JSON.stringify(j));
 }
 test.after(async () => {
@@ -1026,6 +1027,31 @@ test('0.1.13 (ד) מעבר לנחל לכיש לא נקלט → branch-switch (י
     r = await syncOneDay();
     assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
     assert.ok((await picks()).startsWith('יהודה הנשיא;'), 'קודם חזרה ליהודה הנשיא: ' + (await picks()));
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+});
+// 0.1.22 – תקלה 25.11 בכספית האמיתית: השם החדש מופיע בפקד מיד, אבל הבחירה נשמרת רק כשכספית טוענת את הדף מחדש (אחרי כמה שניות).
+// עד 0.1.21 התוסף עבר למסך הדוח לפני כן → הדוח של "נחל לכיש" יצא של יהודה הנשיא (branch-same).
+test('0.1.22 החלפת סניף שנשמרת רק בטעינה מחדש של כספית (brFail=lag): מחכים לטעינה → נחל לכיש נשלח, חזרה ליהודה הנשיא', async () => {
+  await ls({ brFail: 'lag', brLagMs: '2500', brPicks: null });
+  try {
+    const { s, sales } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(sales.length, 1);
+    const bks = [...new Set(sales[0].lines.map((l) => l.bk))].sort();
+    assert.equal(bks.length, 2, 'שני הסניפים נשלחו: ' + bks.join(','));
+    assert.equal(await picks(), 'נחל לכיש;יהודה הנשיא;', 'בחירה אחת לכל כיוון, בלי ניסיון חוזר');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, brLagMs: null, store: 'יהודה הנשיא' }); }
+});
+test('0.1.22 השם מופיע בפקד אבל הבחירה לא נשמרת ואין טעינה מחדש (brFail=lost): התוסף טוען מחדש בעצמו, בוחר שוב, ואז branch-switch (לא branch-same)', async () => {
+  await ls({ brFail: 'lost', brPicks: null });
+  try {
+    const { s, sales, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.code, 'branch-switch', JSON.stringify(s.st.lastRun));
+    assert.equal(rep.err.code, 'branch-switch');
+    assert.equal(sales.length, 1); assert.ok(sales[0].lines.every((l) => l.bk === '1'), 'רק יהודה הנשיא');
+    assert.equal(await picks(), 'נחל לכיש;נחל לכיש;', 'שני ניסיונות בחירה');
     assert.equal(await store0(), 'יהודה הנשיא');
   } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
 });

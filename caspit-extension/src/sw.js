@@ -605,7 +605,13 @@ async function brRead(tab, cfg, ms) {
     await sleep(700);
   }
 }
-// בחירת סניף ובדיקה שנקלטה (הטקסט הנבחר מכיל את השם, והמסך התייצב). כישלון → code (branch-switch / branch-restore), בלי לנחש
+// סימון של הדף הנוכחי (בעולם המבודד – נעלם כשהדף נטען מחדש). → true אם הסימון tok עדיין שם (null = לא נקרא)
+const brMarkIn = (tok, set) => { if (set) { self.__cxBrTok = tok; return true; } return self.__cxBrTok === tok; };
+async function brSame(tab, tok) { try { return !!(await inIso(tab, brMarkIn, [tok, false])); } catch (e) { return null; } }
+// בחירת סניף ובדיקה שנקלטה. כישלון → code (branch-switch / branch-restore), בלי לנחש.
+// 0.1.22 (תקלה 25.11: הדוח של נחל לכיש יצא של יהודה הנשיא): כספית מציגה את השם החדש בפקד מיד, אבל הבחירה נשמרת רק כשכספית
+// טוענת את הדף מחדש בעצמה. לכן: מחכים לטעינה מחדש של כספית (עד reloadMs); אם לא הגיעה – טוענים מחדש בעצמנו.
+// רק אחרי טעינה מחדש בודקים שהשם נשאר. לא נשאר → בוחרים שוב (עד 2 ניסיונות), ואחר כך code.
 async function brSet(tab, name, code) {
   const cfg = await brCfg();
   if (!cfg) throw P.err(code, 'אין הגדרה לפקד הסניף');
@@ -614,19 +620,35 @@ async function brSet(tab, name, code) {
   if (r.cur === name) return { same: true };
   for (let k = 0; k < 2; k++) {
     if ((await boState(tab)) === 'off') throw wrongPage();
+    const tok = U.rid('b');
+    await inIso(tab, brMarkIn, [tok, true]).catch(() => null);
     const p = await inIso(tab, brPickIn, [cfg, name, GUARD]).catch(() => null);
     if (p && p.wrong) throw wrongPage();
     if (p && p.why === 'no-opt') throw P.err(code, `האפשרות "${name}" לא נמצאה בפקד הסניף`);
+    // 1) השם מופיע בפקד
     const end = Date.now() + (+cfg.ms || 30e3);
+    let shown = false;
     while (Date.now() < end) {
       await sleep(700);
       r = await brRead(tab, cfg, 0);
-      if (r && r.cur === name) {
-        await sleep(+cfg.settle || 2000); // כספית מרעננת את הנתונים / טוענת את הדף מחדש אחרי ההחלפה
-        r = await brRead(tab, cfg, 15e3);
-        if (r && r.cur === name && (await boState(tab)) === 'bo') return { ok: true };
-      }
+      if (r && r.cur === name) { shown = true; break; }
     }
+    if (!shown) continue;
+    // 2) כספית טוענת את הדף מחדש (הסימון נעלם)
+    const rEnd = Date.now() + (+cfg.reloadMs || 20e3);
+    let reloaded = false;
+    while (Date.now() < rEnd) {
+      const st = await boState(tab);
+      if (st === 'off') throw wrongPage();
+      if (st === 'bo' && (await brSame(tab, tok)) === false) { reloaded = true; break; }
+      await sleep(700);
+    }
+    if (!reloaded) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); }
+    if ((await boState(tab)) === 'off') throw wrongPage();
+    // 3) אחרי הטעינה מחדש – השם עדיין נבחר
+    await sleep(+cfg.settle || 2000);
+    r = await brRead(tab, cfg, 15e3);
+    if (r && r.cur === name && (await boState(tab)) === 'bo') return { ok: true, reloaded };
   }
   throw P.err(code, `הבחירה בסניף "${name}" לא נקלטה בכספית (מוצג: ${(r && r.cur) || 'לא ידוע'})`);
 }
