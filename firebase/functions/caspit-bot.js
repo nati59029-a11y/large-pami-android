@@ -168,7 +168,7 @@ async function cxBotTok(w, input) {
     const cfg = CX.cfgOf(c);
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
-      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
+      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, nwDup: d.nwDup || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
@@ -356,6 +356,8 @@ const OPF = {
     const max = Math.min(b.max, b.kind === 'new' ? lim.newMax : lim.price);
     await CX.lockTake(w.bizId, 'bot:' + x.dev.id);
     const r = await CX.FNS.cxExport(w, { kind: b.kind, max });
+    // 26.11.2026: מוצרים שהברקוד שלהם כבר בכספית – לא נשלחו; לכרטיס הרובוט (כמה + עד 20 שמות וברקודים)
+    if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) } }, { merge: true });
     return { n: r.n, csv: r.csv, rows: r.rows, added: r.added || 0 };
   },
   async importResult(w, b, x) {

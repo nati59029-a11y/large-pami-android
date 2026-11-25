@@ -160,6 +160,21 @@ describe('סנכרון כספית A1', () => {
     const e2 = await ok('cxExport', MGR, { kind: 'new' });
     assert.equal(e2.added, 0); assert.equal(e2.csv, e.csv);
   });
+  it('26.11: מוצר באפליקציה שהברקוד שלו כבר בכספית (קוד אחר) – לא נשלח כפריט חדש ולא מקבל קוד; מוחזר ב-dup', async () => {
+    const seen = await adm().doc(`b/${A}/cxcfg/seenBc`).get();
+    assert.ok(seen.exists && /(^|\n)7000000000011\t200001(\n|$)/.test(seen.get('s')), 'מפת הברקודים נשמרה באישור הקטלוג');
+    await P('pdupbc').set({ name: 'כוס נייר – כפול', price: 3, barcode: '7000000000011', on: true });
+    try {
+      const e = await ok('cxExport', MGR, { kind: 'new' });
+      assert.equal(e.n, 1, 'רק הפריט החדש הקודם (900000)'); assert.equal(e.added, 0);
+      assert.ok(!e.csv.includes('כוס נייר – כפול'));
+      assert.equal(e.dupN, 1); assert.deepEqual([e.dup[0].pid, e.dup[0].bc, e.dup[0].cx], ['pdupbc', '7000000000011', '200001']);
+      assert.equal((await P('pdupbc').get()).get('cx'), undefined, 'לא קיבל קוד 900000+');
+      // גם מעל המגבלה: הכפול לא נספר
+      const e2 = await ok('cxExport', MGR, { kind: 'new', max: 1 });
+      assert.equal(e2.n, 1);
+    } finally { await P('pdupbc').delete(); }
+  });
   it('קטלוג 2: כספית קלטה (ack), שינוי מכספית (in, עם היסטוריה), קונפליקט – האפליקציה מנצחת', async () => {
     // באפליקציה: מגש מלבני 20 → 22 (דרך saveProduct, נרשם priceLog src:'app')
     await ok('saveProduct', MGR, { id: 'cx200004', name: 'מגש מלבני', price: 22, barcode: '', cost: 9 });

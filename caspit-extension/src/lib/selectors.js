@@ -256,13 +256,18 @@ async function queueEmpty(doc, s, C) {
     await C.sleep(300);
   }
 }
-// "טעינות קודמות" חייבת להיות קריאה לפני העלאה (בלי זה אי אפשר לדעת אם הקובץ כבר הועלה): מחכים לה, ואם לא – null
+// "טעינות קודמות" חייבת להיות קריאה לפני העלאה (בלי זה אי אפשר לדעת אם הקובץ כבר הועלה): מחכים לה, ואם לא – null.
+// 0.1.22 (נבדק בכספית האמיתית 25.11): כשאין טעינות מהזמן האחרון כספית לא מציגה את הכותרת ואת הטבלה בכלל (ואחרי טעינה – מציגה).
+// לכן: אין כותרת "טעינות קודמות" עד סוף ההמתנה → אין טעינות קודמות (none). כותרת בלי טבלה / עמודות לא מוכרות – עדיין null / bad
 async function histWait(doc, s, C) {
   const end = C.now() + (s.ms || 15000);
   for (;;) {
     const H = histRows(doc, s.head);
     if (H && !H.bad) return H;
-    if (C.now() >= end) return null;
+    if (C.now() >= end) {
+      if (!H && !byText(doc, [s.head || 'טעינות קודמות'], 'h1,h2,h3,h4,h5,h6,legend,label,div,span,p,strong,b', true)[0]) return { rows: [], maxId: 0, none: true };
+      return H && H.bad ? H : null;
+    }
     await C.sleep(300);
   }
 }

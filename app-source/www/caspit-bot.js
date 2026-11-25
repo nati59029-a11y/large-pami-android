@@ -15,6 +15,7 @@ if(typeof ACT==='undefined'||typeof V==='undefined')return;
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const B={i:null,err:'',ld:0};
 const NEW_ALL=100000; /* "ללא הגבלה" לפריטים חדשים (24.11.2026) */
+const nf=n=>Number(n||0).toLocaleString('he-IL');
 const REPO=()=>typeof APP_REPO==='string'&&/^[\w.-]+\/[\w.-]+$/.test(APP_REPO)&&!/__/.test(APP_REPO)?APP_REPO:'nati59029-a11y/large-pami-android'; /* APP_REPO נקבע בבנייה (main.yml); בלי – המאגר הזה */
 const dt=t=>t?new Date(t).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
 const dd=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)?d.slice(8)+'/'+d.slice(5,7):'—';
@@ -75,6 +76,7 @@ window.cxBotCardH=()=>{if(!B.i&&!B.err)load();const i=B.i;
    if(i.tf&&i.tf.s&&!(i.tp&&i.tp.at>i.tf.at))h+=`<p class="note" role="alert">⚠ העדכון של מכירות היום בשעה ${esc(String(i.tf.s).slice(11))}:00 נכשל: ${esc(errTxt(i.tf.c))}</p>`;
    if(lr&&lr.st!=='ok'&&lr.code)h+=`<p class="note" role="alert">⚠ ${esc(errTxt(lr.code,lr.msg))}${errDet(lr)?`<br><bdi>${esc(errDet(lr))}</bdi>`:''}</p>`;
    /* הטעינה האחרונה לכספית (טבלת "טעינות קודמות" בכספית) */
+   if(i.nwDup&&i.nwDup.n>0)h+=`<p class="note" role="alert">⚠ ${nf(i.nwDup.n)} מוצרים לא נשלחו לכספית כפריטים חדשים – הברקוד שלהם כבר קיים בכספית תחת קוד אחר (כנראה מוצר כפול באפליקציה, או מוצר שלא קושר). כדאי לבדוק:</p><div class="note" style="max-height:30vh;overflow:auto">${(i.nwDup.l||[]).map(d=>`<div>${esc(d.n||'')} · ברקוד ${esc(d.bc||'')} · בכספית קוד ${esc(d.cx||'')}</div>`).join('')}${i.nwDup.n>(i.nwDup.l||[]).length?`<div>ועוד ${nf(i.nwDup.n-(i.nwDup.l||[]).length)}…</div>`:''}</div>`;
    if(i.li&&i.li.id)h+=`<p class="note">טעינה אחרונה לכספית (${i.li.kind==='new'?'פריטים חדשים':'מחירים'}, ${dt(i.li.at)}): מזהה ${esc(String(i.li.id))} · ${esc(i.li.status||'')} · נטענו ${i.li.loaded<0?'?':i.li.loaded} · שגויים ${i.li.errors<0?'?':i.li.errors}${i.li.errors>0?' ⚠':''}</p>`;
    if(i.first)h+='<p class="note">קודם מסנכרנים כאן קטלוג ראשון (בחירת קובץ למעלה). עד אז הרובוט קולט רק מכירות.</p>';
    h+=`<button class="btn g w" ${big} data-a="cxBotRuns">הריצות האחרונות (${(i.runs||[]).length})</button><div class="row" style="margin-top:8px"><button class="btn g grow" ${big} data-a="cxBotNew">חיבור מחשב אחר</button><button class="btn g grow" ${big} data-a="cxBotRev">ניתוק</button></div>`}
