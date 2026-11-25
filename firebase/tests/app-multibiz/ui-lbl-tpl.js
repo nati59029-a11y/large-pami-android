@@ -11,6 +11,10 @@ const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fai
 const F = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
 const S = (v) => ({ stringValue: v }), N = (v) => (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }), M = (o) => ({ mapValue: { fields: o } }), B = (v) => ({ booleanValue: v });
 const FROZEN = fs.readFileSync(path.join(__dirname, 'fixtures', 'lbl-print-stage1.js'), 'utf8');
+// 25.11.2026: בפריסת "פינות" הקופסאות רחבות יותר (124×64 במקום 64×64) – לוגו וחותמת גדולים יותר. הזהות בבייטים נבדקת מול שלב 1 עם השינוי הזה בלבד
+const FROZEN_Z = (() => { const a = 'const BH=64,BX=64;', b = " if(lay==='bot')return{lay,t:null,logo:[W-6-BX,H-6-BX,BX,BX],stamp:[6,H-6-BX,BX,BX],ib:6+BX+6-14};return null}";
+  if (!FROZEN.includes(a) || !FROZEN.includes(b)) throw new Error('העותק הקפוא השתנה');
+  return FROZEN.replace(a, 'const BH=64,BX=64,BW=124;').replace(b, " if(lay==='bot')return{lay,t:null,logo:[W-6-BW,H-6-BX,BW,BX],stamp:[6,H-6-BX,BW,BX],ib:6+BW+6-14};return null}"); })();
 const BASE_F = path.join(__dirname, 'fixtures', 'lbl-baseline.json');
 
 // 6 סלים קבועים: כל התבניות, עם/בלי ברקוד, EAN-13 / EAN-8 / Code128 / ברקוד לא תקין, שם ארוך, מילה מודגשת, מבצע, אריזה, כמויות
@@ -103,9 +107,9 @@ const PAGE_LIB = () => {
         const a = await LblPrint.build(BK[i], br), b = await OLD.build(BK[i], br);
         r[bm + (i + 1)] = { now: await T.sha(a), old: await T.sha(b), len: a.length };
       }
-      return r; }, [FROZEN, BASKETS]);
+      return r; }, [FROZEN_Z, BASKETS]);
     const zEq = Object.values(z).every((x) => x.now === x.old), zDiff = new Set(Object.values(z).map((x) => x.now)).size;
-    check('z 1 PDF זהה בבייטים לשלב 1: 6 סלים × 3 מצבי לוגו (18 קבצים, כולם שונים זה מזה)', zEq && zDiff === 18, Object.fromEntries(Object.entries(z).map(([k, x]) => [k, x.now === x.old ? x.len : 'שונה'])));
+    check('z 1 PDF זהה בבייטים לשלב 1 (עם קופסאות הפינות הרחבות): 6 סלים × 3 מצבי לוגו (18 קבצים, כולם שונים זה מזה)', zEq && zDiff === 18, Object.fromEntries(Object.entries(z).map(([k, x]) => [k, x.now === x.old ? x.len : 'שונה'])));
     const H0 = Object.fromEntries(Object.entries(z).map(([k, x]) => [k, x.now]));
     if (process.env.LBL_BASELINE_WRITE) fs.writeFileSync(BASE_F, JSON.stringify({ about: 'SHA-256 של PDF מ-6 סלים קבועים × 3 מצבי לוגו (ui-lbl-tpl.js, z). נבדק רק כשגרסת הדפדפן זהה.', chrome: ver, h: H0 }, null, 1) + '\n');
     let base = null; try { base = JSON.parse(fs.readFileSync(BASE_F, 'utf8')); } catch (e) { /* */ }

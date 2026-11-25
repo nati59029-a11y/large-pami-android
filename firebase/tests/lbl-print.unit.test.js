@@ -130,7 +130,7 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.deepEqual([...b], [0x7f, 0x80, 0xff, 0xc0]);
   });
   // לוגו וחותמת כשרות (24.11.2026)
-  it('layBox: top – פס 64 והתוכן מוקטן (~78%) וממורכז; bot – קופסאות 64×64 בפינות התחתונות בתוך המדבקה, והשורה התחתונה מוצרת מהן', () => {
+  it('layBox: top – פס 64 והתוכן מוקטן (~78%) וממורכז; bot – קופסאות 124×64 (רחבות) בפינות התחתונות בתוך המדבקה, והשורה התחתונה מוצרת מהן', () => {
     const t = LP.layBox('top');
     assert.ok(Math.abs(t.t.s - (LP.H - 64) / LP.H) < 1e-12 && t.t.s > 0.77 && t.t.s < 0.79);
     assert.equal(t.t.dy, 64);
@@ -140,10 +140,10 @@ describe('lbl-print – הדפסת מדבקות', () => {
     assert.ok(t.logo[0] > t.stamp[0] + t.stamp[2], 'לוגו מימין, חותמת משמאל, בלי חפיפה');
     const b = LP.layBox('bot');
     assert.equal(b.t, null);
-    assert.deepEqual([b.logo[2], b.logo[3], b.stamp[2], b.stamp[3]], [64, 64, 64, 64]);
-    assert.ok(b.logo[0] + 64 <= LP.W && b.logo[1] + 64 <= LP.H && b.stamp[0] >= 0 && b.stamp[1] + 64 <= LP.H);
+    assert.deepEqual([b.logo[2], b.logo[3], b.stamp[2], b.stamp[3]], [124, 64, 124, 64]);
+    assert.ok(b.logo[0] + 124 <= LP.W && b.logo[1] + 64 <= LP.H && b.stamp[0] >= 0 && b.stamp[1] + 64 <= LP.H && b.stamp[0] + 124 < b.logo[0]);
     assert.ok(b.logo[0] > LP.W / 2 && b.stamp[0] < LP.W / 2, 'לוגו בימין, חותמת בשמאל');
-    assert.ok(14 + b.ib >= b.stamp[0] + 64 && LP.W - 14 - b.ib <= b.logo[0], 'השורה התחתונה לא נוגעת בקופסאות');
+    assert.ok(14 + b.ib >= b.stamp[0] + b.stamp[2] && LP.W - 14 - b.ib <= b.logo[0], 'השורה התחתונה לא נוגעת בקופסאות');
     assert.equal(LP.layBox(''), null);
     assert.equal(LP.layBox('x'), null);
   });

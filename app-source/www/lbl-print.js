@@ -60,11 +60,11 @@ function mkPdf(labels,seq,wPt,hPt){wPt=wPt||PW;hPt=hPt||PH;const parts=[],offs=[
  push(x+`trailer\n<< /Size ${N+1} /Root 1 0 R >>\nstartxref\n${xr}\n%%EOF\n`);
  const out=new Uint8Array(len);let o=0;for(const p of parts){out.set(p,o);o+=p.length}return out}
 /* ---------- לוגו וחותמת כשרות (24.11.2026) ---------- */
-// פריסה: top – פס עליון (לוגו מימין, חותמת משמאל), התוכן מוקטן ומוזז מתחתיו; bot – קופסאות 64×64 בפינות התחתונות, השורה התחתונה מוצרת (ib)
-const BH=64,BX=64;
+// פריסה: top – פס עליון (לוגו מימין, חותמת משמאל), התוכן מוקטן ומוזז מתחתיו; bot – קופסאות 124×64 בפינות התחתונות, השורה התחתונה מוצרת (ib)
+const BH=64,BX=64,BW=124; // BW – רוחב קופסאות הפינות (bot): הלוגו והחותמת רחבים – קופסה רחבה מגדילה אותם בלי לעלות לגובה הברקוד
 // w,h – גודל הקנבס (רשות, ברירת מחדל 591×295)
 function layBox(lay,w,h){w=w||W;h=h||H;if(lay==='top'){const s=(h-BH)/h;return{lay,t:{s,dx:Math.round((w-w*s)/2),dy:BH},logo:[w/2+4,4,w/2-10,BH-8],stamp:[6,4,w/2-10,BH-8],ib:0}}
- if(lay==='bot')return{lay,t:null,logo:[w-6-BX,h-6-BX,BX,BX],stamp:[6,h-6-BX,BX,BX],ib:6+BX+6-14};return null}
+ if(lay==='bot')return{lay,t:null,logo:[w-6-BW,h-6-BX,BW,BX],stamp:[6,h-6-BX,BW,BX],ib:6+BW+6-14};return null}
 // מלבני ברקוד מקואורדינטות התוכן לקנבס (אותו setTransform של התצוגה)
 const xfRects=(rects,t)=>t?(rects||[]).map(([x,y,w,h])=>[x*t.s+t.dx,y*t.s+t.dy,w*t.s,h*t.s]):(rects||[]);
 // RGBA → שחור-לבן (במקום). שקיפות = רקע לבן; thr – סף בהירות (ברירת מחדל 150)
