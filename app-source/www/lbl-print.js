@@ -362,14 +362,17 @@ async function pOut(pdf,C){if(C===undefined)C=typeof shNat==='function'?shNat():
 // במחשב: עמוד תמונות בגודל המדבקה במסגרת נסתרת + print(). בכרום שנפתח עם --kiosk-printing זה יוצא ישר למדפסת, בלי חלון.
 // בלי הדגל – חלון ההדפסה של כרום (בלי לשונית חדשה). בטלפון ובדפדפן נייד – ה-PDF כמו קודם
 const isDesk=()=>!/Android|iPhone|iPad|Mobi/i.test(navigator.userAgent||'');
-const pngOf=lb=>new Promise((ok,no)=>{const c=document.createElement('canvas');c.width=lb.w;c.height=lb.h;const x=c.getContext('2d'),id=x.createImageData(lb.w,lb.h),d=id.data,rb=Math.ceil(lb.w/8);
- for(let y=0;y<lb.h;y++)for(let X=0;X<lb.w;X++){const v=(lb.bits[y*rb+(X>>3)]&(0x80>>(X&7)))?255:0,i=(y*lb.w+X)*4;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255}
- x.putImageData(id,0,0);
- c.toBlob(b=>b?ok(URL.createObjectURL(b)):no(new Error('התמונה לא נוצרה')),'image/png')});
+// תמונת הטקסט להדפסה במחשב: אותו ציור (draw/drawT) בפי HK ברזולוציה, ואז שחור-לבן – קצוות חלקים גם אחרי ההקטנה לרזולוציית המדפסת.
+// setTransform בתוך הציור מוחלט – העטיפה מכפילה אותו ב-HK. הפסים לא מצוירים כאן (rects) – הם SVG
+const HK=3;
+const hiCtx=(g,k)=>{g.setTransform(k,0,0,k,0,0);return new Proxy(g,{get(t,p){if(p==='setTransform')return(a,b,c,d,e,f)=>t.setTransform(a*k,b*k,c*k,d*k,e*k,f*k);const v=t[p];return typeof v==='function'?v.bind(t):v},set(t,p,v){t[p]=v;return true}})};
+const hiPng=(b,br)=>new Promise((ok,no)=>{const D=b.T?LblTpl.dims(b.T.w,b.T.h):{W,H},c=document.createElement('canvas');c.width=D.W*HK;c.height=D.H*HK;const x=c.getContext('2d'),g=hiCtx(x,HK),o=br?{rects:[],brand:br}:{rects:[]};
+ if(b.T)drawT(g,b.T,b.it,o);else draw(g,b.tpl,b.it,o);x.setTransform(1,0,0,1,0,0);const d=x.getImageData(0,0,c.width,c.height);bw1(d.data,c.width,c.height);x.putImageData(d,0,0);
+ c.toBlob(q=>q?ok(URL.createObjectURL(q)):no(new Error('התמונה לא נוצרה')),'image/png')});
 // פסי הברקוד – SVG וקטורי (כמו ב-PDF): כרום מצייר אותם ברזולוציה של המדפסת, בלי עיוות של הקטנת תמונה
 const svgOf=lb=>`<svg viewBox="0 0 ${lb.w} ${lb.h}" preserveAspectRatio="none" shape-rendering="crispEdges">${(lb.rects||[]).map(r=>`<rect x="${+r[0].toFixed(2)}" y="${+r[1].toFixed(2)}" width="${+r[2].toFixed(2)}" height="${+r[3].toFixed(2)}"/>`).join('')}</svg>`;
 const PSC=0.94; // הקטנה קלה במרכז – שלא ייחתך בשולי המדבקה
-async function htmlPrint(labels,seq){const U=await Promise.all(labels.map(pngOf)),SV=labels.map(svgOf),mm=v=>(v*25.4/72).toFixed(2),l0=labels[0]||{},wm=mm(l0.pw||PW),hm=mm(l0.ph||PH);
+async function htmlPrint(labels,seq,L,br){const U=await Promise.all(L.map(b=>hiPng(b,br))),SV=labels.map(svgOf),mm=v=>(v*25.4/72).toFixed(2),l0=labels[0]||{},wm=mm(l0.pw||PW),hm=mm(l0.ph||PH);
  const old=document.getElementById('lblPf');if(old)old.remove();
  const f=document.createElement('iframe');f.id='lblPf';f.setAttribute('aria-hidden','true');f.tabIndex=-1;f.style.cssText='position:fixed;left:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
  document.body.appendChild(f);const D=f.contentDocument;
@@ -379,7 +382,7 @@ async function htmlPrint(labels,seq){const U=await Promise.all(labels.map(pngOf)
  setTimeout(()=>{if(document.getElementById('lblPf')===f)f.remove();U.forEach(u=>URL.revokeObjectURL(u))},120000)}
 async function lblGo(el,L,g){if(el)el.disabled=true;toast('מכין להדפסה…');API.last=L; // last – השורות שנשלחו אחרונות (לבדיקות)
  try{const C=typeof shNat==='function'?shNat():null;
-  if(!(C&&C.Plugins&&C.Plugins.PdfPrint)&&isDesk()){const r=await build(L,undefined,true);await htmlPrint(r.labels,r.seq)}
+  if(!(C&&C.Plugins&&C.Plugins.PdfPrint)&&isDesk()){const br=bOpt(),r=await build(L,br,true);await htmlPrint(r.labels,r.seq,L,br)}
   else await pOut(await build(L),C);
   toast('נשלח להדפסה'+(g&&g.tot?' ('+g.tot+' מדבקות)':''));return true}
  catch(e){toast('ההדפסה נכשלה: '+(e&&e.message||e));return false}finally{if(el)el.disabled=false}}
