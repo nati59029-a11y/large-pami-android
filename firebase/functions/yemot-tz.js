@@ -39,7 +39,7 @@ const RECENT_MS = 60 * 60 * 1000;
 const RESUMABLE = ['partial', 'failed'];
 const bad = () => new HttpsError('invalid-argument', 'קלט לא תקין', { reason: 'bad-input' });
 
-// כמה יקבלו: free = מספרים ברשימה החינמית (רק ב-all), paid = לקוחות משוב לא חסומים (ב-all – פחות מי שברשימה החינמית).
+// כמה יקבלו: free = מספרים ברשימה החינמית (ב-all וב-free), paid = לקוחות משוב לא חסומים (ב-all – פחות מי שברשימה החינמית).
 // (משימה 2026-11-23) skipped = לקוחות משוב שיצאו מהרשימה החינמית (בעצמם או ע"י מנהל) – לא מקבלים בתשלום, בשני הסוגים.
 async function counts(ctx, cfg, fbs, target, db) {
   if (target === 'free') {
