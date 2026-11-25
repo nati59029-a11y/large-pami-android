@@ -371,12 +371,12 @@ const hiPng=(b,br)=>new Promise((ok,no)=>{const D=b.T?LblTpl.dims(b.T.w,b.T.h):{
  c.toBlob(q=>q?ok(URL.createObjectURL(q)):no(new Error('התמונה לא נוצרה')),'image/png')});
 // פסי הברקוד – SVG וקטורי (כמו ב-PDF): כרום מצייר אותם ברזולוציה של המדפסת, בלי עיוות של הקטנת תמונה
 const svgOf=lb=>`<svg viewBox="0 0 ${lb.w} ${lb.h}" preserveAspectRatio="none" shape-rendering="crispEdges">${(lb.rects||[]).map(r=>`<rect x="${+r[0].toFixed(2)}" y="${+r[1].toFixed(2)}" width="${+r[2].toFixed(2)}" height="${+r[3].toFixed(2)}"/>`).join('')}</svg>`;
-const PSC=0.94; // הקטנה קלה במרכז – שלא ייחתך בשולי המדבקה
+const PSC=0.92,PUP=0.8; // הקטנה קלה במרכז + הזזה למעלה (מ"מ) – שלא ייחתך בתחתית המדבקה (Citizen CL-E321E)
 async function htmlPrint(labels,seq,L,br){const U=await Promise.all(L.map(b=>hiPng(b,br))),SV=labels.map(svgOf),mm=v=>(v*25.4/72).toFixed(2),l0=labels[0]||{},wm=mm(l0.pw||PW),hm=mm(l0.ph||PH);
  const old=document.getElementById('lblPf');if(old)old.remove();
  const f=document.createElement('iframe');f.id='lblPf';f.setAttribute('aria-hidden','true');f.tabIndex=-1;f.style.cssText='position:fixed;left:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
  document.body.appendChild(f);const D=f.contentDocument;
- D.open();D.write(`<!doctype html><html><head><meta charset="utf-8"><title>labels</title><style>@page{size:${wm}mm ${hm}mm;margin:0}html,body{margin:0;padding:0;background:#fff}.p{width:${wm}mm;height:${hm}mm;overflow:hidden;position:relative}.p+.p{break-before:page}.i{position:absolute;left:${(1-PSC)*50}%;top:${(1-PSC)*50}%;width:${PSC*100}%;height:${PSC*100}%}.i img,.i svg{position:absolute;inset:0;width:100%;height:100%;display:block}.i svg{fill:#000}</style></head><body>${seq.map(i=>`<div class="p"><div class="i"><img src="${U[i]}" alt="">${SV[i]}</div></div>`).join('')}</body></html>`);D.close();
+ D.open();D.write(`<!doctype html><html><head><meta charset="utf-8"><title>labels</title><style>@page{size:${wm}mm ${hm}mm;margin:0}html,body{margin:0;padding:0;background:#fff}.p{width:${wm}mm;height:${hm}mm;overflow:hidden;position:relative}.p+.p{break-before:page}.i{position:absolute;left:${(1-PSC)*50}%;top:calc(${(1-PSC)*50}% - ${PUP}mm);width:${PSC*100}%;height:${PSC*100}%}.i img,.i svg{position:absolute;inset:0;width:100%;height:100%;display:block}.i svg{fill:#000}</style></head><body>${seq.map(i=>`<div class="p"><div class="i"><img src="${U[i]}" alt="">${SV[i]}</div></div>`).join('')}</body></html>`);D.close();
  await Promise.all(Array.from(D.images).map(im=>im.complete?0:new Promise(r=>{im.onload=im.onerror=r})));
  f.contentWindow.focus();f.contentWindow.print();
  setTimeout(()=>{if(document.getElementById('lblPf')===f)f.remove();U.forEach(u=>URL.revokeObjectURL(u))},120000)}
