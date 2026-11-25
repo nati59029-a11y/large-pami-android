@@ -4,7 +4,7 @@
 //                                     setBusinessAdv, setYemotToken, logBusinessEntry, setBusinessBrand.
 //                                     setBusinessRanks, setStaffPerms, addStaff (6ה: הוספת עובדים – רק מנהל־על).
 //                                     setBusinessOrg, setStaffBranches (סניפים/בנקים/כרטיסים, 2026-11-08).
-//                                     setStaffEmail (שינוי מייל של עובד קיים – 17.11.2026).
+//                                     setStaffEmail (שינוי מייל של עובד או מנהל קיים, או של מנהל־העל עצמו – 17.11, 25.11.2026).
 //   מנהל העסק (בתוך העסק שלו בלבד):   setStaffActive (השבתה והחזרה של עובד קיים).
 //                                     setStaffPrc (מנהל העסק: המתג prc או yl של עובד – 12.11.2026, הורחב 19.11.2026).
 //                                     setStaffTkS (המתג tkS "שליחת משימות" בלבד, legacy וגם b – 19.11.2026).
@@ -738,9 +738,12 @@ async function setStaffName(request) {
 }
 
 // setStaffEmail({uid, email}) – 17.11.2026: שינוי מייל של עובד קיים (מנהל־על בלבד, כמו addStaff – המייל הוא פרטי הכניסה).
+// 25.11.2026: גם של מנהל בעסק הנוכחי, וגם של מנהל־העל עצמו (self). מנהל־על אחר – נדחה (is-superadmin).
 // אותו חשבון (אותו uid): ההיסטוריה, ההרשאות, הסניפים והשם נשארים. רק כתובת הכניסה מתחלפת.
 //   - Auth: המייל מוחלף ומסומן כלא מאומת; החיבורים הקיימים מבוטלים (הטוקן הישן נושא את המייל הישן, וחוק isMyName קורא אותו).
-//   - staff.email ו-users.email מתעדכנים, ונרשם audit. מייל שכבר שייך לחשבון אחר – נדחה (email-taken), בלי לגעת בו.
+//   - באצווה אחת: admins.email / staff.email בעסק הנוכחי (אם המסמך קיים), users.email, private/info.ownerEmail (רק אם שווה
+//     למייל הישן), superadmins.email (רק אם השדה קיים); בשינוי עצמי – גם בעסק שב-users.bizId אם שונה. ונרשם audit.
+//   - מייל שכבר שייך לחשבון אחר – נדחה (email-taken), בלי לגעת בו.
 //   - אידמפוטנטי: אם הכתיבה ל-Firestore נכשלה אחרי עדכון Auth, הפעלה חוזרת עם אותו מייל משלימה אותה.
 async function setStaffEmail(request) {
   const who = await requireBizManager(request);
@@ -749,30 +752,51 @@ async function setStaffEmail(request) {
   const uid = typeof input.uid === 'string' ? input.uid : '';
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
   const email = cleanEmail(input.email);
-  if (uid === who.uid) throw new HttpsError('failed-precondition', 'אי אפשר לשנות את עצמך', { reason: 'self' });
+  const self = uid === who.uid;
   const db = getFirestore();
-  const sRef = db.doc(T.bizRef(who.biz, 'staff/' + uid));
-  const [s, a, u] = await Promise.all([sRef.get(), db.doc(T.bizRef(who.biz, 'admins/' + uid)).get(), db.doc('users/' + uid).get()]);
-  if (!s.exists || (u.exists && u.get('bizId') !== who.bizId)) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
-  if (a.exists) throw new HttpsError('failed-precondition', 'אי אפשר לשנות מייל של מנהל מכאן', { reason: 'is-admin' });
+  const [s, a, u, sa] = await Promise.all([db.doc(T.bizRef(who.biz, 'staff/' + uid)).get(), db.doc(T.bizRef(who.biz, 'admins/' + uid)).get(),
+    db.doc('users/' + uid).get(), db.doc('superadmins/' + uid).get()]);
+  if (!self) {
+    if (sa.exists) throw deny('is-superadmin', 'אי אפשר לשנות מייל של מנהל מערכת אחר');
+    if ((!s.exists && !a.exists) || (u.exists && u.get('bizId') !== who.bizId)) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+  }
+  const snaps = [s, a, u].filter((x) => x.exists);
+  if (sa.exists && sa.get('email') !== undefined) snaps.push(sa);
+  const bizIds = [who.bizId];
+  const uBiz = u.exists ? String(u.get('bizId') || '') : '';
+  if (self && uBiz && uBiz !== who.bizId) {
+    const biz2 = await T.loadBiz(uBiz);
+    if (biz2) {
+      bizIds.push(uBiz);
+      const more = await Promise.all([db.doc(T.bizRef(biz2, 'staff/' + uid)).get(), db.doc(T.bizRef(biz2, 'admins/' + uid)).get()]);
+      snaps.push(...more.filter((x) => x.exists));
+    }
+  }
   const auth = getAuth();
   let other = null;
   try { other = await auth.getUserByEmail(email); } catch (e) { if (!e || e.code !== 'auth/user-not-found') throw e; }
   if (other && other.uid !== uid) throw new HttpsError('failed-precondition', 'המייל הזה כבר שייך לחשבון אחר', { reason: 'email-taken' });
-  const old = String(s.get('email') || '');
-  if (old === email && (!u.exists || u.get('email') === email) && other) return { ok: true, uid, email, same: true };
-  try { await auth.getUser(uid); } catch (e) {
+  let au;
+  try { au = await auth.getUser(uid); } catch (e) {
     if (e && e.code === 'auth/user-not-found') throw new HttpsError('not-found', 'לעובד אין חשבון כניסה', { reason: 'no-account' });
     throw e;
   }
+  const low = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
+  const olds = new Set(snaps.map((x) => low(x.get('email'))).concat(low(au.email)).filter(Boolean));
+  olds.delete(email);
+  const infos = (await Promise.all(bizIds.map((id) => db.doc(`b/${id}/private/info`).get())))
+    .filter((x) => x.exists && olds.has(low(x.get('ownerEmail'))));
+  const docs = snaps.filter((x) => x.get('email') !== email);
+  if (au.email === email && !docs.length && !infos.length) return { ok: true, uid, email, same: true };
+  const old = String(snaps.map((x) => x.get('email')).find((v) => typeof v === 'string' && v) || au.email || '');
   await auth.updateUser(uid, { email, emailVerified: false });
   await auth.revokeRefreshTokens(uid);
   const b = db.batch();
-  b.update(sRef, { email });
-  if (u.exists) b.update(u.ref, { email });
-  b.set(auditRef(who.bizId), auditData(who.uid, 'setStaffEmail', uid + ':' + old + '>' + email));
+  for (const x of docs) b.update(x.ref, { email });
+  for (const x of infos) b.update(x.ref, { ownerEmail: email });
+  b.set(auditRef(who.bizId), auditData(who.uid, 'setStaffEmail', uid + ':' + old + '>' + email + (self ? ' self' : a.exists ? ' admin' : '')));
   await b.commit();
-  return { ok: true, uid, email };
+  return { ok: true, uid, email, self };
 }
 
 // ---------- syncLegacyAdmin / syncLegacyStaff: עותק users/{uid} לחברי לארג' פעמי במצב legacy ----------

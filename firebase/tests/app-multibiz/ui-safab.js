@@ -2,6 +2,7 @@
 // כפתור צף למנהל־על (12.11.2026) מול אמולטורים אמיתיים (Auth, Firestore, Storage, Functions) עם החוקים והפונקציות של הענף.
 // בודק: מנהל־על רואה את הכפתור בכל מסך ובכל עסק ועובר בין עסקים דרכו; מנהל רגיל ועובד לא רואים אותו;
 // גם כשמכריחים את הכפתור/החלון להופיע אצל מנהל רגיל – השרת חוסם (רשימת עסקים, logBusinessEntry, superadmins); אין שגיאות JS; מסך צר.
+// 25.11.2026: שינוי מייל של מנהל ושל מנהל־העל עצמו (הקלדה כפולה, ניתוק), חסימת מנהל־על אחר, וחיבור שפג ב-tok().
 // שימוש: node ui-safab.js <www-dir> <out.json> [shots-dir]
 const fs = require('fs');
 const path = require('path');
@@ -106,7 +107,9 @@ async function seedMember(biz, email, role) {
   // 17.11.2026: שינוי מייל של עובד (setStaffEmail) – ואחר כך מחזירים למייל המקורי (העובד נכנס בהמשך עם wk@x.co)
   await page.evaluate(() => { if (document.getElementById('dlg').open) closeDlg(); });
   page.__step = 'email';
-  await page.click('[data-a=admEmail]'); await wait(page, 300);
+  // 25.11.2026: יש כפתורי "שינוי מייל" גם בכרטיס המנהלים – לוחצים על זה של העובד
+  const wkUid = await page.evaluate(() => (ADM.staff.find((x) => x.email === 'wk@x.co') || {}).uid);
+  await page.click(`#main .li [data-a=admEmail][data-uid="${wkUid}"]`); await wait(page, 300);
   const ed = await page.evaluate(() => ({ open: document.getElementById('dlg').open, cur: document.querySelector('#dlg').innerText.includes('wk@x.co'), inp: !!document.querySelector('#dlg input[name=email]') }));
   await shot(page, '02א-שינוי-מייל');
   await page.fill('#dlg input[name=email]', 'WK2@x.co '); await page.click('#dlg form button:not([type=button])'); await wait(page, 3500);
@@ -116,6 +119,21 @@ async function seedMember(biz, email, role) {
   await page.evaluate(() => closeDlg());
   const back = await page.evaluate(async () => { const u = ADM.staff.find((x) => x.email === 'wk2@x.co'); try { await fnCall('setStaffEmail', { bizId: SY.bizId, uid: u.uid, email: 'wk@x.co' }); return true; } catch (e) { return e.message; } });
   check('7ג החזרת המייל המקורי (אותו עובד)', back === true, back);
+  // 25.11.2026: שינוי מייל של מנהל העסק (admins) מתוך כרטיס המנהלים, ושורה "המייל שלי" – ואחר כך מחזירים (המנהל נכנס בהמשך עם ma@x.co)
+  await page.evaluate(() => rerender()); await wait(page, 500);
+  const card = await page.evaluate(() => { const c = [...document.querySelectorAll('#main .card')].find((x) => /מנהלי העסק – קופה ומייל/.test(x.innerText)); if (!c) return null; const ma = (ADM.admins || []).find((a) => a.email === 'ma@x.co'); const r = c.getBoundingClientRect();
+    return { ma: !!(ma && c.querySelector(`[data-a=admEmail][data-uid="${ma.uid}"]`) && c.querySelector(`[data-a=admMgrPos][data-uid="${ma.uid}"]`)), me: /המייל שלי/.test(c.innerText) && c.innerText.includes('sa@x.co') && !!c.querySelector(`[data-a=admEmail][data-uid="${SY.uid}"]`), maUid: ma && ma.uid, inView: r.left >= 0 && r.right <= innerWidth, hs: document.documentElement.scrollWidth <= innerWidth }; });
+  check('7ד מנהל־על: בכרטיס המנהלים – "שינוי מייל" ליד כל מנהל (לצד "קופה") ושורה "המייל שלי"; בלי גלילה לרוחב ב-360', card && card.ma && card.me && card.inView && card.hs, card);
+  await shot(page, '02ב-כרטיס-מנהלים');
+  page.__step = 'emailMgr';
+  await page.click(`#main [data-a=admEmail][data-uid="${(card || {}).maUid}"]`); await wait(page, 300);
+  const md = await page.evaluate(() => ({ open: document.getElementById('dlg').open, cur: document.querySelector('#dlg').innerText.includes('ma@x.co'), two: !!document.querySelector('#dlg input[name=email2]') }));
+  await page.fill('#dlg input[name=email]', 'ma2@x.co'); await page.click('#dlg form button:not([type=button])'); await wait(page, 3500);
+  const cm = log.filter((r) => r.step === 'emailMgr' && /setStaffEmail/.test(r.url)).map((r) => r.status);
+  const m2a = await page.evaluate(() => ({ row: document.querySelector('#main').innerText.includes('ma2@x.co'), dlg: document.getElementById('dlg').open, still: !!SY.refresh }));
+  check('7ה מנהל־על: שינוי מייל של מנהל – חלון עם המייל הנוכחי (בלי שדה אימות), setStaffEmail הצליח, הכרטיס מציג את המייל החדש, ומנהל־העל נשאר מחובר', md.open && md.cur && !md.two && cm.length === 1 && cm[0] === 200 && m2a.row && !m2a.dlg && m2a.still, { md, cm, m2a });
+  const backM = await page.evaluate(async (u) => { try { await fnCall('setStaffEmail', { bizId: SY.bizId, uid: u, email: 'ma@x.co' }); return true; } catch (e) { return e.message; } }, (card || {}).maUid);
+  check('7ו החזרת המייל המקורי של המנהל', backM === true, backM);
   await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 500);
   await page.click('#safab'); await until(() => page.evaluate(() => !!document.querySelector('#saL [data-a=admEnter]')), 15000);
   d = await page.evaluate(() => ({ here: document.querySelector('#safabd').innerText.includes('עסק acme'), go: [...document.querySelectorAll('#saL [data-a=admEnter]')].map((b) => b.dataset.id).sort() }));
@@ -175,6 +193,42 @@ async function seedMember(biz, email, role) {
   const w2 = await page.evaluate(async () => { ADM.sa = 1; ADM.chk = 1; saFab(); return !!document.getElementById('safab'); });
   check('19 עובד, גם כש-ADM.sa מוכרח: הכפתור לא נוצר (רק למנהל)', !w2, w2);
   check('20 אין שגיאות JS (עובד)', page.__errors.length === 0, page.__errors);
+  await ctx.close();
+
+  // ---------- 25.11.2026: מנהל־על משנה את המייל של עצמו; חיבור שפג ב-tok() ----------
+  const sa9 = await signUp('sa9@x.co');
+  await put('superadmins/' + sa9, {}); await put('b/home/admins/' + sa9, { email: sv('sa9@x.co') });
+  const logS = []; ({ ctx, page } = await open('sa@x.co', logS, 'self'));
+  await page.evaluate(() => go('staff'));
+  await until(() => page.evaluate((u) => !!document.querySelector(`#main [data-a=admEmail][data-uid="${u}"]`), saUid), 15000);
+  const o9 = await page.evaluate(async (u) => { try { await fnCall('setStaffEmail', { bizId: SY.bizId, uid: u, email: 'sa99@x.co' }); return 'ok'; } catch (e) { return e.reason || e.message; } }, sa9);
+  check('21 השרת חוסם שינוי מייל של מנהל־על אחר (is-superadmin), גם כשקוראים לפונקציה ישירות', o9 === 'is-superadmin', o9);
+  // תקלת רשת בחידוש החיבור – לא מנתקים
+  await page.route('**/securetoken.googleapis.com/**', (r) => r.abort());
+  const net = await page.evaluate(async () => { SY.exp = 0; let m = ''; try { await fsx('/users/' + SY.uid, 0, 1); m = 'ok'; } catch (e) { m = e.offline ? 'offline' : e.message; } return { m, still: !!SY.refresh, gate: !!document.getElementById('gate') }; });
+  await page.unroute('**/securetoken.googleapis.com/**');
+  check('22 tok(): תקלת רשת בחידוש החיבור – המשתמש נשאר מחובר ואין מסך כניסה', net.m === 'offline' && net.still && !net.gate, net);
+  page.__step = 'self';
+  await page.click(`#main [data-a=admEmail][data-uid="${saUid}"]`); await wait(page, 300);
+  const sd = await page.evaluate(() => ({ open: document.getElementById('dlg').open, two: !!document.querySelector('#dlg input[name=email2]'), cur: document.querySelector('#dlg').innerText.includes('sa@x.co') }));
+  await shot(page, '05-שינוי-המייל-שלי');
+  await page.fill('#dlg input[name=email]', 'sa2@x.co'); await page.fill('#dlg input[name=email2]', 'sa3@x.co');
+  await page.click('#dlg form button:not([type=button])'); await wait(page, 800);
+  const mis = { toast: await page.evaluate(() => window.__toasts.slice(-1)[0] || ''), calls: logS.filter((r) => r.step === 'self' && /setStaffEmail/.test(r.url)).length, open: await page.evaluate(() => document.getElementById('dlg').open) };
+  check('23 שינוי עצמי: שדה "הקלד שוב את המייל החדש"; כששני המיילים שונים – הודעה, בלי קריאה לשרת', sd.open && sd.two && sd.cur && /לא זהים/.test(mis.toast) && mis.calls === 0 && mis.open, { sd, mis });
+  await page.fill('#dlg input[name=email2]', ' SA2@x.co'); await page.click('#dlg form button:not([type=button])');
+  await until(() => page.evaluate(() => !!document.getElementById('gate')), 15000); await wait(page, 500);
+  const so = await page.evaluate(() => ({ gate: !!document.getElementById('gate'), txt: (document.getElementById('gate') || {}).innerText || '', sy: !!SY.refresh, mail: !!document.querySelector('[data-a=admStfMail]') && document.getElementById('dlg').open, ask: /לשלוח/.test(document.getElementById('dlg').open ? document.querySelector('#dlg').innerText : '') }));
+  const sc = logS.filter((r) => r.step === 'self' && /setStaffEmail/.test(r.url)).map((r) => r.status);
+  check('24 שינוי עצמי הצליח: ניתוק, מסך כניסה עם הודעה על המייל החדש, ובלי הצעה לשלוח מייל הזמנה', sc.length === 1 && sc[0] === 200 && so.gate && /sa2@x\.co/.test(so.txt) && !so.sy && !so.ask, { sc, so: Object.assign({}, so, { txt: so.txt.slice(0, 200) }) });
+  await shot(page, '06-אחרי-שינוי-עצמי');
+  await H.login(page, 'sa2@x.co');
+  const re = await page.evaluate(() => ({ uid: SY.uid, sa: !!SY.sa, email: SY.email }));
+  check('25 כניסה מחדש עם המייל החדש – אותו חשבון (אותו uid), עדיין מנהל־על', re.uid === saUid && re.sa && re.email === 'sa2@x.co', re);
+  // חיבור שהשרת דוחה במפורש (INVALID_REFRESH_TOKEN) – ניתוק ומסך כניסה עם הודעה
+  const gone = await page.evaluate(async () => { SY.refresh = 'bogus-refresh'; SY.exp = 0; let m = ''; try { await fsx('/users/' + SY.uid, 0, 1); m = 'ok'; } catch (e) { m = e.message; } await new Promise((r) => setTimeout(r, 500)); return { m, sy: !!SY.refresh, gate: ((document.getElementById('gate') || {}).innerText || '').includes('החיבור לחשבון פג') }; });
+  check('26 tok(): השרת דוחה את החיבור (INVALID_REFRESH_TOKEN) – ניתוק ומסך כניסה עם הודעה', /החיבור לחשבון פג/.test(gone.m) && !gone.sy && gone.gate, gone);
+  check('27 אין שגיאות JS (שינוי עצמי)', page.__errors.length === 0, page.__errors);
   await ctx.close();
 
   await browser.close();

@@ -477,7 +477,6 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     // ולידציה
     assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid, email: 'לא מייל' })).reason, 'bad-email');
     assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid: '../x', email: 'new-mail@example.invalid' })).reason, 'bad-uid');
-    assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid: U[A].mgr, email: 'new-mail@example.invalid' })).reason, 'is-admin');
     assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid, email: 'taken@example.invalid' })).reason, 'email-taken');
     assert.equal((await getAuth().getUser(uid)).email, 'old-mail@example.invalid', 'לא השתנה אחרי הדחיות');
     // הצלחה: אותו חשבון, רק המייל מתחלף
@@ -501,6 +500,70 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal(add2.status, 'OK', add2.text);
     assert.notEqual(add2.result.uid, uid);
     assert.equal(JSON.stringify([await listDocs(`b/${B}/staff`), await listDocs(`b/${B}/audit`)]), snapB);
+  });
+  it('setStaffEmail (25.11.2026): מנהל־על משנה מייל של מנהל בעסק הנוכחי ושל עצמו; מנהל־על אחר – נדחה; עסק ב\' לא משתנה', async () => {
+    const { getAuth } = fa('firebase-admin/auth');
+    const snapB = JSON.stringify([await listDocs(`b/${B}/staff`), await listDocs(`b/${B}/admins`), await listDocs(`b/${B}/audit`)]);
+    const SA2 = 'u_super_other', ME = 'u_super_self';
+    for (const [id, em] of [[U[A].mgr, 'a-mgr-old@example.invalid'], [SA2, 'sa2@example.invalid'], [ME, 'me-old@example.invalid']]) {
+      await getAuth().deleteUser(id).catch(() => {});
+      await getAuth().createUser({ uid: id, email: em });
+    }
+    await getAuth().createUser({ email: 'taken2@example.invalid' }).catch(() => {});
+    await prep(async (db) => {
+      const b = db.batch();
+      b.set(db.doc(`b/${A}/admins/${U[A].mgr}`), { email: 'a-mgr-old@example.invalid' });
+      b.update(db.doc('users/' + U[A].mgr), { email: 'a-mgr-old@example.invalid' });
+      b.set(db.doc(`b/${A}/private/info`), { ownerEmail: 'A-Mgr-Old@example.invalid', ownerPhone: '0501234567' });
+      b.set(db.doc('superadmins/' + SA2), { email: 'sa2@example.invalid' });
+      b.set(db.doc(`b/${A}/admins/${SA2}`), { email: 'sa2@example.invalid' });
+      b.set(db.doc('superadmins/' + ME), { email: 'me-old@example.invalid' });
+      // מנהל־העל שייך לעסק ב' (users.bizId), ופועל עכשיו בעסק א'
+      b.set(db.doc('users/' + ME), { bizId: B, role: 'admin', active: true, bizStatus: 'active', email: 'me-old@example.invalid', createdAt: 1 });
+      b.set(db.doc(`b/${B}/admins/${ME}`), { email: 'me-old@example.invalid' });
+      b.set(db.doc(`b/${B}/private/info`), { ownerEmail: 'someone-else@example.invalid' });
+      await b.commit();
+    });
+    // החסימה not-superadmin ראשונה – גם כשהיעד הוא מנהל־על או הקורא עצמו
+    assert.equal((await call('setStaffEmail', U[A].mgr, { uid: U[A].mgr, email: 'x@example.invalid' })).reason, 'not-superadmin');
+    assert.equal((await call('setStaffEmail', U[A].mgr, { uid: SA2, email: 'x@example.invalid' })).reason, 'not-superadmin');
+    // מנהל־על אחר – נדחה, בלי שינוי
+    assert.equal((await call('setStaffEmail', ME, { bizId: A, uid: SA2, email: 'x@example.invalid' })).reason, 'is-superadmin');
+    assert.equal((await getAuth().getUser(SA2)).email, 'sa2@example.invalid');
+    // מנהל של עסק א' דרך עסק ב' – לא נמצא (רק העסק הנוכחי)
+    assert.equal((await call('setStaffEmail', ME, { bizId: B, uid: U[A].mgr, email: 'x@example.invalid' })).reason, 'no-staff');
+    assert.equal((await call('setStaffEmail', ME, { bizId: A, uid: U[A].mgr, email: 'taken2@example.invalid' })).reason, 'email-taken');
+    // מנהל בעסק הנוכחי: Auth + admins + staff + users + ownerEmail (שווה לישן, בלי תלות באותיות)
+    const r = await call('setStaffEmail', ME, { bizId: A, uid: U[A].mgr, email: 'A-Mgr-New@example.invalid' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await getAuth().getUser(U[A].mgr)).email, 'a-mgr-new@example.invalid');
+    assert.equal((await getDoc(`b/${A}/admins/${U[A].mgr}`)).email, 'a-mgr-new@example.invalid');
+    assert.equal((await getDoc(`b/${A}/staff/${U[A].mgr}`)).email, 'a-mgr-new@example.invalid');
+    assert.equal((await getDoc('users/' + U[A].mgr)).email, 'a-mgr-new@example.invalid');
+    assert.equal((await getDoc(`b/${A}/private/info`)).ownerEmail, 'a-mgr-new@example.invalid');
+    assert.equal((await getDoc(`b/${A}/private/info`)).ownerPhone, '0501234567');
+    assert.ok((await audits(A)).find((x) => x.act === 'setStaffEmail' && x.by === ME && x.note === U[A].mgr + ':a-mgr-old@example.invalid>a-mgr-new@example.invalid admin'));
+    // שינוי עצמי: Auth + superadmins + users + admins בעסק שב-users.bizId (ב'); ownerEmail של ב' (של מישהו אחר) לא נוגעים
+    const me = await call('setStaffEmail', ME, { bizId: A, uid: ME, email: 'me-new@example.invalid' });
+    assert.equal(me.status, 'OK', me.text);
+    assert.equal(me.result.self, true);
+    assert.equal((await getAuth().getUser(ME)).email, 'me-new@example.invalid');
+    assert.equal((await getDoc('superadmins/' + ME)).email, 'me-new@example.invalid');
+    const usr = await getDoc('users/' + ME);
+    assert.deepEqual([usr.email, usr.bizId, usr.role], ['me-new@example.invalid', B, 'admin']);
+    assert.equal((await getDoc(`b/${B}/admins/${ME}`)).email, 'me-new@example.invalid');
+    assert.equal((await getDoc(`b/${B}/private/info`)).ownerEmail, 'someone-else@example.invalid');
+    assert.equal(await getDoc(`b/${A}/admins/${ME}`), null, 'לא נוצר מסמך מנהל בעסק הנוכחי');
+    assert.ok((await audits(A)).find((x) => x.act === 'setStaffEmail' && x.note === ME + ':me-old@example.invalid>me-new@example.invalid self'));
+    // superadmins בלי שדה email – לא נוסף שדה
+    await prep((db) => db.doc('superadmins/' + ME).set({}));
+    const me2 = await call('setStaffEmail', ME, { bizId: A, uid: ME, email: 'me-new2@example.invalid' });
+    assert.equal(me2.status, 'OK', me2.text);
+    assert.deepEqual(await getDoc('superadmins/' + ME), {});
+    // מנהלי עסק ב' ועובדיו לא השתנו (חוץ מהמנהל־על עצמו, שנבדק למעלה)
+    const nowB = [await listDocs(`b/${B}/staff`), (await listDocs(`b/${B}/admins`)).filter((x) => x.id !== ME), await listDocs(`b/${B}/audit`)];
+    const wasB = JSON.parse(snapB); wasB[1] = wasB[1].filter((x) => x.id !== ME);
+    assert.deepEqual(nowB, wasB);
   });
 });
 
