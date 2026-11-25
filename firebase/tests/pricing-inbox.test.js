@@ -287,6 +287,20 @@ describe('piInbox – חשבונית ספק של עובד נכנסת לתמחו�
     assert.equal(p.st, 'new'); assert.equal(p.n, 0); assert.equal(p.rf, 1); assert.equal(p.np, 1); assert.equal(p.inv, '777');
     assert.equal((await get(`b/${A}/pinv/${pidOf(s.id)}/p/0`)).data, f);
     assert.equal(await get(`b/${A}/pinvq/${s.id}`), null);
+    // "שלח לתמחור" מהמנהל (piCreate עם אותו מזהה) ממלא את החשבונית הריקה בשורות; הכותרת מההוצאה והצילום נשארים
+    const T = require('../functions/lib/tenant.js'), P = require('../functions/pricing.js')._core;
+    const biz = await T.loadBiz(A);
+    const w = { uid: MGR, role: 'manager', uname: 'המנהל', biz, bizId: A };
+    const line = { n: 'קמח', qty: 2, cost: 10 };
+    const c = await T.runInBiz({ bizId: A, prefix: `b/${A}/`, biz, uid: MGR }, () => P.createCore(w, { reqId: X.rqOf('o' + s.id), sup: 'אחר', inv: '1', lines: [line] }));
+    assert.equal(c.refill, true); assert.equal(c.dup, false);
+    const p2 = await get(`b/${A}/pinv/${pidOf(s.id)}`);
+    assert.equal(p2.n, 1); assert.equal(p2.lines[0].n, 'קמח'); assert.equal(p2.rf, undefined);
+    assert.equal(p2.sup, 'תבניכל'); assert.equal(p2.inv, '777'); assert.equal(p2.np, 1);
+    // שליחה נוספת – כבר יש שורות: כפילות, בלי שינוי
+    const c2 = await T.runInBiz({ bizId: A, prefix: `b/${A}/`, biz, uid: MGR }, () => P.createCore(w, { reqId: X.rqOf('o' + s.id), lines: [line, line] }));
+    assert.equal(c2.dup, true);
+    assert.equal((await get(`b/${A}/pinv/${pidOf(s.id)}`)).n, 1);
   });
 
   it('בזמן ההמתנה החשבונית נשלחה ידנית לתמחור ("שלח לתמחור") – התור נמחק בלי זיהוי נוסף', async () => {
