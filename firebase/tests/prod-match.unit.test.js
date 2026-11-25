@@ -81,3 +81,60 @@ describe('התאמת מוצרים – prod-match', () => {
     assert.equal(M.search(big, '7290004321')[0].id, 'p4321');
   });
 });
+
+describe('מיון לפי עדיפות (pri) – מלאי וקרטון', () => {
+  const cat = [
+    { id: 'a', name: 'צלחות עמוקות', barcode: '111', q: { x: 0, y: 5 }, cto: true, ct: 10 },
+    { id: 'b', name: 'צלחות עמוקות גדולות', q: { x: 7, y: 0 }, cto: true, ct: 10 },
+    { id: 'c', name: 'צלחות עמוקות לבנות', q: { x: 3 } },
+    { id: 'd', name: 'צלחות עמוקות', q: { x: -2 } },
+    { id: 'e', name: 'צלחות' },
+  ];
+  const idx = M.index(cat);
+  const stkOf = (br) => (p) => br ? ((p.q || {})[br] || 0) : Object.values(p.q || {}).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+  const mk = (br, ws) => { const s = stkOf(br); return (p) => (s(p) > 0 ? 2 : 0) + (ws && p.cto && p.ct >= 2 ? 1 : 0); };
+  const ids = (r) => r.map((x) => x.id);
+  const pos = (r, id) => ids(r).indexOf(id);
+  it('במלאי לפני שאזל, גם אם לשני ציון גבוה יותר', () => {
+    const r = M.search(idx, 'צלחות עמוקות', { pri: mk('x', false) });
+    assert.ok(pos(r, 'c') < pos(r, 'd') && pos(r, 'b') < pos(r, 'd') && pos(r, 'c') >= 0);
+    const free = M.search(idx, 'צלחות עמוקות');
+    assert.ok(pos(free, 'd') < pos(free, 'c'), 'בלי pri הציון מכריע');
+  });
+  it('בסניף שנבחר נספר רק הסניף; בלי סניף – סך הכול', () => {
+    assert.ok(pos(M.search(idx, 'צלחות עמוקות', { pri: mk('y', false) }), 'a') < pos(M.search(idx, 'צלחות עמוקות', { pri: mk('y', false) }), 'b'));
+    const rx = M.search(idx, 'צלחות עמוקות', { pri: mk('x', false) }), ry = M.search(idx, 'צלחות עמוקות', { pri: mk('y', false) });
+    assert.ok(pos(rx, 'a') > pos(rx, 'b') && pos(ry, 'b') > pos(ry, 'a'));
+    const all = M.search(idx, 'צלחות עמוקות', { pri: mk(null, false) });
+    assert.ok(pos(all, 'a') >= 0 && pos(all, 'd') > pos(all, 'a') && pos(all, 'd') > pos(all, 'c'));
+  });
+  it('לקוח עסקי: cto לפני לא-cto כששניהם במלאי; לקוח פרטי – לא', () => {
+    const biz = M.search(idx, 'צלחות עמוקות', { pri: mk(null, true) });
+    assert.ok(pos(biz, 'b') < pos(biz, 'c'));
+    const priv = M.search(idx, 'צלחות עמוקות', { pri: mk(null, false) });
+    assert.equal(pos(priv, 'b') < pos(priv, 'c'), pos(M.search(idx, 'צלחות עמוקות', { pri: (p) => (stkOf(null)(p) > 0 ? 2 : 0) }), 'b') < pos(M.search(idx, 'צלחות עמוקות', { pri: (p) => (stkOf(null)(p) > 0 ? 2 : 0) }), 'c'));
+  });
+  it('ברקוד מדויק תמיד ראשון, גם אם אזל', () => {
+    const r = M.search(idx, '111', { pri: (p) => (p.id === 'a' ? -5 : 9) });
+    assert.equal(r[0].id, 'a');
+  });
+  it('pri שזורק / מחזיר לא-מספר לא שובר, ובלי pri התוצאה זהה', () => {
+    const base = ids(M.search(idx, 'צלחות עמוקות'));
+    assert.deepEqual(ids(M.search(idx, 'צלחות עמוקות', { pri: () => { throw new Error('x'); } })), base);
+    assert.deepEqual(ids(M.search(idx, 'צלחות עמוקות', { pri: () => 'a' })), base);
+    assert.deepEqual(ids(M.search(idx, 'צלחות עמוקות', { pri: () => NaN })), base);
+    assert.ok(!('pr' in M.search(idx, 'צלחות עמוקות', { pri: () => 1 })[0]));
+  });
+  it('pri נקרא פעם אחת לכל תוצאה, והמיון יציב', () => {
+    let n = 0; const r = M.search(idx, 'צלחות', { pri: () => { n++; return 1; } });
+    assert.equal(n, r.length);
+    assert.deepEqual(ids(M.search(idx, 'צלחות', { pri: () => 1 })), ids(M.search(idx, 'צלחות')));
+  });
+  it('ביצועים עם pri: 5,000 מוצרים מתחת ל-50ms', () => {
+    const P = []; for (let i = 0; i < 5000; i++) P.push({ id: 'p' + i, name: `כוסות גדולות ${i % 97} מארז ${i}`, q: { x: i % 3 }, cto: i % 2 === 0, ct: 10 });
+    const big = M.index(P); let max = 0;
+    for (const t of ['כ', 'כוסות', 'כוסות גדולות 5']) { const s = process.hrtime.bigint(); M.search(big, t, { pri: mk(null, true) }); max = Math.max(max, Number(process.hrtime.bigint() - s) / 1e6); }
+    console.log(`  ביצועים עם pri (5,000 מוצרים): הכי איטית ${max.toFixed(1)}ms`);
+    assert.ok(max < 50, max.toFixed(1));
+  });
+});

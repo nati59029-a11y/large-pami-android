@@ -37,8 +37,9 @@ const stockTxt=(p,D)=>hasBr()?(D&&D.br?'במלאי ב'+esc(brNm(D.br))+': '+n3(q
 const hitH=(r,D)=>{const p=r.p,ct=ctoOf(p);
  const info=[r.k==='al'?'שם קודם: '+esc(r.n):r.k==='bc'?'לפי ברקוד':r.k==='sku'?'לפי קוד פריט':'',p.cat?esc(catNm(p.cat))+(p.sub?' / '+esc(catNm(p.sub)):''):'',p.pk?'במארז '+p.pk:'',ct?'בקרטון '+ct+' מארזים':'',stockTxt(p,D)].filter(Boolean).join(' · ');
  return `<button type="button" class="li" data-a="oxAdd" data-id="${esc(p.id)}"><div class="m"><b>${esc(p.name)}</b>${r.b?' <span class="tag t1">קנה בעבר</span>':''}${ct?' <span class="tag">נמכר בקרטון</span>':''}<small>${info}</small></div><b class="a">${ils(priceOf(D,p))}</b></button>`};
-const hitsH=D=>{const t=String(D&&D.q||'').trim();if(!t)return '';const R=PMx.search(ix(),t,{limit:8,bought:boughtOf(D)});return R.length?R.map(r=>hitH(r,D)).join(''):'<p class="note">לא נמצא מוצר. אפשר להדביק רשימה, להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>'};
-window.__osHits=(D,t)=>PMx.search(ix(),t,{limit:8,bought:boughtOf(D)}); // לבדיקות
+const priOf=D=>{const stk=p=>D&&D.br?q(p,D.br):hasBr()?qAll(p):q(p,NB),ws=wsOf(D);return p=>(stk(p)>0?2:0)+(ws&&ctoOf(p)?1:0)};
+const hitsH=D=>{const t=String(D&&D.q||'').trim();if(!t)return '';const R=PMx.search(ix(),t,{limit:8,bought:boughtOf(D),pri:priOf(D)});return R.length?R.map(r=>hitH(r,D)).join(''):'<p class="note">לא נמצא מוצר. אפשר להדביק רשימה, להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>'};
+window.__osHits=(D,t)=>PMx.search(ix(),t,{limit:8,bought:boughtOf(D),pri:priOf(D)}); // לבדיקות
 const LBTN='<button type="button" class="btn g s w" data-a="osOpen">＋ רשימה חופשית (הדבקה / ווטסאפ / צילום)</button>';
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();try{const D=O.draft;if(!r||!r.h||!D||!on())return r;
  const a=r.h.indexOf('<div id="oxhits">'),b=r.h.indexOf('<button type="button" class="btn g s w" data-a="oxFree">');

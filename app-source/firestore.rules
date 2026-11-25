@@ -1264,6 +1264,15 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
     }
+    // 24.11.2026 (הצעת מחיר): qt/{id} – כמו ord (הרשאת הזמנות + סניף ההצעה). כתיבה – רק השרת (functions/quotes.js)
+    match /qt/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+      match /log/{k} {
+        allow read: if rOrd() && rBrOk(get(/databases/$(database)/documents/qt/$(id)).data.br);
+        allow create, update, delete: if false;
+      }
+    }
     match /ordpay/{id} {
       allow read: if rMgr();
       allow create, update, delete: if false;
@@ -2556,6 +2565,15 @@ service cloud.firestore {
         allow create, update, delete: if false;
         match /log/{k} {
           allow read: if ordOk() && brOk(get(/databases/$(database)/documents/b/$(bizId)/ord/$(id)).data.br);
+          allow create, update, delete: if false;
+        }
+      }
+      // 24.11.2026 (הצעת מחיר): qt/{id} – כמו ord (ordOk + סניף ההצעה). כתיבה – רק השרת (functions/quotes.js)
+      match /qt/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+        match /log/{k} {
+          allow read: if ordOk() && brOk(get(/databases/$(database)/documents/b/$(bizId)/qt/$(id)).data.br);
           allow create, update, delete: if false;
         }
       }
