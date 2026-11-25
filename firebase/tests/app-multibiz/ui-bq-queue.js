@@ -101,8 +101,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('2ה כעבור 5 דקות – ניסיון נוסף ומצליח', sl4[0] === 'ok' && D.att === 5 && await page.evaluate((fid) => !BQ.find((b) => b.fid === fid).qf, fs2), { sl4, att: D.att });
   await page.evaluate(() => closeDlg()); await clearQ();
   // מסמך שהתקבל (SI): אותו כלל
+  // מאז 23.11.2026 (commit 3ba2794) מסמך ששותף כשהסריקה פעילה עובר לזיהוי המוקדם (x.pre, siPreRun) ו-siPump מדלג עליו בכוונה,
+  // וגם siLoad הראשון אחרי טעינה מחדש מעביר אליו פריטים ישנים. כאן נבדק מסלול siOne (מסמך שלא עבר לזיהוי המוקדם),
+  // לכן מסמנים שהמעבר אחרי הטעינה כבר נעשה (כמו בבדיקה 3ב, שרצה בלי טעינה מחדש לפניה). הבדיקות עצמן לא השתנו.
   M.plan = () => 'busy';
-  const siS = await page.evaluate(async () => { siLoad(); const cv = document.createElement('canvas'); cv.width = 300; cv.height = 300; const x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 300, 300); x.fillStyle = '#000'; x.fillText('SI SLOW', 20, 50); const u = cv.toDataURL('image/jpeg', 0.9); const h = trHash(u); await fput('shin:' + h, u); const it = { id: uid(), h, name: 'slow.jpg', mime: 'image/jpeg', size: 1000, at: Date.now(), st: 'q', type: null, man: 0, err: '' }; SI.L.push(it); siSave(); siPump(); return it.id; });
+  const siS = await page.evaluate(async () => { siLoad.pr = 1; siLoad(); const cv = document.createElement('canvas'); cv.width = 300; cv.height = 300; const x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 300, 300); x.fillStyle = '#000'; x.fillText('SI SLOW', 20, 50); const u = cv.toDataURL('image/jpeg', 0.9); const h = trHash(u); await fput('shin:' + h, u); const it = { id: uid(), h, name: 'slow.jpg', mime: 'image/jpeg', size: 1000, at: Date.now(), st: 'q', type: null, man: 0, err: '' }; SI.L.push(it); siSave(); siPump(); return it.id; });
   await sleep(2000); D = docOf()[0]; const a2v = D.att;
   const ss = await page.evaluate((id) => { const x = SI.L.find((y) => y.id === id); NAV = [{ v: 'home' }]; go('todo'); const c = document.querySelector('[data-si="' + id + '"]'); return { st: x.st, qf: x.qf, wait: x.nx - Date.now(), btn: !!(c && c.querySelector('[data-a=siNow]')), t: c ? c.innerText : '' }; }, siS);
   await page.evaluate((id) => ACT.siNow({ dataset: { id } }), siS); await sleep(1000); const D2 = docOf()[0];
