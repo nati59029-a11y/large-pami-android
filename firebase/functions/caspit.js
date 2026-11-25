@@ -266,7 +266,8 @@ async function cxApply(w, input) {
   const bcs = new Map();
   (await ref.collection('in').get()).docs.forEach((d) => (d.get('items') || []).forEach((x) => { codes.add(x.c); for (const b of x.bcs || []) { const k = bcKey(b); if (k && !bcs.has(k)) bcs.set(k, x.c); } }));
   await seenRef.set({ codes: [...codes], at: Date.now() });
-  await db.doc(SEEN_BC).set({ s: [...bcs].map(([b, c]) => b + '\t' + c).join('\n'), n: bcs.size, run, at: Date.now() }); // הקטלוג האחרון בלבד (המצב הנוכחי בכספית)
+  // הקטלוג האחרון בלבד (המצב הנוכחי בכספית). כישלון כאן (למשל מסמך גדול מדי) לא מפיל את האישור – רק מדלגים על ההגנה בקובץ הפריטים החדשים
+  try { await db.doc(SEEN_BC).set({ s: [...bcs].map(([b, c]) => b + '\t' + c).join('\n'), n: bcs.size, run, at: Date.now() }); } catch (e) { logger.warn('cxApply: seenBc not saved', { biz: w.bizId || '', n: bcs.size, msg: String((e && e.message) || '').slice(0, 200) }); }
   await db.runTransaction(async (tx) => {
     const x = await tx.get(ref), c = await tx.get(cref);
     if (x.get('st') === 'done') return;
