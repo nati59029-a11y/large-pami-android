@@ -173,27 +173,31 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.equal(M.state.requests.length, 0);
     });
 
-    it('הקריאה ה-101 באותו יום נדחית; משתמש אחר לא מושפע; ביום חדש המונה מתאפס', async () => {
+    it('לארג\' פעמי (25.11.2026): בלי תקרה למשתמש – גם הקריאה ה-101 עוברת; תקרה שמנהל־על קבע (גם מעל 100) – נאכפת; ביום חדש המונה מתאפס', async () => {
       const uid = 'u_emp2';
-      for (let i = 1; i <= 100; i++) {
+      for (let i = 1; i <= 101; i++) {
         const r = await call('scanDocument', uid, { kind: 'product', files: [jpgFile()] });
         assert.equal(r.status, 'OK', `קריאה ${i}: ${JSON.stringify(r.json)}`);
         assert.equal(r.result.usage.used, i);
       }
-      const r101 = await call('scanDocument', uid, { kind: 'product', files: [jpgFile()] });
-      assert.equal(r101.status, 'RESOURCE_EXHAUSTED');
-      assert.equal(r101.error.details.reason, 'daily-limit');
-      assert.equal(r101.error.details.limit, 100);
-      assert.match(r101.error.message, /מגבלת השימוש/); // האפליקציה מזהה את הביטוי הזה ומחכה לפני ניסיון חוזר
-      assert.equal(M.state.requests.length, 100, 'הקריאה ה-101 לא הגיעה ל-Gemini');
-      assert.equal((await usageOf(env, uid)).count, 100);
+      assert.equal((await usageOf(env, uid)).count, 101);
+      // מנהל־על קבע תקרה (adv.limits.scanPerUserDaily) – נאכפת: 102 עוברת, 103 נדחית
+      await env.withSecurityRulesDisabled((c) => c.firestore().doc('b/largpeami/private/info').set({ adv: { limits: { scanPerUserDaily: 102 } } }));
+      assert.equal((await call('scanDocument', uid, { kind: 'product', files: [jpgFile()] })).status, 'OK');
+      const r103 = await call('scanDocument', uid, { kind: 'product', files: [jpgFile()] });
+      assert.equal(r103.status, 'RESOURCE_EXHAUSTED');
+      assert.equal(r103.error.details.reason, 'daily-limit');
+      assert.equal(r103.error.details.limit, 102);
+      assert.match(r103.error.message, /מגבלת השימוש/); // האפליקציה מזהה את הביטוי הזה ומחכה לפני ניסיון חוזר
+      assert.equal(M.state.requests.length, 102, 'הקריאה שנדחתה לא הגיעה ל-Gemini');
       // משתמש אחר – לא מושפע
       assert.equal((await call('scanDocument', 'u_emp', { kind: 'product', files: [jpgFile()] })).status, 'OK');
       // "מחר": המונה שמור עם תאריך של אתמול – מתאפס
-      await env.withSecurityRulesDisabled((c) => c.firestore().doc('scan_usage/' + uid).set({ day: '2000-01-01', count: 100 }));
+      await env.withSecurityRulesDisabled((c) => c.firestore().doc('scan_usage/' + uid).set({ day: '2000-01-01', count: 102 }));
       const tomorrow = await call('scanDocument', uid, { kind: 'product', files: [jpgFile()] });
       assert.equal(tomorrow.status, 'OK');
       assert.equal(tomorrow.result.usage.used, 1);
+      await env.withSecurityRulesDisabled((c) => c.firestore().doc('b/largpeami/private/info').delete());
     });
 
     it('סוג זיהוי שהוא שם מובנה של JavaScript (__proto__, constructor, toString, hasOwnProperty) נדחה לפני Gemini ולא נספר', async () => {
