@@ -15,7 +15,7 @@ const PART = 700000;               // גודל חלק (base64) ב-sec_inv/{id}/p
 const CAP_DEFAULT = 20000;         // תקרה אחת לעסק (35) – 20,000 ₪ (החלטת בעל הפרויקט, תיקון 1 לשלב 7). סכום ששווה לתקרה – ממתין
 const KEEP_DAYS = 30;              // 9.5: עותק בתור של חשבונית שאושרה / קובץ שנדחה – 30 יום
 const CLAIM_MS = 24 * 3600e3;      // 4.7(3): תפיסה שלא הושלמה משתחררת אחרי 24 שעות
-const KINDS = ['q', 'inv', 'rcpt', 'dn', 'cr', 'chk', 'unk', 'bad', 'long'];
+const KINDS = ['q', 'inv', 'rcpt', 'dn', 'cr', 'chk', 'unk', 'bad', 'long', 'psl']; // 26.11.2026 שלב 2: psl = תלושי שכר (לא נסרקים בשרת; הפיצול במכשיר)
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const hpN = (v) => String(v == null ? '' : v).replace(/\D/g, '');
@@ -301,7 +301,7 @@ function invCfgOf(snap) {
   return {
     auto: d.auto !== false,
     cap: typeof d.cap === 'number' && Number.isFinite(d.cap) && d.cap >= 0 ? d.cap : CAP_DEFAULT,
-    off: obj(d.off), links: obj(d.links), trust: obj(d.trust), // trust: שולחים שהמנהל אישר ל-PDF עם פקודות (מפתח השולח → true)
+    off: obj(d.off), links: obj(d.links), trust: obj(d.trust), psl: obj(d.psl), // psl: שולחי תלושי שכר (26.11.2026) // trust: שולחים שהמנהל אישר ל-PDF עם פקודות (מפתח השולח → true)
     sups: Array.isArray(d.sups) ? d.sups : [], nb: Number.isInteger(d.nb) ? d.nb : 0, br1: typeof d.br1 === 'string' ? d.br1 : '', supH: typeof d.supH === 'string' ? d.supH : '', supAt: Number(d.supAt) || 0, supBy: typeof d.supBy === 'string' ? d.supBy : '', supDev: typeof d.supDev === 'string' ? d.supDev : '',
   };
 }
@@ -349,4 +349,31 @@ function dupKeys(m, sub) {
 // מפתח השולח: ווצאפ – מספר, מייל – כתובת
 const senderKey = (ch, from) => (ch === 'wa' ? 'wa:' : 'm:') + String(from || '').toLowerCase().slice(0, 200);
 
-module.exports = { SURE, NOT_INV_BAD, sureNotInv, staleNotInv, MAX_FILE, MAX_PAGES, LONG_SCAN_MAX, PART, CAP_DEFAULT, KEEP_DAYS, CLAIM_MS, KINDS, sha, hpN, hpOk, NINV, nameKey, inspect, badByName, mapClassify, matchSup, brOf, invCfgOf, eligOf, fullOf, dupKeys, senderKey };
+
+// ---------- 26.11.2026 (בעל העסק), שלב 2 של "הוראות למזכירה": תלושי שכר והוראה בכתיבה חופשית ----------
+// שם קובץ שהוא כמעט בוודאות תלוש שכר. בכוונה צר: "שכר טרחה" (חשבונית של עו"ד/רו"ח) לא נתפס, רק "תלוש"/"payslip"
+const PSL_NAME = /תלוש|pay[\s._-]?slip|salary[\s._-]?slip|wage[\s._-]?slip/i;
+const pslName = (fn) => PSL_NAME.test(String(fn || ''));
+// sec_cfg/inv.psl: { senderKey: true } – שולחים שהמנהל קבע שמהם מגיעים תלושי שכר (נשמר דרך secInv op cfg)
+const pslSender = (cfg, ch, from, ua) => !ua && !!(cfg && cfg.psl && cfg.psl[senderKey(ch, from)] === true);
+// פירוש התשובה של המודל להוראה בכתיבה חופשית. subs = הרשימה שהמכשיר שלח [{id,n,k:'sup'|'fixed'}]; המודל מחזיר אינדקסים מהרשימה.
+// מחזיר { act:'exp'|'fix'|'psl'|'rej', sub } או { q, opts:[ids] } (שאלה אחת). לעולם לא מחזיר ספק שלא ברשימה.
+const RULE_ACTS = ['exp', 'fix', 'psl', 'rej'];
+function ruleOf(j, subs) {
+  const L = Array.isArray(subs) ? subs : [];
+  const o = j && typeof j === 'object' && !Array.isArray(j) ? j : {};
+  const clean = (t) => String(t || '').replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const idx = (v) => (Number.isInteger(v) && v >= 0 && v < L.length ? v : -1);
+  const opts = (Array.isArray(o.opts) ? o.opts : []).map(idx).filter((i) => i >= 0);
+  const uniq = (a) => [...new Set(a)].slice(0, 6).map((i) => L[i].id);
+  const ask = (q, want) => ({ q: clean(q) || 'לא הבנתי את ההוראה. אפשר לכתוב שוב במילים אחרות, או לבחור מהרשימה?', opts: uniq(opts.filter((i) => !want || L[i].k === want)) });
+  const act = RULE_ACTS.includes(o.act) ? o.act : '';
+  if (!act || (typeof o.q === 'string' && o.q.trim())) return ask(o.q);
+  if (act === 'psl' || act === 'rej') return { act };
+  const i = idx(o.i);
+  if (i < 0) return ask(o.q || (act === 'fix' ? 'לאיזו הוצאה קבועה להכניס?' : 'לאיזה ספק להכניס?'));
+  // הסוג נקבע לפי מה שנבחר ברשימה (ספק / הוצאה קבועה), לא לפי מה שהמודל כתב
+  return { act: L[i].k === 'fixed' ? 'fix' : 'exp', sub: L[i].id };
+}
+
+module.exports = { PSL_NAME, pslName, pslSender, ruleOf, RULE_ACTS, SURE, NOT_INV_BAD, sureNotInv, staleNotInv, MAX_FILE, MAX_PAGES, LONG_SCAN_MAX, PART, CAP_DEFAULT, KEEP_DAYS, CLAIM_MS, KINDS, sha, hpN, hpOk, NINV, nameKey, inspect, badByName, mapClassify, matchSup, brOf, invCfgOf, eligOf, fullOf, dupKeys, senderKey };

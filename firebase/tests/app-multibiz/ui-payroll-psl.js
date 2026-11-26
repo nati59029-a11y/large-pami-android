@@ -16,6 +16,8 @@ const pageH = (color, lines) => `<section style="page-break-after:always;height:
 const DANA = (net) => pageH(RED, ['תלוש שכר לחודש אוקטובר 2026', 'שם העובד: דנה כהן', 'שכר בסיס 8,000.00', 'סה"כ ברוטו 9,250.50', 'ביטוח לאומי מעביד 420.75', 'פנסיה מעביד 601.28', 'פיצויים 555.03', 'נטו לתשלום ' + net]);
 const YOSSI = pageH(BLUE, ['תלוש שכר לחודש אוקטובר 2026', 'מספר זהות 023456789', 'סה"כ ברוטו 6,000.00', 'ביטוח לאומי מעביד 250.00', 'נטו לתשלום 5,100.00']);
 const NONAME = pageH(GREEN, ['דף הסבר כללי', 'אין כאן פרטי עובד']);
+// 26.11.2026 (שלב 2 של "הוראות למזכירה"): תלושים שהגיעו למזכירה – חודשים שאין להם עדיין תלוש
+const MON = (m, who, net) => pageH(RED, ['תלוש שכר לחודש ' + m + ' 2025', who, 'סה"כ ברוטו 9,000.00', 'ביטוח לאומי מעביד 400.00', 'נטו לתשלום ' + net]);
 // תרחיש הבודק (סבב 1, ליקוי 1): בכרטיס "יוסי לוי", אבל בתלוש "יוסף לוי" – לא זוהה בוודאות
 const YOSEF = pageH(BLUE, ['תלוש שכר לחודש אוקטובר 2026', 'שם העובד: יוסף לוי', 'סה"כ ברוטו 5,000.00', 'נטו לתשלום 4,321.00']);
 
@@ -275,6 +277,37 @@ const YOSEF = pageH(BLUE, ['תלוש שכר לחודש אוקטובר 2026', 'ש
     await pg.evaluate(() => { S.wh = S.wh.filter((w) => w.id !== 'whD'); save(); });
     check('13ב בלי שעות/תלושים/בונוסים – כפתור המחיקה חוזר', await sd());
     await pg.evaluate(() => { S.subs = S.subs.filter((s) => s.id !== 'psD'); save(); });
+    // 14. 26.11.2026: תלושים מהמזכירה – "נכנס לבד" רק כשהכול מזוהה; אחרת לא נשמר כלום; ביטול; ומסלול עם חלון אישור
+    { const PA = await mkPdf([MON('מרץ', 'שם העובד: דנה כהן', '7,000.00'), MON('מרץ', 'שם העובד: יוסי לוי', '6,500.00')]);
+      const PB = await mkPdf([MON('אפריל', 'שם העובד: דנה כהן', '7,100.00'), NONAME]);
+      const run = (fn, buf, name) => pg.evaluate(async ([fn, b64, name]) => { const bin = atob(b64), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+        const f = new File([a], name, { type: 'application/pdf' }); return window[fn](f); }, [fn, buf.toString('base64'), name]);
+      const n0 = (await psl()).length, e0 = (await ecs()).length;
+      const ids = await run('pslAutoSec', PA, 'a.pdf');
+      P = await psl(); E = await ecs();
+      const pa = P.filter((p) => p.mon === '2025-03');
+      check('14 מהמזכירה: כל התלושים מזוהים ← נשמרו לבד (2), עם עלויות מעביד, מקור sec', Array.isArray(ids) && ids.length === 2 && pa.length === 2 && pa.some((p) => p.sub === 'psA' && p.net === 7000) && pa.some((p) => p.sub === 'psB' && p.net === 6500) && pa.every((p) => p.src === 'sec' && p.ok === 1 && /^ps/.test(p.f)) && E.length === e0 + 2, [ids, pa, E.length - e0]);
+      check('14א אותו קובץ שוב (כבר יש תלוש לחודש) ← לא נשמר כלום', (await run('pslAutoSec', PA, 'a.pdf')) === null && (await psl()).length === n0 + 2);
+      check('14ב עמוד שלא זוהה בו עובד ← לא נשמר כלום (גם לא העמוד המזוהה)', (await run('pslAutoSec', PB, 'b.pdf')) === null && (await psl()).length === n0 + 2 && !(await psl()).some((p) => p.mon === '2025-04'));
+      const ec1 = (await ecs()).find((e) => e.psl === ids[0]);
+      await pg.evaluate((id) => { S.tx.push({ id: 'ccL9', t: 'exp', amt: 1, date: '2026-11-01', ecl: [id] }); save(); }, ec1.id);
+      const u1 = await pg.evaluate((ids) => window.pslUndoSec(ids), ids);
+      check('14ג ביטול כשעלות מעביד שויכה לחיוב ← חסום, לא נמחק כלום', u1.ok === false && u1.lock === true && (await psl()).length === n0 + 2, u1);
+      await pg.evaluate(() => { S.tx = S.tx.filter((t) => t.id !== 'ccL9'); save(); });
+      const u2 = await pg.evaluate((ids) => window.pslUndoSec(ids), ids);
+      check('14ד ביטול ← התלושים ועלויות המעביד שלהם נמחקו', u2.ok === true && u2.n === 2 && (await psl()).length === n0 && (await ecs()).length === e0, u2);
+      // מסלול עם חלון אישור (פעם ראשונה): done מקבל את מה שנשמר
+      await pg.evaluate(() => { window.__done = null; });
+      await pg.evaluate(async (b64) => { const bin = atob(b64), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+        window.pslFromSec(new File([a], 'c.pdf', { type: 'application/pdf' }), { done: (ids) => { window.__done = ids; } }); }, PB.toString('base64'));
+      t = await waitOk('1 מתוך 2'); v = await vals();
+      check('14ה מהמזכירה עם אישור: אותו חלון אישור, דנה, אפריל', !!t && v.sub === 'psA' && v.mon === '2025-04' && +v.net === 7100, [t, v]);
+      await submit(); t = await waitOk('2 מתוך 2'); v = await vals();
+      check('14ו עמוד שלא זוהה ← לא משויך, אפשר לדלג', v.sub === '' && /לא זוהה עובד/.test(v.notes), v);
+      await pg.click('#dlg [data-a=pslSkip]'); await sleep(400);
+      const dn = await pg.evaluate(() => window.__done);
+      check('14ז בסוף – done עם התלוש שנשמר בלבד', Array.isArray(dn) && dn.length === 1 && (await psl()).some((p) => p.id === dn[0] && p.mon === '2025-04'), dn);
+      await pg.evaluate((ids) => window.pslUndoSec(ids), dn); }
     const lg = await pg.evaluate(() => window.__log.filter((l) => /7,?412|9,?250|420\.75|601\.28|5,?100|023456789/.test(l)));
     check('9ד אין נתוני תלוש ביומן (console)', lg.length === 0, lg);
     check('10 אין שגיאות JS', pg.__errors.length === 0, pg.__errors);

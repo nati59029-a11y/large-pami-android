@@ -5,6 +5,8 @@
 //  - מסמך חדש מאותו שולח נכנס לבד, עם "ביטול ההכנסה"; אחרי ביטול – לא נכנס שוב לבד.
 //  - שולח לא מאומת – לא לפי ההוראה.
 //  - "הוראה למזכירה" לספק של הוצאה קבועה: החשבונית נכנסת ומאשרת את החודש במסך ההוצאות הקבועות.
+//  שלב 2 (26.11.2026): הוראה בכתיבה חופשית (פירוש → החלון עם הבחירה; שאלה עם כפתורי בחירה), "לדחות תמיד" באישור כפול + שחזור,
+//  כרטיס "תלושי שכר" (פיצול במודול התלושים, "לזכור?"), "נכנס לבד" אחרי אישור ראשון, מה שלא זוהה – נשאר, וביטול הקליטה.
 // שימוש: node ui-sec-rules.js <www-dir>
 const H = require('./harness');
 let fail = 0;
@@ -12,7 +14,8 @@ const check = (name, ok, info) => { if (!ok) fail++; console.log((ok ? 'עבר  
 const BIZ = 'biz-o';
 const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose: true, secretary: true };
 const hx = (c) => 'f' + c.repeat(40);
-const ID = { U1: hx('1'), U2: hx('2'), U3: hx('3'), U4: hx('4'), UA: hx('5'), P1: hx('6'), U5: hx('7') };
+const ID = { U1: hx('1'), U2: hx('2'), U3: hx('3'), U4: hx('4'), UA: hx('5'), P1: hx('6'), U5: hx('7'), PS1: hx('a'), PS2: hx('b'), PS3: hx('c') };
+const ACC = 'payroll@acc.example';
 const NEW = 'office@new.example';
 
 function items(now) {
@@ -26,6 +29,7 @@ function items(now) {
     b(ID.P1, { f: f({ supplier: 'פרטנר', num: 'P-11', total: 155, date: '2026-11-05' }), src: [{ ch: 'mail', from: 'thankyou@partner.example', name: 'פרטנר', t: now }] }),
   ];
   // כרטיסים נוספים לבדיקת הגלילה
+  L.push(b(ID.PS1, { k: 'psl', pslBy: 'name', fn: 'תלושי שכר 10-2026.pdf', pages: 3, why: ['type'], f: {}, src: [{ ch: 'mail', from: ACC, name: 'רו"ח', t: now }] }));
   for (let i = 0; i < 8; i++) L.push(b('x' + String(i).repeat(40), { src: [{ ch: 'wa', from: '97250000000' + i, name: 'ש' + i, t: now }], f: f({ num: 'Z-' + i, total: 10 + i }) }));
   return L;
 }
@@ -54,6 +58,8 @@ async function open(browser, www, o) {
       if (body.op === 'list') return ok({ ok: true, items: !Q.ready ? [] : Q.L.filter((i) => i.st !== 'rej'), cfg: Q.cfg, stop: false, br: null });
       if (body.op === 'file') return ok({ ok: true, id: body.id, k: 0, np: 1, mime: 'application/pdf', d: Buffer.from('%PDF-1.4\n%%EOF').toString('base64') });
       if (body.op === 'sups') return ok({ ok: true, n: (body.sups || []).length });
+      if (body.op === 'rule') return ok(Object.assign({ ok: true }, Q.rule || {}));
+      if (body.op === 'cfg') return ok({ ok: true, cfg: Q.cfg });
     }
     if (n === 'secDecide') {
       const x = Q.L.find((i) => i.id === body.id);
@@ -61,6 +67,8 @@ async function open(browser, www, o) {
       if (body.op === 'claim') { if (body.mode === 'auto' && !x.el) return no('not-eligible'); if (x.st !== 'new') return no('already'); Object.assign(x, { st: 'cl', mine: true, dev: body.dev, mode: body.mode }); return ok({ ok: true, id: x.id, item: x }); }
       if (body.op === 'done') { Object.assign(x, { st: 'ok', auto: x.mode === 'auto', mineOk: true }); return ok({ ok: true }); }
       if (body.op === 'rej') { x.st = 'rej'; return ok({ ok: true }); }
+      if (body.op === 'release') { if (x.st === 'cl') Object.assign(x, { st: 'new', mine: false }); return ok({ ok: true }); }
+      if (body.op === 'unrej') { Object.assign(x, { st: 'new', hold: 'undo' }); return ok({ ok: true }); }
       if (body.op === 'undo') { Object.assign(x, { st: 'new', el: false, hold: 'undo', mineOk: false }); return ok({ ok: true }); }
       return ok({ ok: true });
     }
@@ -137,6 +145,8 @@ const txOf = (page, id) => page.evaluate((id) => { const t = S.tx.find((z) => z.
 
   // 4. הוראה לספק של הוצאה קבועה
   await page.click(card(ID.P1) + ' [data-a=secIvRule]'); await H.settle(page, 400);
+  check(`${w}: "הוראה למזכירה" – כתיבה חופשית קודם, ובחירה מהרשימה`, !!(await page.$('#dlg form[data-f=secIvAi] textarea')) && !!(await page.$('#dlg [data-a=secIvRuleL]')));
+  await page.click('#dlg [data-a=secIvRuleL]'); await H.settle(page, 400);
   await page.selectOption('#dlg select[name=sub]', 'sf');
   await page.click('#dlg form[data-f=secIvRule] button.grow:not([type])'); await H.settle(page, 2500);
   const tp = await txOf(page, ID.P1);
@@ -144,6 +154,73 @@ const txOf = (page, id) => page.evaluate((id) => { const t = S.tx.find((z) => z.
   check(`${w}: הוצאה קבועה – החשבונית נכנסה ואישרה את החודש`, tp && tp.sub === 'sf' && tp.amt === 155 && fx && fx.e === tp.id && tp.fx === 'tpf', { tp, fx });
   const rl = await page.evaluate(() => { const d = document.getElementById('secIvRl'); return d ? d.textContent : ''; });
   check(`${w}: רשימת "ההוראות שלי למסמכים" מציגה 2 הוראות`, /\(2\)/.test(rl) && /פרטנר/.test(rl), rl.slice(0, 200));
+  // 5. שלב 2: כתיבה חופשית – הוצאה קבועה → החלון של שלב 1 עם הבחירה (לא נשמר עד "שמירה")
+  const X0 = 'x' + '0'.repeat(40), X1 = 'x' + '1'.repeat(40);
+  Q.rule = { act: 'fix', sub: 'sf' };
+  await page.click(card(X0) + ' [data-a=secIvRule]'); await H.settle(page, 300);
+  await page.fill('#dlg textarea[name=t]', 'תמיד לפרטנר'); await page.click('#dlg form[data-f=secIvAi] button:not([type])'); await H.settle(page, 900);
+  const rb = last(bodies, 'secInv', (b) => b.op === 'rule');
+  const f5 = await page.evaluate(() => ({ sel: (document.querySelector('#dlg select[name=sub]') || {}).value, t: document.getElementById('dlg').innerText }));
+  check(`${w}: כתיבה חופשית – נשלחו ההוראה והרשימה (ספק / הוצאה קבועה)`, rb && rb[1].text === 'תמיד לפרטנר' && rb[1].subs.some((x) => x.id === 'sf' && x.k === 'fixed') && rb[1].subs.some((x) => x.id === 's1' && x.k === 'sup'), rb && rb[1]);
+  check(`${w}: כתיבה חופשית – נפתח החלון עם מה שהמזכירה הבינה`, f5.sel === 'sf' && /המזכירה הבינה/.test(f5.t), f5);
+  check(`${w}: כתיבה חופשית – לא נשמר לפני "שמירה"`, !(await page.evaluate(() => S.ivR['w:972500000000'])));
+  await page.evaluate(() => closeDlg());
+  // 6. שאלה אחת עם כפתורי בחירה
+  Q.rule = { q: 'לאיזה ספק להכניס?', opts: ['s1', 'sf'] };
+  await page.click(card(X0) + ' [data-a=secIvRule]'); await H.settle(page, 300);
+  await page.fill('#dlg textarea[name=t]', 'לספק ההוא'); await page.click('#dlg form[data-f=secIvAi] button:not([type])'); await H.settle(page, 900);
+  const f6 = await page.evaluate(() => ({ t: document.getElementById('dlg').innerText, n: document.querySelectorAll('#dlg [data-a=secIvAiPick]').length }));
+  check(`${w}: לא ברור – המזכירה שואלת שאלה אחת עם כפתורי בחירה`, /לאיזה ספק להכניס/.test(f6.t) && f6.n === 2, f6);
+  await page.click('#dlg [data-a=secIvAiPick][data-s=s1]'); await H.settle(page, 400);
+  check(`${w}: בחירה בתשובה – החלון עם הספק שנבחר`, (await page.evaluate(() => (document.querySelector('#dlg select[name=sub]') || {}).value)) === 's1');
+  await page.evaluate(() => closeDlg());
+  // 7. "לדחות תמיד" – אישור כפול, נדחה, רשימת "נדחו" ושחזור
+  Q.rule = { act: 'rej' };
+  await page.click(card(X1) + ' [data-a=secIvRule]'); await H.settle(page, 300);
+  await page.fill('#dlg textarea[name=t]', 'תמיד לדחות'); await page.click('#dlg form[data-f=secIvAi] button:not([type])'); await H.settle(page, 900);
+  const a1 = await page.evaluate(() => document.getElementById('dlg').innerText);
+  await page.click('#dlg [data-a=yes]'); await H.settle(page, 400);
+  const a2 = await page.evaluate(() => document.getElementById('dlg').innerText);
+  check(`${w}: "לדחות תמיד" – אישור כפול`, /לדחות תמיד/.test(a1) && /אישור שני/.test(a2), [a1.slice(0, 120), a2.slice(0, 160)]);
+  await page.click('#dlg [data-a=yes]'); await H.settle(page, 1800);
+  const r7 = await page.evaluate((id) => ({ R: S.ivR['w:972500000001'], J: S.ivRj && S.ivRj[id] }), X1);
+  check(`${w}: "לדחות תמיד" – ההוראה נשמרה והמסמך נדחה`, r7.R && r7.R.rej === 1 && r7.J && Q.L.find((i) => i.id === X1).st === 'rej' && !!last(bodies, 'secDecide', (b) => b.op === 'rej' && b.id === X1), r7);
+  await reload(page);
+  check(`${w}: רשימת "נדחו לפי ההוראה" עם שחזור`, !!(await page.$('#secIvRj [data-a=secIvUnrej][data-id="' + X1 + '"]')));
+  await page.evaluate(() => { document.getElementById('secIvRj').open = true; });
+  await page.click('#secIvRj [data-a=secIvUnrej]'); await H.settle(page, 1500);
+  await reload(page); await H.settle(page, 800);
+  check(`${w}: שחזור – המסמך חזר ולא נדחה שוב לבד`, Q.L.find((i) => i.id === X1).st === 'new' && !!(await page.$(card(X1))) && !!last(bodies, 'secDecide', (b) => b.op === 'unrej'), Q.L.find((i) => i.id === X1).st);
+  // 8. תלושי שכר: כרטיס, פיצול במודול התלושים, "לזכור?"
+  const c8 = await page.evaluate((s) => { const c = document.querySelector(s); return c ? { t: c.innerText, psl: !!c.querySelector('[data-a=secIvPsl]'), scan: !!c.querySelector('[data-a=secIvScan]'), ed: !!c.querySelector('[data-a=secIvEd]') } : null; }, card(ID.PS1));
+  check(`${w}: כרטיס "תלושי שכר" – פיצול ושיוך, "זה לא תלוש", בלי "פתיחה והזנה"`, c8 && /תלושי שכר/.test(c8.t) && c8.psl && c8.scan && !c8.ed, c8);
+  await page.evaluate(() => { window.__pf = []; window.pslFromSec = async (f, o) => { window.__pf.push([f.name, f.type, f.size]); await o.done(['pslA', 'pslB']); }; });
+  await page.click(card(ID.PS1) + ' [data-a=secIvPsl]'); await H.settle(page, 1500);
+  const p8 = await page.evaluate((id) => ({ pf: window.__pf, P: S.ivPs && S.ivPs[id], q: document.getElementById('dlg').open ? document.getElementById('dlg').innerText : '' }), ID.PS1);
+  check(`${w}: תלושים – הקובץ הועבר למודול התלושים, והמסמך סומן כטופל`, p8.pf.length === 1 && p8.pf[0][1] === 'application/pdf' && p8.P && p8.P.ids.length === 2 && Q.L.find((i) => i.id === ID.PS1).st === 'ok', p8);
+  check(`${w}: תלושים – "לזכור?" אחרי הפעם הראשונה`, /לזכור/.test(p8.q) && /תלושי שכר/.test(p8.q), p8.q.slice(0, 200));
+  await page.click('#dlg [data-a=yes]'); await H.settle(page, 800);
+  const r8 = await page.evaluate((k) => S.ivR[k], 'm:' + ACC);
+  check(`${w}: תלושים – ההוראה נשמרה (אחרי אישור ראשון) ונשלחה לשרת`, r8 && r8.psl === 1 && r8.ok === 1 && !!last(bodies, 'secInv', (b) => b.op === 'cfg' && b.psl === 'm:' + ACC && b.on === true), r8);
+  // 9. תלוש נוסף מאותו שולח – נכנס לבד כשהכול מזוהה; כשלא – נשאר לבדיקה
+  const base = Q.L.find((i) => i.id === ID.PS1);
+  Q.L.push(Object.assign({}, base, { id: ID.PS2, st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'snd', fn: 'slips-11.pdf' }), Object.assign({}, base, { id: ID.PS3, st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'snd', fn: 'slips-12.pdf' }), Object.assign({}, base, { id: hx('d'), st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'name', fn: 'slips-ua.pdf', ua: true }));
+  await page.evaluate((ids) => { window.__pa = []; window.pslAutoSec = async (f) => { window.__pa.push(f.name); return f.name === 'slips-11.pdf' ? ['pslC'] : null; }; }, null);
+  await reload(page); await H.settle(page, 1800);
+  const p9 = await page.evaluate((a) => ({ pa: window.__pa, P2: S.ivPs && S.ivPs[a[0]], P3: S.ivPs && S.ivPs[a[1]] }), [ID.PS2, ID.PS3]);
+  check(`${w}: תלוש מזוהה מהשולח – נכנס לבד`, p9.P2 && p9.P2.auto === 1 && Q.L.find((i) => i.id === ID.PS2).st === 'ok', p9);
+  check(`${w}: תלוש ממייל לא מאומת – לא נכנס לבד, גם עם הוראה`, !p9.pa.includes('slips-ua.pdf') && Q.L.find((i) => i.id === hx('d')).st === 'new', p9.pa);
+  check(`${w}: לפני השמירה – תפיסה בשרת`, bodies.filter((b) => b[0] === 'secDecide' && b[1].op === 'claim' && b[1].id === ID.PS2).length >= 1);
+  check(`${w}: תלוש שלא זוהה בוודאות – נשאר לבדיקה`, !p9.P3 && Q.L.find((i) => i.id === ID.PS3).st === 'new', p9);
+  await reload(page);
+  const c9 = await page.evaluate((s) => (document.querySelector(s) || {}).innerText || '', card(ID.PS3));
+  check(`${w}: התלוש שנשאר מסומן "לא כל התלושים זוהו"`, /לא כל התלושים זוהו/.test(c9), c9.slice(0, 200));
+  check(`${w}: יש "ביטול קליטת התלושים" למה שנכנס לבד`, !!(await page.$(card(ID.PS2) + ' [data-a=secIvPslUndo]')));
+  await page.evaluate(() => { window.__pu = []; window.pslUndoSec = (ids) => { window.__pu.push(ids); return { ok: true, n: ids.length }; }; });
+  await page.click(card(ID.PS2) + ' [data-a=secIvPslUndo]'); await H.settle(page, 300);
+  await page.click('#dlg [data-a=yes]'); await H.settle(page, 1500);
+  const u9 = await page.evaluate((id) => ({ pu: window.__pu, P: S.ivPs && S.ivPs[id], no: !!(S.ivRno && S.ivRno[id]) }), ID.PS2);
+  check(`${w}: ביטול – התלושים נמחקו, המסמך חזר לבדיקה ולא ייכנס שוב לבד`, u9.pu.length === 1 && u9.pu[0][0] === 'pslC' && !u9.P && u9.no && Q.L.find((i) => i.id === ID.PS2).st === 'new', u9);
   check(`${w}: לא נשלחה תפיסה במצב אוטומטי (רק ידני, כמו "בדיקה ואישור")`, !last(bodies, 'secDecide', (b) => b.op === 'claim' && b.mode === 'auto'));
   check(`${w}: בלי גלילה לרוחב`, (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1);
   check(`${w}: בלי שגיאות JS`, page.__errors.length === 0, page.__errors);

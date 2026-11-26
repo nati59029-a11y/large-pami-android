@@ -112,13 +112,14 @@ function payAnswer(body) {
   return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
 }
 const state = { payrule: null, bayscan: null, bayscanSeq: [], dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, invMaxImg: 0, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.payrule = null; state.bayscan = null; state.bayscanSeq = []; state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.invMaxImg = 0; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+function reset() { state.secrule = null; state.payrule = null; state.bayscan = null; state.bayscanSeq = []; state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.invMaxImg = 0; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
   if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
   if (typeof si === 'string' && si.startsWith('ORD-PARSE-V1')) return 'ordparse';
   if (typeof si === 'string' && si.startsWith('DR-REP-V1')) return 'dr'; // דיווח יומי (lib/prompts-dr.js)
+  if (typeof si === 'string' && si.startsWith('SEC-INV-RULE-V1')) return 'secrule'; // 26.11.2026: הוראה למזכירה בכתיבה חופשית (secretary-inv.js ruleOp)
   if (typeof si === 'string' && si.startsWith('PAY-RULE-V1')) return 'payrule'; // כלל שכר בכתב חופשי (lib/pay-ai.js)
   if (typeof si === 'string' && si.startsWith('POS-OCR-V1')) return 'posocr'; // POS:M6 – מחירון מצילום (functions/pos-ocr.js)
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
@@ -171,6 +172,7 @@ function drAnswer(body) {
 function rawAnswer(kind, body) {
   if (kind === 'dr') return drAnswer(body || {});
   if (kind === 'payrule') return payAnswer(body || {});
+  if (kind === 'secrule') { let r = state.secrule; try { if (typeof r === 'function') r = r(body); } catch (e) { r = 'mock error'; } return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r || {}) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage }; }
   if (kind === 'sec') return secAnswer(body || {});
   if (kind === 'ordparse') return ordAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
