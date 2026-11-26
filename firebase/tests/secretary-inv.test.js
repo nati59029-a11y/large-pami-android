@@ -593,6 +593,84 @@ describe('קצה לקצה: ווצאפ → תור → זיהוי (אמולטור 
 });
 
 // ---------------------------------------------------------------------------------
+// 26.11.2026 (בעל העסק), שלב 2 של "הוראות למזכירה": תלושי שכר והוראה בכתיבה חופשית
+// ---------------------------------------------------------------------------------
+describe('26.11.2026: תלושי שכר – לא נסרקים בשרת, כרטיס psl', () => {
+  beforeEach(() => seed());
+  it('קובץ ששמו "תלוש" – כרטיס psl בלי סריקה ובלי מכסה; "שכר טרחה" – חשבונית רגילה', async () => {
+    const x = await arrive(pdf(2), RAW.inv(), { fn: 'תלושי שכר 10-2026.pdf' });
+    assert.equal(x.k, 'psl'); assert.equal(x.st, 'new'); assert.equal(x.pslBy, 'name'); assert.equal(x.el, false);
+    assert.equal(CLS, 0, 'לא נשלח לזיהוי'); assert.equal(await get(`b/${A}/scan_usage/_sec`), null, 'לא נספר במכסה');
+    assert.ok(x.np >= 1, 'הקובץ נשמר (לפיצול במכשיר)');
+    const y = await arrive(pdf(1), RAW.inv({ number: 'ST1' }), { fn: 'שכר טרחה.pdf' });
+    assert.equal(y.k, 'inv'); assert.equal(CLS, 1);
+  });
+  it('שולח תלושים (cfg psl) – כל קובץ ממנו psl; מייל לא מאומת – לא לפי השולח; ביטול – חוזר לרגיל', async () => {
+    const c = await call('secInv', M1, { op: 'cfg', psl: 'wa:' + SUP_WA, on: true });
+    assert.ok(c.ok, c.msg); assert.deepEqual(c.r.cfg.psl, ['wa:' + SUP_WA]);
+    assert.equal((await call('secInv', M1, { op: 'list' })).r.cfg.psl[0], 'wa:' + SUP_WA);
+    const x = await arrive(pdf(3), RAW.inv());
+    assert.equal(x.k, 'psl'); assert.equal(x.pslBy, 'snd'); assert.equal(CLS, 0);
+    assert.ok((await call('secInv', M1, { op: 'cfg', psl: 'm:' + SUP_MAIL, on: true })).ok);
+    const u = await arrive(pdf(1), RAW.inv({ number: 'UA1' }), { ch: 'mail', from: SUP_MAIL, auth: false });
+    assert.notEqual(u.k, 'psl', 'מייל לא מאומת – לא לפי השולח');
+    assert.ok((await call('secInv', M1, { op: 'cfg', psl: 'wa:' + SUP_WA, on: false })).ok);
+    assert.equal((await arrive(pdf(1), RAW.inv({ number: 'N1' }))).k, 'inv');
+    assert.equal((await call('secInv', M1, { op: 'cfg', psl: 'bad key', on: true })).reason, 'bad-psl');
+    assert.equal((await call('secInv', E1, { op: 'cfg', psl: 'wa:' + SUP_WA, on: true })).ok, false, 'עובד – לא');
+  });
+  it('"זה לא תלוש" – סריקה כחשבונית (scan); הכרטיס יוצא מ-psl', async () => {
+    const x = await arrive(pdf(1), RAW.inv(), { fn: 'payslip.pdf' });
+    assert.equal(x.k, 'psl');
+    const r = await call('secDecide', M1, { op: 'scan', id: x.id });
+    assert.ok(r.ok, r.msg);
+    const y = await get(`b/${A}/sec_inv/${x.id}`); assert.equal(y.st, 'q'); assert.equal(y.k, 'q'); assert.equal(y.long, false); assert.equal(y.pslBy, undefined);
+  });
+  it('תלוש – אפשר לתפוס ולסמן כטופל (claim + done) כמו כל מסמך', async () => {
+    const x = await arrive(pdf(1), RAW.inv(), { fn: 'תלוש.pdf' });
+    const c = await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'man', dev: 'devA0001' });
+    assert.ok(c.ok, c.msg); assert.equal(c.r.item.k, 'psl');
+    assert.ok((await call('secDecide', M1, { op: 'done', id: x.id, dev: 'devA0001' })).ok);
+    assert.equal((await get(`b/${A}/sec_inv/${x.id}`)).st, 'ok');
+  });
+});
+
+// הפונקציה נקראת בתוך תהליך הבדיקה (call), והמודל המדומה (gemini-mock) רץ כאן – לכן לא תלוי באמולטור הפונקציות
+describe('26.11.2026: הוראה בכתיבה חופשית (secInv op rule)', () => {
+  const GM = require('./gemini-mock');
+  before(async () => { process.env.GEMINI_API_BASE = process.env.GEMINI_API_BASE || 'http://127.0.0.1:9799'; process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'dummy-gemini-key-for-emulator'; await GM.start(); });
+  after(async () => { await GM.stop(); });
+  beforeEach(async () => { await seed(); GM.reset(); });
+  const subs = [{ id: 's1', n: 'ספק א', k: 'sup' }, { id: 'el1', n: 'חשמל', k: 'fixed' }];
+  it('פירוש להוראה: הוצאה קבועה, ספק, תלושים, דחייה – רק מתוך הרשימה', async () => {
+    GM.state.secrule = { act: 'exp', i: 1 };
+    let r = await call('secInv', M1, { op: 'rule', text: 'תמיד לחשמל', snd: '+972', subs });
+    assert.ok(r.ok, r.msg); assert.equal(r.r.act, 'fix', 'הסוג לפי הרשימה'); assert.equal(r.r.sub, 'el1');
+    GM.state.secrule = { act: 'psl' };
+    assert.equal((await call('secInv', M1, { op: 'rule', text: 'אלה תלושי שכר', subs })).r.act, 'psl');
+    GM.state.secrule = { act: 'rej' };
+    assert.equal((await call('secInv', M1, { op: 'rule', text: 'תמיד לדחות', subs })).r.act, 'rej');
+    GM.state.secrule = { act: 'exp', i: 9 };
+    r = await call('secInv', M1, { op: 'rule', text: 'לספק ההוא', subs });
+    assert.ok(r.r.q, 'ספק שלא ברשימה – שאלה'); assert.equal(r.r.act, undefined);
+    GM.state.secrule = { q: 'לאיזה ספק?', opts: [0, 1, 7] };
+    r = await call('secInv', M1, { op: 'rule', text: 'משהו', subs });
+    assert.equal(r.r.q, 'לאיזה ספק?'); assert.deepEqual(r.r.opts, ['s1', 'el1']);
+    GM.state.secrule = 'not json';
+    assert.ok((await call('secInv', M1, { op: 'rule', text: 'משהו', subs })).r.q, 'תשובה לא תקינה – שאלה');
+    const rq = GM.state.requests.filter((x) => x.kind === 'secrule');
+    assert.equal(rq.length, 6);
+  });
+  it('קלט לא תקין, עובד, ומכסה יומית', async () => {
+    assert.equal((await call('secInv', M1, { op: 'rule', text: 'x', subs })).reason, 'bad-text');
+    assert.equal((await call('secInv', M1, { op: 'rule', text: 'תמיד לחשמל', subs: 'x' })).reason, 'bad-subs');
+    assert.equal((await call('secInv', E1, { op: 'rule', text: 'תמיד לחשמל', subs })).ok, false);
+    await put(`b/${A}/sec_cfg/inv_ai`, { day: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date()), n: 40 });
+    assert.equal((await call('secInv', M1, { op: 'rule', text: 'תמיד לחשמל', subs })).reason, 'rule-limit');
+  });
+});
+
+// ---------------------------------------------------------------------------------
 // שלב 7 – תיקון 1 (אחרי בדיקה עצמאית, סבב 1): בדיקה לכל ליקוי
 // ---------------------------------------------------------------------------------
 const b64u = (x) => x.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
