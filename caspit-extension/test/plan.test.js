@@ -19,7 +19,8 @@ function drive(run, fn, maxN) {
 test('ריצה מלאה: כל השלבים לפי הסדר, יום מכירות אחרי יום', () => {
   const { r, seen } = drive(run0(), (s, run) => { if (s === 'hello') run.days = ['2026-11-16', '2026-11-17']; return { ok: 1 }; });
   assert.equal(r.st, 'ok');
-  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'sales:2026-11-16', 'sales:2026-11-17', 'hours', 'hk', 'exportNew', 'exportPrice', 'report']);
+  // 0.1.23: שלבי המוצרים ראשונים (לפני כל החלפת סניף במכירות)
+  assert.deepEqual(seen, ['hello', 'login', 'catalog', 'catPreview', 'catApply', 'exportNew', 'exportPrice', 'exportUpd', 'sales:2026-11-16', 'sales:2026-11-17', 'hours', 'hk', 'report']);
   assert.ok(r.info.sales['2026-11-16']);
 });
 
@@ -132,4 +133,12 @@ test('0.1.19 tfOf: נכשל → קוד; רץ יותר מ-20 דקות → stuck; 
   assert.equal(P.tfOf({ slot: null, st: 'fail', code: 'today-off', at: now }, now), null, 'today-off – בלי slot');
   assert.equal(P.tfOf({ slot: '2026-11-24', st: 'fail', code: 'tab' }, now), null, 'slot לא בצורה של שעה');
   assert.equal(P.tfOf(null, now), null);
+});
+
+test('0.1.23 tfOf: העדכון השעתי הצליח אבל החזרה לסניף שהיה מוצג נכשלה → branch-back; הצליח בלי זה → לא מדווחים', () => {
+  const now = Date.parse('2026-11-26T10:00:00Z');
+  assert.deepEqual(P.tfOf({ slot: '2026-11-26 12', st: 'ok', at: now, back: { code: 'branch-back', br: 'נחל לכיש' } }, now), { s: '2026-11-26 12', c: 'branch-back' });
+  assert.equal(P.tfOf({ slot: '2026-11-26 12', st: 'ok', at: now }, now), null);
+  assert.ok(P.msgOf('branch-back') && !/יהודה הנשיא/.test(P.msgOf('branch-back')), 'בלי "להחזיר ליהודה הנשיא"');
+  for (const c of ['branch-switch', 'branch-same', 'branch-sales', 'branch-restore', 'hours-branch']) assert.ok(!/יהודה הנשיא/.test(P.msgOf(c)), c);
 });

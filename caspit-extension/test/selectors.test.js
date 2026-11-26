@@ -327,12 +327,55 @@ test('branchCur / branchPick (0.1.13): הסניף הנבחר מהטקסט, פת�
   const cur = () => page.evaluate((c) => window.CxSel.branchCur(document, c), BR);
   assert.deepEqual(await cur(), { found: true, cur: 'יהודה הנשיא', opts: ['יהודה הנשיא', 'נחל לכיש'] });
   const r = await page.evaluate((c) => window.CxSel.branchPick(document, c, 'נחל לכיש', { win: window, sleep: (ms) => new Promise((x) => setTimeout(x, ms)) }), BR);
-  assert.deepEqual(r, { ok: true });
+  assert.deepEqual(r, { ok: true, ev: ['focus', 'click'] }); // 0.1.23: האירועים שנשלחו (לאבחון)
   assert.equal((await cur()).cur, 'נחל לכיש');
   assert.deepEqual([...new Set(await ev())], ['focus', 'pick:נחל לכיש']);
   assert.equal((await page.evaluate((c) => window.CxSel.branchPick(document, c, 'סניף אחר', { win: window, sleep: (ms) => new Promise((x) => setTimeout(x, ms)) }), BR)).why, 'no-opt');
   await page.evaluate(() => { document.getElementById('store-switch-field').remove(); });
   assert.deepEqual(await cur(), { found: false });
+});
+
+// 0.1.23 (תקלה 26.11): חלון אישור אחרי הבחירה – נלחץ "אישור" רק עם confirm ורק בחלון שמזכיר סניף/חנות; select רגיל – השמה + change; branchDiag בלי נתונים פרטיים
+test('branchPick / branchDiag (0.1.23): חלון אישור של החלפת חנות, select רגיל, ואבחון מסונן', async () => {
+  await page.evaluate((h) => {
+    window.ev = [];
+    const d = document.createElement('div'); d.id = 'brx'; d.innerHTML = h; document.body.appendChild(d);
+    const ms = d.querySelector('.multiselect'), w = d.querySelector('.multiselect__content-wrapper');
+    ms.addEventListener('focus', () => { w.style.display = 'block'; });
+    d.querySelectorAll('.multiselect__option').forEach((o) => o.addEventListener('click', () => {
+      w.style.display = 'none';
+      const dl = document.createElement('div'); dl.setAttribute('role', 'dialog'); dl.id = 'cdl';
+      dl.innerHTML = '<p>האם לעבור לחנות ' + o.textContent + '? (ישראל ישראלי)</p><button type="button" id="cok">אישור</button><button type="button">ביטול</button>';
+      document.body.appendChild(dl);
+      dl.querySelector('#cok').onclick = () => { window.ev.push('confirm:' + o.textContent); d.querySelector('.selected-store').textContent = "לארג' פעמי-" + o.textContent; dl.remove(); };
+    }));
+  }, BR_HTML);
+  const ctx = '{ win: window, sleep: (ms) => new Promise((x) => setTimeout(x, ms)) }';
+  const pick = (c, nm) => page.evaluate(([c0, n0, cx]) => window.CxSel.branchPick(document, c0, n0, eval('(' + cx + ')')), [c, nm, ctx]);
+  // בלי confirm – לא נוגעים בחלון (התנהגות 0.1.22)
+  assert.deepEqual(await pick(BR, 'נחל לכיש'), { ok: true, ev: ['focus', 'click'] });
+  // דף בדיקה בלי localStorage (about:blank) – חלון מדומה עם שני מפתחות
+  const dg = await page.evaluate((c) => { const K = ['storeId', 'owner_phone']; return window.CxSel.branchDiag(document, c, { localStorage: { length: 2, key: (i) => K[i] }, sessionStorage: { length: 0, key: () => null } }); }, BR);
+  assert.deepEqual([dg.found, dg.ms, dg.sel, dg.cur, dg.nOpt], [true, true, false, 'יהודה הנשיא', 2]);
+  assert.deepEqual(dg.dlg, [{ kw: true, btns: ['אישור', 'ביטול'] }]);
+  assert.deepEqual(dg.keys, ['l:storeId'], 'רק שמות מפתחות שקשורים לחנות, בלי ערכים');
+  assert.ok(!JSON.stringify(dg).includes('ישראל') && !JSON.stringify(dg).includes('050'), 'בלי טקסט חופשי מהחלון');
+  await page.evaluate(() => document.getElementById('cdl').remove());
+  // עם confirm – לוחצים "אישור" בחלון שמזכיר חנות
+  assert.deepEqual(await pick(Object.assign({ confirm: true }, BR), 'נחל לכיש'), { ok: true, ev: ['focus', 'click', 'confirm'] });
+  assert.deepEqual(await ev(), ['confirm:נחל לכיש']);
+  assert.equal((await page.evaluate((c) => window.CxSel.branchCur(document, c), BR)).cur, 'נחל לכיש');
+  // חלון שלא מזכיר סניף/חנות – לא לוחצים
+  await page.evaluate(() => { window.ev = []; const d = document.getElementById('brx'); d.querySelectorAll('.multiselect__option').forEach((o) => { const c = o.cloneNode(true); o.replaceWith(c); c.addEventListener('click', () => { const dl = document.createElement('div'); dl.setAttribute('role', 'dialog'); dl.id = 'odl'; dl.innerHTML = '<p>למחוק את הקובץ?</p><button type="button" id="ook">אישור</button>'; document.body.appendChild(dl); dl.querySelector('#ook').onclick = () => window.ev.push('bad-confirm'); }); }); });
+  assert.deepEqual(await pick(Object.assign({ confirm: true }, BR), 'יהודה הנשיא'), { ok: true, ev: ['focus', 'click'] });
+  assert.deepEqual(await ev(), []);
+  await page.evaluate(() => { document.getElementById('odl').remove(); document.getElementById('brx').remove(); });
+  // select רגיל בתוך הפקד
+  await page.evaluate(() => { window.ev = []; const d = document.createElement('div'); d.id = 'store-switch-field'; d.innerHTML = '<select><option value="1">יהודה הנשיא</option><option value="2">נחל לכיש</option></select><span class="multiselect__single">יהודה הנשיא</span>'; document.body.appendChild(d); d.querySelector('select').addEventListener('change', (e) => window.ev.push('change:' + e.target.value)); });
+  assert.deepEqual(await pick(BR, 'נחל לכיש'), { ok: true, ev: ['select'] });
+  assert.deepEqual(await ev(), ['change:2']);
+  assert.equal((await page.evaluate((c) => window.CxSel.branchDiag(document, c, window), BR)).sel, true);
+  await page.evaluate(() => document.getElementById('store-switch-field').remove());
 });
 
 test('lists / errDialogs / rowScan (0.1.13, היכרות): רשימות קצרות בלי פקד הסניף; חלון שגיאה נסגר רק ב"אישור"; שורות בלי טקסט תאים', async () => {

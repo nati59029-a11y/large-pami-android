@@ -757,9 +757,12 @@ for (const [mode, evx] of [['drop', 'drop'], ['xls', 'add:application/vnd.ms-exc
     await Promise.all(ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url())).map((p) => p.evaluate(() => { window.ev = []; }).catch(() => {})));
     await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
     srv.exportN.new = 0; srv.exportN.price = 2;
+    // 0.1.23: ההעלאות לכספית לפני המכירות – בלי ימי מכירות, כדי שהחלפת הסניף (טעינה מחדש של הדף) לא תמחק את window.ev
+    const d0 = srv.days; srv.days = [];
     const nImp = imports.length, t0 = Date.now();
     await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
     const s = await waitRun(t0);
+    srv.days = d0;
     assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
     assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
     assert.equal(imports.at(-1).type, 'price');
@@ -953,7 +956,7 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(await tt(W), null);
   srv.caps = ['today', 'uq'];
   await sw.evaluate(() => self.__cxTest.pollOnce());
-  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false, tf: false });
+  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false, tf: false, prod30: false });
   const c0 = cnt(), H0 = (await store()).salesHash || {};
   const r = await tt(W);
   assert.equal(r && r.st, 'ok', JSON.stringify(r));
@@ -1003,7 +1006,12 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
 // ---------- 0.1.13: סניפים ----------
 const store0 = () => caspitPage().evaluate(() => localStorage.getItem('store') || 'יהודה הנשיא');
 const picks = () => caspitPage().evaluate(() => localStorage.getItem('brPicks') || '');
-const ls = (o) => caspitPage().evaluate((x) => { for (const [k, v] of Object.entries(x)) { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } }, o);
+// 0.1.23: שינוי store – טוענים את הדף מחדש, כדי שפקד הסניף יציג את הסניף החדש (התוסף כבר לא מחזיר ליהודה הנשיא בתחילת ריצה – מתחיל מהסניף שמוצג)
+const ls = async (o) => {
+  const pg = caspitPage();
+  await pg.evaluate((x) => { for (const [k, v] of Object.entries(x)) { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } }, o);
+  if ('store' in o) for (const p of ctx.pages().filter((x) => /^https:\/\/caspit\.valu\.co\.il\/bo/.test(x.url()))) { await p.reload().catch(() => {}); await p.waitForLoadState().catch(() => {}); } // כל הלשוניות (גם של התוסף)
+};
 async function syncOneDay() {
   srv.days = [days[1]];
   const n0 = srv.calls.length, t0 = Date.now();
@@ -1035,27 +1043,63 @@ test('0.1.13 (ג) כישלון באמצע נחל לכיש (אין "צור קוב
     assert.equal(await store0(), 'יהודה הנשיא');
   } finally { await ls({ nlNoBtn: null }); }
 });
-test('0.1.13 (ד) מעבר לנחל לכיש לא נקלט → branch-switch (יהודה הנשיא נשלח); החזרה ליהודה הנשיא נכשלת → branch-restore, הריצה נעצרת', async () => {
+test('0.1.13 (ד) → 0.1.23: מעבר לנחל לכיש לא נקלט → branch-switch (יהודה הנשיא נשלח, המוצרים סונכרנו, אבחון הפקד); החזרה ליהודה הנשיא נכשלת → branch-back: לא עוצר, הכול נשלח; הריצה הבאה מתחילה מהסניף שמוצג', async () => {
   await ls({ brFail: 'switch', brPicks: null });
   let r = await syncOneDay();
   assert.equal(r.s.st.lastRun.code, 'branch-switch', JSON.stringify(r.s.st.lastRun));
-  assert.equal(r.sales.length, 1); assert.ok(r.sales[0].lines.every((l) => l.bk === '1'));
+  assert.equal(r.rep.info.prod, true, 'שלבי המוצרים הסתיימו לפני המכירות');
+  const brd = r.rep.info.flags.br.brd;
+  assert.ok(brd && brd.want === 'נחל לכיש' && brd.tries.length === 2, JSON.stringify(brd));
+  assert.deepEqual(brd.tries[0].ev, ['focus', 'click']); assert.equal(brd.tries[0].pre.cur, 'יהודה הנשיא'); assert.equal(brd.tries[0].shown, false);
   assert.equal(await store0(), 'יהודה הנשיא');
+  // סבב בדיקה 1 (ליקוי 1): ריצה שנכשלה רושמת failSlot גם כשהמוצרים הצליחו – אחרת tick מריץ שוב כל רבע שעה
+  const st1 = await store();
+  assert.ok(st1.st.failSlot && st1.st.failSlot === st1.run.slot, JSON.stringify([st1.st.failSlot, st1.run.slot]));
+  assert.ok(st1.st.prodAt >= st1.st.lastRun.at - 5000, 'וגם "מוצרים סונכרנו לאחרונה"');
   await ls({ brFail: 'restore', brPicks: null });
   try {
     r = await syncOneDay();
-    assert.equal(r.s.st.lastRun.st, 'fail'); assert.equal(r.s.st.lastRun.code, 'branch-restore', JSON.stringify(r.s.st.lastRun));
-    assert.equal(r.rep.err.code, 'branch-restore'); assert.equal(r.rep.st, 'fail');
-    assert.equal(r.sales.length, 0, 'החזרה נכשלה – לא שולחים את היום');
-    assert.ok(!r.s.st.lastRun.sum.sales[days[1]]);
-    assert.equal(await store0(), 'נחל לכיש', 'כספית נשארה בנחל לכיש (הבחירה ביהודה הנשיא לא נקלטה)');
-    // תחילת הריצה הבאה: הנבחר אינו יהודה הנשיא → מחזירים קודם (עכשיו מצליח), ואז הכול כרגיל
+    assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
+    assert.equal(r.rep.st, 'ok'); assert.equal(r.rep.info.flags.back.code, 'branch-back'); assert.equal(r.rep.info.flags.back.br, 'יהודה הנשיא');
+    assert.ok(r.s.st.lastRun.sum.sales[days[1]], 'היום נשלח');
+    assert.equal(await store0(), 'נחל לכיש', 'כספית נשארה בנחל לכיש');
+    // הריצה הבאה: בלי החזרה ליהודה הנשיא בהתחלה – מתחילים מנחל לכיש (המוצג), עוברים ליהודה הנשיא וחוזרים
     await ls({ brFail: null, brPicks: null });
     r = await syncOneDay();
     assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
-    assert.ok((await picks()).startsWith('יהודה הנשיא;'), 'קודם חזרה ליהודה הנשיא: ' + (await picks()));
-    assert.equal(await store0(), 'יהודה הנשיא');
+    assert.equal(await picks(), 'יהודה הנשיא;נחל לכיש;');
+    assert.equal(await store0(), 'נחל לכיש');
+    assert.equal(r.rep.info.flags.back, undefined);
   } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+});
+// סבב בדיקה 1 (ליקוי 7): בלי בסיס השוואה אמין לא פוסלים את הסניף השני ולא מסמנים את היום כנקלט
+test('סבב בדיקה 1 (ליקוי 7): פעם ראשונה על נחל לכיש בלי מכירות ובלי בסיס – היום לא נשלח ולא נחשב שנקלט (branch-unsure); עם בסיס שמור של יהודה הנשיא – נשלח', async () => {
+  nlMode = 'empty';
+  await sw.evaluate(() => chrome.storage.local.remove(['brRefs', 'brRef', 'salesHash']));
+  await ls({ store: 'נחל לכיש', brPicks: null });
+  try {
+    let r = await syncOneDay();
+    assert.equal(r.s.st.lastRun.code, 'branch-unsure', JSON.stringify(r.s.st.lastRun));
+    assert.equal(r.sales.length, 0, 'היום לא נשלח');
+    assert.ok(!r.rep.info.sales[days[1]], 'לא נחשב שנקלט – ייקלט בריצה הבאה');
+    assert.equal(await store0(), 'נחל לכיש');
+    await sw.evaluate(() => chrome.storage.local.set({ brRef: { bn: ['סניף א'], bk: ['1'] } })); // הבסיס הישן של יהודה הנשיא (עד 0.1.22)
+    r = await syncOneDay();
+    assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
+    assert.ok(r.rep.info.sales[days[1]]);
+    assert.equal(r.sales.length, 1); assert.ok(r.sales[0].lines.every((l) => l.bk === '1'));
+    assert.deepEqual((await store()).brRefs['יהודה הנשיא'], { bn: ['סניף א'], bk: ['1'] }, 'נשמר בסיס גם לסניף השני');
+  } finally { nlMode = 'rows'; await ls({ store: 'יהודה הנשיא', brPicks: null }); }
+});
+// 0.1.23 (השערה לתקלה 26.11): כספית שואלת "לעבור לחנות…?" – התוסף לוחץ "אישור" רק בחלון שמזכיר חנות/סניף (branch.switch.confirm)
+test('0.1.23 חלון אישור בהחלפת חנות (brFail=confirm): "אישור" נלחץ, נחל לכיש נשלח, חזרה ליהודה הנשיא', async () => {
+  await ls({ brFail: 'confirm', brPicks: null, brOk: null });
+  try {
+    const { s } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('brOk')), 'נחל לכיש;יהודה הנשיא;');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, brOk: null, store: 'יהודה הנשיא' }); }
 });
 // 0.1.22 – תקלה 25.11 בכספית האמיתית: השם החדש מופיע בפקד מיד, אבל הבחירה נשמרת רק כשכספית טוענת את הדף מחדש (אחרי כמה שניות).
 // עד 0.1.21 התוסף עבר למסך הדוח לפני כן → הדוח של "נחל לכיש" יצא של יהודה הנשיא (branch-same).
@@ -1223,7 +1267,7 @@ async function hrsOff() {
   await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'hrsSt']); await self.__cxTest.setupAlarms(); });
 }
 const byId = (up) => Object.fromEntries(up.emps.map((e) => [e.id, e]));
-test('0.1.14 שעות בסנכרון הלילי: אחרי המכירות ולפני ההעלאות לכספית, שני סניפים, רק עובדים עם שעות; גלילה ברשימה; בלי לחיצות אסורות; בלי שמות בדיווח', async () => {
+test('0.1.14 שעות בסנכרון הלילי: אחרי המכירות (0.1.23: וההעלאות לכספית לפני שתיהן), שני סניפים, רק עובדים עם שעות; גלילה ברשימה; בלי לחיצות אסורות; בלי שמות בדיווח', async () => {
   await hrsOn();
   try {
     const n0 = srv.calls.length;
@@ -1233,9 +1277,9 @@ test('0.1.14 שעות בסנכרון הלילי: אחרי המכירות ולפ�
     const up = hrsUps(n0);
     assert.equal(up.length, 2, JSON.stringify(up.map((u) => [u.br, u.m])));
     const iH = ix((c) => c.kind === 'hours'), iS = calls.map((c, i) => (c.op === 'upload' && c.kind === 'sales' ? i : -1)).filter((i) => i >= 0).pop(), iE = ix((c) => c.op === 'export');
-    assert.ok((iS === undefined || iS < iH) && iH < iE, `סדר: מכירות ${iS} → שעות ${iH} → העלאות לכספית ${iE}`);
+    assert.ok(iE < iH && (iS === undefined || iS < iH), `סדר (0.1.23): העלאות לכספית ${iE} → מכירות ${iS} → שעות ${iH}`);
     const sl = rep.steps.map((x) => x.s); // גם כשהמכירות של היום כבר נשלחו בריצה קודמת (אותו קובץ)
-    assert.ok(sl.lastIndexOf('sales') < sl.indexOf('hours') && sl.indexOf('hours') < sl.indexOf('exportNew'), sl.join(','));
+    assert.ok(sl.indexOf('exportUpd') < sl.indexOf('sales') && sl.lastIndexOf('sales') < sl.indexOf('hours'), sl.join(','));
     const [yh, nl] = up;
     assert.equal(yh.br, 'יהודה הנשיא'); assert.equal(nl.br, 'נחל לכיש'); assert.equal(yh.m, curYm()); assert.equal(nl.m, curYm());
     assert.deepEqual(yh.emps.map((e) => e.id).sort(), ['12', '15'], 'רק עובדים עם שעות; 15 – אחרי גלילה; 11 (לא פעיל) ו-14 (בלי שעות) – לא');
@@ -1285,7 +1329,7 @@ test('0.1.14 שעות כל 30 דקות (0.1.15: עד 23:00): רק החודש ה�
     for (const w of HRS_NAMES) assert.ok(!JSON.stringify(st).includes(w), 'שם / שעה בחלון התוסף: ' + w);
   } finally { await hrsOff(); }
 });
-test('0.1.14 שעות: כישלון בנחל לכיש → יהודה הנשיא נשלח, חזרה ליהודה הנשיא, hours-branch; החזרה נכשלת → branch-restore ודיווח', async () => {
+test('0.1.14 שעות: כישלון בנחל לכיש → יהודה הנשיא נשלח, חזרה ליהודה הנשיא, hours-branch; החזרה נכשלת (0.1.23) → branch-back: שני הסניפים נשלחו, בלי דיווח', async () => {
   await hrsOn({ hrsLink: '1', brFail: 'switch' });
   try {
     let n0 = srv.calls.length;
@@ -1297,10 +1341,10 @@ test('0.1.14 שעות: כישלון בנחל לכיש → יהודה הנשיא 
     await ls({ brFail: 'restore', brPicks: null });
     n0 = srv.calls.length;
     r = await sw.evaluate(() => self.__cxTest.hrsRun());
-    assert.equal(r.code, 'branch-restore', JSON.stringify(r));
-    assert.equal(hrsUps(n0).length, 0, 'החזרה נכשלה – לא שולחים');
-    const rp = srv.calls.slice(n0).filter((c) => c.op === 'report').at(-1);
-    assert.equal(rp && rp.err.code, 'branch-restore'); assert.equal(rp.err.step, 'hours');
+    assert.equal(r.st, 'ok', JSON.stringify(r)); assert.equal(r.back && r.back.code, 'branch-back'); assert.equal(r.back.br, 'יהודה הנשיא');
+    assert.deepEqual(hrsUps(n0).map((u) => u.br), ['יהודה הנשיא', 'נחל לכיש'], 'החזרה נכשלה – השעות נשלחו בכל זאת');
+    assert.equal(srv.calls.slice(n0).filter((c) => c.op === 'report').length, 0, 'בלי דיווח – אזהרה בלבד');
+    assert.equal(await store0(), 'נחל לכיש');
   } finally { await hrsOff(); }
 });
 test('0.1.14 שעות: קובץ במבנה לא מוכר → hours-format (כותרות דרך הרשימה הלבנה, בלי שמות), בלי העלאת שעות; המכירות וההעלאות לכספית נשלחו', async () => {
@@ -1386,7 +1430,7 @@ test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספי
 const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'hkSnap');
 async function hkOn(mode, ms) {
   if (!caspitPage()) { const pg = await ctx.newPage(); await pg.goto('https://caspit.valu.co.il/bo#/'); await pg.evaluate(() => localStorage.setItem('auth', '1')); }
-  await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית נשארה בנחל לכיש – הריצה מחזירה ליהודה הנשיא
+  await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית בנחל לכיש (0.1.23: בלי החלפה – היתרות בסניף שמוצג, והמכירות חוזרות אליו)
   for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/bo/.test(x.url()))) { await p.reload(); await p.waitForLoadState('load'); } // הסניף שבמסך = הסניף שבנתונים
   await sw.evaluate(async (w) => { const S = await self.__cxTest.sel(); S.hkSync = true; if (w) S.flows.hkSnap[1].ms = w; }, ms || 0);
 }
@@ -1394,7 +1438,7 @@ async function hkOff() {
   await ls({ hkXlsx: null, hkXs: null, store: 'יהודה הנשיא' });
   await sw.evaluate(async () => { const S = await self.__cxTest.sel(); S.hkSync = false; S.flows.hkSnap[1].ms = 30000; });
 }
-test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת ביהודה הנשיא, רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
+test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת (0.1.23: בסניף שמוצג, בלי החלפה), רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
   await hkOn('1');
   try {
     const n0 = srv.calls.length;
@@ -1412,9 +1456,9 @@ test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת �
     assert.deepEqual([rep.info.hk.n, rep.info.hk.skip, rep.info.hk.bad], [3, 2, 0], JSON.stringify(rep.info.hk));
     assert.ok(!rep.info.flags.hk);
     const sl = rep.steps.map((x) => x.s);
-    assert.ok(sl.indexOf('hours') < sl.indexOf('hk') && sl.indexOf('hk') < sl.indexOf('exportNew'), sl.join(','));
-    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('hkXs')), 'יהודה הנשיא;', 'יצוא אחד, בסניף הבית');
-    assert.equal(await store0(), 'יהודה הנשיא', 'לא נשאר בנחל לכיש');
+    assert.ok(sl.indexOf('exportUpd') < sl.indexOf('hours') && sl.indexOf('hours') < sl.indexOf('hk'), sl.join(',')); // 0.1.23: ההעלאות לכספית ראשונות
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('hkXs')), 'נחל לכיש;', 'יצוא אחד, בסניף שמוצג');
+    assert.equal(await store0(), 'נחל לכיש', 'חזרה לסניף שהיה מוצג בתחילת הריצה');
     assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'בלי "לקוח חדש" / "טעינת לקוחות" / "עריכה"');
   } finally { await hkOff(); }
 });
@@ -1430,7 +1474,7 @@ test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנ�
     assert.equal(s.st.lastRun.sum.flags.hk.code, 'hk-export', 'מסומן בנפרד בסיכום הריצה');
     assert.ok(rep.info.sales[days[1]], 'המכירות נקלטו (או שאותו קובץ כבר נשלח)');
     assert.ok(srv.calls.slice(n0).some((c) => c.op === 'export'), 'ההעלאות לכספית רצו');
-    assert.equal(await store0(), 'יהודה הנשיא');
+    assert.equal(await store0(), 'נחל לכיש', '0.1.23: חזרה לסניף שהיה מוצג');
     await ls({ hkXlsx: 'bad' });
     const n1 = srv.calls.length;
     const r2 = await syncOneDay();
@@ -1442,6 +1486,51 @@ test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנ�
   } finally { await hkOff(); }
 });
 
+// 0.1.23 – מוצרים כל 30 דקות (prodTick): בלי hello / מכירות / שעות, בלי שום החלפת סניף
+test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → apply → פריטים חדשים / מחירים / עדכוני פריטים → report prod; בלי hello / מכירות; בלי החלפת סניף (גם בנחל לכיש); פעם אחת בחצי שעה; לא לפני 07:00 / בשבת / בריצה פעילה; שרת בלי prod30 – לא', async () => {
+  srv.caps = ['prod30']; srv.exportN = { new: 1, price: 2, upd: 1 };
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('hrs'); await chrome.storage.local.set({ caps: { prod30: true } }); return chrome.storage.local.remove('prodSt'); });
+  await ls({ store: 'נחל לכיש', brPicks: null });
+  try {
+    const W = curDay('08:10');
+    const pt = (now) => sw.evaluate((n) => self.__cxTest.prodTick({ now: n }), now);
+    const n0 = srv.calls.length;
+    const r = await pt(W);
+    assert.equal(r && r.st, 'ok', JSON.stringify(r));
+    const calls = srv.calls.slice(n0), ops = calls.map((c) => c.op + (c.kind ? ':' + c.kind : ''));
+    const seq = ['cfg', 'upload', 'preview', 'apply', 'export:new', 'export:price', 'export:upd', 'report:prod'];
+    let k = 0; for (const o of ops) if (o === seq[k]) k++;
+    assert.equal(k, seq.length, 'סדר: ' + ops.join(','));
+    assert.ok(!ops.some((o) => o === 'hello' || o === 'upload:sales' || o === 'upload:hours' || o === 'report:run'), ops.join(','));
+    const rp = calls.find((c) => c.op === 'report');
+    assert.deepEqual([rp.st, rp.n.up, rp.n.pr, rp.n.nw], ['ok', 1, 2, 1]);
+    assert.equal(calls.find((c) => c.op === 'export' && c.kind === 'upd').max, 5, 'updMax מ-cfg');
+    assert.equal(await picks(), '', 'בלי שום בחירת סניף');
+    assert.equal(await store0(), 'נחל לכיש');
+    assert.ok((await store()).st.prodAt >= r.at - 1000, 'מוצרים סונכרנו לאחרונה');
+    assert.equal(await pt(W + 10 * 60e3), null, 'אותה חצי שעה');
+    assert.equal(await pt(W - 80 * 60e3), null, '06:50');
+    const sat = (() => { for (let d = 1; d <= 28; d++) { const day = curYm() + '-' + String(d).padStart(2, '0'); if (new Date(day + 'T12:00:00Z').getUTCDay() === 6) return D.zonedToUtc(day, '09:00', 'Asia/Jerusalem'); } return null; })();
+    assert.equal(await pt(sat), null, 'שבת');
+    await sw.evaluate(async () => { const { run } = await chrome.storage.local.get('run'); await chrome.storage.local.set({ runSaved: run, run: Object.assign({}, run, { st: 'run', touchedAt: Date.now() }) }); });
+    assert.equal(await pt(W + 30 * 60e3), null, 'ריצה אחרת פעילה');
+    await sw.evaluate(async () => { const { runSaved } = await chrome.storage.local.get('runSaved'); await chrome.storage.local.set({ run: runSaved }); await chrome.storage.local.remove('runSaved'); });
+    // עדכוני פריטים מעל המגבלה – לא נשלחים לכספית, הריצה "נכשלה" עם limit, המחירים נשלחו
+    srv.updMax = 0;
+    const n1 = srv.calls.length;
+    const r2 = await pt(W + 30 * 60e3);
+    assert.equal(r2.st, 'fail', JSON.stringify(r2)); assert.equal(r2.code, 'limit');
+    assert.ok(srv.calls.slice(n1).some((c) => c.op === 'export' && c.kind === 'price'));
+    assert.equal(srv.calls.slice(n1).filter((c) => c.op === 'report').at(-1).c, 'limit');
+    srv.updMax = null;
+    await sw.evaluate(() => chrome.storage.local.set({ caps: { prod30: false } }));
+    assert.equal(await pt(W + 60 * 60e3), null, 'שרת בלי prod30');
+  } finally {
+    srv.caps = null; srv.exportN = { new: 1, price: 2 }; srv.updMax = null;
+    await ls({ store: 'יהודה הנשיא', brPicks: null });
+    await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'prodSt']); await self.__cxTest.setupAlarms(); });
+  }
+});
 test('ניתוק: הקוד נמחק', async () => {
   const pg = await ctx.newPage();
   await pg.goto(`chrome-extension://${EXT_ID}/options.html`);

@@ -589,7 +589,8 @@
       "box": ".multiselect",
       "opt": ".multiselect__option",
       "ms": 30000,
-      "settle": 2000
+      "settle": 2000,
+      "confirm": true
     }
   },
   "discBranch": {
