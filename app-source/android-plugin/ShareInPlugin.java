@@ -198,7 +198,7 @@ public class ShareInPlugin extends Plugin {
         String own = getContext().getPackageName();
         for (Uri u : uris) {
             String au = u.getAuthority();
-            if (au == null || au.startsWith(own)) {
+            if (au == null || au.indexOf('@') >= 0 || au.startsWith(own) || ownProvider(au, own)) {
                 // Our own FileProvider (cache + external storage): another app must not make us import our own files
                 JSObject b = new JSObject();
                 b.put("name", cleanName(u.getLastPathSegment()));
@@ -231,6 +231,19 @@ public class ShareInPlugin extends Plugin {
         ev.put("n", got.size());
         // retainUntilConsumed: if the screens did not register yet, the event waits for them
         notifyListeners("shareIn", ev, true);
+    }
+
+    /**
+     * true when the provider behind this authority belongs to this app (any of its names).
+     * "user@authority" (e.g. 0@...) is rejected before this: ContentResolver strips the user part and would open our own provider.
+     */
+    private boolean ownProvider(String au, String own) {
+        try {
+            android.content.pm.ProviderInfo pi = getContext().getPackageManager().resolveContentProvider(au, 0);
+            return pi != null && own.equals(pi.packageName);
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     /** A label only: no folders, no control characters, max 80 characters. */
