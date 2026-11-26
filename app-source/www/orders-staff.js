@@ -456,14 +456,17 @@ const stockL=()=>(O.P||[]).filter(p=>(!O.dnF||p.dn)&&(!O.sq||String(p.name).incl
 CHG.oxCF=el=>{O.cf=el.value;O.plN=0;rerender()};
 const wsCan=()=>mgr()||!!(O.draft&&O.draft.custId&&O.draft.wholesale===true);
 // טופס מוצר: קטגוריה/תת, מחיר שונה לסניף (נפתח לפי צורך), סיטונאי (מנהל ועובד עם ord), מארז, קרטון, סניף בית
-const pExtH=p=>{const T=topC(),c=p&&p.cat||'',B=brs(),bp=p&&p.bp||{};
- const cs=T.length?`<div class="row"><label class="f grow"><span>קטגוריה</span><select name="cat"><option value="">ללא</option>${T.map(x=>`<option value="${esc(x.id)}"${c===x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label class="f grow"><span>תת־קטגוריה</span><select name="sub"><option value="">ללא</option>${T.flatMap(x=>subC(x.id).map(u=>`<option value="${esc(u.id)}"${p&&p.sub===u.id?' selected':''}>${esc(x.name)} / ${esc(u.name)}</option>`)).join('')}</select></label></div>`:'';
+/* 26.11.2026: קטגוריה חובה (גם בעריכה), תת קטגוריה רשות, ו"＋ חדשה" בתוך הטופס – cat-pick.js */
+if(window.CatPick)CatPick.reg('ox',{cats:()=>{if(!Array.isArray(O.C))O.C=[];return O.C}});
+const pExtH=p=>{const c=p&&p.cat||'',B=brs(),bp=p&&p.bp||{};
+ const cs=window.CatPick?CatPick.h('ox',c,p&&p.sub):'';
  const bh=B.length>1?`<details${Object.keys(bp).length?' open':''}><summary class="note" style="min-height:44px;display:flex;align-items:center">מחיר שונה לסניף (ריק = מחיר המכירה)</summary>${B.map(b=>fld('מחיר ב'+esc(b.name)+' ₪','bp_'+b.id,bp[b.id]!=null?bp[b.id]:'','text','inputmode="decimal"')).join('')}</details>`:'';
  return cs+bh+`<div class="row"><label class="f grow"><span>כמות במארז</span><input name="pk" inputmode="numeric" value="${esc(p&&p.pk||'')}"></label><label class="f grow"><span>כמות בקרטון</span><input name="ct" inputmode="numeric" value="${esc(p&&p.ct||'')}"></label></div>`
  +(B.length>1?`<label class="f"><span>סניף הבית של הפריט</span><select name="home"><option value="">לא נקבע</option>${B.map(b=>`<option value="${esc(b.id)}"${p&&p.home===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:'')
  +fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"')
  +/* סנכרון ספקים (19.11.2026): ספק המוצר, עם רשימת כל הספקים (כרטסת + מלאי). ריק = בלי ספק */`<label class="f"><span>ספק (רשות)</span><input name="sup" maxlength="60" list="oxPSupDL" autocomplete="off" value="${esc(p&&p.sup||'')}" placeholder="שם הספק"></label>${window.supDL?window.supDL('oxPSupDL'):''}`}; // 00:13: גם עובד עם ord
-function pExtRead(f,x,isNew){const d={},T=topC();if(T.length){d.cat=x.cat||null;d.sub=x.sub||null;if(d.sub){const s=(O.C||[]).find(c=>c.id===d.sub);if(s&&!d.cat)d.cat=s.parent;if(s&&d.cat!==s.parent)throw new Error('תת־הקטגוריה לא שייכת לקטגוריה שנבחרה')}}
+function pExtRead(f,x,isNew){const d={};if(window.CatPick){const v=CatPick.val(f);if(!v.cat)throw new Error('בחרו קטגוריה למוצר (אפשר גם לפתוח קטגוריה חדשה)');d.cat=v.cat;d.sub=v.sub||null;
+  const s=d.sub&&(O.C||[]).find(c=>c.id===d.sub);if(s&&s.parent!==d.cat)throw new Error('תת־הקטגוריה לא שייכת לקטגוריה שנבחרה')}
  const B=brs();if(B.length>1){const bp={};let any=false;for(const b of B){const v=String(x['bp_'+b.id]||'').trim();if(v){const n=num(v);if(!(n>=0))throw new Error('מחיר לסניף לא תקין');bp[b.id]=n;any=true}else if(!isNew)bp[b.id]=''}if(any||!isNew)d.bp=bp;d.home=x.home||null}
  for(const k of['pk','ct']){const v=String(x[k]||'').trim();if(v){const n=num(v);if(!(n>0)||!Number.isInteger(n))throw new Error('מארז/קרטון: מספר שלם');d[k]=n}else if(!isNew)d[k]=null}
  if(x.wp&&x.wp.trim()){const n=num(x.wp);if(!(n>=0))throw new Error('מחיר סיטונאי לא תקין');d.wp=n}

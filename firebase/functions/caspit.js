@@ -304,6 +304,7 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen) {
         const it = x.it, pid = pids[i];
         const ext = {};
         if (it.c1) { ext.cat = catIdOf(it.c1, ''); if (!cats.has(ext.cat)) { tx.set(db.doc('cat/' + ext.cat), { name: it.c1, ord: 0, upd: now }); cats.set(ext.cat, true); } }
+        else { ext.cat = catIdOf('ללא קטגוריה', ''); if (!cats.has(ext.cat)) { tx.set(db.doc('cat/' + ext.cat), { name: 'ללא קטגוריה', ord: 0, upd: now }); cats.set(ext.cat, true); } } // 26.11.2026: פריט חדש בלי קטגוריה – תחת "ללא קטגוריה"
         if (it.c1 && it.c2) { ext.sub = catIdOf(it.c2, ext.cat); if (!cats.has(ext.sub)) { tx.set(db.doc('cat/' + ext.sub), { name: it.c2, parent: ext.cat, ord: 0, upd: now }); cats.set(ext.sub, true); } }
         if (it.sup) ext.sup = it.sup;
         if (it.bx && it.bx.length) ext.bcx = it.bx;

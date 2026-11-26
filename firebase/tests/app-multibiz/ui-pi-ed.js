@@ -57,7 +57,7 @@ async function server(ctx, me) {
     if (fn === 'piClaim') {
       if (fresh30(d.lk, now) && d.lk.uid !== uid) return err(route, 'locked', 'החשבונית בטיפול של ' + d.lk.name);
       d.lk = { uid, name: NAMES[uid] || uid, t: now };
-      return ok(route, { ok: true, id: b.id, inv: { st: d.st, sup: d.sup, inv: d.inv, date: d.date, by: d.by, byName: d.byName, at: d.at, np: d.np, lines: JSON.parse(JSON.stringify(d.lines)) }, rev: d.rev || 0, lk: d.lk, until: now + 30 * 60e3, vat: 18, ord: S.ord, m: matches(b.id, d.lines) });
+      return ok(route, Object.assign({ ok: true, id: b.id, inv: { st: d.st, sup: d.sup, inv: d.inv, date: d.date, by: d.by, byName: d.byName, at: d.at, np: d.np, lines: JSON.parse(JSON.stringify(d.lines)) }, rev: d.rev || 0, lk: d.lk, until: now + 30 * 60e3, vat: 18, ord: S.ord, m: matches(b.id, d.lines) }, S.ord ? { cats: [{ id: 'c1', name: 'חד פעמי', parent: '' }, { id: 's1', name: 'כוסות', parent: 'c1' }, { id: 'c2', name: 'מאפים', parent: '' }] } : {}));
     }
     if (!(d.lk && d.lk.uid === uid)) return fresh30(d.lk, now) ? err(route, 'locked', 'החשבונית בטיפול של ' + d.lk.name) : err(route, 'not-locked', 'צריך להיכנס לחשבונית מחדש');
     if (fn === 'piBeat') { d.lk.t = now; return ok(route, { ok: true }); }
@@ -256,7 +256,16 @@ const inp = (i, k) => `#pil${i} input[data-k="${k}"]`;
   check('8- דלג על השורה: השורה מעומעמת, בלי שדות, עם "החזר"; לשאר השורות יש "דלג"; בלי גלישה ב-360', sk.sk && sk.op < 0.7 && sk.back && sk.inputs === 0 && sk.others === 3 && sk.sw <= sk.W, sk);
   await sleep(500); const dSk = calls('piDraft', 'm').pop();
   check('8-א הטיוטה נשמרת עם skip בשורה שדילגו עליה בלבד', dSk && dSk.b.lines[1].skip === true && !dSk.b.lines.some((l, i) => i !== 1 && l.skip), dSk && dSk.b.lines.map((l) => !!l.skip));
+  // 26.11.2026: מוצר חדש – קטגוריה חובה (בורר רק בשורת מוצר חדש); בלי קטגוריה הסיום נעצר
   await A.page.fill(inp(2, 'price'), '19.9'); await A.page.click('[data-a=piFin]'); await sleep(200);
+  const tc = await A.page.evaluate(() => ({ t: [...document.querySelectorAll('.toast')].map((x) => x.textContent).pop(), dlg: document.getElementById('dlg').open, pk: [...document.querySelectorAll('.pil')].map((r) => !!r.querySelector('.cpk')) }));
+  check('8-ק סיום עם מוצר חדש בלי קטגוריה – נעצר עם הודעה (שורה 3); בורר קטגוריה רק בשורת המוצר החדש', /שורה 3/.test(tc.t) && /קטגוריה/.test(tc.t) && !tc.dlg && calls('piFinish').length === 0 && JSON.stringify(tc.pk) === JSON.stringify([false, false, true, false]), tc);
+  await A.page.selectOption('#pil2 select[data-c=cpCat]', 'c1'); await sleep(100);
+  const subs = await A.page.evaluate(() => [...document.querySelectorAll('#pil2 select[data-c=cpSub] option')].map((o) => o.value));
+  await A.page.selectOption('#pil2 select[data-c=cpSub]', 's1'); await sleep(100);
+  const lc = await A.page.evaluate(() => ({ c: PI.ed().L[2].cat, s: PI.ed().L[2].sub }));
+  check('8-ק1 בחירת קטגוריה → תת קטגוריה רק שלה (+ "חדשה"); נשמר בשורה', lc.c === 'c1' && lc.s === 's1' && JSON.stringify(subs) === JSON.stringify(['', 's1', '__new']), { lc, subs });
+  await A.page.click('[data-a=piFin]'); await sleep(200);
   const dk = await A.page.evaluate(() => ({ u: (document.getElementById('piSU') || {}).textContent, n: (document.getElementById('piSN') || {}).textContent, q: (document.getElementById('piSQ') || {}).textContent }));
   check('8-ב בסיום השורה לא נספרת: 2 מוצרים יעודכנו, 1 ייווצר, 32 יחידות (בלי 6 של השורה)', dk.u === '2' && dk.n === '1' && dk.q === '32', dk);
   await A.page.evaluate(() => closeDlg());
@@ -273,6 +282,7 @@ const inp = (i, k) => `#pil${i} input[data-k="${k}"]`;
   check('8א אישור קצר: 3 מוצרים יעודכנו, 1 ייווצר, 38 יחידות למלאי (10+6+12+10)', dt.u === '3' && dt.n === '1' && dt.q === '38', dt);
   await A.page.click('#dlg form[data-f=piFinF] button.btn:not([type])'); await sleep(800);
   const fin = calls('piFinish', 'm'); const fb = fin[0] && fin[0].b;
+  check('8ב1 piFinish: קטגוריה ותת קטגוריה בשורת המוצר החדש בלבד', fb && fb.lines[2].cat === 'c1' && fb.lines[2].sub === 's1' && !fb.lines.some((l, i) => i !== 2 && ('cat' in l || 'sub' in l)), fb && fb.lines.map((l) => [l.cat, l.sub]));
   check('8ב piFinish: מזהה בקשה, השורות עם pid / מחירים / סיטונאי / cto (בלי שדות ריקים)', fin.length === 1 && /^[A-Za-z0-9_-]{8,40}$/.test(fb.reqId) && fb.lines.length === 4 && fb.lines[0].pid === 'pA' && fb.lines[0].price === 7.9 && fb.lines[0].wp === 4.5 && fb.lines[1].pid === 'pO' && !fb.lines[2].pid && fb.lines[2].price === 19.9 && fb.lines[2].wp === PC.wsDefault(12) && fb.lines[3].pid === 'pM' && !Object.values(fb.lines[2]).some((v) => v === null || v === ''), fb);
   const lA = await A.page.evaluate(() => ({ v: cur().v, rows: [...document.querySelectorAll('.pi-row')].map((b) => b.dataset.id || 'x') }));
   check('8ג אחרי הסיום – חוזרים לרשימה והחשבונית נעלמה', lA.v === 'pi' && !lA.rows.includes('i1') && lA.rows.length === 2, lA);

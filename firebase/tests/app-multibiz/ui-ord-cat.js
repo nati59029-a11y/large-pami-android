@@ -88,7 +88,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('[data-a=oxEditP][data-id=pA]'); await H.settle(page, 300); await setDs('a'); await shot('קטלוג-טופס-מוצר-a');
   const pf = await page.evaluate(() => __q('#dlg'));
   await page.fill('#dlg input[name=bp_br1]', '11'); await page.fill('#dlg input[name=bp_br2]', ''); await page.fill('#dlg input[name=ct]', '24'); await page.fill('#dlg input[name=wp]', '9');
-  await page.selectOption('#dlg select[name=sub]', 's1'); await page.selectOption('#dlg select[name=cat]', 'c1'); await page.selectOption('#dlg select[name=home]', 'br2');
+  await page.selectOption('#dlg select[name=cat]', 'c1'); await page.selectOption('#dlg select[name=sub]', 's1'); await page.selectOption('#dlg select[name=home]', 'br2'); // 26.11.2026: התת נפתחת אחרי בחירת קטגוריה
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
   const sp = calls.filter((c) => c.n === 'saveProduct').pop();
   check('4 טופס מוצר: saveProduct עם cat/sub, bp {br1:11, br2:""}, pk 6, ct 24, home, wp; מגע בדיאלוג', !!sp && sp.d.cat === 'c1' && sp.d.sub === 's1' && sp.d.bp.br1 === 11 && sp.d.bp.br2 === '' && sp.d.pk === 6 && sp.d.ct === 24 && sp.d.home === 'br2' && sp.d.wp === 9 && pf.small.length === 0 && pf.sw <= pf.iw, { d: sp && sp.d, small: pf.small });
