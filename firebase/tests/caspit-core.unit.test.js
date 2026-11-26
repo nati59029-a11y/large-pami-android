@@ -480,3 +480,23 @@ describe('decideF / afterF – שדות טקסט', () => {
     assert.deepEqual(C.decide(10.001, 10, {}), { act: 'base', v: 10 });
   });
 });
+
+// סבב בדיקה 1: נרמול כמו בכספית (ליקוי 3) ו-clean בלי איחוד לקודים ממתינים (ליקוי 4)
+describe('fxNorm / clean solo', () => {
+  it('fxNorm: שם מעל 60 → 59 + "…", קטגוריה עד 40 לכל חלק, ברקוד לא תקין = אין', () => {
+    const L = 'א'.repeat(70);
+    assert.equal(C.fxNorm('nm', L), 'א'.repeat(59) + '…');
+    assert.equal(C.fxNorm('nm', 'קצר'), 'קצר');
+    assert.equal(C.fxNorm('ct', 'ב'.repeat(45) + '›' + 'ג'.repeat(45)), 'ב'.repeat(40) + '›' + 'ג'.repeat(40));
+    assert.equal(C.fxNorm('bc', '$7290000000011'), '7290000000011');
+    assert.equal(C.fxNorm('bc', 'אב#'), null);
+    assert.equal(C.decideF(C.fxNorm('nm', L), C.fxNorm('nm', L), { fb: 'x', ab: 'y', pd: C.fxNorm('nm', L) }).act, 'ack');
+  });
+  it('clean: קוד ב-solo לא מתאחד (שם ומחיר זהים) – לא כראשי ולא כמשני', () => {
+    const items = [{ c: '1', n: 'מחק', p: 2 }, { c: '2', n: 'מחק', p: 2 }, { c: '3', n: 'מחק', p: 2 }];
+    assert.equal(C.clean(items).keep.length, 1);
+    const r = C.clean(items, { solo: ['2'] });
+    assert.deepEqual(r.keep.map((x) => x.c), ['1', '2']);
+    assert.deepEqual(r.merged.map((x) => [x.c, x.to]), [['3', '1']]);
+  });
+});

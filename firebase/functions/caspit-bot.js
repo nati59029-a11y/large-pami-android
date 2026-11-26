@@ -174,7 +174,7 @@ async function cxBotTok(w, input) {
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, nwDup: d.nwDup || null, nwVar: d.nwVar || null, newMax: cfg.bot.newMax, updMax: cfg.bot.updMax, limits: LIM,
-      p30: d.h ? d.p30 || null : null, pok: d.pok || null, bw: d.h ? d.bw || null : null, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
+      p30: d.h ? d.p30 || null : null, updOff: CX.updOff(cfg) || null, upStuck: d.upStuck || null, pok: d.pok || null, bw: d.h ? d.bw || null : null, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
@@ -280,7 +280,7 @@ async function useOk(bizId, day, isRun, lim) {
 
 // ---------- הפעולות של הרובוט ----------
 const runRef = (id) => T.tdb().doc('cxBotRun/' + id);
-const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)), updMax: Math.max(0, Math.min(LIM.updMax, cfg.bot.updMax)) });
+const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)), updMax: CX.updOff(cfg) ? 0 : Math.max(0, Math.min(LIM.updMax, cfg.bot.updMax)) }); // עדכוני פריטים כבויים עד אימות מול כספית (caspit.js updOff)
 async function cfgNow() { return CX.cfgOf(await T.tdb().doc(CX.CFG).get()); }
 // מצב העדכון האוטומטי של התוסף (0.1.7, upd.json מהמחשב, ב-hello). לא תקין → מתעלמים (לא מכשילים את הסנכרון).
 // { at, ok, ver, err, fails, rx (מתי התקבל) }; at לא בעתיד (שעון מחשב שגוי → rx)
@@ -378,6 +378,8 @@ const OPF = {
     // 26.11.2026: מוצרים שהברקוד שלהם כבר בכספית – לא נשלחו; לכרטיס הרובוט (כמה + עד 20 שמות וברקודים)
     if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) },
       nwVar: { n: r.varN || 0, at: x.now, l: (r.vars || []).slice(0, 100).map((d) => ({ n: str(d.n, 80), cx: str(d.cx, 40) })) } }, { merge: true }); // 26.11.2026: וריאנטים של פריט בכספית (לא "כפולים")
+    // סבב בדיקה 1: עדכוני פריטים שנשלחו 3 פעמים ולא נקלטו – לכרטיס הרובוט ("לבדוק")
+    if (b.kind === 'upd' && !r.off) await priv(w.bizId, 'cxbot').set({ upStuck: { n: r.stuckN || 0, at: x.now, l: (r.stuck || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), c: str(d.c, 40) })) } }, { merge: true });
     return { n: r.n, csv: r.csv, rows: r.rows, added: r.added || 0 };
   },
   async importResult(w, b, x) {
@@ -416,7 +418,13 @@ const OPF = {
         if (b.st === 'ok') up.pok = x.now;
         await priv(w.bizId, 'cxbot').set(up, { merge: true });
         return {};
-      } finally { await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {}); }
+      } finally {
+        // סבב בדיקה 1: לא משחררים את המנעול כשריצה לילית של המחשב באמצע (אותו בעלים) – היא תשחרר בדיווח שלה
+        const last = await T.tdb().collection('cxBotRun').orderBy('at', 'desc').limit(1).get().catch(() => null);
+        const lr0 = last && last.docs[0] ? last.docs[0].data() : null;
+        const busy = lr0 && ['run', 'wait'].includes(lr0.st) && x.now - (lr0.at || 0) < 3 * 3600e3;
+        if (!busy) await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {});
+      }
     }
     if (b.kind !== 'run') throw bad('bad-kind', 'סוג דיווח לא תקין');
     // דיווח ריצה שנכשל (קלט פגום, תקלה) – המנעול של הרובוט משתחרר בכל זאת

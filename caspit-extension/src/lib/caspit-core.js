@@ -127,6 +127,7 @@ function groupCat(rows, det) {
 // → { keep:[{ c, n, bc, bx:[], p, cost, nv, c1, c2, sup, m:[קודים שאוחדו אליו] }], merged:[{ c, to, n }], filt:[{ c, n, why }], warn:[{ c, w, v? }], cnt }
 function clean(items, opt) {
   const skip = new Set(((opt && opt.skip) || SKIP).map(String));
+  const solo = new Set(((opt && opt.solo) || []).map(String)); // 26.11.2026: קודים שלא מאחדים (פריט חדש מהאפליקציה שממתין לקליטה – cxItem nw)
   const keep = [], merged = [], filt = [], warn = [];
   const byKey = new Map();
   for (const x of items || []) {
@@ -138,8 +139,8 @@ function clean(items, opt) {
     if (p === 0 && n0.replace(/\s/g, '').length < 4) { filt.push({ c, n: n0, why: 'junk' }); continue; }
     // מפתח איחוד: שם + מחיר + צבעים + מידות (וריאנט אחר = מוצר אחר)
     const k = [nameKey(n0), r2(p), vk(x.col), vk(x.sz)].join('|');
-    const prim = byKey.get(k);
-    if (prim) {
+    const prim = solo.has(c) ? null : byKey.get(k);
+    if (prim && !solo.has(prim.c)) {
       merged.push({ c, to: prim.c, n: n0 });
       prim.m.push(c);
       for (const b of (x.bcs || []).map(bcNorm)) if (b && !prim.raw.includes(b)) prim.raw.push(b);
@@ -148,7 +149,8 @@ function clean(items, opt) {
       continue;
     }
     const it = { c, n: n0, col: (x.col || []).slice(), sz: (x.sz || []).slice(), p: r2(p), cost: x.cost > 0 ? r2(x.cost) : null, nv: x.nv === true, c1: hk(x.c1).slice(0, 40), c2: hk(x.c2).slice(0, 40), sup: hk(x.sup).slice(0, 60), m: [], raw: (x.bcs || []).map(bcNorm).filter(Boolean) };
-    byKey.set(k, it); keep.push(it);
+    if (!solo.has(c) && !byKey.has(k)) byKey.set(k, it);
+    keep.push(it);
   }
   // שם זהה במחיר שונה – אזהרה בלבד
   const names = new Map();
@@ -212,6 +214,15 @@ const eqS = (x, y) => sv(x) === sv(y);
 const CT_SEP = '›';
 const ctOf = (c1, c2) => { const a = sv(c1); if (!a) return null; const b = sv(c2); return b ? a + CT_SEP + b : a; };
 const ctSplit = (v) => { const x = sv(v); if (!x) return ['', '']; const i = x.indexOf(CT_SEP); return i < 0 ? [x, ''] : [x.slice(0, i), x.slice(i + 1)]; };
+// נרמול כמו ב-clean / בכספית (סבב בדיקה 1, ליקוי 3): שם מעל 60 → 59 + "…", קטגוריה – כל חלק עד 40, ברקוד לא תקין = אין
+function fxNorm(k, v) {
+  const x = sv(v);
+  if (x == null) return null;
+  if (k === 'nm') return x.length > NAME_MAX ? x.slice(0, NAME_MAX - 1).trim() + '…' : x;
+  if (k === 'bc') { const b = bcNorm(x); return BC_RE.test(b) ? b : null; }
+  if (k === 'ct') { const [a, b] = ctSplit(x); return ctOf(a.slice(0, 40), b.slice(0, 40)); }
+  return x;
+}
 function decideF(f, a, s) {
   if (!s || typeof s !== 'object' || s.ab === undefined) return { act: 'base0' };
   const fc = !eqS(f, s.fb), ac = !eqS(a, s.ab) || s.pd != null;
@@ -244,6 +255,10 @@ function csvNew(rows, vat) {
     a[ix('מחיר לצרכן כולל מעמ')] = r.p;
     if (r.cost != null) { a[ix('מחיר עלות אחרי הנחות לא כולל מעמ')] = exVat(r.cost, vat, r.nv); a[ix('מחיר עלות אחרי הנחות כולל מעמ')] = r.cost; }
     a[ix('שם קטגוריה ראשית')] = r.c1 || ''; a[ix('שם קטגוריה משנית')] = r.c2 || ''; a[ix('שם ספק')] = r.sup || '';
+    // עדכון פריט קיים (cxExport upd): הערכים של כספית מהקטלוג. פריט חדש – בלי (כמו קודם). nvs: 'כן' / 'לא' (לא מאומת איך כספית מצפה)
+    if (typeof r.col === 'string') a[ix('צבע')] = r.col;
+    if (typeof r.sz === 'string') a[ix('מידה')] = r.sz;
+    if (typeof r.nvs === 'string') a[ix('פריט ללא מעמ')] = r.nvs;
     return a;
   }));
 }
@@ -545,7 +560,7 @@ function unpackDays(p) {
 function chunks(from, to, n) { const out = []; let a = from; while (a <= to) { let b = addDay(a, (n || 92) - 1); if (b > to) b = to; out.push([a, b]); a = addDay(b, 1); } return out; }
 const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
 
-const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF };
+const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF, fxNorm };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);

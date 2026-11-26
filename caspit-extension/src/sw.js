@@ -189,6 +189,7 @@ async function runToday(slot, now, tz) {
     if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
     // 0.1.13 (תיקון בודק): נחל לכיש נכשל – לא מעלים בכלל. השרת מחליף את כל מסמכי היום (cxDayP), והעלאה של יהודה הנשיא בלבד
     // הייתה מוחקת את נחל לכיש מהשעה הקודמת. התמונה הקודמת נשארת; השעה הבאה תנסה שוב
+    if (A.unsure) throw P.err(A.unsure.code, A.unsure.msg, { br: A.unsure, back: A.back }); // ליקוי 7: בלי בסיס להשוואה – לא מעלים
     if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br, back: A.back });
     if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
     out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {}, A.back ? { back: A.back } : {});
@@ -258,7 +259,7 @@ async function prodTick(o) {
   const slot = D.halfSlot(now, s.tz, HRS_FROM, HRS_TO);
   if (!slot || ((await get('prodSt')) || {}).slot === slot) return null;
   const run = await get('run');
-  if (run && run.st === 'run' && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null;
+  if (run && !P.isTerminal(run) && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null; // ריצה פעילה או ממתינה לניסיון חוזר
   return runProd(slot);
 }
 async function runProd(slot) {
@@ -775,6 +776,12 @@ function brCheck(ref, lines, name, hn0) {
 }
 // הסניף של הבית לפי הדוח (שם + מספר), עם מה שנשמר מריצות קודמות (יום בלי מכירות ביהודה הנשיא)
 // 0.1.23: לכל סניף בנפרד (brRefs[שם]) – הסניף שמתחילים ממנו משתנה. brRef הישן (של יהודה הנשיא) – חלופה רק ל-home
+// בסיס שמור לסניף (בלי לעדכן): brRefs[שם], ול-home גם brRef הישן
+async function brRefOf(name) {
+  const all0 = (await get('brRefs')) || {}, B = await brCfg();
+  const o = all0[name] || (B && name === B.home ? await get('brRef') : null) || { bn: [], bk: [] };
+  return { bn: (o.bn || []).slice(0, 5), bk: (o.bk || []).slice(0, 5) };
+}
 async function brRef(lines, name) {
   const all0 = (await get('brRefs')) || {}, B = await brCfg();
   const old = all0[name] || (B && name === B.home ? await get('brRef') : null) || { bn: [], bk: [] };
@@ -806,7 +813,16 @@ async function salesAll(tab, vars, ms, o) {
     const x = await inBranchBack(tab, name, start, async () => { const f = await capture(tab, 'sales', vars, ms); return { f, p: salesOf(f) }; });
     if (x.back) out.back = x.back;
     let e = x.err;
-    if (!e) { const bad = brCheck(ref, x.res.p.lines, name, start); if (bad) e = bad; else out.list.push({ br: name, f: x.res.f, p: x.res.p }); }
+    if (!e) {
+      const L = x.res.p.lines;
+      // סבב בדיקה 1 (ליקוי 7): אין בסיס לסניף שמתחילים ממנו (פעם ראשונה, בלי מכירות) – משווים לבסיס השמור של הסניף השני.
+      // גם הוא חסר / לא תואם → לא פוסלים ולא שולחים: היום לא נשלח (unsure) וייקלט בריצה הבאה
+      if (!ref.bn.length && !ref.bk.length && L.length) {
+        const o = await brRefOf(name);
+        const fit = (o.bn.length || o.bk.length) && L.every((l) => (l.bn && o.bn.includes(l.bn)) || (!l.bkn && l.bk && o.bk.includes(l.bk)));
+        if (fit) { out.list.push({ br: name, f: x.res.f, p: x.res.p }); await brRef(L, name); } else if (!out.unsure) out.unsure = { code: 'branch-unsure', msg: P.msgOf('branch-unsure') };
+      } else { const bad = brCheck(ref, L, name, start); if (bad) e = bad; else { out.list.push({ br: name, f: x.res.f, p: x.res.p }); await brRef(L, name); } }
+    }
     if (e) {
       const code = e && typeof e.code === 'string' ? e.code : 'tab';
       if (['wrong-page', 'needs-login'].includes(code)) throw e;
@@ -1202,6 +1218,7 @@ const STEP = {
     const [y, m, d] = day.split('-');
     // 0.1.13: יהודה הנשיא ואחר כך נחל לכיש (אותו יום), חזרה ליהודה הנשיא; העלאה אחת משולבת לשני הסניפים (השרת מפריד לפי מספר סניף)
     const A = await salesAll(tab, { day, dmy: `${d}/${m}/${y}` }, 300e3, { retry: (run.attempt || 0) < P.BACKOFF.length });
+    if (A.unsure) { run.flags.br = run.flags.br || Object.assign({ day }, A.unsure); if (A.back) run.flags.back = Object.assign({ day }, A.back); return undefined; } // ליקוי 7: היום לא נשלח ולא נחשב שנקלט
     if (A.br) { run.flags.br = run.flags.br || Object.assign({ day }, A.br); }
     if (A.back) run.flags.back = Object.assign({ day }, A.back); // 0.1.23: החזרה לסניף שהיה מוצג נכשלה – לא עוצר
     const lines = [], hs = [];
@@ -1420,8 +1437,8 @@ async function finalize(run) {
   const code = run.err && run.err.code;
   st.lastRun = { id: run.id, at: Date.now(), st: run.st, manual: run.manual, req: !!run.req, code, msg: run.err && run.err.msg, step: run.err && run.err.step, sum: summary(run) };
   if (run.st === 'ok') { if (!st.lastOkDay || run.slot > st.lastOkDay) st.lastOkDay = run.slot; st.loginDay = null; st.failSlot = null; }
-  if (st.lastRun.sum && st.lastRun.sum.prod) st.prodAt = Date.now(); // 0.1.23: המוצרים סונכרנו – גם אם המכירות של סניף נכשלו
   else if (run.st === 'fail' && code !== 'req-gone') st.failSlot = run.slot; // בקשה מהטלפון שכבר טופלה – לא חוסמת את הסנכרון האוטומטי
+  if (st.lastRun.sum && st.lastRun.sum.prod) st.prodAt = Date.now(); // 0.1.23: המוצרים סונכרנו – גם אם המכירות של סניף נכשלו (משפט נפרד – לא נוגע ב-failSlot)
   await set({ st });
   if (run.st === 'ok') return;
   if (code === 'auth' || code === 'req-gone') return; // החיבור בוטל – אין למי לדווח; בקשה שכבר טופלה – אין מה לדווח

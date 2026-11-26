@@ -126,7 +126,7 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true });
     assert.deepEqual(h.days, [yday]);
     assert.equal(h.lastSales, null);
-    assert.deepEqual(h.limits, { price: 500, newMax: 1, updMax: 1 });
+    assert.deepEqual(h.limits, { price: 500, newMax: 1, updMax: 0 }); // סבב בדיקה 1: עדכוני פריטים כבויים עד אימות מול כספית
     assert.equal(h.minVer, BOT.MIN_VER); assert.equal(h.enabled, true); assert.equal(h.biz.name, 'עסק ' + A);
     assert.match(h.runId, /^[A-Za-z0-9_-]{6,40}$/);
     const r = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).data();
@@ -265,6 +265,8 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
   });
 
   it('26.11 (תוסף 0.1.23): export upd לפי updMax; report kind:prod → p30 / pok ושחרור המנעול; info.prod ו-flags.back בדיווח ריצה; caps prod30; עד 60 קטלוגים ביום', async () => {
+    assert.match((await ok('cxBotTok', MGR, { op: 'info' })).updOff, /עדכוני פריטים כבויים/);
+    await adm().doc(`b/${A}/cxcfg/main`).set({ updOk: true }, { merge: true }); // כאילו אומת מול כספית
     await P(A, 'cx400001').update({ name: 'כוס נייר גדולה' }); await P(A, 'cx400002').update({ name: 'צלחת גדולה' });
     const nmPd = async (c) => ((await adm().doc(`b/${A}/cxItem/${c}`).get()).get('nm') || {}).pd;
     const l1 = await bot(TOK, { op: 'export', kind: 'upd', max: 100, ver: '0.1.0' });
@@ -281,9 +283,16 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     const L = adm().doc(`b/${A}/private/cxbot.lock`);
     assert.ok((await L.get()).exists, 'export לקח את המנעול');
     assert.equal((await bot(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'maybe', ver: '0.1.0' })).body.reason, 'bad-report');
+    // סבב בדיקה 1: ריצה לילית של המחשב באמצע – הדיווח של ריצת המוצרים לא משחרר את המנעול שלה; אחרי הדיווח הלילי – משוחרר
+    const hN = await okb(TOK, { op: 'hello', mode: 'sync' });
     await okb(TOK, { op: 'export', kind: 'price', max: 500 });
     await okb(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'ok', n: { cat: 2, nw: 0, pr: 0, up: 2, bad: 'x' } });
-    assert.ok(!(await L.get()).exists, 'המנעול שוחרר');
+    assert.ok((await L.get()).exists, 'ריצה לילית פעילה – המנעול נשאר');
+    await okb(TOK, { op: 'report', run: hN.runId, kind: 'run', st: 'ok', steps: [], info: {} });
+    assert.ok(!(await L.get()).exists, 'הריצה הלילית דיווחה – המנעול שוחרר');
+    await okb(TOK, { op: 'export', kind: 'price', max: 500 });
+    await okb(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'ok', n: { cat: 2, nw: 0, pr: 0, up: 2, bad: 'x' } });
+    assert.ok(!(await L.get()).exists, 'בלי ריצה לילית פעילה – ריצת המוצרים משחררת');
     const d1 = await dev();
     assert.deepEqual([d1.p30.st, d1.p30.n], ['ok', { cat: 2, nw: 0, pr: 0, up: 2 }]); assert.ok(d1.pok > 0);
     await okb(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'fail', c: 'import-errors' });

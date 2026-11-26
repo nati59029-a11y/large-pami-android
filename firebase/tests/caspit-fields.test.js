@@ -74,10 +74,13 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.equal((await P('pc').get()).get('cat'), undefined);
     assert.deepEqual((await X('300001')).nm, { fb: 'עט כחול חדש', ab: 'עט כחול' });
     assert.deepEqual((await X('300002')).bc, { fb: '7100000000099', ab: '7100000000028' });
-    assert.deepEqual((await X('300003')).ct, { fb: 'כלי כתיבה', ab: null });
+    assert.deepEqual((await X('300003')).ct, { fb: 'כלי כתיבה', ab: null, ai: '/' }); // ai = הקטגוריות של המוצר באפליקציה (סבב בדיקה 1)
     assert.equal((await logs('pa', 'n')).length, 0);
+    // סבב בדיקה 1 (ליקוי 2): עדכוני פריטים כבויים עד אימות – חסרות עמודות שאין לנו מהקטלוג
     const e = await ok('cxExport', MGR, { kind: 'upd' });
-    assert.equal(e.n, 0);
+    assert.equal(e.n, 0); assert.match(e.off, /עדכוני פריטים כבויים – חסר ערך "מחיר בחנות" מהקטלוג/);
+    await adm().doc(`b/${A}/cxcfg/main`).set({ updOk: true }, { merge: true }); // מכאן – כאילו אומת מול כספית
+    assert.equal((await ok('cxExport', MGR, { kind: 'upd' })).n, 0);
   });
   it('הבדל קבוע שאף צד לא שינה מאז הבסיס – לא נוגעים (keep), ולא יוצא לכספית', async () => {
     const { pv } = await sync(BASE());
@@ -105,7 +108,10 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.equal(e.n, 1);
     const L = e.csv.slice(1).split('\n');
     assert.equal(L[0], CC.HDR_NEW.join(','));
-    assert.ok(L[1].startsWith('300002,7100000000028,מחברת A4,,,8,'), L[1]);
+    // רק השם השתנה באפליקציה: הברקוד – של כספית (fb), המחיר – של כספית; צבע / מידה / ללא מע"מ – מהקטלוג (סבב בדיקה 1)
+    assert.ok(L[1].startsWith('300002,7100000000099,מחברת A4,,,8,'), L[1]);
+    assert.equal(L[1].split(',')[CC.HDR_NEW.indexOf('פריט ללא מעמ')], 'לא');
+    assert.equal((await X('300002')).bc.pd, undefined, 'שדה שלא השתנה – לא מסומן pd');
     assert.deepEqual(e.rows[0].f, ['nm']);
     assert.equal((await X('300002')).nm.pd, 'מחברת A4');
     const rows = BASE(); rows[0] = r('300001', 'עט כחול 2', '7100000000011', 5); rows[1] = r('300002', 'מחברת A4', '7100000000028', 8); rows[2] = r('300003', 'סרגל', '7100000000035', 3, 'משרד', 'סרגלים');

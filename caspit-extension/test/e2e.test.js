@@ -1052,6 +1052,10 @@ test('0.1.13 (ד) → 0.1.23: מעבר לנחל לכיש לא נקלט → branc
   assert.ok(brd && brd.want === 'נחל לכיש' && brd.tries.length === 2, JSON.stringify(brd));
   assert.deepEqual(brd.tries[0].ev, ['focus', 'click']); assert.equal(brd.tries[0].pre.cur, 'יהודה הנשיא'); assert.equal(brd.tries[0].shown, false);
   assert.equal(await store0(), 'יהודה הנשיא');
+  // סבב בדיקה 1 (ליקוי 1): ריצה שנכשלה רושמת failSlot גם כשהמוצרים הצליחו – אחרת tick מריץ שוב כל רבע שעה
+  const st1 = await store();
+  assert.ok(st1.st.failSlot && st1.st.failSlot === st1.run.slot, JSON.stringify([st1.st.failSlot, st1.run.slot]));
+  assert.ok(st1.st.prodAt >= st1.st.lastRun.at - 5000, 'וגם "מוצרים סונכרנו לאחרונה"');
   await ls({ brFail: 'restore', brPicks: null });
   try {
     r = await syncOneDay();
@@ -1067,6 +1071,25 @@ test('0.1.13 (ד) → 0.1.23: מעבר לנחל לכיש לא נקלט → branc
     assert.equal(await store0(), 'נחל לכיש');
     assert.equal(r.rep.info.flags.back, undefined);
   } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+});
+// סבב בדיקה 1 (ליקוי 7): בלי בסיס השוואה אמין לא פוסלים את הסניף השני ולא מסמנים את היום כנקלט
+test('סבב בדיקה 1 (ליקוי 7): פעם ראשונה על נחל לכיש בלי מכירות ובלי בסיס – היום לא נשלח ולא נחשב שנקלט (branch-unsure); עם בסיס שמור של יהודה הנשיא – נשלח', async () => {
+  nlMode = 'empty';
+  await sw.evaluate(() => chrome.storage.local.remove(['brRefs', 'brRef', 'salesHash']));
+  await ls({ store: 'נחל לכיש', brPicks: null });
+  try {
+    let r = await syncOneDay();
+    assert.equal(r.s.st.lastRun.code, 'branch-unsure', JSON.stringify(r.s.st.lastRun));
+    assert.equal(r.sales.length, 0, 'היום לא נשלח');
+    assert.ok(!r.rep.info.sales[days[1]], 'לא נחשב שנקלט – ייקלט בריצה הבאה');
+    assert.equal(await store0(), 'נחל לכיש');
+    await sw.evaluate(() => chrome.storage.local.set({ brRef: { bn: ['סניף א'], bk: ['1'] } })); // הבסיס הישן של יהודה הנשיא (עד 0.1.22)
+    r = await syncOneDay();
+    assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
+    assert.ok(r.rep.info.sales[days[1]]);
+    assert.equal(r.sales.length, 1); assert.ok(r.sales[0].lines.every((l) => l.bk === '1'));
+    assert.deepEqual((await store()).brRefs['יהודה הנשיא'], { bn: ['סניף א'], bk: ['1'] }, 'נשמר בסיס גם לסניף השני');
+  } finally { nlMode = 'rows'; await ls({ store: 'יהודה הנשיא', brPicks: null }); }
 });
 // 0.1.23 (השערה לתקלה 26.11): כספית שואלת "לעבור לחנות…?" – התוסף לוחץ "אישור" רק בחלון שמזכיר חנות/סניף (branch.switch.confirm)
 test('0.1.23 חלון אישור בהחלפת חנות (brFail=confirm): "אישור" נלחץ, נחל לכיש נשלח, חזרה ליהודה הנשיא', async () => {
