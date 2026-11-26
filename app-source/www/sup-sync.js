@@ -37,6 +37,7 @@ window.supSyncNames=supSync;/* לא window.supSync – השם הזה תפוס ב
 /* בדיקה תקופתית אצל המנהל: כשרשימת המוצרים או "להזמין מספקים" נטענה מחדש (הפניה חדשה) – משלימים כרטיסים חסרים */
 let pP=null,pS=null;
 setInterval(()=>{try{if(!isA())return;const P=window.__ox&&window.__ox.P,O=window.__so&&window.__so.L;
- if(P&&P!==pP&&!(window.__ox&&window.__ox.pMore)){pP=P;supSync(supCatNames())}
- if(Array.isArray(O)&&O!==pS){pS=O;supSync(O.map(x=>x&&x.sup))}}catch(e){}},15000);
+ /* B2b: לא מסנכרנים לפי עותק שמור במכשיר (window.__ox.sc / window.__so.sc) – רק אחרי תשובה מהשרת */
+ if(P&&P!==pP&&!(window.__ox&&(window.__ox.pMore||window.__ox.sc))){pP=P;supSync(supCatNames())}
+ if(Array.isArray(O)&&O!==pS&&!window.__so.sc){pS=O;supSync(O.map(x=>x&&x.sup))}}catch(e){}},15000);
 })();

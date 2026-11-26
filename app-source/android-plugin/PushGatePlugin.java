@@ -16,6 +16,7 @@ import org.json.JSONArray;
  * act=true (16.11.2026) -> this APK builds notifications with action buttons itself (LpMessagingService), so the screens
  * register the device with act:1 and the server may send it data-only messages. Comes from Java, not from the screens,
  * because a live update can bring new screens to an old APK that does not have the buttons.
+ * rcv=true (24.11.2026) -> this APK also sends a delivery receipt for group messages (register with rcv:1). Same reason: Java only.
  */
 @CapacitorPlugin(name = "PushGate")
 public class PushGatePlugin extends Plugin {
@@ -41,6 +42,9 @@ public class PushGatePlugin extends Plugin {
         r.put("ready", ready);
         r.put("act", true);
         r.put("rem", true); // 16.11.2026: remSync / remPeek / remAck (personal reminders with working buttons)
+        // 24.11.2026: this APK sends a group delivery receipt (LpActJob.receipt). Only then may the server send group messages
+        // as data with a one-time token; older APKs with buttons keep getting the ordinary Firebase notification.
+        r.put("rcv", true);
         call.resolve(r);
     }
 

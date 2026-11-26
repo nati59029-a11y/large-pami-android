@@ -247,8 +247,8 @@ const tDef=()=>{const d=S.Ls&&S.Ls.def;if(S.tU||!d)return;const r=/^b[1-5]$/.tes
 const szT=(w,h)=>'\u2066'+w+'×'+h+'\u2069'; // גודל בתוך טקסט עברי – בלי היפוך (40×30 ולא 30×40)
 async function loadInv(){if(S.pB)return;S.pB=1;S.pErr='';try{
  if(!bzF('orders')){S.P=[];S.pNo=1;return}
- const ox=window.__ox;if(ox&&Array.isArray(ox.P)&&ox.P.length){S.P='ox';return}
- if(typeof window.__oxLoadAll==='function'&&wp('ord')){try{await window.__oxLoadAll()}catch(e){}if(window.__ox&&Array.isArray(window.__ox.P)){S.P='ox';return}}
+ /* B2b: מחירים למדבקה – לא מהעותק השמור של ההזמנות (window.__ox.sc) */const ox=window.__ox;if(ox&&!ox.sc&&Array.isArray(ox.P)&&ox.P.length){S.P='ox';return}
+ if(typeof window.__oxLoadAll==='function'&&wp('ord')){try{await window.__oxLoadAll()}catch(e){}if(window.__ox&&!window.__ox.sc&&Array.isArray(window.__ox.P)){S.P='ox';return}}
  // עובד עם "הדפסת מדבקות" בלי "הזמנות": קריאה ישירה של המוצרים, בעמודים של 2,000, רק השדות שצריך
  let L=[],after=null;for(let g=0;g<30;g++){const sq={from:[{collectionId:'prod'}],select:{fields:['name','price','barcode','bcx','sku','cx','bp','on'].map(f=>({fieldPath:f}))},orderBy:[{field:{fieldPath:'__name__'},direction:'ASCENDING'}],limit:2000};
   if(after)sq.startAt={values:[{referenceValue:after}],before:false};

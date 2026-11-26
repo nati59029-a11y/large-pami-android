@@ -40,14 +40,20 @@ const HRS0=[0,1,2,3,4,5,6].map(i=>i<5?{s:'08:00',e:'20:00'}:i===5?{s:'08:00',e:'
 .shh{padding:6px 8px;border-radius:var(--r-s,10px);border:1.5px dashed var(--bad);color:var(--bad);font-size:.85rem;font-weight:600}
 .shh span{direction:ltr;display:inline-block}`;document.head.appendChild(st)}
 
-async function load(){if(S.ld)return;S.ld=1;try{const d={op:'week'};if(S.from)d.from=S.from;S.w=await fnCall('shApi',d);S.from=S.w.from;S.err=''}catch(e){S.err=e&&e.message||'הטעינה נכשלה'}S.ld=0;if(cur().v==='shf'&&!document.querySelector('#dlg[open]')){rerender();/* מסך צר: גלילה לעמודה של היום */try{const t=document.querySelector('.shd.td'),w=document.querySelector('.shw');if(t&&w)w.scrollLeft+=t.getBoundingClientRect().left-w.getBoundingClientRect().left-(w.clientWidth-t.clientWidth)/2}catch(e){}}}
-const reload=()=>{S.w=null;S.err='';load()};
+/* B2a (24.11.2026): השבוע נפתח מיד מהעותק השמור במכשיר (DC.sfill – תצוגה בלבד; פעם אחת בהפעלה לכל שבוע), ואז load מעדכן מהשרת.
+   S.sc = מוצג עותק שמור: פתיחת משמרת, הוספה ומחיקת משימה מחכות לטעינה מהשרת. בלי חיבור – העותק נשאר עם שורת "אין חיבור" */
+const skFor=f=>'shf|'+(f||'');
+function fill(){const k=skFor(S.from),f0=S.from;DC.sfill(k,(v,t)=>{if(S.w||S.from!==f0||!v||!Array.isArray(v.days)||!Array.isArray(v.occ))return;S.w=v;S.sc=1;S.sct=t;S.err='';if(cur().v==='shf'&&!document.querySelector('#dlg[open]'))rerender()})}
+const wait=()=>{if(S.sc){toast('מעדכן מהשרת… נסו שוב בעוד רגע');return true}return false};
+async function load(){if(S.ld)return;S.ld=1;const f0=S.from;try{await DC.swait(skFor(f0));const d={op:'week'};if(S.from)d.from=S.from;const w=await fnCall('shApi',d);S.w=w;S.from=S.w.from;S.err='';S.sc=0;DC.ok();DC.sput(skFor(f0),w);if(f0&&w.from!==f0)DC.sput(skFor(w.from),w);if(f0&&Array.isArray(w.days)&&w.days.includes(w.today))DC.sput(skFor(''),w)}
+ catch(e){if(S.sc&&S.w&&e&&e.offline)DC.soff(e,S.sct);else{if(S.sc){S.w=null;S.sc=0}S.err=e&&e.message||'הטעינה נכשלה'}}S.ld=0;if(cur().v==='shf'&&!document.querySelector('#dlg[open]')){rerender();/* מסך צר: גלילה לעמודה של היום */try{const t=document.querySelector('.shd.td'),w=document.querySelector('.shw');if(t&&w)w.scrollLeft+=t.getBoundingClientRect().left-w.getBoundingClientRect().left-(w.clientWidth-t.clientWidth)/2}catch(e){}}}
+const reload=()=>{S.w=null;S.err='';S.sc=0;load()};
 
 /* ---------- הטבלה השבועית ---------- */
 function chip(o,w){const n=((w.tasks||{})[o.id]||[]).length,nm=o.u?(o.nm||nmOf(o.u)||'עובד'):'בלי עובד';
  return `<button class="shc${o.u?'':' op'}" data-a="sftOpen" data-k="${esc(o.id)}"><b>${esc(o.s)}–${esc(o.e)}${o.x?' ☾':''}</b><small>${esc(nm)}</small>${o.fx||n?`<small>${o.fx?'🔁 קבועה':''}${o.fx&&n?' · ':''}${n?'📋 '+n+' משימות':''}</small>`:''}</button>`}
 V.shf=()=>{const T='משמרות';if(!on())return{t:T,h:'<div class="empty">המסך זמין כשתוספת המשימות פעילה</div>'};
- if(!S.w&&!S.err)load();const w=S.w;
+ if(!S.w&&!S.err){fill();load()}const w=S.w;
  if(S.err)return{t:T,h:`<div class="card"><p class="note">${esc(S.err)}</p><button class="btn g w" ${big} data-a="shRe">נסו שוב</button></div>`};
  if(!w)return{t:T,h:'<div class="empty">טוען…</div>'};
  const full=!!w.full;
@@ -66,7 +72,7 @@ ACT.shRe=()=>reload();
 ACT.shWk=el=>{const n=+el.dataset.v;const base=S.w?S.w.from:'';S.from=n&&base?addD(base,n):'';reload();rerender()};
 
 /* ---------- לחיצה על משמרת: פרטים, משימות, עריכה, מחיקה ---------- */
-ACT.sftOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
+ACT.sftOpen=el=>{if(wait())return;const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
  const nm=o.u?(o.nm||nmOf(o.u)||'עובד'):'בלי עובד',L=(w.tasks||{})[o.id]||[],ended=o.end<=Date.now();
  let h=`<h3>${esc(nm)} · יום ${DN[dow(o.day)]} ${dm(o.day)}</h3><p class="note" style="margin-top:0"><span dir="ltr">${esc(o.s)}–${esc(o.e)}</span>${o.x?' (נגמרת למחרת)':''} · ${o.fx?'משמרת קבועה (כל שבוע)':'משמרת חד־פעמית'}${o.nt?'<br>'+esc(o.nt):''}</p>`;
  if(!w.full)return dlg(h+`<button class="btn g w" ${big} data-a="closeDlg">סגור</button>`);
@@ -79,7 +85,7 @@ ACT.sftOpen=el=>{const o=occOf(el.dataset.k),w=S.w;if(!o||!w)return;
 FRM.shTaskF=async f=>{const occ=f.dataset.k,txt=String(fd(f).txt||'').trim();if(!txt)return toast('כתבו משימה');if(txt.length>500)return toast('עד 500 תווים');
  const b=f.querySelector('button');b.disabled=true;
  try{const r=await fnCall('shApi',{op:'task',occ,txt});toast(r.st==='rel'?'המשימה נשלחה לעובד':r.st==='orph'?'המשימה לא נשלחה – אין עובד פעיל במשמרת':'נשמר – העובד יראה את המשימה בתחילת המשמרת');closeDlg();reload()}catch(e){b.disabled=false;err(e)}};
-ACT.shTDel=el=>{const id=el.dataset.k;ask('למחוק את המשימה?',async()=>{try{await fnCall('shApi',{op:'taskDel',id});toast('נמחקה');closeDlg();reload()}catch(e){err(e)}},'כן, מחק')};
+ACT.shTDel=el=>{if(wait())return;const id=el.dataset.k;ask('למחוק את המשימה?',async()=>{try{await fnCall('shApi',{op:'taskDel',id});toast('נמחקה');closeDlg();reload()}catch(e){err(e)}},'כן, מחק')};
 
 /* טופס משמרת: חדשה (o = null) או עריכה. "משמרת קבועה?" – חובה לבחור */
 function formH(o){const w=S.w,st=(w&&w.staff)||[],d=o?o.day:(w&&w.days&&w.days.includes(w.today)?w.today:w.days[0]);
@@ -93,7 +99,7 @@ function formH(o){const w=S.w,st=(w&&w.staff)||[],d=o?o.day:(w&&w.days&&w.days.i
  <div class="f"><span>משמרת קבועה?</span><div class="chips" role="radiogroup" style="margin:4px 0;display:flex;flex-wrap:wrap;gap:6px">${rad('1','כן – כל שבוע באותו יום ושעות')}${rad('0','לא – רק בתאריך הזה')}</div></div>
  <label class="f"><span>הערה (לא חובה)</span><input name="nt" maxlength="200" value="${esc(o?o.nt:'')}" style="min-height:48px"></label>
  <div class="row" style="margin-top:8px"><button class="btn grow" ${big}>שמירה</button><button type="button" class="btn g grow" ${big} data-a="closeDlg">ביטול</button></div></form>`}
-ACT.shNew=()=>{if(!S.w||!S.w.full)return;dlg(formH(null))};
+ACT.shNew=()=>{if(wait())return;if(!S.w||!S.w.full)return;dlg(formH(null))};
 ACT.sftEdit=el=>{const o=occOf(el.dataset.k);if(o)dlg(formH(o))};
 const sidOf=o=>o.sid||o.id.slice(0,o.id.length-11);
 async function saveRun(data,b){try{await fnCall('shApi',data);toast('נשמר');closeDlg();reload()}catch(e){if(b)b.disabled=false;err(e)}}

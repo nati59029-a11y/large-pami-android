@@ -48,8 +48,9 @@ const sg=r=>r.k==='bad'?-r.a:r.k==='warn'?r.a:0;
 
 /* ---- טעינה: חודש אחרי חודש דרך zsLoad (חודש שכבר נטען – מהמטמון) ---- */
 const re=()=>{if(cur().v==='cm'&&!document.querySelector('#dlg[open] form'))rerender()};
-async function load(force){if(CM.busy)return;const[a,b]=range(),M=months(a,b);if(force)M.forEach(m=>{delete ZS.D[m]});if(M.every(m=>ZS.D[m]))return;CM.busy=1;
- try{for(const m of M){while(ZS.b){try{await ZS.b}catch(e){}}if(!ZS.D[m])await zsLoad(m)}}catch(e){}finally{CM.busy=0}re()}
+/* B2b (24.11.2026): החודשים מוצגים מיד מהעותק השמור (zsFill, index.html – תצוגה בלבד, D.sc), וכל חודש כזה נטען שוב מהשרת (בלי חיבור – D.off, נשאר) */
+async function load(force){if(CM.busy)return;const[a,b]=range(),M=months(a,b);if(force)M.forEach(m=>{delete ZS.D[m]});if(M.every(m=>ZS.D[m]&&(!ZS.D[m].sc||ZS.D[m].off)))return;CM.busy=1;if(typeof zsFill==='function')M.forEach(m=>zsFill(m));
+ try{for(const m of M){while(ZS.b){try{await ZS.b}catch(e){}}if(!ZS.D[m]||ZS.D[m].sc&&!ZS.D[m].off)await zsLoad(m)}}catch(e){}finally{CM.busy=0}re()}
 
 /* הנתונים של התקופה והקופה שנבחרו. Z: {z,D,m} – הסגירה, החודש שלה ב-ZS.D ומפתח החודש. CO: הוצאות מקופה (של הסגירות שנטענו ושלא שויכו עדיין) */
 function rows(){const[a,b]=range(),M=months(a,b),Z=[],C=new Map(),err=[];let miss=0;
