@@ -54,6 +54,8 @@ CHG.pmQ=el=>{S.q=el.value;rerender();const i=document.getElementById('pmQ');if(i
 /* ---------- עריכה / מוצר חדש ---------- */
 const list=v=>String(v||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean);
 async function costOf(id){try{const j=await fsx('/prod/'+encodeURIComponent(id)+'/p/cost');const c=fvj({mapValue:j}).cost;return typeof c==='number'?c:''}catch(e){return ''}}
+/* 26.11.2026: קטגוריה חובה (גם בעריכה), תת קטגוריה רשות, "＋ חדשה" בטופס (cat-pick.js). בקופה המוצר שומר קטגוריה אחת: התת אם נבחרה, אחרת הראשית – כמו קודם */
+if(window.CatPick)CatPick.reg('pm',{cats:()=>{if(!Array.isArray(C.cats))C.cats=[];return C.cats}});
 async function edit(id){const p=id?(C.prods||[]).find(x=>x.id===id):null;if(id&&!p)return;
  const cost=id?await costOf(id):'';const brs=(typeof brList==='function'?brList():[]);
  dlg(`<h3>${p?'עריכת מוצר':'מוצר חדש'}</h3>${p&&(p.flags||[]).length?`<p class="note" style="margin-top:0">${(p.flags||[]).filter(f=>FL[f]).map(f=>esc(FL[f])).join(' · ')}${p.bcRaw?` · ברקוד מקורי: <bdi dir="ltr">${esc(p.bcRaw)}</bdi>`:''}</p>`:''}
@@ -63,7 +65,7 @@ async function edit(id){const p=id?(C.prods||[]).find(x=>x.id===id):null;if(id&&
  <label class="f"><span>ברקוד</span><input name="barcode" dir="ltr" inputmode="numeric" data-pos-scan value="${esc(p?p.barcode||'':'')}"></label>
  ${p&&p.barcode?'':`<label class="f"><span><input type="checkbox" name="autoBc" ${p?'':'checked'}> בלי ברקוד – ליצור ברקוד פנימי</span></label>`}
  <label class="f"><span>מק"ט (ריק = מספר רץ)</span><input name="sku" dir="ltr" value="${esc(p?p.sku||'':'')}"></label>
- <label class="f"><span>קטגוריה</span><select name="cat"><option value="">—</option>${(C.cats||[]).map(c=>`<option value="${esc(c.id)}"${p&&p.cat===c.id?' selected':''}>${esc((c.parent?'— ':'')+c.name)}</option>`).join('')}</select></label>
+ ${window.CatPick?CatPick.h('pm',p&&p.cat,p&&p.sub):`<label class="f"><span>קטגוריה</span><select name="cat"><option value="">—</option>${(C.cats||[]).map(c=>`<option value="${esc(c.id)}"${p&&p.cat===c.id?' selected':''}>${esc((c.parent?'— ':'')+c.name)}</option>`).join('')}</select></label>`}
  <label class="f"><span>עלות קנייה לפני מע"מ (₪)</span><input name="cost" inputmode="decimal" dir="ltr" value="${cost}"></label>
  <label class="f"><span>מחיר מינימום (₪, ריק = לפי הגדרת ההזמנות)</span><input name="minP" inputmode="decimal" dir="ltr" value="${p&&typeof p.minP==='number'?(p.minP/100):''}"></label>
  <label class="f"><span>ברקודים נוספים (מופרדים בפסיק)</span><input name="bcs" dir="ltr" value="${esc((p&&p.bcs||[]).join(', '))}"></label>
@@ -77,7 +79,7 @@ async function edit(id){const p=id?(C.prods||[]).find(x=>x.id===id):null;if(id&&
  ${p?`<button class="btn g w" style="margin-top:8px" data-a="pmLbl" data-id="${esc(p.id)}">הוספת מדבקה לתור</button>`:''}`)}
 ACT.pmEd=el=>edit(el.dataset.id).catch(err);
 ACT.pmNew=()=>{if(!C.cats||!C.cats.length)return toast('אין קטגוריות. הוסיפו קטגוריה במסך ההזמנות ואחר כך מוצר.');edit('')};
-FRM.pmSave=async f=>{const v=fd(f),id=f.dataset.id||'';const brs=(typeof brList==='function'?brList():[]);
+FRM.pmSave=async f=>{const v=fd(f),id=f.dataset.id||'';if(window.CatPick){const c=CatPick.val(f);if(!c.cat)return toast('בחרו קטגוריה למוצר (אפשר גם לפתוח קטגוריה חדשה)');v.cat=c.sub||c.cat}const brs=(typeof brList==='function'?brList():[]);
  const packs=list(v.packs).map(s=>{const m=/^\s*([0-9A-Za-z-]+)\s*[:x×*]\s*(\d+)\s*$/.exec(s);return m?{bc:m[1],qty:+m[2]}:{bc:s,qty:0}});
  const minQ={};(brs.length?brs.map(b=>b.id):['_']).forEach(b=>{const x=v['minQ_'+b];if(x!==undefined&&String(x).trim()!=='')minQ[b]=+x});
  const d={name:v.name,price:Number(String(v.price).replace(',','.')),barcode:String(v.barcode||'').trim(),sku:v.sku,cat:v.cat,cost:v.cost===''?'':Number(String(v.cost).replace(',','.')),minP:v.minP===''?'':Number(String(v.minP).replace(',','.')),

@@ -14,11 +14,14 @@ const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), '
 const fnUrl = (n) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${n}`;
 // piDraft / piFinish דורשים rev (הגרסה שהמסך טען). בבדיקות הקיימות – הגרסה הנוכחית במסמך (AUTO); בדיקת ה-rev עצמה שולחת במפורש
 const AUTO_REV = { on: true };
+// 26.11.2026: מוצר חדש בסיום – קטגוריה חובה. בבדיקות הקיימות נוספת קטגוריה קבועה (c_pi) לשורה חדשה בלי קטגוריה; הבדיקה הייעודית מכבה (AUTO_CAT.on = false)
+const AUTO_CAT = { on: true };
 async function curRev(id) {
   let r = 0; await prep(async (d) => { for (const p of [`b/biz-pi/pinv/${id}`, `b/biz-pi-shelf/pinv/${id}`, `pinv/${id}`]) { const s = await d.doc(p).get(); if (s.exists) { r = s.get('rev') || 0; return; } } }); return r;
 }
 async function call(name, uid, data) {
   if (AUTO_REV.on && (name === 'piDraft' || name === 'piFinish') && data && data.rev === undefined && typeof data.id === 'string') data = Object.assign({ rev: await curRev(data.id) }, data);
+  if (AUTO_CAT.on && name === 'piFinish' && data && Array.isArray(data.lines)) data = Object.assign({}, data, { lines: data.lines.map((l) => (l && typeof l === 'object' && !l.pid && !l.cat ? Object.assign({ cat: 'c_pi' }, l) : l)) });
   const headers = { 'Content-Type': 'application/json' };
   if (uid) headers.Authorization = 'Bearer ' + H.mockToken(uid);
   const r = await fetch(fnUrl(name), { method: 'POST', headers, body: JSON.stringify({ data: data || {} }) });
@@ -61,6 +64,9 @@ async function seed() {
     b.set(d.doc(`b/${A}/prod/pO`), { name: 'במבה (ספק אחר)', price: 6, barcode: '729001', on: true, q: {}, sup: 'שטראוס' });
     b.set(d.doc(`b/${A}/prod/pN`), { name: 'ביסלי', price: 6.9, barcode: '729002', on: true, q: {} });
     b.set(d.doc(`b/${A}/ordcfg/main`), { vat: 18 });
+    b.set(d.doc(`b/${A}/cat/c_pi`), { name: 'כללי', ord: 0 });
+    b.set(d.doc(`b/${A}/cat/s_pi`), { name: 'משנה', parent: 'c_pi', ord: 0 });
+    b.set(d.doc(`b/${A}/cat/c_pi2`), { name: 'אחרת', ord: 1 });
     await b.commit();
   });
 }
@@ -240,6 +246,32 @@ describe('תמחור חשבונית ספק – שרת', () => {
     assert.equal((await coll(PFX() + 'prod')).length, 4);
     assert.equal((await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: L })).reason, 'closed');
     assert.equal((await call('piClaim', P2, { id })).reason, 'closed', 'אחרי סיום – נעלם לכולם מהעריכה');
+  });
+
+  it('קטגוריה (26.11.2026): piClaim מחזיר את הקטגוריות; מוצר חדש בלי קטגוריה / עם תת שלא שייכת – נדחה; עם קטגוריה ותת – נשמרות במוצר; מוצר קיים – לא נדרש', async () => {
+    const id = await mk(MGR, [LINES[0], LINES[2]]);
+    const cl = await call('piClaim', P1, { id });
+    assert.equal(cl.status, 'OK', cl.text);
+    assert.deepEqual(cl.result.cats.map((c) => [c.id, c.parent]).sort(), [['c_pi', ''], ['c_pi2', ''], ['s_pi', 'c_pi']]);
+    AUTO_CAT.on = false;
+    try {
+      const L = [Object.assign({}, LINES[0], { pid: 'pA' }), Object.assign({}, LINES[2], { price: 9.9 })];
+      const r0 = await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: L });
+      assert.equal(r0.reason, 'bad-cat'); assert.match(r0.text, /שורה 2/);
+      assert.equal((await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: [L[0], Object.assign({ cat: 'c_pi2', sub: 's_pi' }, L[1])] })).reason, 'bad-cat', 'תת של קטגוריה אחרת');
+      assert.equal((await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: [L[0], Object.assign({ cat: 's_pi' }, L[1])] })).reason, 'bad-cat', 'תת במקום ראשית');
+      assert.equal((await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: [L[0], Object.assign({ cat: 'c_none' }, L[1])] })).reason, 'no-cat');
+      assert.equal((await call('piDraft', P1, { id, lines: [Object.assign({ cat: 'c_pi', sub: 's_pi' }, L[1])] })).status, 'OK', 'cat/sub נשמרים בטיוטה');
+      assert.deepEqual([(await get(PFX() + 'pinv/' + id)).lines[0].cat, (await get(PFX() + 'pinv/' + id)).lines[0].sub], ['c_pi', 's_pi']);
+      const f = await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: [L[0], Object.assign({ cat: 'c_pi', sub: 's_pi' }, L[1])] });
+      assert.equal(f.status, 'OK', f.text);
+      const nid = (await get(PFX() + 'pinv/' + id)).lines[1].pid;
+      const p = await get(PFX() + 'prod/' + nid);
+      assert.deepEqual([p.cat, p.sub], ['c_pi', 's_pi']);
+      assert.equal((await get(PFX() + 'prod/pA')).cat, 'c_x', 'מוצר קיים – הקטגוריה לא משתנה');
+      // עובד עם prc פותח קטגוריה חדשה מתוך המסך
+      const nc = await call('saveCat', P1, { name: 'חדשה מהתמחור' }); assert.equal(nc.status, 'OK', nc.text);
+    } finally { AUTO_CAT.on = true; }
   });
 
   it('שינוי שם וכינויים (שלב 2): "שם במלאי" הופך לשם הראשי והישן נשמר ככינוי בלי כפילות; מוצר חדש בשם אחר; שורה בשם ישן מקבלת הצעה למוצר', async () => {

@@ -158,7 +158,7 @@ describe('אשף ייבוא מכספיט – ניקוי שורה בשרת', () =
     assert.equal(rs(() => S.prodRow({ name: 'x', price: -1 })), 'bad-price');
     assert.equal(rs(() => S.prodRow({ name: '', price: 1 })), 'bad-name');
     assert.equal(rs(() => S.prodRow({ name: 'x', price: 1, barcode: '7.29E+12' })), 'bad-barcode', 'תווים אסורים – נדחה בשרת (המכשיר שולח bcRaw)');
-    assert.deepEqual(S.prodRow({ name: 'x', price: 0, barcode: '5901234123458' }), { n: undefined, name: 'x', price: 0, barcode: '', bcRaw: '5901234123458' }, 'ספרת ביקורת שגויה – לבדיקה');
+    assert.deepEqual(S.prodRow({ name: 'x', price: 0, barcode: '5901234123458' }), { n: undefined, name: 'x', price: 0, barcode: '', bcRaw: '5901234123458', cat: 'ללא קטגוריה' }, 'ספרת ביקורת שגויה – לבדיקה; בלי קטגוריה – "ללא קטגוריה" (26.11.2026)');
     assert.equal(S.prodRow({ name: 'x', price: 1, bcRaw: '7.29E+12' }).bcRaw, '7.29E+12');
     assert.equal(rs(() => S.prodRow({ name: 'x', price: 1, on: false })), 'bad-field');
     assert.equal(rs(() => S.prodRow({ name: 'מוצר 1234567890', price: 1 })), 'card-like');

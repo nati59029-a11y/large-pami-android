@@ -165,7 +165,7 @@ try{window.addEventListener('online',()=>later(1000));setInterval(()=>{if(qGet()
 if(typeof V==='undefined'||typeof ACT==='undefined'||typeof INP==='undefined'||!window.PI||typeof PricingCalc==='undefined')return;
 const PC=PricingCalc,PI=window.PI,LOCK_MS=30*60e3;
 const BC_RE=/^[0-9A-Za-z-]{3,30}$/,ID_OK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(v);
-const KEYS=['n','bc','sku','qty','unit','pk','ct','cost','raw','chk','pid','nw','skip','price','wp','wpSrc','cto','nm'];/* nm – "שם במלאי" (שלב 2, 2026-11-14): שינוי שם; השם הקודם נשמר בשרת ככינוי */
+const KEYS=['n','bc','sku','qty','unit','pk','ct','cost','raw','chk','pid','nw','skip','price','wp','wpSrc','cto','nm','cat','sub'];/* cat/sub (26.11.2026) – קטגוריה ותת קטגוריה למוצר חדש; נשלחים רק כשהשרת מכיר אותם (e.cats) *//* nm – "שם במלאי" (שלב 2, 2026-11-14): שינוי שם; השם הקודם נשמר בשרת ככינוי */
 const fnc=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return fnCall(n,d)};
 const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'r'+[...a].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,22)};
 const r2=x=>Math.round(x*100)/100,r3=x=>Math.round(x*1000)/1000;
@@ -286,7 +286,7 @@ function supSet(inv){const out=new Set(),n0=normSup(inv&&inv.sup),id=inv&&inv.su
 function supAlias(M,inv){try{const set=supSet(inv);if(!set.size)return;
  for(const m of M){if(!m||m.m||m.k!=='otherSup'||!Array.isArray(m.oth))continue;const j=m.oth.findIndex(o=>o&&set.has(normSup(o.sup)));if(j<0)continue;
   m.m=m.oth[j];m.k='bc';m.oth=m.oth.filter((o,k)=>k!==j)}}catch(x){}}
-function init(e,r){const inv=r.inv||{};e.inv=inv;e.rev=Number.isInteger(r.rev)&&r.rev>=0?r.rev:0;e.gen=(e.gen||0)+1;e.vat=typeof r.vat==='number'?r.vat:PC.VAT0;e.ord=r.ord!==false;e.until=r.until||0;
+function init(e,r){const inv=r.inv||{};e.inv=inv;e.cats=Array.isArray(r.cats)?r.cats:null;e.rev=Number.isInteger(r.rev)&&r.rev>=0?r.rev:0;e.gen=(e.gen||0)+1;e.vat=typeof r.vat==='number'?r.vat:PC.VAT0;e.ord=r.ord!==false;e.until=r.until||0;
  e.M=Array.isArray(r.m)?r.m:[];e.S0=[];e.B=[];supAlias(e.M,inv);
  e.L=[];(Array.isArray(inv.lines)?inv.lines:[]).forEach((l0,i)=>{const l={};for(const k of KEYS)if(l0&&l0[k]!=null)l[k]=l0[k];e.L[i]=l;const m=e.M[i]||{};
   e.S0[i]=m.m&&['bc','sku','name','al'].includes(m.k)?m.k:(m.k==='pid'?'pid':'');
@@ -296,7 +296,7 @@ function init(e,r){const inv=r.inv||{};e.inv=inv;e.rev=Number.isInteger(r.rev)&&
   e.B[i]=l.unit==='ct'?{n:l.ct?l.qty/l.ct:l.qty,cp:l.ct&&l.cost!=null?l.cost*l.ct:null}:null})}/* שורת קרטונים: מספר הקרטונים ומחיר קרטון – לשינוי כמות בקרטון */
 /* השורות לשליחה (piDraft / piFinish): רק השדות שהשרת מכיר, בלי ערכים ריקים. עסק בלי הזמנות (מדף בלבד) – בלי כמות, מארז וקרטון (אין מלאי) */
 const NO_STOCK=['qty','pk','ct','wp','wpSrc','cto','nm'];
-function out(e){return e.L.map(l=>{const o={};for(const k of KEYS){const v=l[k];if(v==null||v==='')continue;if(!e.ord&&NO_STOCK.includes(k))continue;if(k==='nw'||k==='skip'){if(v===true)o[k]=true;continue}if(k==='cto'){if(e.ord&&typeof v==='boolean')o[k]=v;continue}
+function out(e){return e.L.map(l=>{const o={};for(const k of KEYS){const v=l[k];if(v==null||v==='')continue;if((k==='cat'||k==='sub')&&(!e.cats||!e.ord||l.pid))continue;if(!e.ord&&NO_STOCK.includes(k))continue;if(k==='nw'||k==='skip'){if(v===true)o[k]=true;continue}if(k==='cto'){if(e.ord&&typeof v==='boolean')o[k]=v;continue}
   if((k==='wp'||k==='wpSrc')&&!e.ord)continue;if(k==='bc'&&!BC_RE.test(v))continue;o[k]=v}if(!o.n)o.n='';if(e.ord&&o.qty==null)o.qty=0;return o})}
 PI.out=()=>E?out(E):null;
 async function start(id){const e={id,rq:rid(),busy:1};E=e;
@@ -346,6 +346,10 @@ function cchH(e,i){const l=e.L[i],p=prodOf(e,i);if(!p||p.costx==null||l.cost==nu
 function mgH(e,i){const l=e.L[i],m=PC.marginInc(l.price,l.cost,e.vat);return m==null?'רווח: —':`רווח: ${m}%`}
 const wsrc=l=>l.wpSrc==='stock'?'מהמלאי':l.wpSrc==='auto'?'חושב אוטומטית (עלות × 1.5)':l.wpSrc==='man'?'הוזן ידנית':'';
 const fld=(lb,i,k,v,a)=>`<label class="pf"><span>${lb}</span><input data-i="piF" data-x="${i}" data-k="${k}" value="${esc(money(v))}" autocomplete="off" ${a||''}${E&&E.lost?' disabled':''}></label>`;
+/* 26.11.2026: מוצר חדש – קטגוריה חובה, תת קטגוריה רשות, ואפשר לפתוח חדשה (cat-pick.js). רק כשהשרת שולח את רשימת הקטגוריות */
+if(window.CatPick)CatPick.reg('pi',{cats:()=>E&&E.cats||[],set:(cat,sub,b)=>{if(!E||!E.L||E.lost)return;const w=b&&b.closest('.pil'),i=w?+String(w.id).replace('pil',''):-1,l=E.L[i];if(!l)return;
+ if((l.cat||'')===(cat||'')&&(l.sub||'')===(sub||''))return;if(cat)l.cat=cat;else delete l.cat;if(sub)l.sub=sub;else delete l.sub;dirty()}});
+const catH=(e,l,i)=>e.ord&&e.cats&&!l.pid&&window.CatPick?CatPick.h('pi',l.cat,l.sub,{nm:false}):'';
 function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
  const L=`<div><div class="hd"><span class="no">${i+1}.</span>${tagH(e,i)}<button type="button" class="lkb" data-a="piSkip" data-x="${i}" data-v="1"${dis}>דלג על השורה</button></div>${l.chk?`<span class="tag t1">לבדיקה: ${esc(l.chk)}</span>`:''}
   ${fld('שם',i,'n',l.n,'maxlength="60"')}
@@ -353,7 +357,7 @@ function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
   ${e.ord?'':`<div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>`}
   ${!e.ord?'':`<div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('כמות למלאי',i,'qty',l.qty,'inputmode="decimal"')}</div>
   <div class="g3">${fld('במארז',i,'pk',l.pk,`inputmode="numeric"${p&&p.pk?` placeholder="${esc(String(p.pk))}"`:''}`)}${fld('מארזים בקרטון',i,'ct',l.ct,`inputmode="numeric"${p&&p.ct?` placeholder="${esc(String(p.ct))}"`:''}`)}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>`}
-  <span id="pic${i}">${cchH(e,i)}</span>${l.raw?`<small class="sm">בחשבונית: ${esc(l.raw)}</small>`:''}</div>`;
+  ${catH(e,l,i)}<span id="pic${i}">${cchH(e,i)}</span>${l.raw?`<small class="sm">בחשבונית: ${esc(l.raw)}</small>`:''}</div>`;
  const R=`<div class="pr">${fld('מחיר לצרכן כולל מע"מ',i,'price',l.price,'inputmode="decimal"')}<b class="mg" id="pim${i}">${mgH(e,i)}</b>
   ${e.ord?`${fld('מחיר סיטונאי לפני מע"מ',i,'wp',l.wp,'inputmode="decimal"')}<small class="sm" id="pis${i}" style="margin-top:-4px;margin-bottom:6px">${wsrc(l)}</small>
   <label class="cb"><input type="checkbox" data-c="piCto" data-x="${i}"${l.cto?' checked':''}${dis}>רק קרטונים סגורים</label>`:''}
@@ -410,7 +414,8 @@ ACT.piFin=()=>{if(!E||!E.L||E.lost||E.fin)return;
  if(document.querySelector('.pil input.bad'))return toast('יש שדה עם ערך לא תקין (מסומן באדום)');
  for(let i=0;i<E.L.length;i++){const l=E.L[i];if(l.skip)continue;
   if(!String(l.n||'').trim()&&!l.pid)return toast(`שורה ${i+1}: חסר שם מוצר`);
-  if(E.ord&&!l.pid&&l.price==null)return toast(`שורה ${i+1}: חסר מחיר לצרכן למוצר חדש`)}
+  if(E.ord&&!l.pid&&l.price==null)return toast(`שורה ${i+1}: חסר מחיר לצרכן למוצר חדש`);
+  if(E.ord&&E.cats&&!l.pid&&!l.cat)return toast(`שורה ${i+1}: בחרו קטגוריה למוצר החדש`)}
  const s=sums(E),B=E.ord&&s.q>0&&typeof brList==='function'?brList():[];
  const brH=B.length>1?`<label class="f"><span>לאיזה סניף נכנס המלאי</span><select name="br">${B.map(b=>`<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></label>`:B.length===1?`<input type="hidden" name="br" value="${esc(B[0].id)}"><p class="note">סניף: ${esc(B[0].name)}</p>`:'';
  const body=E.ord?`<p>יעודכנו <b id="piSU">${s.up}</b> מוצרים קיימים · ייווצרו <b id="piSN">${s.nw}</b> מוצרים חדשים · יתווספו <b id="piSQ">${s.q}</b> יחידות למלאי.</p>`:'<p>החשבונית תיסגר. בעסק בלי הזמנות אין מלאי בענן לעדכן.</p>';

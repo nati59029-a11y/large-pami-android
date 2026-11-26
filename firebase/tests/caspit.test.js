@@ -224,7 +224,8 @@ describe('סנכרון כספית A1', () => {
     assert.equal((await adm().doc(`b/${A}/cxRun/${id2}`).get()).get('st'), 'void');
   });
   it('פריטים חדשים: שתי קריאות במקביל – קוד אחד למוצר; קוד שהופיע בקטלוג (גם מסונן) לא ניתן', async () => {
-    await ok('saveProduct', MGR, { reqId: 'reqcxnew01zz', name: 'מוצר חדש מהאפליקציה', price: 8 });
+    await adm().doc(`b/${A}/cat/c_app`).set({ name: 'כללי', ord: 0 });
+    await ok('saveProduct', MGR, { reqId: 'reqcxnew01zz', name: 'מוצר חדש מהאפליקציה', price: 8, cat: 'c_app' });
     const [e1, e2] = await Promise.all([ok('cxExport', MGR, { kind: 'new' }), ok('cxExport', MGR, { kind: 'new' })]);
     assert.equal(e1.added + e2.added, 1);
     const d = (await adm().doc(`b/${A}/prod/preqcxnew01zz`).get()).data();

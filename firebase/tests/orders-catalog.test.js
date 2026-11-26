@@ -78,11 +78,24 @@ describe('קטלוג: מוצר ישן, מחיר לסניף, שדות חדשים'
     assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'x', price: 1, home: 'br9' })).reason, 'bad-br');
     assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'x', price: 1, foo: 1 })).reason, 'bad-field');
   });
-  it('קטגוריות: מנהל יוצר קטגוריה + תת־קטגוריה; עובד לא; תת לקטגוריה לא קיימת נדחית; עובד קורא, לא כותב', async () => {
+  it('קטגוריות: מנהל יוצר קטגוריה + תת־קטגוריה; עובד עם ord רק יוצר חדשה (26.11.2026); תת לקטגוריה לא קיימת נדחית; עובד קורא, לא כותב', async () => {
     const c = await call('saveCat', MGR, { name: 'מאפים' }); assert.equal(c.status, 'OK', c.text);
     const s = await call('saveCat', MGR, { name: 'לחמים', parent: c.result.id }); assert.equal(s.status, 'OK', s.text);
     assert.equal((await call('saveCat', MGR, { name: 'x', parent: s.result.id })).reason, 'bad-parent');
-    assert.equal((await call('saveCat', E1, { name: 'y' })).reason, 'manager-only');
+    const y = await call('saveCat', E1, { name: 'y' }); assert.equal(y.status, 'OK', y.text); // 26.11.2026: מי שמוסיף מוצר פותח קטגוריה
+    assert.equal((await call('saveCat', E1, { name: 'מאפים', ord: 5 })).reason, 'manager-only', 'עובד לא משנה סדר');
+    assert.equal((await call('saveCat', E1, { id: c.result.id, name: 'שם אחר' })).reason, 'manager-only', 'עובד לא משנה קטגוריה קיימת');
+    const ex = await call('saveCat', E1, { name: 'מאפים' }); assert.equal(ex.result.id, c.result.id); assert.equal(ex.result.ex, true);
+    assert.equal((await call('saveCat', NOORD, { name: 'z' })).status, 'PERMISSION_DENIED');
+    // קטגוריה חובה: מוצר חדש בלי / ריקה – נדחה; עריכה עם קטגוריה ריקה – נדחית; תת שלא שייכת – נדחית; תת קטגוריה במקום ראשית – נדחית
+    assert.equal((await call('saveProduct', E1, { reqId: 'reqcatnone01', name: 'חדש', price: 3 })).reason, 'bad-cat');
+    assert.equal((await call('saveProduct', E1, { reqId: 'reqcatnone02', name: 'חדש', price: 3, cat: '' })).reason, 'bad-cat');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, cat: null })).reason, 'bad-cat');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, cat: y.result.id, sub: s.result.id })).reason, 'bad-cat');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, cat: s.result.id })).reason, 'bad-cat');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, cat: 'c_none' })).reason, 'no-cat');
+    const nw = await call('saveProduct', E1, { reqId: 'reqcatok0001', name: 'חדש', price: 3, cat: c.result.id }); assert.equal(nw.status, 'OK', nw.text);
+    assert.equal((await get(`b/${A}/prod/${nw.result.id}`)).cat, c.result.id);
     assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, cat: c.result.id, sub: s.result.id })).status, 'OK');
     assert.equal((await get(`b/${A}/prod/pB`)).sub, s.result.id);
     await assertSucceeds(db(E1).doc(`b/${A}/cat/${c.result.id}`).get());
@@ -128,6 +141,19 @@ describe('מחיר סיטונאי (22:07: עובד רואה רק ללקוח סי
 
 describe('ייבוא מוצרים', () => {
   const rows = (k) => Array.from({ length: k }, (_, i) => ({ name: 'מוצר ' + i, price: 1 + i, barcode: 'B' + String(i).padStart(4, '0'), qty: 2, cat: 'קטגוריה ' + (i % 3), sub: i % 2 ? 'תת' : '' }));
+  it('26.11.2026: מוצר חדש בלי קטגוריה בקובץ – תחת "ללא קטגוריה" (נוצרת פעם אחת); מוצר קיים בלי קטגוריה בקובץ – הקטגוריה שלו לא משתנה', async () => {
+    await prep((d) => Promise.all([d.doc(`b/${A}/cat/c_k`).set({ name: 'קיימת', ord: 0 }), d.doc(`b/${A}/prod/pK`).set({ name: 'קיים', price: 3, barcode: 'K0001', on: true, q: {}, cat: 'c_k' })]));
+    const r = await call('importProducts', MGR, { reqId: rid(), br: 'br1', rows: [{ name: 'בלי קטגוריה 1', price: 2 }, { name: 'בלי קטגוריה 2', price: 3 }, { name: 'קיים', price: 4, barcode: 'K0001' }, { name: 'עם', price: 5, cat: 'קיימת' }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.added, 3); assert.equal(r.result.updated, 1);
+    const P = await coll(`b/${A}/prod`);
+    const nc = (await coll(`b/${A}/cat`)).filter((c) => c.name === 'ללא קטגוריה');
+    assert.equal(nc.length, 1);
+    assert.deepEqual(P.filter((p) => /^בלי קטגוריה/.test(p.name)).map((p) => p.cat), [nc[0].id, nc[0].id]);
+    assert.equal(P.find((p) => p.id === 'pK').cat, 'c_k');
+    assert.ok(P.find((p) => p.name === 'עם').cat && P.find((p) => p.name === 'עם').cat !== nc[0].id);
+    const r2 = await call('importProducts', MGR, { reqId: rid(), br: 'br1', rows: [{ name: 'קיים', price: 6, barcode: 'K0001' }] });
+    assert.equal(r2.result.updated, 1);
+  });
   it('(3) 250 שורות בשתי מנות → 250 מוצרים; ייבוא חוזר בלי "הוסף כמות" – אין כפולים והכמות לא משתנה; עם – מוסיף; מחיר טקסט נדחה', async () => {
     const R = rows(250); R[7] = Object.assign({}, R[7], { price: 'abc' });
     const a = await call('importProducts', MGR, { reqId: rid(), br: 'br1', rows: R.slice(0, 200) });

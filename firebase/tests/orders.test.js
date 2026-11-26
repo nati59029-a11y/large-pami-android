@@ -361,8 +361,9 @@ describe('זיכוי אצל ספק הקישור (17:47)', () => {
 
 describe('מלאי', () => {
   it('3 + הכנסת 5 = 8; הזמנה 2 = 6; ביטול = 8; נגמר = 0; סך התנועות = הכמות', async () => {
-    await prep((d) => d.doc(`b/${A}/prod/pA`).set({ name: 'עוגה', price: 10, on: true, q: {} }));
-    const pr = await call('saveProduct', E1, { reqId: rid(), name: 'קפה', price: 12, br: 'br1', qty: 3 });
+    await prep((d) => Promise.all([d.doc(`b/${A}/prod/pA`).set({ name: 'עוגה', price: 10, on: true, q: {} }), d.doc(`b/${A}/cat/cq`).set({ name: 'שתייה', ord: 0 })]));
+    assert.equal((await call('saveProduct', E1, { reqId: rid(), name: 'קפה', price: 12, br: 'br1', qty: 3 })).reason, 'bad-cat', 'מוצר חדש בלי קטגוריה – נדחה (26.11.2026)');
+    const pr = await call('saveProduct', E1, { reqId: rid(), name: 'קפה', price: 12, br: 'br1', qty: 3, cat: 'cq' });
     assert.equal(pr.status, 'OK', pr.text);
     const pid = pr.result.id;
     const q = rid();
@@ -401,7 +402,8 @@ describe('מלאי', () => {
       await assertFails(db(u).doc(`b/${A}/stockLog/s1`).set({ delta: 1 }));
       await assertFails(db(u).doc(`b/${A}/ordcfg/main`).set({ pay: {} }));
     }
-    const r = await call('saveProduct', E1, { reqId: rid(), name: 'x', price: 1 });
+    await prep((d) => d.doc(`b/${A}/cat/cq`).set({ name: 'שתייה', ord: 0 }));
+    const r = await call('saveProduct', E1, { reqId: rid(), name: 'x', price: 1, cat: 'cq' });
     assert.equal(r.status, 'OK', r.text);
   });
 });
