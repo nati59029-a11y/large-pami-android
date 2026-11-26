@@ -130,8 +130,9 @@ async function seedMember(biz, email, role) {
   const md = await page.evaluate(() => ({ open: document.getElementById('dlg').open, cur: document.querySelector('#dlg').innerText.includes('ma@x.co'), two: !!document.querySelector('#dlg input[name=email2]') }));
   await page.fill('#dlg input[name=email]', 'ma2@x.co'); await page.click('#dlg form button:not([type=button])'); await wait(page, 3500);
   const cm = log.filter((r) => r.step === 'emailMgr' && /setStaffEmail/.test(r.url)).map((r) => r.status);
-  const m2a = await page.evaluate(() => ({ row: document.querySelector('#main').innerText.includes('ma2@x.co'), dlg: document.getElementById('dlg').open, still: !!SY.refresh }));
-  check('7ה מנהל־על: שינוי מייל של מנהל – חלון עם המייל הנוכחי (בלי שדה אימות), setStaffEmail הצליח, הכרטיס מציג את המייל החדש, ומנהל־העל נשאר מחובר', md.open && md.cur && !md.two && cm.length === 1 && cm[0] === 200 && m2a.row && !m2a.dlg && m2a.still, { md, cm, m2a });
+  const m2a = await page.evaluate(() => ({ row: document.querySelector('#main').innerText.includes('ma2@x.co'), ask: document.getElementById('dlg').open && /ma2@x\.co/.test(document.querySelector('#dlg').innerText), still: !!SY.refresh }));
+  check('7ה מנהל־על: שינוי מייל של מנהל – חלון עם המייל הנוכחי (בלי שדה אימות), setStaffEmail הצליח, הכרטיס מציג את המייל החדש, מוצעת שליחת מייל קביעת סיסמה לכתובת החדשה (15c010d), ומנהל־העל נשאר מחובר', md.open && md.cur && !md.two && cm.length === 1 && cm[0] === 200 && m2a.row && m2a.ask && m2a.still, { md, cm, m2a });
+  await page.evaluate(() => closeDlg()); // ההצעה לשלוח מייל – לא שולחים בבדיקה
   const backM = await page.evaluate(async (u) => { try { await fnCall('setStaffEmail', { bizId: SY.bizId, uid: u, email: 'ma@x.co' }); return true; } catch (e) { return e.message; } }, (card || {}).maUid);
   check('7ו החזרת המייל המקורי של המנהל', backM === true, backM);
   await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 500);

@@ -64,11 +64,12 @@ const mask = (p) => (p && p.url ? new URL(p.url).searchParams.getAll('updateMask
   // ---------- e: עובד עם הרשאת מדבקות – עורך, גרירה, שמירה ----------
   { const ST = { docs: {}, prods: PRODS, lbls: null, deny: 0, patches: [] };
     const { ctx, page, log } = await open(browser, www, 'w', { st: ST });
-    await page.evaluate(() => go('lbl')); await H.settle(page, 1500);
+    // 25.11.2026 (PR #231): "עיצוב תבניות" עבר ממסך ההדפסה למסך "הגדרות" של המדבקות (lblS) – נכנסים דרך כפתור "הגדרות"
+    await page.evaluate(() => go('lbl')); await H.settle(page, 1500); await page.click('#main [data-a=go][data-v=lblS]'); await H.settle(page, 800);
     const b0 = await page.evaluate(() => !!document.querySelector('#main [data-a=go][data-v=lblD]'));
     await page.click('#main [data-a=go][data-v=lblD]'); await H.settle(page, 1200);
     const l0 = await page.evaluate(() => ({ v: cur().v, ed: document.querySelectorAll('#main [data-a=lblDEd]').length, t: document.getElementById('main').innerText }));
-    check('e 1 עובד עם הרשאת מדבקות: כפתור "עיצוב תבניות" במסך ההדפסה, רשימה עם 5 התבניות המקוריות', b0 && l0.v === 'lblD' && l0.ed === 5 && /ברקוד ומחיר/.test(l0.t) && /מחיר ליחידה/.test(l0.t), { b0, v: l0.v, ed: l0.ed });
+    check('e 1 עובד עם הרשאת מדבקות: כפתור "עיצוב תבניות" במסך ההגדרות של המדבקות, רשימה עם 5 התבניות המקוריות', b0 && l0.v === 'lblD' && l0.ed === 5 && /ברקוד ומחיר/.test(l0.t) && /מחיר ליחידה/.test(l0.t), { b0, v: l0.v, ed: l0.ed });
     await page.click('#main [data-a=lblDNew]'); await H.settle(page, 300);
     const nd = await page.evaluate(() => [...document.querySelectorAll('#dlg select[name=from] option')].map((o) => o.value));
     await page.fill('#dlg [name=name]', 'מבצע שבועי'); await page.selectOption('#dlg [name=from]', '0'); await page.click('#dlg button:not([type=button])'); await H.settle(page, 800);
