@@ -71,6 +71,7 @@ function prodRow(r) {
   if (r.cost != null && r.cost !== '') o.cost = ORD.money(r.cost, 'עלות');
   if (r.cid != null && r.cid !== '') o.cid = ORD.idOf(r.cid, 'קטגוריה');
   else if (r.cat != null && r.cat !== '') o.cat = ORD.txt(r.cat, 40, 'bad-cat', 'קטגוריה');
+  if (!o.cid && !o.cat) o.cat = 'ללא קטגוריה'; // 26.11.2026 (החלטת בעל העסק): מוצר בלי קטגוריה בקובץ – תחת "ללא קטגוריה" (נוצרת אם חסרה)
   return o;
 }
 function custRow(r) {

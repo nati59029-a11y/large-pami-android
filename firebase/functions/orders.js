@@ -274,6 +274,15 @@ function alJoin(cur, add, name) {
 // saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
 // עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
 // עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13). cto (רק קרטונים סגורים) – 12.11.2026, תוספתי.
+// 26.11.2026: קטגוריה חובה במוצר (חדש וגם בעריכה); תת קטגוריה – רשות, ורק מתוך הקטגוריה שנבחרה.
+// cat = קטגוריה ראשית קיימת. sub (אם יש) = תת קטגוריה קיימת שהקטגוריה הראשית שלה היא cat.
+async function catChk(db, cat, sub) {
+  const [c, u] = await Promise.all([db.doc('cat/' + cat).get(), sub ? db.doc('cat/' + sub).get() : null]);
+  if (!c.exists) throw new HttpsError('not-found', 'הקטגוריה לא נמצאה', { reason: 'no-cat' });
+  if (c.get('parent')) throw bad('bad-cat', 'בחרו קטגוריה ראשית (תת קטגוריה נבחרת בשדה הנפרד)');
+  if (sub && (!u.exists || u.get('parent') !== cat)) throw bad('bad-cat', 'תת הקטגוריה לא שייכת לקטגוריה שנבחרה');
+}
+const NO_CAT = 'קטגוריה – חובה. בחרו קטגוריה למוצר';
 async function saveProduct(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -281,6 +290,11 @@ async function saveProduct(request) {
   const c = prodClean(w, input);
   const db = T.tdb();
   const now = Date.now();
+  if (input.sub != null && input.sub !== '' && input.cat === undefined) throw bad('bad-cat', 'תת קטגוריה בלי קטגוריה');
+  if (input.cat !== undefined) {
+    if (input.cat === null || input.cat === '') throw bad('bad-cat', NO_CAT);
+    await catChk(db, c.ext.cat, input.sub == null || input.sub === '' ? '' : c.ext.sub);
+  } else if (input.id == null) throw bad('bad-cat', NO_CAT);
   if (input.id != null) {
     const id = idOf(input.id, 'מוצר');
     const ref = db.doc('prod/' + id);
@@ -1643,14 +1657,21 @@ async function setOrderCfg(request) {
 // קטלוג (fb/ord-catalog): קטגוריות, ייבוא מוצרים, העברה ידנית, מחיר סיטונאי
 // =====================================================================================
 const crypto = require('crypto');
+const NO_CAT_NAME = 'ללא קטגוריה';
 const catIdOf = (name, parent) => (parent ? 's_' : 'c_') + crypto.createHash('sha1').update((parent || '') + '|' + name).digest('hex').slice(0, 16);
 
 // saveCat({ id?, name, parent?, ord? }) – מנהל. parent ריק = קטגוריה; מלא = תת־קטגוריה של קטגוריה קיימת.
+// 26.11.2026 (קטגוריה חובה במוצר חדש): גם מי שמורשה להוסיף מוצר פותח קטגוריה / תת קטגוריה חדשה מתוך טופס המוצר –
+// מנהל (הזמנות או קופה), או עובד עם ord / prc בעסק עם הזמנות. עובד רק יוצר: בלי id ובלי סדר, וקטגוריה שכבר קיימת (אותו שם) לא משתנה.
 async function saveCat(request) {
-  const w = await who(request);
-  mgr(w);
+  const w = await requireStaff(request);
+  const f = (w.biz && w.biz.features) || {};
+  const isMgr = w.role === 'manager';
+  if (!w.superadmin && !(f.orders === true || (isMgr && f.pos === true))) T.requireFeature(w.biz, 'orders');
+  if (!isMgr && !(hasPerm(w, 'ord') || hasPerm(w, 'prc'))) throw deny('no-perm', 'אין לך הרשאה להוסיף קטגוריה. פנה למנהל.');
   const input = inputObject(request);
   onlyKeys(input, ['id', 'name', 'parent', 'ord']);
+  if (!isMgr && (input.id != null || input.ord != null)) throw deny('manager-only', 'שינוי קטגוריה קיימת – למנהל בלבד');
   const name = txt(input.name, 40, 'bad-name', 'שם הקטגוריה', true);
   const db = T.tdb();
   let parent = '';
@@ -1662,6 +1683,7 @@ async function saveCat(request) {
   const ord = input.ord == null ? 0 : Math.max(0, Math.min(9999, Math.round(Number(input.ord) || 0)));
   const id = input.id != null ? idOf(input.id, 'קטגוריה') : catIdOf(name, parent);
   if (input.id != null && !(await db.doc('cat/' + id).get()).exists) throw new HttpsError('not-found', 'הקטגוריה לא נמצאה', { reason: 'no-cat' });
+  if (!isMgr && (await db.doc('cat/' + id).get()).exists) return { ok: true, id, ex: true };
   const doc = { name, ord, upd: Date.now() };
   if (parent) doc.parent = parent;
   await db.doc('cat/' + id).set(doc, { merge: true });
@@ -1729,6 +1751,9 @@ async function prodRows(w, input) {
     for (let k = 0; k < bcs.length; k += 30) (await tx.get(db.collection('prod').where('barcode', 'in', bcs.slice(k, k + 30)))).forEach((s) => { if (!byBc.has(s.get('barcode'))) byBc.set(s.get('barcode'), s); });
     for (let k = 0; k < names.length; k += 30) (await tx.get(db.collection('prod').where('name', 'in', names.slice(k, k + 30)))).forEach((s) => { if (!byName.has(s.get('name'))) byName.set(s.get('name'), s); });
     const cats = new Map();
+    // 26.11.2026 (החלטת בעל העסק): מוצר חדש מקובץ בלי קטגוריה נכנס תחת "ללא קטגוריה" (נוצרת רק אם נדרשה). מוצר קיים – לא משתנה
+    const noCat = catIdOf(NO_CAT_NAME, '');
+    if (ok.some((o) => !o.cat)) cats.set(noCat, { name: NO_CAT_NAME, lazy: true });
     for (const o of ok) if (o.cat) { cats.set(catIdOf(o.cat, ''), { name: o.cat }); if (o.sub) cats.set(catIdOf(o.sub, catIdOf(o.cat, '')), { name: o.sub, parent: catIdOf(o.cat, '') }); }
     const catSnaps = cats.size ? await tx.getAll(...[...cats.keys()].map((id) => db.doc('cat/' + id))) : [];
     // 17.11.2026 (סנכרון כספית, תיקון סבב 1): עלות קודמת של מוצרים קיימים – להיסטוריית העלות (priceLog k:'c'). נקרא לפני כל כתיבה
@@ -1736,7 +1761,8 @@ async function prodRows(w, input) {
     const exIds = [...new Set(ok.filter((o) => o.cost != null && !skipEx).map((o) => ((o.barcode && byBc.get(o.barcode)) || (o.sku && bySku.get(o.sku)) || byName.get(o.name) || {}).id).filter(Boolean))];
     if (exIds.length) (await tx.getAll(...exIds.map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((x) => oldCost.set(x.ref.parent.parent.id, x.exists && typeof x.get('cost') === 'number' ? x.get('cost') : null));
     const now = Date.now();
-    catSnaps.forEach((s) => { if (!s.exists) tx.set(s.ref, Object.assign({ ord: 0, upd: now }, cats.get(s.id))); });
+    catSnaps.forEach((s) => { if (!s.exists && !cats.get(s.id).lazy) tx.set(s.ref, Object.assign({ ord: 0, upd: now }, cats.get(s.id))); });
+    let noCatUsed = false;
     const seen = new Map(); // מוצר חדש שכבר נוצר במנה הזו (שורה כפולה בקובץ)
     for (const o of ok) {
       const ex = (o.barcode && byBc.get(o.barcode)) || (o.sku && bySku.get(o.sku)) || byName.get(o.name) || seen.get(o.barcode || ('n:' + o.name)) || null;
@@ -1762,6 +1788,7 @@ async function prodRows(w, input) {
       } else {
         id = 'p' + crypto.createHash('sha1').update(reqId + '|' + o.i).digest('hex').slice(0, 24); // מזהה קבוע לכל מנה+שורה
         qty = br && o.qty ? o.qty : 0;
+        if (!ext.cat) { ext.cat = noCat; noCatUsed = true; }
         tx.set(db.doc('prod/' + id), Object.assign({ name: o.name, price: o.price, barcode: o.barcode, on: true, q: qty ? { [br]: qty } : {}, at: now, by: w.uid, src: 'import' }, ext));
         seen.set(o.barcode || ('n:' + o.name), { newId: id, q: qty });
         res.added++;
@@ -1771,6 +1798,7 @@ async function prodRows(w, input) {
       if (o.cost != null && ex && ex.ref && oldCost.has(id) && oldCost.get(id) !== o.cost) tx.set(priceRef(db), { prod: id, k: 'c', old: oldCost.get(id), new: o.cost, src: 'app', by: w.uid, at: now });
       if (qty) tx.set(stockRef(db), { prod: id, name: o.name, br, delta: qty, why: 'in', note: 'ייבוא', by: w.uid, at: now });
     }
+    if (noCatUsed) { const ns = catSnaps.find((x) => x.id === noCat); if (ns && !ns.exists) tx.set(ns.ref, { name: NO_CAT_NAME, ord: 0, upd: now }); }
     tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated, same: res.same } });
   });
   return res;
@@ -2238,6 +2266,6 @@ const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכנ
 const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
 const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, priceRef, snapAll, ixDrop, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin,
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, catChk, NO_CAT, stockRef, priceRef, snapAll, ixDrop, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin,
   // 24.11.2026 (הצעת מחיר, quotes.js): ייצוא בלבד – אותו תמחור ואותו ניקוי כמו createCore, בלי שינוי התנהגות
   priceRun, discOk, cartons, loadCosts, snapCosts, plain, freeHits, freeCheck, sums } });

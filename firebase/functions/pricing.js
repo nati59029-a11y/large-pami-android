@@ -42,7 +42,7 @@ const BC_RE = /^[0-9A-Za-z-]{3,30}$/;
 const DATE_RE = /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const UNITS = ['u', 'pk', 'ct'];
 const WP_SRC = ['stock', 'auto', 'man'];
-const LINE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk', 'pid', 'nw', 'skip', 'price', 'wp', 'wpSrc', 'cto', 'nm'];
+const LINE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk', 'pid', 'nw', 'skip', 'price', 'wp', 'wpSrc', 'cto', 'nm', 'cat', 'sub']; // cat/sub – 26.11.2026: קטגוריה (חובה) ותת קטגוריה (רשות) למוצר חדש
 const CREATE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk']; // piCreate: שדות זיהוי בלבד (ליקוי 2)
 const NAME_MAX = 60; // כמו שם מוצר ב-saveProduct (prodClean) – ליקוי 5
 // שינוי שם וכינויים (משימה 2026-11-14, שלב 2 חלק א'; תשובות 46–54): בשורה nm = "שם במלאי". piFinish: השם החדש הופך לראשי,
@@ -117,6 +117,8 @@ function cleanLine(l, i, strict) {
   }
   if (l.pid != null && l.pid !== '') { if (typeof l.pid === 'string' && O.ID_RE.test(l.pid)) o.pid = l.pid; else fail('bad-id', 'מוצר לא תקין'); }
   if (l.nm != null && l.nm !== '') { if (typeof l.nm === 'string') { const v = soft(l.nm, NAME_MAX); if (v) o.nm = v; } else fail('bad-field', 'שם במלאי לא תקין'); }
+  for (const k of ['cat', 'sub']) if (l[k] != null && l[k] !== '') { if (typeof l[k] === 'string' && O.ID_RE.test(l[k])) o[k] = l[k]; else fail('bad-cat', 'קטגוריה לא תקינה'); }
+  if (o.sub && !o.cat) delete o.sub;
   return o;
 }
 function cleanLines(v, strict, allowEmpty, keys) {
@@ -304,7 +306,9 @@ async function piClaim(request) {
   const vat = await vatOf(db, w);
   const m = w.ord ? await matches(db, d, vat) : [];
   const inv = { st: d.st, src: d.src, sup: d.sup || '', supId: d.supId || '', inv: d.inv || '', date: d.date || '', by: d.by, byName: d.byName || '', at: d.at, np: Number.isInteger(d.np) ? d.np : 0, lines: Array.isArray(d.lines) ? d.lines : [] };
-  return { ok: true, id, inv, rev: revOf(d), lk: d.lk, until: now + LOCK_MS, vat, ord: w.ord, m };
+  // 26.11.2026: רשימת הקטגוריות לבחירה במוצר חדש (עובד עם prc לא תמיד קורא את cat ישירות). השדה הוא גם הסימן לאפליקציה שהשרת מכיר cat/sub בשורה
+  const cats = w.ord ? (await db.collection('cat').limit(1000).get()).docs.map((x) => ({ id: x.id, name: String(x.get('name') || ''), parent: x.get('parent') || '', ord: Number(x.get('ord')) || 0 })) : null;
+  return Object.assign({ ok: true, id, inv, rev: revOf(d), lk: d.lk, until: now + LOCK_MS, vat, ord: w.ord, m }, cats ? { cats } : {});
 }
 
 // piBeat({ id }) – "עדיין בטיפול" (כל דקה מהמסך): מחדש את הנעילה
@@ -374,6 +378,19 @@ async function piFinish(request) {
   const ref = db.doc('pinv/' + id);
   const now = Date.now();
   let res = null;
+  if (w.ord) { // 26.11.2026: מוצר חדש – קטגוריה חובה (תת קטגוריה רשות, מתוך הקטגוריה)
+    const chk = new Map();
+    for (const { l, i } of act) {
+      if (l.pid) continue;
+      if (!l.cat) throw new HttpsError('invalid-argument', `שורה ${i + 1}: חסרה קטגוריה למוצר חדש`, { reason: 'bad-cat' });
+      const k = l.cat + '|' + (l.sub || '');
+      if (!chk.has(k)) chk.set(k, i);
+    }
+    for (const [k, i] of chk) {
+      const [c, u] = k.split('|');
+      try { await O.catChk(db, c, u); } catch (e) { throw new HttpsError(e.code || 'invalid-argument', `שורה ${i + 1}: ${e.message}`, e.details); }
+    }
+  }
   const cp0 = w.ord ? await O.cpPre(db, act.filter((x) => x.l.pid && (x.l.wp != null || x.l.price != null)).map((x) => x.l.pid)) : null; // 14.11.2026: התראה על מחיר קבוע ללקוח
   await db.runTransaction(async (tx) => {
     // טרנזקציה יכולה לרוץ שוב (התנגשות) – כל מה שמשתנה בתוכה מתחיל מחדש בכל ניסיון
@@ -420,7 +437,7 @@ async function piFinish(request) {
           } else {
             const nid = 'p' + crypto.createHash('sha1').update(id + '|' + i).digest('hex').slice(0, 24);
             const sku = l.sku && O.digRun(l.sku) < 8 ? { sku: l.sku } : {};
-            const c = O.prodClean(w, Object.assign({ name: l.nm || l.n, price: l.price, barcode: l.bc || '', on: true }, ext, supOk ? { sup: supOk } : {}, sku));
+            const c = O.prodClean(w, Object.assign({ name: l.nm || l.n, price: l.price, barcode: l.bc || '', on: true, cat: l.cat }, l.sub ? { sub: l.sub } : {}, ext, supOk ? { sup: supOk } : {}, sku));
             const al = l.nm ? alMerge([], [l.n], c.name) : [];
             O.prodPut(tx, db, w, nid, null, c, now, Object.assign({ q: qty ? { [br]: qty } : {}, src: 'pinv' }, al.length ? { al } : {}));
             if (qty) tx.set(O.stockRef(db), { prod: nid, name: c.name, br, delta: qty, why: 'pinv', note: `חשבונית ${d.inv || ''} ${sup}`.trim().slice(0, 300), pinv: id, by: w.uid, at: now });

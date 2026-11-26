@@ -11,7 +11,7 @@ const S = (v) => ({ stringValue: v }), N = (v) => (Number.isInteger(v) ? { integ
 const PFX = 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/';
 const D = (id, f) => ({ document: { name: PFX + 'prod/' + id, fields: f } });
 const NEWBC = '7290000000999';
-const ST = { prods: [D('p1', { name: S('צלחות 20 יח׳ (דוגמה)'), price: N(12.9), barcode: S('5901234123457'), on: B(true), q: M({ _: N(5) }) })], cfg: null, patches: [] };
+const ST = { prods: [D('p1', { name: S('צלחות 20 יח׳ (דוגמה)'), price: N(12.9), barcode: S('5901234123457'), on: B(true), q: M({ _: N(5) }) })], cfg: null, patches: [], cats: [] };
 
 async function open(browser, www, who, calls) {
   const cfg = { mode: 'new', users: { m: 'biz-o', w: 'biz-o' }, biz: { 'biz-o': { dataRoot: 'b', features: F, name: 'עסק בדיקה' } }, admins: { 'b/biz-o/|m': 1 }, staff: { 'b/biz-o/|w': { perms: { lbl: true } } }, ctx: { deviceScaleFactor: 1 } };
@@ -22,7 +22,7 @@ async function open(browser, www, who, calls) {
     const req = route.request(), u = new URL(req.url()), m = req.method();
     const J = (b, st) => route.fulfill({ status: st || 200, contentType: 'application/json', body: JSON.stringify(b) });
     if (/:runQuery$/.test(u.pathname)) { let c = ''; try { c = JSON.parse(req.postData()).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
-      return J(c === 'prod' ? ST.prods : []); }
+      return J(c === 'prod' ? ST.prods : c === 'cat' ? ST.cats : []); }
     if (/\/ordcfg\/main$/.test(u.pathname)) return J({ error: { code: 404, message: 'NOT_FOUND' } }, 404);
     if (/\/cfg\/lbl$/.test(u.pathname)) {
       if (m === 'GET') return ST.cfg ? J({ name: PFX + 'cfg/lbl', fields: ST.cfg }) : J({ error: { code: 404, message: 'NOT_FOUND' } }, 404);
@@ -35,8 +35,9 @@ async function open(browser, www, who, calls) {
     calls.push({ n, d });
     let R = { ok: true };
     if (n === 'saveProduct') {
-      if (d.id) { const x = ST.prods.find((p) => p.document.name.endsWith('/' + d.id)); if (x) Object.assign(x.document.fields, { name: S(d.name), price: N(d.price), barcode: S(d.barcode || '') }); R = { ok: true, id: d.id }; }
-      else { ST.prods.push(D('pNew', { name: S(d.name), price: N(d.price), barcode: S(d.barcode || ''), on: B(true), q: M({}) })); R = { ok: true, id: 'pNew' }; }
+      if (d.id) { const x = ST.prods.find((p) => p.document.name.endsWith('/' + d.id)); if (x) Object.assign(x.document.fields, { name: S(d.name), price: N(d.price), barcode: S(d.barcode || '') }, d.cat ? { cat: S(d.cat) } : {}); R = { ok: true, id: d.id }; }
+      else { ST.prods.push(D('pNew', Object.assign({ name: S(d.name), price: N(d.price), barcode: S(d.barcode || ''), on: B(true), q: M({}) }, d.cat ? { cat: S(d.cat) } : {}))); R = { ok: true, id: 'pNew' }; }
+    } else if (n === 'saveCat') { const id = 'c_new' + ST.cats.length; ST.cats.push({ document: { name: PFX + 'cat/' + id, fields: { name: S(d.name), ord: N(0) } } }); R = { ok: true, id };
     } else if (n === 'getCosts') R = { cost: {} };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R }) });
   });
@@ -68,10 +69,19 @@ async function open(browser, www, who, calls) {
     const pf = await page.evaluate(() => { const f = document.querySelector('#dlg form[data-f=oxPF]'); return f ? { bc: f.elements.barcode.value, id: !!f.elements.id, qty: !!f.elements.qty, cost: !!f.elements.cost } : null; });
     check('m 2 נפתח טופס המוצר המלא של המלאי (כמות פתיחה, עלות), הברקוד ממולא', pf && pf.bc === NEWBC && !pf.id && pf.qty && pf.cost, pf);
     await page.fill('#dlg [name=name]', 'מוצר חדש (דוגמה)'); await page.fill('#dlg [name=price]', '9.9');
+    // 26.11.2026: קטגוריה חובה – בלי קטגוריה לא נשמר; "＋ קטגוריה חדשה" בתוך הטופס יוצר ובוחר אותה
     let n0 = calls.length; await submitPF(page);
+    check('m 2א בלי קטגוריה – לא נשמר, הטופס נשאר פתוח', !calls.slice(n0).some((c) => c.n === 'saveProduct') && await dlgOpen(page));
+    await page.selectOption('#dlg select[data-c=cpCat]', '__new'); await H.settle(page, 200);
+    const nwOpen = await page.evaluate(() => { const r = document.querySelector('#dlg .cpn'); return !!r && r.style.display !== 'none'; });
+    await page.fill('#dlg [data-cpn]', 'כלים חד פעמיים'); await page.click('#dlg [data-a=cpAdd]'); await H.settle(page, 500);
+    const sc = calls.slice(n0).find((c) => c.n === 'saveCat');
+    const cv = await val(page, '#dlg select[data-c=cpCat]');
+    check('m 2ב "＋ קטגוריה חדשה": נפתח שדה שם, saveCat נשלח, והקטגוריה החדשה נבחרת בטופס', nwOpen && sc && sc.d.name === 'כלים חד פעמיים' && !sc.d.parent && cv === 'c_new0', { nwOpen, d: sc && sc.d, cv });
+    n0 = calls.length; await submitPF(page);
     const sv = calls.slice(n0).find((c) => c.n === 'saveProduct');
     const ed = { name: await val(page, '#main #lblEd [data-k=name]'), price: await val(page, '#main #lblEd [data-k=price]'), code: await val(page, '#main #lblEd [data-k=code]'), dlg: await dlgOpen(page) };
-    check('m 3 שמירה: saveProduct (שם, מחיר, ברקוד) → המוצר נבחר למדבקה', sv && sv.d.name === 'מוצר חדש (דוגמה)' && sv.d.price === 9.9 && sv.d.barcode === NEWBC && !sv.d.id && ed.name === 'מוצר חדש (דוגמה)' && ed.price === '9.9' && ed.code === NEWBC && !ed.dlg, { d: sv && sv.d, ed });
+    check('m 3 שמירה: saveProduct (שם, מחיר, ברקוד, קטגוריה) → המוצר נבחר למדבקה', sv && sv.d.cat === 'c_new0' && sv.d.name === 'מוצר חדש (דוגמה)' && sv.d.price === 9.9 && sv.d.barcode === NEWBC && !sv.d.id && ed.name === 'מוצר חדש (דוגמה)' && ed.price === '9.9' && ed.code === NEWBC && !ed.dlg, { d: sv && sv.d, ed });
     // עריכת מוצר: מחיר מתעדכן, מילה מודגשת נשמרת
     await page.fill('#main #lblEd [data-k=hl]', 'חדש!');
     const hasEd = await page.evaluate(() => !!document.querySelector('#main [data-a=lblEditP]'));
