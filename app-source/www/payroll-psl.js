@@ -146,7 +146,9 @@ async function imgDU(f){const i=await ldImg(await rdU(f));for(const [w,q] of [[1
 
 /* ---- העלאה ---- */
 const PS={busy:0,q:[],i:0,batch:{},sel:new Set(),sh:null,sub:'',saved:0};
-async function intake(f,mode,sub){
+async function intake(f,mode,sub,o){const Q=await build(f,mode,sub);if(!Q){if(o&&typeof o.done==='function')o.done([]);return}
+  PS.q=Q;PS.i=0;PS.batch={};PS.saved=0;PS.ids=new Set();PS.done=o&&typeof o.done==='function'?o.done:null;showPiece()}
+async function build(f,mode,sub){
   const isPdf=f.type==='application/pdf'||/\.pdf$/i.test(f.name||''),isImg=/^image\/(jpeg|png)$/.test(f.type)||/\.(jpe?g|png)$/i.test(f.name||'');
   if(!isPdf&&!isImg)return toast('אפשר PDF או תמונה (JPG / PNG)');
   if(f.size>40*1048576)return toast('הקובץ גדול מדי');
@@ -169,16 +171,17 @@ async function intake(f,mode,sub){
         for(const g of G){const o=await pagesPdf(doc,g.pages.map(i=>i+1)),v=parseSlip(g.text),why=v.warn.slice(),pl=g.pages.length>1?'עמודים '+(g.pages[0]+1)+'–'+(g.pages[g.pages.length-1]+1):'עמוד '+(g.pages[0]+1);
           if(!g.sub)why.unshift(pl+': לא זוהה עובד'+(noTxt?' (אין טקסט בקובץ)':'')+'. בחרו עובד או דלגו.'+(mode==='one'?' ייתכן שזה עמוד של עובד אחר – אל תשייכו אותו בלי לבדוק.':''));
           else if(mode==='one'&&sub&&g.sub!==sub){const a=empOf(sub),b=empOf(g.sub);why.unshift(pl+': זוהה '+(b?b.name:'—')+' ולא '+(a?a.name:'—')+'. העמוד יישמר אצל העובד שבשדה "עובד" (כרגע: '+(b?b.name:'—')+') – אפשר לשנות או לדלג.')}if(g.sub&&!v.found)why.unshift(pl+': לא נמצאו נתונים – הזינו ידנית.');
-          Q.push({sub:g.sub,mon:g.mon||def,du:o.du,pv:o.pv,pgs:o.pgs,src:'pdfc',v,why,pl,auto:!!g.sub})}}}
+          Q.push({sub:g.sub,mon:g.mon||def,mf:!!g.mon,du:o.du,pv:o.pv,pgs:o.pgs,src:'pdfc',v,why,pl,auto:!!g.sub})}}}
     finally{try{doc.destroy()}catch(e){}}}
-  PS.q=Q;PS.i=0;PS.batch={};PS.saved=0;showPiece()}
+  return Q}
 CHG.pslFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f||!on())return;if(PS.busy)return toast('קורא קובץ קודם…');PS.busy=1;toast('קורא את הקובץ…');
   try{await intake(f,el.dataset.m==='all'?'all':'one',el.dataset.sub||'')}catch(e){toast(e&&e.user?e.message:'קריאת הקובץ נכשלה')}finally{PS.busy=0}};
 
 /* ---- חלון אישור ---- */
 const inp=(l,n,v,x)=>`<label class="f"><span>${l}</span><input name="${n}" value="${esc(v==null?'':String(v))}" ${x||''}></label>`;
 function showPiece(){const it=PS.q[PS.i];
-  if(!it){const n=PS.saved,N=PS.q.length;PS.q=[];PS.i=0;closeDlg();if(N)toast(n?(n===1?'התלוש נשמר':n+' תלושים נשמרו')+(N>n?' · '+(N-n)+' דולגו':''):'לא נשמר תלוש');rerender();return}
+  if(!it){const n=PS.saved,N=PS.q.length,cb=PS.done,ids=[...(PS.ids||[])];PS.q=[];PS.i=0;PS.done=null;PS.ids=new Set();closeDlg();if(N)toast(n?(n===1?'התלוש נשמר':n+' תלושים נשמרו')+(N>n?' · '+(N-n)+' דולגו':''):'לא נשמר תלוש');rerender();
+    if(cb)try{cb(ids.filter(id=>pslById(id)))}catch(e){}return}
   const N=PS.q.length,ecv=k=>{const x=(it.v.ec||[]).find(e=>e.k===k);return x?x.a:''};
   const E=emps(),old=it.sub&&AR('psl').some(p=>p&&p.sub===it.sub&&p.mon===it.mon);
   const opts=`<option value="">בחרו עובד</option>`+E.map(s=>`<option value="${esc(s.id)}"${s.id===it.sub?' selected':''}>${esc(s.name)}</option>`).join('');
@@ -206,12 +209,41 @@ FRM.pslOkF=async f=>{if(!on()||f.dataset.busy)return;const it=PS.q[PS.i];if(!it)
   if(old.some(pslLock))return toast('לתלוש הקיים של '+s.name+' ל'+mfmt(mon)+' יש עלויות מעביד ששויכו לחיוב אשראי או בנק. בטלו קודם את השיוך.');
   f.dataset.busy='1';
   try{if(pb&&pb.pgs&&it.pgs){pgs=pb.pgs.concat(it.pgs);const u8=await mkScanPdf(pgs);if(u8.length>MAXB){delete f.dataset.busy;return toast('הצירוף גדול מ-3MB – דלגו על העמוד')}du=pdfDU(u8)}
-    const fid='ps'+uid();await fput(fid,du);
-    const gone=old.map(pslDrop),id=uid(),p={id,sub:s.id,mon,f:fid,name:fname({sub:s.id,mon}),gross:v.gross,net:v.net,ec:v.ec.map(e=>({k:e.k,n:e.n,a:e.a})),src:it.src,ok:1,at:new Date().toISOString()};
-    AR('psl').push(p);
-    v.ec.forEach(e=>S.tx.push({id:uid(),t:'exp',cat:s.cat,sub:s.id,date:lastDay(mon),amt:e.a,plan:mon,pays:[],ec:1,eck:e.k,psl:id,note:'עלות מעביד: '+e.n}));
-    save();delF(gone);if(!pb)PS.saved++;PS.batch[kb]={pid:id,pgs,v};PS.i++;showPiece()}
+    if(PS.ids)old.forEach(p=>PS.ids.delete(p.id));
+    const id=await pslPut(s,mon,du,v,it.src,old);
+    if(PS.ids)PS.ids.add(id);if(!pb)PS.saved++;PS.batch[kb]={pid:id,pgs,v};PS.i++;showPiece()}
   catch(e){delete f.dataset.busy;toast('שמירת התלוש נכשלה')}};
+
+/* שמירת תלוש אחד (משותף לחלון האישור ולקליטה מהמזכירה): הקובץ ב-IndexedDB, רשומת S.psl, ורשומת ec לכל עלות מעביד. old = תלושים קיימים לאותו עובד וחודש (מוחלפים) */
+async function pslPut(s,mon,du,v,src,old){const fid='ps'+uid();await fput(fid,du);
+  const gone=(old||[]).map(pslDrop),id=uid(),p={id,sub:s.id,mon,f:fid,name:fname({sub:s.id,mon}),gross:v.gross,net:v.net,ec:v.ec.map(e=>({k:e.k,n:e.n,a:e.a})),src,ok:1,at:new Date().toISOString()};
+  AR('psl').push(p);
+  v.ec.forEach(e=>S.tx.push({id:uid(),t:'exp',cat:s.cat,sub:s.id,date:lastDay(mon),amt:e.a,plan:mon,pays:[],ec:1,eck:e.k,psl:id,note:'עלות מעביד: '+e.n}));
+  save();delF(gone);return id}
+
+/* ---- 26.11.2026 (בעל העסק), שלב 2 של "הוראות למזכירה": תלושים שהגיעו למזכירה (מייל / ווצאפ) ----
+   window.pslFromSec(file,{done}) – אותו מסלול כמו העלאה מרוכזת (פיצול לפי עמוד, חלון אישור לכל תלוש, עמוד שלא זוהה – שיוך ידני או דילוג).
+   done(ids) נקרא בסוף עם התלושים שנשמרו.
+   window.pslAutoSec(file) – "נכנס לבד" לפי הוראה (רק אחרי אישור ראשון): נשמר רק אם *כל* התלושים בקובץ מזוהים בוודאות – עובד, חודש, ברוטו ונטו תקינים,
+   בלי תלוש קיים לאותו עובד וחודש (לא מחליף לבד) ובלי שני תלושים לאותו עובד וחודש בקובץ. אחרת – לא נשמר כלום (null), והמסמך מחכה לבדיקה.
+   window.pslUndoSec(ids) – ביטול: מוחק את התלושים ואת עלויות המעביד שלהם, אלא אם עלות שויכה לחיוב אשראי / בנק (אז לא מוחק כלום). */
+window.pslFromSec=async(f,o)=>{const no=m=>{toast(m);if(o&&typeof o.done==='function')o.done([])};if(!on())return no('רק מנהל');if(PS.busy)return no('קורא קובץ קודם…');PS.busy=1;toast('קורא את התלושים…');
+  const isPdf=f.type==='application/pdf'||/\.pdf$/i.test(f.name||'');
+  try{await intake(f,isPdf?'all':'one','',o)}catch(e){toast(e&&e.user?e.message:'קריאת הקובץ נכשלה');if(o&&typeof o.done==='function')o.done([])}finally{PS.busy=0}};
+window.pslAutoSec=async f=>{if(!on()||PS.busy)return null;if(!(f.type==='application/pdf'||/\.pdf$/i.test(f.name||'')))return null;PS.busy=1;
+  try{const Q=await build(f,'all','');if(!Q||!Q.length)return null;const seen=new Set();
+    for(const it of Q){const s=empOf(it.sub),k=it.sub+'|'+it.mon;
+      if(it.src!=='pdfc'||!s||!it.mf||!monV(it.mon)||!it.v||!it.v.found||it.v.gross==null||it.v.net==null||(it.v.warn||[]).length||checkVals(it.v).length||seen.has(k)||duBytes(it.du)>MAXB)return null;
+      if(AR('psl').some(p=>p&&p.sub===it.sub&&p.mon===it.mon))return null;seen.add(k)}
+    /* הכול או כלום (בדיקה עצמאית, סעיף 2): קודם כל הקבצים; קובץ שנכשל – מוחקים את מה שנכתב ולא נשמרת אף רשומה. אחר כך כל הרשומות ו-save אחד */
+    const F=[];try{for(const it of Q){const fid='ps'+uid();await fput(fid,it.du);F.push(fid)}}catch(e){delF(F);return null}
+    const ids=[],at=new Date().toISOString();Q.forEach((it,i)=>{const s=empOf(it.sub),mon=it.mon,id=uid(),ec=(it.v.ec||[]).filter(e=>e&&typeof e.a==='number'&&Number.isFinite(e.a)).map(e=>({k:e.k,n:e.n,a:e.a}));
+      AR('psl').push({id,sub:s.id,mon,f:F[i],name:fname({sub:s.id,mon}),gross:it.v.gross,net:it.v.net,ec,src:'sec',ok:1,at});
+      ec.forEach(e=>S.tx.push({id:uid(),t:'exp',cat:s.cat,sub:s.id,date:lastDay(mon),amt:e.a,plan:mon,pays:[],ec:1,eck:e.k,psl:id,note:'עלות מעביד: '+e.n}));ids.push(id)});
+    save();rerender();return ids}
+  catch(e){return null}finally{PS.busy=0}};
+window.pslUndoSec=ids=>{if(!on())return {ok:false};const L=(Array.isArray(ids)?ids:[]).map(pslById).filter(Boolean);
+  if(L.some(pslLock))return {ok:false,lock:true};const gone=L.map(pslDrop);save();delF(gone);rerender();return {ok:true,n:L.length}};
 
 /* ---- כרטיס עובד: שורה + מסך תלושים ---- */
 const pslOf=id=>AR('psl').filter(p=>p&&p.sub===id).sort((a,b)=>String(b.mon).localeCompare(String(a.mon))||String(b.at||'').localeCompare(String(a.at||'')));
