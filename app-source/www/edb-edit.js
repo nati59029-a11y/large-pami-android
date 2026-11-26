@@ -1,4 +1,4 @@
-/* הדפסת דף אכיל (26.11.2026) – צעד 3, העורך, וציור משבצת (גם להדפסה ב-300 DPI, edb-print.js).
+/* הדפסת דף אכיל (26.11.2026) – העורך (סבב 2: חלק מצעד 2 "עריכה ופריסה"), וציור משבצת (גם להדפסה ב-300 DPI, edb-print.js).
    תצוגה חיה בצורה המדויקת (עיגול / ריבוע / מלבן) עם החשכה מחוץ לקו החיתוך; גרירה, זום בשתי אצבעות, סיבוב (±90 ומחוון), היפוך;
    "שיפור אוטומטי" (רמות) + בהירות / ניגודיות / רוויה; כיתובים (גופנים מקומיים, גודל, צבע, מסגרת, צל, גרירה, קשת עליונה / תחתונה בעיגול);
    מד איכות לפי DPI אפקטיבי בגודל ההדפסה. התצוגה מציירת מעותק קטן של התמונה (עד 1024) – מהיר בטלפון חלש. */
@@ -65,7 +65,8 @@ function mount(){const c=document.getElementById('edbCv');if(!c)return;E.cv=c;co
 function unmount(){E.cv=null;E.ptr.clear();E.drag=null;E.pin=null}
 function paintNow(){const c=E.cv;if(!c||!c.isConnected)return;const s=S(),L=P().lay(),d=D();
  draw(c.getContext('2d'),c.width,c.height,{d,img:s.img,src:s.img&&s.img.p,ox:E.pad*E.ppm,oy:E.pad*E.ppm,ppm:E.ppm,wMm:L.w,hMm:L.h,shape:L.shape,prev:1});
- const q=quality(d),e=document.getElementById('edbQ');if(e&&q)e.innerHTML=`<span class="edQ ${q.c}"><i></i>איכות הדפסה: ${q.d} DPI – ${q.t}</span>`}
+ const q=quality(d),e=document.getElementById('edbQ');if(e&&q)e.innerHTML=`<span class="edQ ${q.c}"><i></i>איכות הדפסה: ${q.d} DPI – ${q.t}</span>`;
+ try{if(P().pvSoon)P().pvSoon()}catch(x){}} // סבב 2: תצוגת הדף מתעדכנת (לכל היותר פעם ב-300ms)
 const soon=()=>{if(E.raf)return;E.raf=requestAnimationFrame(()=>{E.raf=0;paintNow()})};
 // נקודה במסך → פיקסלים של הקנבס
 const cp=e=>{const r=E.cv.getBoundingClientRect(),k=E.cv.width/r.width;return{x:(e.clientX-r.left)*k,y:(e.clientY-r.top)*k}};

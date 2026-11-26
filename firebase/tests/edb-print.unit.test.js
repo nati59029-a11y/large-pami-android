@@ -19,7 +19,7 @@ function sane(L) {
 }
 
 describe('edb-print – פריסות A4', () => {
-  const EXP = { 6: [2, 3, 93.67], 12: [3, 4, 64.67], 24: [4, 6, 45.33], 36: [5, 8, 33.25] };
+  const EXP = { 6: [2, 3, 93.67], 12: [3, 4, 64.67], 24: [4, 6, 45.33], 36: [6, 6, 30.83] }; // 36 = 6×6 מסודר (בחירת בעל העסק, סבב 2)
   for (const sh of ['c', 's']) for (const n of [6, 12, 24, 36]) {
     it(`${sh === 'c' ? 'עיגולים' : 'ריבועים'} ${n}: רשת ${EXP[n][0]}×${EXP[n][1]}, ${EXP[n][2]} מ"מ`, () => {
       const L = EC.layout(sh + n);
@@ -29,11 +29,19 @@ describe('edb-print – פריסות A4', () => {
       sane(L);
     });
   }
-  it('הרשת הנבחרת היא הגדולה ביותר מכל האפשרויות', () => {
+  it('הרשת הנבחרת היא הגדולה ביותר מכל האפשרויות (בפריסות הקבועות – מבין הרשתות המלאות, בלי שורה חלקית)', () => {
     for (const n of [6, 12, 24, 36]) {
-      const b = EC.fitGrid(n);
-      for (let c = 1; c <= n; c++) { const r = Math.ceil(n / c), s = Math.min((200 - (c - 1) * 3) / c, (287 - (r - 1) * 3) / r); assert.ok(s <= b.s + 1e-9); }
+      const b = EC.fitGrid(n), f = EC.fitGrid(n, 0, 0, null, true);
+      assert.equal(f.cols * f.rows, n, `${n}: רשת מלאה`);
+      for (let c = 1; c <= n; c++) {
+        const r = Math.ceil(n / c), s = Math.min((200 - (c - 1) * 3) / c, (287 - (r - 1) * 3) / r);
+        assert.ok(s <= b.s + 1e-9);
+        if (c * r === n) assert.ok(s <= f.s + 1e-9);
+      }
+      const L = EC.layout('c' + n); assert.equal(L.cols * L.rows, n, `c${n}: אין משבצות ריקות`);
     }
+    assert.deepEqual([EC.fitGrid(36).cols, EC.fitGrid(36).rows], [5, 8], 'בלי full – עדיין 5×8 (לגודל חופשי ולבדיקה)');
+    assert.deepEqual([EC.fitGrid(7, 0, 0, null, true).cols, EC.fitGrid(7, 0, 0, null, true).rows].sort(), [1, 7], 'מספר ראשוני – רשת מלאה 1×7');
   });
   it('A5 ×2: שני חלקים 200×142 מ"מ, אחד מתחת לשני; A4 מלא: 200×287', () => {
     const L = EC.layout('a5');
@@ -41,8 +49,11 @@ describe('edb-print – פריסות A4', () => {
     near(L.slots[0].y, 5); near(L.slots[1].y, 5 + 142 + 3); sane(L);
     const F = EC.layout('full'); assert.equal(F.n, 1); near(F.w, 200); near(F.h, 287); near(F.slots[0].x, 5); near(F.slots[0].y, 5);
   });
-  it('שורה אחרונה חלקית ממורכזת (36 = 5×8, בשורה האחרונה פריט אחד באמצע)', () => {
-    const L = EC.layout('c36'), last = L.slots[35];
+  it('36 עיגולים: 6×6 ממורכז בדף; place – שורה אחרונה חלקית עדיין ממורכזת (5×8 עם פריט אחד בשורה האחרונה)', () => {
+    const L = EC.layout('c36');
+    near(L.slots[0].x + (L.slots[5].x + L.w - L.slots[0].x) / 2, 105, 0.001);
+    near(L.slots[0].y + (L.slots[35].y + L.h - L.slots[0].y) / 2, 148.5, 0.001);
+    const P = EC.place(5, 8, 33.25, 33.25, 36), last = P[35];
     near(last.x + last.w / 2, 105, 0.001);
   });
   it('גודל חופשי: הכמות מחושבת לבד; גדול מדי = 0 ולא נשבר', () => {
@@ -50,7 +61,11 @@ describe('edb-print – פריסות A4', () => {
     assert.equal(L.cols, 3); assert.equal(L.rows, 5); assert.equal(L.n, 15); sane(L);
     const R = EC.layout('cu', { sh: 'r', w: 90, h: 40 }); assert.equal(R.n, 2 * 6); assert.equal(R.shape, 'r'); sane(R);
     const B = EC.layout('cu', { sh: 's', w: 200 }); assert.equal(B.n, 1);
-    assert.match(EC.layTxt(EC.layout('c12')), /12 עיגולים בקוטר 64\.7 מ"מ/);
+    assert.match(EC.layTxt(EC.layout('c12')), /12 עיגולים בקוטר 6\.5 ס"מ/);
+    // סבב 2: הגדלים בכפתורים ובשורת הסיכום – בס"מ, ספרה אחת
+    assert.equal(EC.laySz(EC.layout('c12')), 'קוטר 6.5 ס"מ'); assert.equal(EC.laySz(EC.layout('c36')), 'קוטר 3.1 ס"מ');
+    assert.equal(EC.laySz(EC.layout('s24')), 'צלע 4.5 ס"מ'); assert.equal(EC.laySz(EC.layout('full')), '20.0×28.7 ס"מ');
+    assert.equal(EC.laySz(EC.layout('a5')), '20.0×14.2 ס"מ'); assert.match(EC.layTxt(EC.layout('a5')), /2 חלקים של 20\.0×14\.2 ס"מ/);
   });
 });
 

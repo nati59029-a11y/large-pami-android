@@ -1261,6 +1261,40 @@ service cloud.firestore {
       allow create, update: if lpW() && rLbl() && id == 'main' && lblsOk(request.resource.data);
       allow delete: if lpW() && rMgr() && id == 'main';
     }
+    // הדפסת דף אכיל (26.11.2026, סבב 2): edbq/{id} – תור לתחנת ההדפסה במחשב; edbs/main – התחנה. מנהל או עובד עם edb; מחיקה – מנהל.
+    function rEdb() {
+      return rMgr() || (isActiveEmployee()
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('edb', false) == true);
+    }
+    function edbMsg(d) { return !('msg' in d) || (d.msg is string && d.msg.size() <= 200); }
+    function edbqNew(id, d) {
+      return id.matches('^[A-Za-z0-9_-]{8,40}$') && d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg']) && d.keys().hasAll(['by', 'at', 'st', 'n'])
+        && d.by == request.auth.uid && d.st == 'up' && d.n is int && d.n >= 1 && d.n <= 10 && d.at is int && d.at > 0 && edbMsg(d);
+    }
+    function edbqUpd(o, d) {
+      return d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'tk']) && edbMsg(d) && (
+        (d.diff(o).affectedKeys().hasOnly(['st', 'msg']) && (
+          (o.st == 'up' && o.by == request.auth.uid && d.st in ['new', 'err'])
+          || (o.st == 'new' && d.st == 'err' && (o.by == request.auth.uid || o.at < request.time.toMillis() - 86400000))
+          || (o.st == 'taken' && o.get('tk', '') == request.auth.uid && d.st in ['done', 'err'])))
+        || (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'tk']) && o.st == 'new' && d.st == 'taken' && d.get('tk', '') == request.auth.uid));
+    }
+    function edbsOk(d) {
+      return d.keys().hasOnly(['by', 'at', 'on', 'pr', 'hp']) && d.keys().hasAll(['by', 'at', 'on'])
+        && d.by == request.auth.uid && d.at is int && d.at > 0 && d.on is bool
+        && (!('pr' in d) || (d.pr is string && d.pr.size() <= 80)) && (!('hp' in d) || d.hp is bool);
+    }
+    match /edbq/{id} {
+      allow read: if rEdb();
+      allow create: if lpW() && rEdb() && edbqNew(id, request.resource.data);
+      allow update: if lpW() && rEdb() && edbqUpd(resource.data, request.resource.data);
+      allow delete: if lpW() && rMgr();
+    }
+    match /edbs/{id} {
+      allow read: if rEdb() && id == 'main';
+      allow create, update: if lpW() && rEdb() && id == 'main' && edbsOk(request.resource.data);
+      allow delete: if lpW() && rMgr() && id == 'main';
+    }
     match /prod/{id} {
       allow read: if rOrd() || rLbl();
       allow create, update, delete: if false;
@@ -2566,6 +2600,18 @@ service cloud.firestore {
       match /lbls/{id} {
         allow read: if perm('lbl') && id == 'main';
         allow create, update: if perm('lbl') && id == 'main' && lblsOk(request.resource.data);
+        allow delete: if bMgr() && id == 'main';
+      }
+      // הדפסת דף אכיל (סבב 2): edbq (תור) ו-edbs/main (התחנה) – מנהל או עובד עם edb; מחיקה – מנהל. edbqNew / edbqUpd / edbsOk – בשורש.
+      match /edbq/{id} {
+        allow read: if perm('edb');
+        allow create: if perm('edb') && edbqNew(id, request.resource.data);
+        allow update: if perm('edb') && edbqUpd(resource.data, request.resource.data);
+        allow delete: if bMgr();
+      }
+      match /edbs/{id} {
+        allow read: if perm('edb') && id == 'main';
+        allow create, update: if perm('edb') && id == 'main' && edbsOk(request.resource.data);
         allow delete: if bMgr() && id == 'main';
       }
       match /prod/{id} {
