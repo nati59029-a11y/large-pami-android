@@ -198,4 +198,17 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.deepEqual([e3.varN, e3.varNew, e3.dupN], [1, 0, 1]); assert.equal(e3.dup[0].pid, 'pv1');
     assert.equal((await P('pv1').get()).get('cxv'), undefined, 'לא סומן שוב אוטומטית');
   });
+  it('וריאנט – סבב בדיקה 2: מחושב מחדש בכל ריצה: הברקוד עבר לקוד אחר → cxv החדש; כבר לא בקטלוג → cxv נמחק והמוצר מקבל קוד כרגיל', async () => {
+    assert.equal((await P('pv2').get()).get('cxv'), '300009');
+    await sync([r('300030', 'מחק כחול', '7100000000042', 2)]); // הברקוד עכשיו בכספית תחת 300030, ו-300009 כבר לא בקטלוג
+    const e1 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.equal((await P('pv2').get()).get('cxv'), '300030');
+    assert.ok(e1.vars.some((v) => v.pid === 'pv2' && v.cx === '300030'));
+    await sync([r('300031', 'דבר אחר', '7100000000999', 3)]); // הברקוד כבר לא בכספית בכלל
+    const e2 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.equal(e2.varDel, 1);
+    const v2 = (await P('pv2').get()).data();
+    assert.equal(v2.cxv, undefined); assert.ok(/^9\d{5}$/.test(v2.cx), 'חזר להיות מועמד רגיל וקיבל קוד: ' + v2.cx);
+    assert.ok(e2.csv.includes('מחק זהב'));
+  });
 });

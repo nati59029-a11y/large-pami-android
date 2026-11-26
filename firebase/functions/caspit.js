@@ -525,9 +525,19 @@ async function cxExport(w, input) {
   const dup = [];
   const dupOf = (pid, p, c) => { const h = bcHit(BC, p); if (h) dup.push({ pid, n: String(p.name || '').slice(0, 80), bc: h.bc, cx: h.cx, c: c || '' }); return !!h; };
   // 26.11.2026 (בעל העסק): וריאנט – מוצר לא מקושר שהברקוד שלו בכספית תחת קוד X → cxv = X (רק השדה הזה; לא מחיר, שם או כמות). לא אחרי "לא וריאנט" (cxvNo)
-  const mkV = [];
-  for (const [id, p] of S.P) { if (linked.has(id) || p.cx || p.cxv || p.cxvNo || p.on === false) continue; const h = bcHit(BC, p); if (h) { mkV.push([id, h.cx]); p.cxv = h.cx; } }
-  await Promise.all(mkV.map(([id, cx]) => db.doc('prod/' + id).update({ cxv: cx }).catch(() => { S.P.get(id).cxv = undefined; }))); // נמחק בינתיים – מדלגים
+  // סבב בדיקה 2: מחושב מחדש בכל ריצה מול הקטלוג האחרון – הברקוד עבר לקוד אחר → cxv = הקוד החדש; כבר לא בכספית תחת קוד אחר
+  // (או שהקוד X כבר לא בקטלוג) → cxv נמחק והמוצר חוזר להיות מועמד רגיל. בלי מפת ברקודים (seenBc לא נשמר) – לא נוגעים בסימון קיים
+  const mkV = [], rmV = [];
+  for (const [id, p] of S.P) {
+    if (linked.has(id) || p.cx || p.cxvNo || p.on === false) continue;
+    if (p.cxv && !BC.size) continue;
+    const h = bcHit(BC, p), want = h ? h.cx : null;
+    if (want === (p.cxv || null)) continue;
+    if (want) mkV.push([id, want]); else rmV.push([id, p.cxv]);
+    p.cxv = want || undefined;
+  }
+  await Promise.all(mkV.map(([id, cx]) => db.doc('prod/' + id).update({ cxv: cx }).catch(() => { S.P.get(id).cxv = undefined; })) // נמחק בינתיים – מדלגים
+    .concat(rmV.map(([id, cx]) => db.doc('prod/' + id).update({ cxv: FV().delete() }).catch(() => { S.P.get(id).cxv = cx; }))));
   const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && !p.cxv && p.on !== false && !dupOf(id, p)).map(([id]) => id);
   // פריט שנשלח וטרם נקלט: הברקוד בכספית תחת הקוד שלו עצמו – כבר נקלט (הקישור יגיע בסנכרון הקטלוג), לא שולחים שוב ולא "כפול"
   // 26.11.2026 (cxCode): פריט חדש בקוד חדש של מוצר קיים – הברקוד עדיין בכספית תחת הקוד הקודם (from), וזה לא "כפול"
@@ -568,7 +578,7 @@ async function cxExport(w, input) {
   }
   O.ixDrop(w);
   const vars = [...S.P].filter(([id, p]) => p.cxv && p.on !== false && !linked.has(id)).map(([id, p]) => ({ pid: id, n: String(p.name || '').slice(0, 80), cx: p.cxv }));
-  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })), dupN: dup.length, dup: dup.slice(0, 200), varN: vars.length, varNew: mkV.length, vars: vars.slice(0, 200) };
+  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })), dupN: dup.length, dup: dup.slice(0, 200), varN: vars.length, varNew: mkV.length, varDel: rmV.length, vars: vars.slice(0, 200) };
 }
 
 // cxCode({ pid, code }) – מנהל (26.11.2026): שינוי קוד הכספית של מוצר מקושר – רק מהאפליקציה.
