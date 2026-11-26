@@ -165,4 +165,31 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.equal(e.dupN, 0);
     assert.equal((await X('300009')).old, true);
   });
+  it('וריאנט (26.11): מוצר לא מקושר שהברקוד שלו בכספית תחת קוד אחר → cxv, בלי קוד חדש ובלי "כפול"; הקטלוג לא מקשר אליו; "לא וריאנט" – חוזר לכפולים ולא מסומן שוב', async () => {
+    await P('pv1').set({ name: 'מחק אדום', price: 4, barcode: '7100000000042', on: true, q: { _: 3 }, at: 1 });
+    await P('pv2').set({ name: 'מחק זהב', price: 4, barcode: '', bcx: ['7100000000042'], on: true, q: {}, at: 1 });
+    await P('pv3').set({ name: 'מוצר חדש באמת', price: 6, barcode: '7100000000777', on: true, q: {}, at: 1 });
+    const e = await ok('cxExport', MGR, { kind: 'new' });
+    assert.deepEqual([e.varN, e.varNew, e.dupN], [2, 2, 0], JSON.stringify(e.dup));
+    assert.deepEqual(e.vars.map((v) => [v.pid, v.cx]).sort(), [['pv1', '300009'], ['pv2', '300009']]);
+    assert.ok(!e.csv.includes('מחק אדום') && !e.csv.includes('מחק זהב')); assert.ok(e.csv.includes('מוצר חדש באמת'));
+    const v1 = (await P('pv1').get()).data();
+    assert.deepEqual([v1.cxv, v1.cx, v1.price, v1.name, v1.q._], ['300009', undefined, 4, 'מחק אדום', 3], 'רק cxv – בלי מחיר / שם / כמות');
+    const e2 = await ok('cxExport', MGR, { kind: 'new', max: 5 });
+    assert.deepEqual([e2.varNew, e2.dupN], [0, 0]);
+    // הקטלוג לא מקשר לווריאנט (גם לא לפי שם)
+    const g = CC.groupCat([HDR, r('300020', 'מחק אדום', '7100000000888', 4)]); const id = run();
+    await ok('cxUpload', MGR, { run: id, part: 0, parts: 1, items: g.items });
+    const pv = await ok('cxPreview', MGR, { run: id });
+    assert.equal(pv.cnt.link, 0); assert.equal(pv.cnt.nw, 1);
+    // "לא וריאנט" – מנהל בלבד
+    assert.notEqual((await call('cxDnOk', E1, { pid: 'pv1', v: true })).status, 'OK');
+    assert.equal((await call('cxDnOk', MGR, { pid: 'pv1', v: 'x' })).reason, 'bad-v');
+    await ok('cxDnOk', MGR, { pid: 'pv1', v: true });
+    const v1b = (await P('pv1').get()).data();
+    assert.deepEqual([v1b.cxv, v1b.cxvNo], [undefined, true]);
+    const e3 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.deepEqual([e3.varN, e3.varNew, e3.dupN], [1, 0, 1]); assert.equal(e3.dup[0].pid, 'pv1');
+    assert.equal((await P('pv1').get()).get('cxv'), undefined, 'לא סומן שוב אוטומטית');
+  });
 });

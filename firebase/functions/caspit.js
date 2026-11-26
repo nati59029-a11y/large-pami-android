@@ -13,6 +13,9 @@
 //   cxcfg/seen         { codes:[כל קודי הקטלוג שאושרו, גם מסוננים] } – תפוסים לקוד 900000+ · cxBak/{id} – גיבוי לפני האישור הראשון (נפרד מ-stockBak)
 //   cxRun/{run}        { st:'up'|'pv'|'ap'|'done', parts, by, at, gen, cnt, sel?, res? } + in/{k} { items } (קלט) + pv/{k} { rows } (תצוגה מקדימה) + done/{k}
 //   prod/{id}          + dn: true = "שם כפול – לבדוק" (cxDnOk מסיר), cx: קוד כספית, nc: true ("לא נספר" – יורד בהכנסת מלאי / תיקון כמות), bcx: [ברקודים נוספים], src:'cx'
+//   prod/{id}.cxv      (26.11.2026, בעל העסק) וריאנט של פריט בכספית: מוצר לא מקושר שהברקוד שלו בכספית תחת קוד אחר (למשל בליסטרים בצבעים שונים
+//                      תחת פריט אחד). לא מקבל קוד, לא נשלח בפריטים חדשים, לא "כפול", והקטלוג לא מקשר אליו. נקבע אוטומטית ב-cxExport new;
+//                      "לא וריאנט" (cxDnOk { pid, v:true }) מסיר ומסמן cxvNo – הקביעה האוטומטית לא חוזרת עליו
 //   priceLog/{id}      { prod, k:'p'|'c', old, new, src:'caspit'|'conf', code, run, by, at } (גם src:'app' – orders.js). conf = האפליקציה ניצחה: old = הערך בכספית
 // A2 (דוח מכירות → מלאי) ו-A3 (מסך מכירות, התאמה מול סגירת קופה) – ראו בהמשך הקובץ: cxTx, cxDay, cxSales, cxLines, cxFix.
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -158,7 +161,7 @@ async function cxUpload(w, input) {
 
 // מצב נוכחי: מוצרים (שדות לקישור), עלויות, cxItem, הגדרות
 async function loadState(db) {
-  const [ps, xs, cs] = await Promise.all([db.collection('prod').select('name', 'price', 'barcode', 'bcx', 'sku', 'cx', 'on', 'cat', 'sub', 'sup').get(), db.collection('cxItem').get(), db.doc(CFG).get()]);
+  const [ps, xs, cs] = await Promise.all([db.collection('prod').select('name', 'price', 'barcode', 'bcx', 'sku', 'cx', 'on', 'cat', 'sub', 'sup', 'cxv', 'cxvNo').get(), db.collection('cxItem').get(), db.doc(CFG).get()]);
   const P = new Map(ps.docs.map((d) => [d.id, d.data()]));
   const cost = new Map();
   const refs = ps.docs.map((d) => db.doc(`prod/${d.id}/p/cost`));
@@ -214,7 +217,7 @@ async function cxPreview(w, input) {
     const codes = [it.c].concat(it.m);
     let pid = null, via = '';
     for (const c of codes) { const x = S.X.get(c); if (x && x.pid && S.P.has(x.pid)) { pid = x.pid; via = 'cx'; break; } }
-    const free = (id) => id && !claimed.has(id) && (!linked.has(id) || codes.includes(linked.get(id)));
+    const free = (id) => id && !claimed.has(id) && (!linked.has(id) || codes.includes(linked.get(id))) && !S.P.get(id).cxv; // וריאנט – לא מקשרים אליו
     if (!pid && free(bySku.get(it.c))) { pid = bySku.get(it.c); via = 'sku'; }
     if (!pid) for (const b of [it.bc].concat(it.bx)) if (free(byBc.get(b))) { pid = byBc.get(b); via = 'bc'; break; }
     if (!pid && free(byName.get(PM.key(it.n)))) { pid = byName.get(PM.key(it.n)); via = 'name'; }
@@ -242,7 +245,7 @@ async function cxPreview(w, input) {
     rows.push(row);
   }
   // מוצרים באפליקציה שלא מקושרים לשום קוד (אחרי האישור – ייצאו בקובץ "פריטים חדשים")
-  cnt.appOnly = [...S.P.keys()].filter((id) => !claimed.has(id) && !linked.has(id) && S.P.get(id).on !== false).length;
+  cnt.appOnly = [...S.P.keys()].filter((id) => !claimed.has(id) && !linked.has(id) && S.P.get(id).on !== false && !S.P.get(id).cxv).length;
   // שמירת התצוגה (מחליפה תצוגה קודמת של אותו סנכרון)
   const old = await ref.collection('pv').listDocuments();
   const groups = old.map((d) => (b) => b.delete(d));
@@ -485,7 +488,11 @@ async function cxExport(w, input) {
   const BC = bcMapOf(await db.doc(SEEN_BC).get());
   const dup = [];
   const dupOf = (pid, p, c) => { const h = bcHit(BC, p); if (h) dup.push({ pid, n: String(p.name || '').slice(0, 80), bc: h.bc, cx: h.cx, c: c || '' }); return !!h; };
-  const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && p.on !== false && !dupOf(id, p)).map(([id]) => id);
+  // 26.11.2026 (בעל העסק): וריאנט – מוצר לא מקושר שהברקוד שלו בכספית תחת קוד X → cxv = X (רק השדה הזה; לא מחיר, שם או כמות). לא אחרי "לא וריאנט" (cxvNo)
+  const mkV = [];
+  for (const [id, p] of S.P) { if (linked.has(id) || p.cx || p.cxv || p.cxvNo || p.on === false) continue; const h = bcHit(BC, p); if (h) { mkV.push([id, h.cx]); p.cxv = h.cx; } }
+  await Promise.all(mkV.map(([id, cx]) => db.doc('prod/' + id).update({ cxv: cx }).catch(() => { S.P.get(id).cxv = undefined; }))); // נמחק בינתיים – מדלגים
+  const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && !p.cxv && p.on !== false && !dupOf(id, p)).map(([id]) => id);
   // פריט שנשלח וטרם נקלט: הברקוד בכספית תחת הקוד שלו עצמו – כבר נקלט (הקישור יגיע בסנכרון הקטלוג), לא שולחים שוב ולא "כפול"
   // 26.11.2026 (cxCode): פריט חדש בקוד חדש של מוצר קיים – הברקוד עדיין בכספית תחת הקוד הקודם (from), וזה לא "כפול"
   const pendOk = (c, x) => { if (!x.nw || !S.P.has(x.pid)) return false; const h = bcHit(BC, S.P.get(x.pid)); return !h || (!!x.from && h.cx === x.from); };
@@ -524,7 +531,8 @@ async function cxExport(w, input) {
     rows.push({ c, bc: p.barcode || '', n: p.name, p: typeof p.price === 'number' ? p.price : 0, cost: S.cost.has(x.pid) ? S.cost.get(x.pid) : null, c1: p.cat ? catN.get(p.cat) || '' : '', c2: p.sub ? catN.get(p.sub) || '' : '', sup: p.sup || '' });
   }
   O.ixDrop(w);
-  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })), dupN: dup.length, dup: dup.slice(0, 200) };
+  const vars = [...S.P].filter(([id, p]) => p.cxv && p.on !== false && !linked.has(id)).map(([id, p]) => ({ pid: id, n: String(p.name || '').slice(0, 80), cx: p.cxv }));
+  return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })), dupN: dup.length, dup: dup.slice(0, 200), varN: vars.length, varNew: mkV.length, vars: vars.slice(0, 200) };
 }
 
 // cxCode({ pid, code }) – מנהל (26.11.2026): שינוי קוד הכספית של מוצר מקושר – רק מהאפליקציה.
@@ -575,11 +583,14 @@ async function cxCode(w, input) {
 async function bumpGen(db) { await db.runTransaction(async (tx) => { const c = cfgOf(await tx.get(db.doc(CFG))); tx.set(db.doc(CFG), { gen: c.gen + 1 }, { merge: true }); }); }
 
 // cxDnOk({ pid }) – "נבדק": מסיר את הסימון "שם כפול – לבדוק" (dn) מהמוצר (החלטה 10). מנהל בלבד.
+// 26.11.2026: { pid, v:true } – "לא וריאנט": מסיר cxv ומסמן cxvNo (הקביעה האוטומטית ב-cxExport new לא חוזרת על המוצר)
 async function cxDnOk(w, input) {
-  onlyKeys(input, ['pid']);
+  onlyKeys(input, ['pid', 'v']);
   const pid = idOf(input.pid, 'מוצר');
+  if (input.v !== undefined && input.v !== true) throw bad('bad-v', 'ערך לא תקין');
   const ref = T.tdb().doc('prod/' + pid);
   if (!(await ref.get()).exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+  if (input.v) { await ref.update({ cxv: FV().delete(), cxvNo: true, upd: Date.now(), dnBy: w.uid }); return { ok: true }; }
   await ref.update({ dn: FV().delete(), upd: Date.now(), dnBy: w.uid });
   return { ok: true };
 }
