@@ -1458,7 +1458,7 @@ test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת (
     assert.equal(up.length, 1, 'פעם אחת (לא לכל סניף)');
     const b = up[0];
     assert.deepEqual(Object.keys(b).sort(), ['day', 'op', 'rows', 'run', 'ver'], JSON.stringify(Object.keys(b)));
-    assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.equal(b.day, today);
+    assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.ok([today, D.dayStr(Date.now(), 'Asia/Jerusalem')].includes(b.day), b.day); // ריצה שחוצה חצות (שעון העסק)
     assert.deepEqual(b.rows, fx.HK_WANT);
     const txt = JSON.stringify(srv.calls.slice(n0)) + JSON.stringify(s.st.lastRun);
     for (const w of fx.HK_SECRETS) assert.ok(!txt.includes(w), 'עמודה שאסור לשלוח: ' + w);
