@@ -635,6 +635,23 @@ describe('26.11.2026: תלושי שכר – לא נסרקים בשרת, כרטי
   });
 });
 
+describe('26.11.2026: שחזור מסמך שנדחה (unrej)', () => {
+  beforeEach(() => seed());
+  it('מי שדחה – משחזר ל"ממתין" עם hold undo; מנהל אחר / מסמך שנמחק – לא', async () => {
+    const x = await arrive(pdf(1), RAW.inv({ number: 'UR1' }));
+    assert.ok((await call('secDecide', M1, { op: 'rej', id: x.id })).ok);
+    assert.equal((await call('secDecide', M2, { op: 'unrej', id: x.id })).reason, 'not-mine', 'מנהל אחר');
+    const r = await call('secDecide', M1, { op: 'unrej', id: x.id });
+    assert.ok(r.ok, r.msg);
+    const y = await get(`b/${A}/sec_inv/${x.id}`);
+    assert.equal(y.st, 'new'); assert.equal(y.hold, 'undo'); assert.equal(y.el, false); assert.equal(y.rejBy, undefined); assert.equal(y.purgeAt, undefined);
+    assert.ok((await call('secDecide', M1, { op: 'unrej', id: x.id })).r.again, 'לא נדחה – כלום');
+    assert.ok((await call('secDecide', M1, { op: 'rej', id: x.id })).ok);
+    await prep((d) => d.doc(`b/${A}/sec_inv/${x.id}`).update({ purged: true }));
+    assert.equal((await call('secDecide', M1, { op: 'unrej', id: x.id })).reason, 'not-mine', 'הקובץ כבר נמחק');
+  });
+});
+
 // הפונקציה נקראת בתוך תהליך הבדיקה (call), והמודל המדומה (gemini-mock) רץ כאן – לכן לא תלוי באמולטור הפונקציות
 describe('26.11.2026: הוראה בכתיבה חופשית (secInv op rule)', () => {
   const GM = require('./gemini-mock');

@@ -442,7 +442,7 @@ async function secInv(request) {
 // secDecide – כל שינוי מצב בתור (4.7, 9.4). claim במצב אוטומטי בודק את כל התנאים שוב (4.3) ומסרב כשאחד לא מתקיים.
 async function secDecide(request) {
   const input = inputObject(request);
-  const op = ['claim', 'done', 'rej', 'release', 'hold', 'undo', 'sender', 'trust', 'scan'].includes(input.op) ? input.op : null;
+  const op = ['claim', 'done', 'rej', 'release', 'hold', 'undo', 'sender', 'trust', 'scan', 'unrej'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const id = String(input.id || '');
   if (!ID_RE.test(id)) throw bad('bad-id', 'מזהה לא תקין');
@@ -578,6 +578,15 @@ async function secDecide(request) {
       const was = x.hold === why;
       tx.update(ref, Object.assign({ hold: why, el: false, why: [...new Set((x.why || []).concat(['hold']))] }, mineCl ? { st: 'new', by: FieldValue.delete(), dev: FieldValue.delete(), mode: FieldValue.delete(), clAt: FieldValue.delete() } : {}));
       after = was ? null : { act: 'invHold', x, why };
+      return { ok: true };
+    }
+    // 26.11.2026 (בעל העסק), שלב 2: שחזור מסמך שנדחה (למשל לפי ההוראה "לדחות תמיד") – רק מי שדחה, ורק כל עוד הקובץ שמור (30 יום).
+    // חוזר ל"ממתין לאישור" עם hold 'undo' – לא נדחה שוב לבד ולא נכנס לבד
+    if (op === 'unrej') {
+      if (x.st !== 'rej') return { ok: true, again: true };
+      if (x.rejBy !== uid || x.purged || !(x.np > 0)) throw pre('not-mine', 'אפשר לשחזר רק מסמך שנדחה אצלך ועדיין שמור');
+      tx.update(ref, { st: 'new', hold: 'undo', el: false, why: [...new Set((x.why || []).concat(['hold']))], rejAt: FieldValue.delete(), rejBy: FieldValue.delete(), purgeAt: FieldValue.delete() });
+      after = { act: 'invUnrej', x };
       return { ok: true };
     }
     // undo: ביטול של "נכנס ישר" (4.3: "אפשרות ביטול") – חוזר ל"ממתין לאישור", לא יוכנס שוב אוטומטית
