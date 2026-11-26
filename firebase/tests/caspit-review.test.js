@@ -64,13 +64,13 @@ describe('כספית – תיקונים אחרי בדיקה סבב 1', () => {
     assert.equal((await ok('cxExport', { kind: 'upd' })).n, 0);
     assert.equal((await P('pc').get()).get('name'), LONG, 'השם המלא באפליקציה לא נדרס');
   });
-  it('ליקוי 2: שינוי שם בלבד – הקטגוריה והברקוד נשלחים כמו שבכספית, ורק השם מסומן pd', async () => {
+  it('ליקוי 2: שינוי שם בלבד – רק השם נשלח ומסומן pd; הקטגוריה והברקוד ריקים ("עדכון פריטים": ריק = לא משתנה בכספית)', async () => {
     await P('pb').update({ name: 'עפרון HB' }); // באפליקציה אין קטגוריה, בכספית "כתיבה" (keep)
     const e = await ok('cxExport', { kind: 'upd' });
     assert.deepEqual(e.rows.map((x) => [x.c, x.f]), [['400002', ['nm']]]);
     const L = e.csv.slice(1).split('\n')[1].split(',');
-    assert.equal(L[CC.HDR_NEW.indexOf('שם קטגוריה ראשית')], 'כתיבה', 'לא ריק');
-    assert.equal(L[CC.HDR_NEW.indexOf('שם פריט')], 'עפרון HB');
+    assert.equal(L[CC.HDR_UPD.indexOf('שם קטגוריה ראשית')], '', 'ריק – לא משתנה בכספית (במקום לשלוח את הערך של כספית)');
+    assert.equal(L[CC.HDR_UPD.indexOf('שם פריט')], 'עפרון HB');
     const x = await X('400002');
     assert.equal(x.nm.pd, 'עפרון HB'); assert.equal(x.ct.pd, undefined); assert.equal(x.bc.pd, undefined);
   });

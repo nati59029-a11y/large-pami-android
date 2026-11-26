@@ -48,9 +48,9 @@ const STALE = 'מאז התצוגה המקדימה נשמר סנכרון או ק�
 async function mgrW(request) { const w = await O.who(request); if (w.role !== 'manager') throw O.deny('manager-only', 'הפעולה מותרת למנהל בלבד'); return w; }
 const runOf = (v) => { if (typeof v !== 'string' || !RUN_RE.test(v)) throw bad('bad-run', 'מזהה סנכרון לא תקין'); return v; };
 const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null, lastSales: d.lastSales || null,
-  bot: { newMax: d.bot && Number.isInteger(d.bot.newMax) ? d.bot.newMax : BOT_NEW0, updMax: d.bot && Number.isInteger(d.bot.updMax) ? d.bot.updMax : BOT_UPD0 }, updOk: d.updOk === true, cats: Array.isArray(d.cats) ? d.cats : [] }; };
+  bot: { newMax: d.bot && Number.isInteger(d.bot.newMax) ? d.bot.newMax : BOT_NEW0, updMax: d.bot && Number.isInteger(d.bot.updMax) ? d.bot.updMax : BOT_UPD0 }, updOk: d.updOk !== false, cats: Array.isArray(d.cats) ? d.cats : [] }; };
 const NEW_ALL = 100000; // "ללא הגבלה" לפריטים חדשים – התקרה הטכנית של cxExport (max עד 100000)
-const BOT_UPD0 = 1; // 26.11.2026: עדכוני פריטים (שם/ברקוד/קטגוריה) לכספית בכל ריצה של הרובוט – 1 עד שהמנהל מעלה (כמו newMax)
+const BOT_UPD0 = 20; // 26.11.2026: עדכוני פריטים (שם/קטגוריה/ספק) לכספית בכל ריצה של הרובוט – 20 עד שהמנהל משנה (כמו newMax)
 const UPD_ALL = 100000;
 const BOT_NEW0 = 1; // רובוט כספית: פריטים חדשים לכספית בכל ריצה – 1 (בדיקה ראשונה עם פריט אחד) עד שהמנהל מעלה (החלטות 2, 11)
 const numOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -172,6 +172,7 @@ async function loadState(db) {
 
 // 26.11.2026: שדות טקסט שמסונכרנים בשני הכיוונים (cxItem nm/bc/ct)
 const FX = ['nm', 'bc', 'ct'];
+const UPD_F = ['nm', 'ct']; // מה שנשלח ב"עדכון פריטים" (ועוד ספק – sp). ברקוד – לא (כספית לא מעדכנת ברקוד בייבוא הזה)
 // catN: מזהה → שם; catN.by: '<הורה>|<שם מנורמל>' → מזהה (סבב בדיקה 1, ליקוי 6: קטגוריה קיימת נמצאת לפי שם, גם אם המזהה שלה מגיבוב של שם ישן)
 const catKey = (par, n) => (par || '') + '|' + CC.nameKey(n);
 function catMaps(docs) { const n = new Map(), by = new Map(); for (const d of docs) { const nm = d.get('name') || ''; n.set(d.id, nm); if (nm && !by.has(catKey(d.get('parent'), nm))) by.set(catKey(d.get('parent'), nm), d.id); } n.by = by; return n; }
@@ -192,13 +193,11 @@ function catEnsure(tx, db, cats, now, c1, c2, by) {
   if (c2) { out.sub = B.get(catKey(out.cat, c2)) || catIdOf(c2, out.cat); if (!cats.has(out.sub)) { tx.set(db.doc('cat/' + out.sub), { name: c2, parent: out.cat, ord: 0, upd: now }); cats.set(out.sub, true); B.set(catKey(out.cat, c2), out.sub); } }
   return out;
 }
-// עדכוני פריטים לכספית (ליקוי 2): תבנית "פריטים חדשים" דורסת את כל העמודות. יש לנו מהקטלוג רק את אלה – כל השאר חסרות,
-// ולכן העדכונים כבויים עד שיאומת מול כספית שעמודה ריקה לא מוחקת (cxcfg/main.updOk = true, ידנית בלבד)
-const UPD_COLS = ['קוד פריט', 'ברקוד', 'שם פריט', 'צבע', 'מידה', 'מחיר לצרכן כולל מעמ', 'מחיר עלות אחרי הנחות לא כולל מעמ', 'מחיר עלות אחרי הנחות כולל מעמ', 'פריט ללא מעמ', 'שם קטגוריה ראשית', 'שם קטגוריה משנית', 'שם ספק'];
-const UPD_MISSING = CC.HDR_NEW.filter((h) => !UPD_COLS.includes(h));
-const updOff = (cfg) => (cfg && cfg.updOk === true) || !UPD_MISSING.length ? '' : `עדכוני פריטים כבויים – חסר ערך "${UPD_MISSING[0]}" מהקטלוג (ועוד ${UPD_MISSING.length - 1} עמודות). נפעיל אחרי בדיקה מול כספית.`;
+// עדכוני פריטים לכספית: סוג הייבוא "עדכון פריטים" (CC.HDR_UPD, אומת מול כספית 26.11.2026 – תא ריק לא משנה). פועל כברירת מחדל;
+// cxcfg/main.updOk = false – מתג כיבוי לחירום (ידנית בלבד)
+const updOff = (cfg) => (cfg && cfg.updOk === false ? 'עדכוני פריטים לכספית כבויים (מתג חירום).' : '');
 const UPD_TRIES = 3; // אותה שורה שנשלחה 3 פעמים בלי להיקלט – לא נשלחת שוב (ליקוי 3)
-// ערכי כספית שאין באפליקציה – נשמרים מהקטלוג (xc) ונשלחים כמו שהם בשורת העדכון. כמה צבעים / מידות לאותו קוד – לא ידוע מה לשלוח (amb)
+// ערכי כספית שאין באפליקציה – נשמרים מהקטלוג (xc; מאז "עדכון פריטים" כבר לא נשלחים בשורת העדכון – רק לתיעוד). כמה צבעים / מידות לאותו קוד – לא ידוע מה לשלוח (amb)
 const xcOf = (it) => { const one = (a) => (Array.isArray(a) && a.length > 1 ? null : (Array.isArray(a) && a[0]) || ''); const col = one(it.col), sz = one(it.sz); return Object.assign({ sup: it.sup || '', nv: it.nv === true }, col == null || sz == null ? { amb: true } : { col, sz }); };
 
 // cxPreview({ run }) – ניקוי, קישור והשוואה. לא כותב למוצרים. → { cnt, rows, filt, merged, warn }
@@ -249,6 +248,7 @@ async function cxPreview(w, input) {
     const ap = typeof p.price === 'number' ? p.price : null, ac = S.cost.has(pid) ? S.cost.get(pid) : null;
     Object.assign(row, { a: 'link', pid, via, pn: p.name, pr: Object.assign({ f: it.p, a: ap }, CC.decide(it.p, ap, st.pr)), co: Object.assign({ f: it.cost, a: ac }, CC.decide(it.cost, ac, st.co)) });
     if (p.sku && p.sku !== it.c && !p.cx && via !== 'cx') warn.push({ c: it.c, w: 'sku', v: p.sku });
+    if (st.sp && typeof st.sp === 'object') row.sp0 = Object.assign({ ab: st.sp.ab === undefined ? null : st.sp.ab }, st.sp.pd != null ? { pd: st.sp.pd } : {}); // ספק – הבסיס (cxExport upd)
     // 26.11.2026: שם / ברקוד ראשי / קטגוריה (CC.decideF; בלי בסיס – רק רישום בסיס)
     const fv = { nm: CC.fxNorm('nm', it.n), bc: CC.fxNorm('bc', it.bc), ct: CC.fxNorm('ct', CC.ctOf(it.c1, it.c2)) }, av = appF(p, catN, st.ct);
     row.fx = {};
@@ -377,7 +377,7 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen, catN0)
         if (it.cost != null) tx.set(db.doc(`prod/${pid}/p/cost`), { cost: it.cost, at: now, by: w.uid, src: 'cx' });
         const ct0 = CC.ctOf(it.c1, it.c2), bc0 = it.bc || null;
         const nm0 = CC.fxNorm('nm', it.n), bcN = CC.fxNorm('bc', bc0), ctN = CC.fxNorm('ct', ct0);
-        const st = { pr: { fb: it.p, ab: it.p }, co: { fb: it.cost, ab: it.cost }, nm: { fb: nm0, ab: nm0 }, bc: { fb: bcN, ab: bcN }, ct: { fb: ctN, ab: ctN, ai: catIds(ext) } };
+        const st = { pr: { fb: it.p, ab: it.p }, co: { fb: it.cost, ab: it.cost }, nm: { fb: nm0, ab: nm0 }, bc: { fb: bcN, ab: bcN }, ct: { fb: ctN, ab: ctN, ai: catIds(ext) }, sp: { ab: CC.sv(it.sup) || '' } };
         xi(x.c, Object.assign({ pid, n: it.n, xc: xcOf(it) }, st, it.nv ? { nv: true } : {}), true);
         for (const m of x.m || []) xi(m, Object.assign({ pid, n: it.n, m: x.c }, st), true);
         res.nw++;
@@ -409,6 +409,11 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen, catN0)
         if (!p.sup && it.sup) upd.sup = it.sup;
         // 26.11.2026: שם / ברקוד ראשי / קטגוריה. שדה שהשתנה באפליקציה מאז התצוגה – לא נוגעים בו (יופיע בסנכרון הבא)
         let pend = false;
+        // 26.11.2026: ספק (מהאפליקציה לכספית בלבד, cxExport upd). sp.ab = הספק באפליקציה שמוסכם עם כספית, sp.pd = נשלח וטרם נקלט.
+        // בלי בסיס (sp0) או כשכספית והאפליקציה שוות – הבסיס = האפליקציה. ספק שהשתנה רק בכספית – לא נשלח בחזרה (האפליקציה לא דורסת ספק קיים, כמו קודם)
+        const aS = CC.sv(upd.sup !== undefined ? upd.sup : p.sup) || '', fS = CC.sv(it.sup) || '';
+        if (!x.sp0 || x.sp0.ab == null || aS === fS) fxs.sp = { ab: aS, pd: FV().delete() };
+        else if (x.sp0.pd != null) pend = true;
         if (x.fx) {
           const av = appF(p, catN, x.fx.ct ? { ai: x.fx.ct.ai, ab: x.fx.ct.a } : null);
           for (const kk of FX) {
@@ -483,39 +488,37 @@ async function cxExport(w, input) {
     return { csv: CC.csvPrice(rows, vat), n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })) };
   }
   if (!S.cfg.last) throw pre('no-cat', 'קודם מסנכרנים קטלוג מכספית, כדי לא לתת קוד חדש למוצר שכבר קיים שם');
-  // 26.11.2026 – upd: פריטים מקושרים שהשם / הברקוד הראשי / הקטגוריה שלהם באפליקציה השתנו מהבסיס (או נשלחו וטרם נקלטו),
-  // בתבנית "פריטים חדשים" עם הקוד הקיים (לא מאומת שכספית מעדכנת כך פריט קיים). סבב בדיקה 1:
-  //   - שדה שלא השתנה באפליקציה נשלח עם הערך של כספית (fb), ורק השדות שהשתנו מסומנים pd. מחיר / עלות – מה שבכספית (או שממתין לקליטה), ספק / צבע / מידה / ללא מע"מ – מהקטלוג (xc)
-  //   - כבוי כל עוד חסרות עמודות שאין לנו מהקטלוג (updOff) – n:0 ו-off, בלי לסמן דבר
-  //   - שורה שנשלחה UPD_TRIES פעמים בלי להיקלט – לא נשלחת שוב (stuck), לא נספרת למגבלה. מעל max → limit לפני שמשהו מסומן.
+  // 26.11.2026 – upd: סוג הייבוא "עדכון פריטים" בכספית (CC.csvUpd). שורה = קוד + רק מה שהשתנה באפליקציה מהבסיס (או נשלח וטרם נקלט): שם, קטגוריה ראשית/משנית, ספק.
+  //   כל השאר ריק (= לא משתנה בכספית); אף פעם לא NULL; ערך ריק באפליקציה (למשל קטגוריה שהוסרה) לא נשלח. מחיר / עלות – רק בקובץ המחירים. ברקוד – לא נשלח (כספית לא מעדכנת ברקוד בייבוא הזה).
+  //   הגנה (לקח מבדיקה ידנית שעדכנה פריט לא נכון): רק קוד שמופיע בקטלוגים מכספית (cxcfg/seen), מקושר ב-cxItem למוצר שקיים ושה-cx שלו הוא אותו קוד; לא nw / ישן / מאוחד / וריאנט.
+  //   cxcfg/main.updOk = false – כבוי (מתג חירום): n:0 ו-off, בלי לסמן דבר. שורה שנשלחה UPD_TRIES פעמים בלי להיקלט – לא נשלחת שוב (stuck). מעל max → limit לפני שמשהו מסומן.
   if (input.kind === 'upd') {
     const off = updOff(S.cfg);
     if (off) return { csv: '', n: 0, rows: [], off };
     const catN = await catNames(db);
+    const seen = new Set(((await db.doc(SEEN).get()).get('codes')) || []);
     const rows = [], stuck = [];
-    let noxc = 0;
     for (const [c, x] of [...S.X].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-      if (!x.pid || x.nw || x.old || x.m || !S.P.has(x.pid)) continue;
-      const p = S.P.get(x.pid), av = appF(p, catN, x.ct);
-      const has = FX.filter((k) => x[k] && typeof x[k] === 'object' && x[k].ab !== undefined);
-      const need = has.filter((k) => x[k].pd != null || !CC.eqS(av[k], x[k].ab));
+      if (!x.pid || x.nw || x.old || x.m || !seen.has(c) || !S.P.has(x.pid)) continue;
+      const p = S.P.get(x.pid);
+      if (p.cx !== c || p.cxv) continue;
+      const av = appF(p, catN, x.ct);
+      const need = UPD_F.filter((k) => av[k] && x[k] && typeof x[k] === 'object' && x[k].ab !== undefined && (x[k].pd != null || !CC.eqS(av[k], x[k].ab)));
+      const sa = CC.sv(p.sup) || '', sp = x.sp && typeof x.sp === 'object' ? x.sp : null;
+      if (sa && sp && sp.ab != null && (sp.pd != null || sa !== sp.ab)) need.push('sp');
       if (!need.length) continue;
       if ((x.uq || 0) >= UPD_TRIES) { stuck.push({ c, n: String(p.name || '').slice(0, 80) }); continue; }
-      const xc = x.xc || null;
-      if (has.length < FX.length || !xc || xc.amb) { noxc++; continue; } // ערך של כספית לא ידוע – לא שולחים
-      const val = (k) => (need.includes(k) ? av[k] : CC.sv(x[k].fb));
-      const [c1, c2] = CC.ctSplit(val('ct'));
-      const pr = x.pr || {}, co = x.co || {};
-      rows.push({ c, bc: val('bc') || '', n: val('nm') || '', p: pr.pd != null ? pr.pd : pr.fb, cost: co.pd != null ? co.pd : co.fb, nv: xc.nv === true, nvs: xc.nv ? 'כן' : 'לא', col: xc.col || '', sz: xc.sz || '', c1, c2, sup: xc.sup || '', f: need });
+      const [c1, c2] = need.includes('ct') ? CC.ctSplit(av.ct) : ['', ''];
+      rows.push({ c, n: need.includes('nm') ? av.nm : '', c1, c2, sup: need.includes('sp') ? sa : '', f: need });
       const u = { xAt: now, uq: (x.uq || 0) + 1 };
-      for (const k of need) { u[k + '.pd'] = av[k]; u[k + '.ab'] = av[k]; }
+      for (const k of need) { const v = k === 'sp' ? sa : av[k]; u[k + '.pd'] = v; u[k + '.ab'] = v; }
       if (need.includes('ct')) u['ct.ai'] = catIds(p);
       ups.push([db.doc('cxItem/' + c), u]);
     }
     if (rows.length > max) throw over(rows.length);
     for (let i = 0; i < ups.length; i += 400) { const b = db.batch(); ups.slice(i, i + 400).forEach(([rf, u]) => b.update(rf, u)); await b.commit(); }
     if (ups.length) await bumpGen(db);
-    return { csv: CC.csvNew(rows, vat), n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost, f: x.f })), stuckN: stuck.length, stuck: stuck.slice(0, 50), noxc };
+    return { csv: CC.csvUpd(rows), n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n || String(S.P.get(S.X.get(x.c).pid).name || '').slice(0, 80), f: x.f })), stuckN: stuck.length, stuck: stuck.slice(0, 50) };
   }
   // ליקוי 5: הכול בטרנזקציה – מוצרי המועמדים וההגדרות נקראים בתוכה; מוצר שכבר קיבל קוד (cx) בקריאה מקבילה – מדולג.
   // ליקוי 6: תפוסים = cxItem + כל הקודים שהופיעו בקטלוג (cxcfg/seen).

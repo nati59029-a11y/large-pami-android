@@ -1494,7 +1494,7 @@ test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → a
   try {
     const W = curDay('08:10');
     const pt = (now) => sw.evaluate((n) => self.__cxTest.prodTick({ now: n }), now);
-    const n0 = srv.calls.length;
+    const n0 = srv.calls.length, i0 = imports.length;
     const r = await pt(W);
     assert.equal(r && r.st, 'ok', JSON.stringify(r));
     const calls = srv.calls.slice(n0), ops = calls.map((c) => c.op + (c.kind ? ':' + c.kind : ''));
@@ -1505,6 +1505,10 @@ test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → a
     const rp = calls.find((c) => c.op === 'report');
     assert.deepEqual([rp.st, rp.n.up, rp.n.pr, rp.n.nw], ['ok', 1, 2, 1]);
     assert.equal(calls.find((c) => c.op === 'export' && c.kind === 'upd').max, 5, 'updMax מ-cfg');
+    // 0.1.24: עדכוני הפריטים נטענים בסוג הייבוא "עדכון פריטים" (importUpd), לא כ"פריטים חדשים"
+    const im = imports.slice(i0).filter((b) => b.name.startsWith('lp-upd-')); // new / price – אולי כבר נטענו היום באותו קובץ (impHash)
+    assert.deepEqual(im.map((b) => b.type), ['upd'], JSON.stringify(imports.slice(i0).map((b) => [b.name, b.type])));
+    assert.match(im[0].text, /^\ufeff?קוד פריט,שם פריט,/, 'הקובץ מהשרת כמו שהוא'); // ה-BOM נבלע בקריאת הקובץ בדף
     assert.equal(await picks(), '', 'בלי שום בחירת סניף');
     assert.equal(await store0(), 'נחל לכיש');
     assert.ok((await store()).st.prodAt >= r.at - 1000, 'מוצרים סונכרנו לאחרונה');

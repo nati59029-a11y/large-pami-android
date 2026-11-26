@@ -1278,7 +1278,7 @@ const STEP = {
     }
   },
   exportPrice: (run) => exportImport(run, 'price'),
-  // 0.1.23: עדכוני שם / ברקוד / קטגוריה לכספית (תבנית "פריטים חדשים" עם הקוד הקיים) – רק מול שרת עם caps.prod30. תקלה לא עוצרת: flags.up
+  // 0.1.23: עדכוני פריטים לכספית – רק מול שרת עם caps.prod30. תקלה לא עוצרת: flags.up. 0.1.24: שם / קטגוריה / ספק בסוג הייבוא "עדכון פריטים" (importUpd)
   async exportUpd(run) {
     if (!((await get('caps')) || {}).prod30) return { skip: 'caps' };
     try { return await exportImport(run, 'upd'); } catch (e) {
@@ -1318,7 +1318,7 @@ const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout']); // 0.1.22
 async function exportImport(run, kind) {
   const L = run.limits || U.LIMITS;
   const max = kind === 'new' ? Math.min(L.newMax, U.LIMITS.newMax) : kind === 'upd' ? Math.min(L.updMax == null ? 1 : L.updMax, U.LIMITS.updMax) : Math.min(L.price, U.LIMITS.price);
-  const what = kind === 'new' ? 'טעינת פריטים חדשים' : kind === 'upd' ? 'עדכון פריטים' : 'עדכון מחירים', flow = kind === 'price' ? 'importPrice' : 'importNew'; // upd – אותה תבנית ("פריטים חדשים")
+  const what = kind === 'new' ? 'טעינת פריטים חדשים' : kind === 'upd' ? 'עדכון פריטים' : 'עדכון מחירים', flow = kind === 'price' ? 'importPrice' : kind === 'upd' ? 'importUpd' : 'importNew'; // 0.1.24: upd – סוג הייבוא "עדכון פריטים" (importUpd)
   const cl = await api();
   const r = await cl.call('export', { kind, max, log: run.srv });
   const n = +r.n || 0;

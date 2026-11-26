@@ -37,7 +37,7 @@
 //          לפני אישור ראשון באפליקציה – נשמר כ"ממתין לאישור" בלבד; אחרי האישור – הפרשים מול התמונה הקודמת. עד HK_DAY תמונות ביום לעסק (hk ב-private/cxbot). caps כולל 'hk'.
 //   מוצרים כל 30 דקות (26.11.2026, תוסף 0.1.23, caps 'prod30'): התוסף מוריד קטלוג → upload → preview → apply → export new/price/upd, בלי hello,
 //          ומסיים ב-report { kind:'prod', run, st:'ok'|'fail'|'skip', c?, n? } → p30:{ at, st, c, n } ב-private/cxbot (ok → גם pok = "מוצרים סונכרנו לאחרונה") ושחרור המנעול.
-//          export kind:'upd' – עדכוני שם/ברקוד/קטגוריה, עד min(LIM.updMax, cxcfg.bot.updMax). קצב: CALLS_DAY 1500 (היה 600), עד CAT_DAY קטלוגים ביום לעסק.
+//          export kind:'upd' – עדכוני שם/קטגוריה/ספק ("עדכון פריטים" בכספית, תוסף UPF_VER ומעלה), עד min(LIM.updMax, cxcfg.bot.updMax). קצב: CALLS_DAY 1500 (היה 600), עד CAT_DAY קטלוגים ביום לעסק.
 //          דיווח ריצה: info.prod === true → pok; info.flags.back (החזרה לסניף שהיה מוצג נכשלה) → bw:{ at, msg } (אזהרה בכרטיס, לא עוצר).
 // פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים (גם בלי שמות עובדים ושעות).
 
@@ -74,6 +74,7 @@ const TOK_RE = /^([a-z0-9-]{3,30})\.([A-Za-z0-9_-]{43})$/;
 const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
 const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
+const UPF_VER = '0.1.24'; // 26.11.2026: התוסף הראשון שטוען את export upd בסוג הייבוא "עדכון פריטים" (קודם – "פריטים חדשים", שלא מעדכן). לתוסף ישן יותר – upd ריק, בלי סימון
 const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
 const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf', 'hk', 'prod30']; // prod30 (תוסף 0.1.23): מוצרים כל 30 דקות + export upd + report kind:'prod' // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
 // tf (תוסף 0.1.19, 24.11.2026): poll מקבל tf = { s:'YYYY-MM-DD HH', c:קוד } – העדכון השעתי של מכירות היום שנכשל במחשב (עד אז נשמר רק בתוסף)
@@ -280,7 +281,7 @@ async function useOk(bizId, day, isRun, lim) {
 
 // ---------- הפעולות של הרובוט ----------
 const runRef = (id) => T.tdb().doc('cxBotRun/' + id);
-const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)), updMax: CX.updOff(cfg) ? 0 : Math.max(0, Math.min(LIM.updMax, cfg.bot.updMax)) }); // עדכוני פריטים כבויים עד אימות מול כספית (caspit.js updOff)
+const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)), updMax: CX.updOff(cfg) ? 0 : Math.max(0, Math.min(LIM.updMax, cfg.bot.updMax)) }); // updOff = מתג החירום cxcfg.updOk:false (caspit.js)
 async function cfgNow() { return CX.cfgOf(await T.tdb().doc(CX.CFG).get()); }
 // מצב העדכון האוטומטי של התוסף (0.1.7, upd.json מהמחשב, ב-hello). לא תקין → מתעלמים (לא מכשילים את הסנכרון).
 // { at, ok, ver, err, fails, rx (מתי התקבל) }; at לא בעתיד (שעון מחשב שגוי → rx)
@@ -374,6 +375,7 @@ const OPF = {
     const lim = limitsOf(await cfgNow());
     const max = Math.min(b.max, cap(lim));
     await CX.lockTake(w.bizId, 'bot:' + x.dev.id);
+    if (b.kind === 'upd' && cmpVer(x.ver, UPF_VER) < 0) return { n: 0, csv: '', rows: [], added: 0 };
     const r = await CX.FNS.cxExport(w, { kind: b.kind, max });
     // 26.11.2026: מוצרים שהברקוד שלהם כבר בכספית – לא נשלחו; לכרטיס הרובוט (כמה + עד 20 שמות וברקודים)
     if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) },

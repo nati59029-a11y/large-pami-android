@@ -76,11 +76,10 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.deepEqual((await X('300002')).bc, { fb: '7100000000099', ab: '7100000000028' });
     assert.deepEqual((await X('300003')).ct, { fb: 'כלי כתיבה', ab: null, ai: '/' }); // ai = הקטגוריות של המוצר באפליקציה (סבב בדיקה 1)
     assert.equal((await logs('pa', 'n')).length, 0);
-    // סבב בדיקה 1 (ליקוי 2): עדכוני פריטים כבויים עד אימות – חסרות עמודות שאין לנו מהקטלוג
+    // 26.11.2026: "עדכון פריטים" אומת מול כספית – פועל כברירת מחדל (בלי updOk); אין מה לשלוח
     const e = await ok('cxExport', MGR, { kind: 'upd' });
-    assert.equal(e.n, 0); assert.match(e.off, /עדכוני פריטים כבויים – חסר ערך "מחיר בחנות" מהקטלוג/);
-    await adm().doc(`b/${A}/cxcfg/main`).set({ updOk: true }, { merge: true }); // מכאן – כאילו אומת מול כספית
-    assert.equal((await ok('cxExport', MGR, { kind: 'upd' })).n, 0);
+    assert.equal(e.n, 0); assert.equal(e.off, undefined);
+    assert.deepEqual((await X('300001')).sp, { ab: '' }, 'בסיס הספק נרשם');
   });
   it('הבדל קבוע שאף צד לא שינה מאז הבסיס – לא נוגעים (keep), ולא יוצא לכספית', async () => {
     const { pv } = await sync(BASE());
@@ -107,10 +106,9 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     const e = await ok('cxExport', MGR, { kind: 'upd' });
     assert.equal(e.n, 1);
     const L = e.csv.slice(1).split('\n');
-    assert.equal(L[0], CC.HDR_NEW.join(','));
-    // רק השם השתנה באפליקציה: הברקוד – של כספית (fb), המחיר – של כספית; צבע / מידה / ללא מע"מ – מהקטלוג (סבב בדיקה 1)
-    assert.ok(L[1].startsWith('300002,7100000000099,מחברת A4,,,8,'), L[1]);
-    assert.equal(L[1].split(',')[CC.HDR_NEW.indexOf('פריט ללא מעמ')], 'לא');
+    assert.equal(L[0], CC.HDR_UPD.join(','));
+    // "עדכון פריטים" (26.11): רק הקוד והשם שהשתנה; כל השאר ריק (= לא משתנה בכספית) – בלי ברקוד, מחיר, עלות
+    assert.equal(L[1], '300002,מחברת A4' + ','.repeat(46));
     assert.equal((await X('300002')).bc.pd, undefined, 'שדה שלא השתנה – לא מסומן pd');
     assert.deepEqual(e.rows[0].f, ['nm']);
     assert.equal((await X('300002')).nm.pd, 'מחברת A4');
@@ -140,6 +138,45 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
       assert.equal(a.res.bdup, 1);
       assert.equal((await P('pb').get()).get('barcode'), '7100000000028');
     }
+  });
+  it('עדכון פריטים (26.11): ברקוד לא נשלח; ספק שהשתנה באפליקציה – נשלח ונקלט; ספק שהשתנה רק בכספית – לא חוזר; רק קוד מהקטלוג שמקושר לאותו מוצר; updOk=false – כבוי', async () => {
+    const up = () => ok('cxExport', MGR, { kind: 'upd' });
+    assert.equal((await up()).n, 0);
+    await P('pd').update({ barcode: '7100000000555' });
+    assert.equal((await up()).n, 0, 'שינוי ברקוד באפליקציה – לא יוצר שורה');
+    await P('pd').update({ barcode: '7100000000042', sup: 'ספק הדר' });
+    // מתג חירום: updOk=false – כלום לא נשלח ולא מסומן
+    await adm().doc(`b/${A}/cxcfg/main`).set({ updOk: false }, { merge: true });
+    const off = await up();
+    assert.equal(off.n, 0); assert.match(off.off, /כבויים/);
+    assert.equal(((await X('300004')).sp || {}).pd, undefined);
+    await adm().doc(`b/${A}/cxcfg/main`).update({ updOk: require(require.resolve('firebase-admin/firestore', { paths: [FN] })).FieldValue.delete() });
+    const e = await up();
+    assert.equal(e.n, 1); assert.deepEqual(e.rows[0].f, ['sp']);
+    const row = e.csv.slice(1).split('\n')[1].split(',');
+    assert.equal(row.length, 48);
+    assert.deepEqual([row[0], row[CC.HDR_UPD.indexOf('שם ספק')]], ['300004', 'ספק הדר']);
+    assert.equal(row.filter(Boolean).length, 2, 'רק קוד וספק');
+    assert.deepEqual((await X('300004')).sp, { ab: 'ספק הדר', pd: 'ספק הדר' });
+    // כספית קלטה → ack; אחר כך הספק השתנה רק בכספית → האפליקציה לא דורסת ולא שולחת בחזרה
+    const rs = (sup) => [['300004', 'מחק', '7100000000042', sup, '', '', 0, 2, 'לא']];
+    await sync(rs('ספק הדר'));
+    assert.deepEqual((await X('300004')).sp, { ab: 'ספק הדר' });
+    assert.equal((await up()).n, 0);
+    await sync(rs('ספק אחר'));
+    assert.equal((await P('pd').get()).get('sup'), 'ספק הדר');
+    assert.equal((await up()).n, 0, 'שינוי רק בכספית – לא נשלח בחזרה');
+    // קוד שלא בקטלוג מכספית (cxcfg/seen) / מוצר שה-cx שלו קוד אחר – לא נשלח
+    await P('pe').set({ name: 'שם חדש', price: 1, barcode: '', on: true, q: {}, cx: '300051', at: 1 });
+    await adm().doc(`b/${A}/cxItem/300050`).set({ c: '300050', pid: 'pe', st: 'link', n: 'שם ישן', pr: { fb: 1, ab: 1 }, co: { fb: null, ab: null }, nm: { fb: 'שם ישן', ab: 'שם ישן' }, run: 'old', at: 1 });
+    assert.equal((await up()).n, 0, 'לא בקטלוג');
+    const seenRef = adm().doc(`b/${A}/cxcfg/seen`), codes0 = (await seenRef.get()).get('codes');
+    await seenRef.set({ codes: codes0.concat(['300050']) });
+    assert.equal((await up()).n, 0, 'בקטלוג, אבל המוצר מקושר לקוד אחר');
+    await P('pe').update({ cx: '300050' });
+    const e2 = await up();
+    assert.deepEqual(e2.rows.map((x) => [x.c, x.n, x.f]), [['300050', 'שם חדש', ['nm']]]);
+    await adm().doc(`b/${A}/cxItem/300050`).delete(); await P('pe').delete(); await seenRef.set({ codes: codes0 });
   });
   it('cxCode: מנהל בלבד; קוד שמקושר למוצר אחר – חסימה', async () => {
     assert.notEqual((await call('cxCode', E1, { pid: 'pd', code: '300009' })).status, 'OK');

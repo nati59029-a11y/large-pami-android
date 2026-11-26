@@ -26,6 +26,10 @@ const NEW_FROM = 900000; // קוד כספית לפריט חדש מהאפליקצ
 const PART = 1500; // פריטים בכל חלק שנשלח לשרת
 // כותרות התבניות של כספית – בדיוק כמו בקבצים לדוגמה (UTF-8 עם BOM, פסיקים, LF)
 const HDR_NEW = ['קוד פריט', 'ברקוד', 'שם פריט', 'צבע', 'מידה', 'מחיר לצרכן כולל מעמ', 'מחיר בחנות', 'מחיר עלות אחרי הנחות לא כולל מעמ', 'מחיר עלות אחרי הנחות כולל מעמ', 'אפשר מחיר אפס', 'כמות במלאי', 'פריט ללא מעמ', 'שם קטגוריה ראשית', 'שם קטגוריה משנית', 'פריט תוספת', 'פריט אב', 'פריט שקיל', 'הצג בתפריט ראשי', 'אל תציג בתפריט', 'שם ספק', 'קוד פריט ספק', 'מותג', 'משפחה', 'עונה', 'מגוון תפריט', 'שם תפריט תצוגה', 'שם תפריט משני תצוגה', 'שם תפריט תצוגה שלישי', 'קבוצה', 'תת קבוצה', 'הוראות הכנה', 'הוראות הכנה שירות עצמי', 'פתיחת חלון הוראות הכנה שירות עצמי אוטומטית', 'פתיחת חלון הוראות הכנה אוטומטית', 'מדפסות בונים', 'תיאור פריט מורחב', 'מידה מוצהרת של הפריט', 'יחידת מידה מוצהרת לפריט', 'יחידת מידה להצגה', 'פריט נעול', 'מנהל מלאי', 'פריט אחוזים', 'פריט אינו צובר נקודות', 'דורש סיסמת מנהל', 'חייב מע”מ תמיד', 'שינוי שם לפריט כללי', 'פריט לא יכול לקבל הנחה', 'לא זמין למכירה בקופה', 'חלק מאריזה', 'תיאור פריט קצר', 'פריט לא נשלח לאתר אינטרנט', 'מחיר לאחר הנחה באתר', 'מלל נוסף שיודפס ב-בון', 'הודעה בעת הוספת פריט', 'שובר הדפסה לפריט', 'זמינות בוולט לפי מלאי', 'שורה אחת בלבד לפריט בחשבון', 'מחיר לפי מדרגת משקל', 'מדרגות מחיר לפי משקל'];
+// "עדכון פריטים" בכספית (אומת 26.11.2026 מול כספית האמיתית): HDR_NEW בלי 12 עמודות (ברקוד, צבע, מידה, מחיר בחנות, כמות, תוספת / אב, עונה, תפריטים) ועם "נעול" בסוף – 48 עמודות.
+// לפי קוד פריט קיים; תא ריק = לא משתנה בכספית (NULL = מחיקה – אנחנו אף פעם לא שולחים NULL). ברקוד לא מתעדכן בקובץ הזה.
+const UPD_DROP = ['ברקוד', 'צבע', 'מידה', 'מחיר בחנות', 'כמות במלאי', 'פריט תוספת', 'פריט אב', 'עונה', 'מגוון תפריט', 'שם תפריט תצוגה', 'שם תפריט משני תצוגה', 'שם תפריט תצוגה שלישי'];
+const HDR_UPD = HDR_NEW.filter((h) => !UPD_DROP.includes(h)).concat(['נעול']);
 const HDR_PRICE = ['קוד פריט', 'מחיר לצרכן כולל מעמ', 'מחיר עלות אחרי הנחות לא כולל מעמ', 'מחיר עלות אחרי הנחות כולל מעמ'];
 // עמודות הקטלוג (ייצוא "קטלוג פריטים" מכספית). המחיר = "מחיר לצרכן" (לא "מחיר בחנות" – החלטה 4). עלות = "מחיר עלות" (כולל מע"מ, כמו באפליקציה)
 const CAT = { c: 'קוד פריט', n: 'שם פריט', bc: 'ברקוד', col: 'צבע', sz: 'מידה', sup: 'ספק', c1: 'קטגוריה ראשית', c2: 'קטגוריה משנית', cost: 'מחיר עלות', p: 'מחיר לצרכן', nv: 'פריט ללא מעמ' };
@@ -259,6 +263,16 @@ function csvNew(rows, vat) {
     if (typeof r.col === 'string') a[ix('צבע')] = r.col;
     if (typeof r.sz === 'string') a[ix('מידה')] = r.sz;
     if (typeof r.nvs === 'string') a[ix('פריט ללא מעמ')] = r.nvs;
+    return a;
+  }));
+}
+// rows: [{ c, n?, c1?, c2?, sup? }] – רק קוד ומה שהשתנה באפליקציה; כל השאר ריק (= לא משתנה בכספית). ערך ריק / "NULL" לא נשלח לעולם
+function csvUpd(rows) {
+  const ix = (h) => HDR_UPD.indexOf(h), v = (x) => { const t = x == null ? '' : String(x).trim(); return /^null$/i.test(t) ? '' : t; };
+  return csv(HDR_UPD, (rows || []).map((r) => {
+    const a = new Array(HDR_UPD.length).fill('');
+    a[ix('קוד פריט')] = r.c; a[ix('שם פריט')] = v(r.n);
+    a[ix('שם קטגוריה ראשית')] = v(r.c1); a[ix('שם קטגוריה משנית')] = v(r.c2); a[ix('שם ספק')] = v(r.sup);
     return a;
   }));
 }
@@ -560,7 +574,7 @@ function unpackDays(p) {
 function chunks(from, to, n) { const out = []; let a = from; while (a <= to) { let b = addDay(a, (n || 92) - 1); if (b > to) b = to; out.push([a, b]); a = addDay(b, 1); } return out; }
 const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
 
-const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF, fxNorm };
+const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_UPD, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvUpd, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF, fxNorm };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);
