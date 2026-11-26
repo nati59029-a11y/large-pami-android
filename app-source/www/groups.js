@@ -90,6 +90,11 @@ body.grc .bar,body.grc .wbar{display:none!important}body.grc main{padding-bottom
 .gr-pc i{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none}.gr-pc i.on{background:#2ecc71}
 .gr-emp{position:fixed;z-index:60;display:flex;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.45)}
 .gr-emp button{min-height:0;min-width:0;width:38px;height:38px;font-size:1.4rem;background:none;border:0;padding:0;cursor:pointer;border-radius:50%}
+.gr-b.pk{outline:3px solid var(--acc);outline-offset:2px}.gr-b.pk::after{content:'✓';position:absolute;top:-8px;inset-inline-start:-8px;width:24px;height:24px;border-radius:50%;background:var(--acc);color:var(--onacc);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:.85rem}
+.gr-b.no{opacity:.45}
+.gr-selbar{display:flex;align-items:center;gap:6px;position:sticky;top:calc(64px + env(safe-area-inset-top));z-index:6;background:var(--bg);padding:6px 0;margin-bottom:8px;border-bottom:1px solid var(--line)}.gr-selbar b{flex:1}
+.gr-ct{display:flex;align-items:center;gap:10px;min-width:180px}.gr-ct .t b{display:block}.gr-ct .t span{display:block;color:var(--mut);font-size:.86rem}
+.gr-cta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.gr-cta button{flex:1;min-height:38px;font-size:.82rem;padding:0 8px;border-radius:10px;background:var(--bg);color:var(--ink);border:1px solid var(--line);cursor:pointer;white-space:nowrap}
 .gr-rebar{display:flex;align-items:center;gap:8px;margin-bottom:6px}.gr-rebar .gr-q{flex:1;margin:0;cursor:default}
 `;document.head.appendChild(st);
 
@@ -135,12 +140,19 @@ window.GRP={n:()=>on()?GR.n:0,tick:grTick,off:()=>GR.off,open:grOpenId};
 
 /* ---- שיחה ---- */
 const mineId=m=>m.by===SY.uid;
+/* איש קשר: הודעת טקסט בתבנית קבועה (גרסאות ישנות רואות אותה כטקסט רגיל) */
+const CTRX=/^👤 איש קשר: ([^\n]{1,60})\n📞 (\+?[\d\- ()]{5,25})$/;
+const ctOf=m=>{if(m.k!=='t')return null;const x=CTRX.exec(String(m.txt||''));return x?{name:x[1].trim(),phone:x[2].trim()}:null};
+const ctP=()=>{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.LpContact;if(!P||!isNat()||(C.isPluginAvailable&&!C.isPluginAvailable('LpContact')))return null;return P};
+const selOk=m=>m.k==='img'||(m.k==='vid'&&!m.gone&&Date.now()-m.t<=90*DAY);
 function msgH(m,c){
- const me=mineId(m);let b='';
+ const me=mineId(m),ct=ctOf(m);let b='';
+ if(ct){const I=`data-id="${esc(m.id)}"`;b=`<div class="gr-ct"><span class="gr-av">👤</span><div class="t"><b>${esc(ct.name)}</b><span dir="ltr">${esc(ct.phone)}</span></div></div><div class="gr-cta"><button data-a="grCall" ${I}>📞 התקשר</button><button data-a="grWa" ${I}>💬 וואטסאפ</button>${ctP()?`<button data-a="grCtSave" ${I}>➕ שמור</button>`:''}</div>`}
  if(m.k==='img'){const du=GR.img[c.gid+'/'+m.id];b=`<button class="gr-pic" data-a="grImg" data-id="${esc(m.id)}" aria-label="תמונה">${du?`<img src="${esc(du)}" alt="תמונה">`:`<span class="ph" data-gimg="${esc(m.id)}">${GR.img['x'+c.gid+'/'+m.id]?'התמונה לא נטענה. לחץ לנסות שוב':'טוען תמונה…'}</span>`}</button>`}
  else if(m.k==='vid'){const old=Date.now()-m.t>90*DAY;b=old||m.gone?`<div class="gr-pic" style="cursor:default"><span class="ph">🎬 הסרטון נמחק אחרי 90 יום</span></div>`:`<button class="gr-pic" data-a="grVid" data-id="${esc(m.id)}" aria-label="סרטון"><span class="ph" style="min-height:110px;background:var(--bg)"></span><span class="play">▶</span><span class="dr">${dur(m.vs)}</span></button>`}
  const q=m.re?`<button class="gr-q" data-a="grJump" data-id="${esc(m.re.mid)}"><b>${esc(nmP(m.re.byN))}</b><span>${esc(m.re.k==='img'?'📷 '+(m.re.txt||'תמונה'):m.re.k==='vid'?'🎬 '+(m.re.txt||'סרטון'):m.re.txt)}</span></button>`:'';
- return `<div class="gr-b${me?' me':''}" data-mid="${esc(m.id)}"><button class="dl" data-a="grMenu" data-id="${esc(m.id)}" aria-label="אפשרויות הודעה">⋯</button>${me?'':`<div class="who">${esc(nm(m.by,m.byN))}</div>`}${m.fw?'<div class="gr-fw">↪ הועברה</div>':''}${q}${b}${m.txt?`<div class="tx">${esc(m.txt)}</div>`:''}${rxH(m,c)}<div class="tm">${hm(m.t)}${tkH(c,m)}</div></div>`}
+ const sc=c.sel?(c.sel.has(m.id)?' pk':selOk(m)?'':' no'):'';
+ return `<div class="gr-b${me?' me':''}${sc}" data-mid="${esc(m.id)}"><button class="dl" data-a="grMenu" data-id="${esc(m.id)}" aria-label="אפשרויות הודעה">⋯</button>${me?'':`<div class="who">${esc(nm(m.by,m.byN))}</div>`}${m.fw?'<div class="gr-fw">↪ הועברה</div>':''}${q}${b}${m.txt&&!ct?`<div class="tx">${esc(m.txt)}</div>`:''}${rxH(m,c)}<div class="tm">${hm(m.t)}${tkH(c,m)}</div></div>`}
 function rxH(m,c){const r=c.rx&&c.rx.get(m.id);if(!r)return '';const cnt={};let mine='';r.forEach((x,u)=>{if(!x.e)return;cnt[x.e]=(cnt[x.e]||0)+1;if(u===SY.uid)mine=x.e});
  const ks=EMO.filter(e=>cnt[e]);if(!ks.length)return '';return `<button class="gr-rx${mine?' me':''}" data-a="grRxWho" data-id="${esc(m.id)}" aria-label="מי סימן">${ks.map(e=>e+(cnt[e]>1?' '+cnt[e]:'')).join(' ')}</button>`}
 function msgsH(c){
@@ -156,8 +168,9 @@ function grPinPaint(){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)retur
 function compH(c){const g=c.g;
  if(!fbAdmin()&&g.ao)return '<div class="gr-lock">🔒 רק המנהל יכול לשלוח הודעות בקבוצה הזו</div>';
  const dis=c.sending?' disabled':'',re=c.re?`<div class="gr-rebar"><div class="gr-q"><b>↩ תשובה ל${esc(nmP(c.re.byN))}</b><span>${esc(c.re.k==='img'?'📷 '+(c.re.txt||'תמונה'):c.re.k==='vid'?'🎬 '+(c.re.txt||'סרטון'):c.re.txt)}</span></div><button class="gr-circ" data-a="grReX" aria-label="בטל תשובה" style="width:36px;height:36px">✕</button></div>`:'';
- return `${re}<div class="gr-comp">${g.md?`<label class="gr-circ" aria-label="צרף תמונה או סרטון" style="${c.sending?'opacity:.5':''}">📎<input type="file" accept="image/*,video/*" data-c="grFile" hidden${dis}></label>`:''}<textarea id="grtx" data-i="grDraft" rows="1" maxlength="2000" placeholder="${DT.on?'מדברים… המילים נכתבות כאן':'כתוב הודעה…'}" aria-label="הודעה"${dis}${DT.on?' readonly':''}>${esc(c.draft)}</textarea>${isNat()?`<button class="gr-circ${DT.on?' rec':''}" data-a="grMic" aria-label="${DT.on?'עצור הקלטה':'הקלט והקלד'}"${dis}>${DT.on?'⏹':'🎤'}</button>`:''}<button class="gr-circ go" data-a="grSend" aria-label="שלח"${dis}>➤</button></div>${c.sending?`<p class="note" style="margin:6px 0 0">${esc(c.sending)}</p>`:DT.on?'<p class="note" style="margin:6px 0 0">🎤 מקליט – המילים נכתבות בתיבה. לחצו ⏹ לסיום, ואז אפשר לערוך ולשלוח.</p>':''}`}
+ return `${re}<div class="gr-comp"><button class="gr-circ" data-a="grAtt" aria-label="צרף"${dis}>📎</button><textarea id="grtx" data-i="grDraft" rows="1" maxlength="2000" placeholder="${DT.on?'מדברים… המילים נכתבות כאן':'כתוב הודעה…'}" aria-label="הודעה"${dis}${DT.on?' readonly':''}>${esc(c.draft)}</textarea>${isNat()?`<button class="gr-circ${DT.on?' rec':''}" data-a="grMic" aria-label="${DT.on?'עצור הקלטה':'הקלט והקלד'}"${dis}>${DT.on?'⏹':'🎤'}</button>`:''}<button class="gr-circ go" data-a="grSend" aria-label="שלח"${dis}>➤</button></div>${c.sending?`<p class="note" style="margin:6px 0 0">${esc(c.sending)}</p>`:DT.on?'<p class="note" style="margin:6px 0 0">🎤 מקליט – המילים נכתבות בתיבה. לחצו ⏹ לסיום, ואז אפשר לערוך ולשלוח.</p>':''}`}
 function topH(c){const g=c.g;
+ if(c.sel){const n=c.sel.size,d=n?'':' disabled';return `<div class="gr-selbar"><button class="gr-circ" data-a="grSelX" aria-label="סיום בחירה" style="width:38px;height:38px">✕</button><b>${n?'נבחרו '+n:'לחצו על תמונות וסרטונים לבחירה'}</b><button class="chip" data-a="grSelShare"${d}>📤 שיתוף</button><button class="chip" data-a="grSelGal"${d}>⬇ שמירה</button></div>`}
  const sb='<button class="chip" data-a="grSr" aria-label="חיפוש בקבוצה">🔍 חיפוש</button>';
  if(fbAdmin())return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px"><span class="note" style="margin:0">${g.mem.length} חברים${g.ao?' · רק המנהל שולח':''}</span><span style="display:flex;gap:6px">${sb}<button class="chip" data-a="grSet" data-id="${esc(g.id)}">⚙ הגדרות</button></span></div><div id="grpr" class="gr-pr">${prH(c)}</div>`;
  return `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${sb}</div><div id="grpr" class="gr-pr">${prH(c)}</div>`}
@@ -278,44 +291,58 @@ ACT.grSend=async()=>{const c=GR.c;if(!c||c.sending||!c.ready)return;dtFlush();co
  if(!fbAdmin()&&c.g.ao)return toast('רק המנהל יכול לשלוח הודעות בקבוצה הזו');
  c.sending='שולח…';grComp();
  try{await grPost(c,'t',txt,reX(c));c.draft='';sendDone(c)}catch(e){c.draft=txt;sendErr(c,e)}};
-CHG.grFile=async el=>{const f=el.files&&el.files[0];el.value='';const c=GR.c;if(!f||!c||c.sending||!c.g.md)return;dtFlush();
+/* 📎: תמונות וסרטונים (כמה בבת אחת, עד FMAX) – רק כשמדיה מותרת בקבוצה; איש קשר – תמיד (נשלח כטקסט) */
+const FMAX=30;
+ACT.grAtt=()=>{const c=GR.c;if(!c||c.sending||!canSend(c.g))return;dtFlush();const tx=$('#grtx');if(tx)c.draft=tx.value;
+ dlg(`<h3>צירוף</h3>${c.g.md?`<label class="btn g w" style="margin-bottom:8px">🖼 תמונות וסרטונים<input type="file" accept="image/*,video/*" multiple data-c="grFile" hidden></label><p class="note" style="margin:-2px 0 10px">אפשר לבחור כמה ביחד (עד ${FMAX}). כל אחת נשלחת כהודעה נפרדת.</p>`:''}<button class="btn g w" data-a="grCt" style="margin-bottom:8px">👤 איש קשר</button><button class="btn g w" data-a="closeDlg">ביטול</button>`)};
+const isVid=f=>/^video\//.test(f.type||'')||/\.(mp4|webm|3gp|mov)$/i.test(f.name||'');
+/* תמונה אחת: מכווצים, שולחים את ההודעה ואז את התמונה. מחזיר '' או אזהרה (ההודעה נשלחה אבל התמונה לא עלתה) */
+async function grImgUp(c,f,cap,x,st){
+ if(f.type&&!/^image\//.test(f.type))throw new Error('אפשר לשלוח תמונה או סרטון בלבד');
+ st('מכין את התמונה…');let du;try{du=await fbShrink(await rdU(f));if(du.length>880000||!imgOk(du))throw 0}catch(e){throw new Error('תמונה לא תקינה או גדולה מדי')}
+ st('שולח…');let m;try{m=await grPost(c,'img',cap,x)}catch(e){throw new Error(tkErr(e))}GR.img[c.gid+'/'+m.id]=du;
+ try{await fsx('/grp/'+c.gid+'/m/'+m.id+'/p/1',{method:'PATCH',body:JSON.stringify({fields:{img:sv(du),t:iv(Date.now()),uid:sv(SY.uid)}})});return ''}catch(e2){return 'ההודעה נשלחה, אבל התמונה לא עלתה. '+tkErr(e2)}}
+CHG.grFile=async el=>{let fs=[...(el.files||[])];el.value='';closeDlg();const c=GR.c;if(!fs.length||!c||c.sending||!c.g.md)return;dtFlush();
  const tx=$('#grtx');if(tx)c.draft=tx.value;
- if(/^video\//.test(f.type||'')||/\.(mp4|webm|3gp|mov)$/i.test(f.name||''))return grVideo(c,f);
- if(f.type&&!/^image\//.test(f.type))return toast('אפשר לשלוח תמונה או סרטון בלבד');
- c.sending='מכין את התמונה…';grComp();
- let du;try{du=await fbShrink(await rdU(f));if(du.length>880000||!imgOk(du))throw 0}catch(e){c.sending='';grComp();return toast('תמונה לא תקינה או גדולה מדי')}
- c.sending='שולח…';grComp();
- try{const cap=String(c.draft||'').trim().slice(0,2000),m=await grPost(c,'img',cap,reX(c));GR.img[c.gid+'/'+m.id]=du;c.draft='';
-  try{await fsx('/grp/'+c.gid+'/m/'+m.id+'/p/1',{method:'PATCH',body:JSON.stringify({fields:{img:sv(du),t:iv(Date.now()),uid:sv(SY.uid)}})})}catch(e2){toast('ההודעה נשלחה, אבל התמונה לא עלתה. '+tkErr(e2))}
-  sendDone(c)}catch(e){sendErr(c,e)}};
+ if(fs.length>FMAX){toast('אפשר עד '+FMAX+' בבת אחת. נשלחות '+FMAX+' הראשונות.');fs=fs.slice(0,FMAX)}
+ const n=fs.length;let ok=0,cap=String(c.draft||'').trim().slice(0,2000),re=c.re;const bad=[],warn=[];
+ for(let i=0;i<n;i++){const f=fs[i],st=t=>{c.sending=n>1?'('+(i+1)+' מתוך '+n+') '+t:t;grComp()};
+  /* הכיתוב והתשובה הולכים עם ההודעה הראשונה שנשלחת בהצלחה */
+  const x=re?{re}:null;
+  try{if(isVid(f))await grVidUp(c,f,cap,x,st);else{const w=await grImgUp(c,f,cap,x,st);if(w)warn.push(w)}
+   ok++;if(cap||re){cap='';re=null;c.draft='';c.re=null}if(n>1)grPaint('bottom')}
+  catch(e){bad.push((e&&e.message)||'השליחה נכשלה')}}
+ sendDone(c);
+ if(n===1){if(bad.length)toast(bad[0]);else if(warn.length)toast(warn[0]);return}
+ if(!bad.length&&!warn.length)toast('✓ נשלחו '+n);
+ else toast('נשלחו '+ok+' מתוך '+n+'.'+(bad.length?' '+bad.length+' לא נשלחו: '+bad[0]:' '+warn[0]))};
 /* משך הסרטון נמדד ב-<video> מקומי לפני ההעלאה */
 async function vidProbe(f){const url=URL.createObjectURL(f),v=document.createElement('video');v.preload='metadata';v.muted=true;v.playsInline=true;
  try{const d0=await new Promise((ok,no)=>{const bad=()=>no(new Error('לא הצלחנו לקרוא את הסרטון. נסו סרטון אחר.')),t=setTimeout(bad,10000);v.onloadedmetadata=()=>{clearTimeout(t);ok(v.duration)};v.onerror=()=>{clearTimeout(t);bad()};v.src=url});
   let d=d0;if(d===Infinity){await new Promise(ok=>{const t=setTimeout(ok,4000);v.ondurationchange=()=>{if(Number.isFinite(v.duration)){clearTimeout(t);ok()}};v.currentTime=1e101});d=v.duration}
   if(!Number.isFinite(d)||d<=0)throw new Error('לא הצלחנו לקרוא את אורך הסרטון. נסו סרטון אחר.');return d}
  finally{URL.revokeObjectURL(url);try{v.removeAttribute('src');v.load()}catch(e){}}}
-async function grVideo(c,f){
+async function grVidUp(c,f,cap,x,st){
  const EXT={'video/mp4':1,'video/webm':1,'video/3gpp':1};let type=String(f.type||'').split(';')[0];
- if(!type){const x=(/\.(\w+)$/.exec(f.name||'')||[])[1];type=x==='mp4'?'video/mp4':x==='webm'?'video/webm':x==='3gp'?'video/3gpp':''}
- if(!EXT[type])return toast('פורמט הסרטון לא נתמך. אפשר MP4, WebM או 3GP.');
- if(f.size>VMAX)return toast('הסרטון גדול מדי (מעל 30MB). אפשר סרטון עד דקה ועד 30MB.');
- c.sending='בודק את הסרטון…';grComp();let d;
- try{d=await vidProbe(f)}catch(e){c.sending='';grComp();return toast(e.message)}
- if(d>VSEC+0.5){c.sending='';grComp();return toast('הסרטון ארוך מדי ('+Math.round(d)+' שניות). אפשר עד דקה.')}
- c.sending='מעלה את הסרטון…';grComp();
+ if(!type){const e=(/\.(\w+)$/.exec(f.name||'')||[])[1];type=e==='mp4'?'video/mp4':e==='webm'?'video/webm':e==='3gp'?'video/3gpp':''}
+ if(!EXT[type])throw new Error('פורמט הסרטון לא נתמך. אפשר MP4, WebM או 3GP.');
+ if(f.size>VMAX)throw new Error('הסרטון גדול מדי (מעל 30MB). אפשר סרטון עד דקה ועד 30MB.');
+ st('בודק את הסרטון…');const d=await vidProbe(f);
+ if(d>VSEC+0.5)throw new Error('הסרטון ארוך מדי ('+Math.round(d)+' שניות). אפשר עד דקה.');
+ st('מעלה את הסרטון…');
  const mid=newMid(),name=(bzB()?'b/'+SY.bizId+'/':'')+'grpv/'+c.gid+'/'+mid;
  try{const t=await tok();let r;
   try{r=await fetch(STB()+'?uploadType=media&name='+encodeURIComponent(name),{method:'POST',headers:{Authorization:'Firebase '+t,'Content-Type':type},body:f})}catch(e){throw Object.assign(new Error('אין חיבור לאינטרנט'),{offline:true})}
   if(!r.ok)throw Object.assign(new Error(r.status===403?'אין הרשאה להעלות סרטון בקבוצה הזו':'העלאת הסרטון נכשלה ('+r.status+')'),{code:r.status});
-  c.sending='שולח…';grComp();
-  await grPost(c,'vid',String(c.draft||'').trim().slice(0,2000),{mid,vp:name,vs:Math.min(VSEC,Math.max(1,Math.ceil(d))),vb:f.size,re:c.re});c.draft='';sendDone(c)}
- catch(e){c.sending='';grComp();toast(e&&e.code===403&&e.message?e.message:e&&e.offline?e.message:e&&e.code?tkErr(e):(e&&e.message)||'השליחה נכשלה')}}
+  st('שולח…');
+  await grPost(c,'vid',cap,Object.assign({mid,vp:name,vs:Math.min(VSEC,Math.max(1,Math.ceil(d))),vb:f.size},x||{}))}
+ catch(e){throw new Error(e&&e.code===403&&e.message?e.message:e&&e.offline?e.message:e&&e.code?tkErr(e):(e&&e.message)||'השליחה נכשלה')}}
 /* ⋯ של הודעה (כולם): סימון, תשובה, שיתוף, העברה, שמירה בגלריה; מנהל: גם הצמדה ומחיקה */
 ACT.grMenu=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;const adm=fbAdmin(),pd=c.g.pin&&c.g.pin.mid===id;
  const r=c.rx&&c.rx.get(id),mine=r&&r.get(SY.uid)?r.get(SY.uid).e:'',I=`data-id="${esc(id)}"`,B=(a,t,cl)=>`<button class="btn ${cl||'g'} w" data-a="${a}" ${I} style="margin-bottom:8px">${t}</button>`;
  const media=m.k==='img'||(m.k==='vid'&&!m.gone&&Date.now()-m.t<=90*DAY);
  dlg(`<h3>אפשרויות הודעה</h3>${c.xoff?'':`<div class="gr-emo">${EMO.map(e=>`<button class="${e===mine?'on':''}" data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`}`
-  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+B('grShare','📤 שיתוף')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):'')
+  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+B('grShare','📤 שיתוף')+(media?B('grSelOn','☑ בחירת כמה תמונות וסרטונים'):'')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):'')
   +(adm?B('grPin',pd?'בטל הצמדה':'📌 הצמד')+B('grDel','🗑 מחק הודעה','r'):'')+'<button class="btn g w" data-a="closeDlg">ביטול</button>')};
 /* הצמדה: עדכון חלקי של השדה pin בלבד; שרת ישן (403) = הודעה ברורה */
 ACT.grPin=async el=>{const c=GR.c;if(!c||!fbAdmin())return;closeDlg();const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
@@ -396,15 +423,65 @@ ACT.grShare=async el=>{const c=GR.c;if(!c)return;closeDlg();const m=c.msgs.find(
 
 /* ---- שמירה בגלריה: SaveFile.gallery (אנדרואיד 10 ומעלה, תיקיית LargePami בתמונות/בסרטונים).
    APK ישן בלי gallery, או אנדרואיד ישן – חלון "שמירה בשם" (SaveFile.save). בדפדפן – הורדה ---- */
-async function galSave(o){const C=window.Capacitor;if(!isNat())return saveFile(o.name,o.b,o.mime);
+async function galSave(o,q){const C=window.Capacitor,T=t=>{if(!q)toast(t)};if(!isNat()){await saveFile(o.name,o.b,o.mime);return ''}
  const data=u8b64(new Uint8Array(await o.b.arrayBuffer())),P=C.Plugins.SaveFile;
- if(P&&typeof P.gallery==='function'){try{await P.gallery({filename:o.name,mime:o.mime,data});return toast('✓ נשמר בגלריה')}
-  catch(e){const s=String(e&&(e.message||e));if(!/not implemented|unimplemented|old_android/i.test(s))return toast('השמירה נכשלה: '+s)}}
- if(P){try{await P.save({filename:o.name,mime:o.mime,data});toast('✓ נשמר במכשיר')}catch(e){const s=String(e&&(e.message||e));toast(/cancel/i.test(s)?'השמירה בוטלה':'השמירה נכשלה: '+s)}return}
- await saveFile(o.name,o.b,o.mime)}
+ if(P&&typeof P.gallery==='function'){try{await P.gallery({filename:o.name,mime:o.mime,data});T('✓ נשמר בגלריה');return ''}
+  catch(e){const s=String(e&&(e.message||e));if(!/not implemented|unimplemented|old_android/i.test(s)){T('השמירה נכשלה: '+s);return 'השמירה נכשלה: '+s}}}
+ if(P){try{await P.save({filename:o.name,mime:o.mime,data});T('✓ נשמר במכשיר');return ''}catch(e){const s=String(e&&(e.message||e)),t=/cancel/i.test(s)?'השמירה בוטלה':'השמירה נכשלה: '+s;T(t);return t}}
+ await saveFile(o.name,o.b,o.mime);return ''}
 ACT.grGal=async el=>{const c=GR.c;if(!c)return;closeDlg();const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k==='t')return;
  try{toast(m.k==='vid'?'מוריד את הסרטון…':'שומר…');await galSave(await mFile(c,m))}
  catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'השמירה נכשלה')}};
+
+/* ---- בחירה של כמה תמונות וסרטונים: שיתוף ביחד / שמירה ביחד בגלריה (עד FMAX) ---- */
+const selPaint=()=>{const c=GR.c;if(!c||cur().v!=='grc')return;const t=$('#grtop');if(t)t.innerHTML=topH(c)};
+ACT.grSelOn=el=>{const c=GR.c;if(!c)return;closeDlg();const m=c.msgs.find(x=>x.id===el.dataset.id);c.sel=new Set(m&&selOk(m)?[m.id]:[]);selPaint();grPaint('keep')};
+ACT.grSelX=()=>{const c=GR.c;if(!c)return;c.sel=null;selPaint();grPaint('keep')};
+function selTap(b){const c=GR.c,id=b.dataset.mid,m=c&&c.msgs.find(x=>x.id===id);if(!m)return;
+ if(!selOk(m))return toast('אפשר לבחור רק תמונות וסרטונים');
+ if(c.sel.has(id))c.sel.delete(id);else{if(c.sel.size>=FMAX)return toast('אפשר לבחור עד '+FMAX);c.sel.add(id)}
+ b.classList.toggle('pk',c.sel.has(id));selPaint()}
+/* הקבצים לפי סדר ההודעות; שם ייחודי לכל קובץ */
+async function selFiles(c,what){const L=c.msgs.filter(m=>c.sel.has(m.id)),out=[],bad=[];let sz=0;
+ for(let i=0;i<L.length;i++){toast(what+' '+(i+1)+' מתוך '+L.length+'…');
+  try{const o=await mFile(c,L[i]);o.name=o.name.replace(/(\.\w+)$/,'_'+(i+1)+'$1');sz+=o.b.size;if(sz>150*1024*1024){bad.push('גדול מדי ביחד – בחרו פחות סרטונים');break}out.push(o)}
+  catch(e){bad.push((e&&e.message)||'לא נטען')}}
+ if(L.some(m=>m.gone))grPaint('keep');return{out,bad,n:L.length}}
+ACT.grSelShare=async()=>{const c=GR.c;if(!c||!c.sel||!c.sel.size||c.selBusy)return;c.selBusy=1;
+ try{const{out,bad,n}=await selFiles(c,'מכין לשיתוף');if(!out.length)return toast(bad[0]||'השיתוף נכשל');
+  const C=window.Capacitor;
+  if(isNat()&&C.Plugins.Filesystem&&C.Plugins.Share){const uris=[];for(const o of out){const r=await C.Plugins.Filesystem.writeFile({path:o.name,data:u8b64(new Uint8Array(await o.b.arrayBuffer())),directory:'CACHE'});uris.push(r.uri)}
+   try{await C.Plugins.Share.share({files:uris,dialogTitle:'שיתוף'})}catch(e){if(/cancel/i.test(String(e&&e.message)))return;throw e}}
+  else{const fs=typeof File==='function'?out.map(o=>new File([o.b],o.name,{type:o.mime})):[];
+   if(fs.length&&navigator.canShare&&navigator.share&&navigator.canShare({files:fs})){try{await navigator.share({files:fs})}catch(e){if(e&&e.name==='AbortError')return;throw e}}
+   else for(const o of out)await saveFile(o.name,o.b,o.mime)}
+  if(bad.length)toast('שותפו '+out.length+' מתוך '+n+'. '+bad[0]);c.sel=null;selPaint();grPaint('keep')}
+ catch(e){toast(e&&e.message?'השיתוף נכשל: '+e.message:'השיתוף נכשל')}
+ finally{c.selBusy=0}};
+ACT.grSelGal=async()=>{const c=GR.c;if(!c||!c.sel||!c.sel.size||c.selBusy)return;c.selBusy=1;
+ try{const{out,bad,n}=await selFiles(c,'מוריד');let ok=0;
+  for(const o of out){const e=await galSave(o,1);if(e)bad.push(e);else ok++}
+  toast(ok===n?'✓ נשמרו '+n+' בגלריה':'נשמרו '+ok+' מתוך '+n+(bad.length?'. '+bad[0]:''));if(ok){c.sel=null;selPaint();grPaint('keep')}}
+ catch(e){toast(e&&e.message?e.message:'השמירה נכשלה')}
+ finally{c.selBusy=0}};
+
+/* ---- איש קשר: בחירה מאנשי הקשר בטלפון (תוסף LpContact, בלי הרשאה), או הקלדה ידנית (APK ישן / דפדפן) ---- */
+const ctNum=p=>{p=String(p||'').trim();const plus=p[0]==='+',d=p.replace(/\D/g,'');return d.length>=5&&d.length<=15?(plus?'+':'')+d:''};
+function ctForm(name,phone,note){dlg(`<h3>👤 שליחת איש קשר</h3>${note?`<p class="note">${esc(note)}</p>`:''}<label class="f"><span>שם</span><input id="grctn" maxlength="60" value="${esc(name||'')}" autocomplete="off"></label><label class="f"><span>מספר טלפון</span><input id="grctp" type="tel" dir="ltr" maxlength="25" value="${esc(phone||'')}" autocomplete="off"></label><button class="btn w" data-a="grCtSend" style="margin:10px 0 8px">שלח</button><button class="btn g w" data-a="closeDlg">ביטול</button>`)}
+ACT.grCt=async()=>{const c=GR.c;if(!c||c.sending||!canSend(c.g))return;closeDlg();const P=ctP();
+ if(!P)return ctForm('','',isNat()?'בחירה מאנשי הקשר תעבוד אחרי עדכון האפליקציה. בינתיים אפשר להקליד.':'');
+ try{const r=await P.pick();ctForm(String(r&&r.name||'').slice(0,60),String(r&&r.phone||'').slice(0,25))}
+ catch(e){if(!/cancel/i.test(String(e&&(e.message||e))))ctForm('','','לא הצלחנו לפתוח את אנשי הקשר. אפשר להקליד.')}};
+ACT.grCtSend=async()=>{const c=GR.c;if(!c||c.sending||!canSend(c.g))return;
+ const ph=String(($('#grctp')||{}).value||'').trim(),num=ctNum(ph);if(!num)return toast('מספר הטלפון לא תקין');
+ const name=(String(($('#grctn')||{}).value||'').replace(/\s+/g,' ').trim()||num).slice(0,60),txt='👤 איש קשר: '+name+'\n📞 '+ph.replace(/[^\d+\- ()]/g,'').slice(0,25);
+ if(!CTRX.test(txt))return toast('מספר הטלפון לא תקין');closeDlg();c.sending='שולח…';grComp();
+ try{await grPost(c,'t',txt,reX(c));sendDone(c)}catch(e){sendErr(c,e)}};
+const ctMsg=el=>{const c=GR.c,m=c&&c.msgs.find(x=>x.id===el.dataset.id);return m?ctOf(m):null};
+ACT.grCall=el=>{const ct=ctMsg(el),n=ct&&ctNum(ct.phone);if(n)window.open('tel:'+n,'_system')};
+/* וואטסאפ: מספר שמתחיל ב-0 נחשב ישראלי (972) */
+ACT.grWa=el=>{const ct=ctMsg(el);let n=ct&&ctNum(ct.phone);if(!n)return;n=n[0]==='+'?n.slice(1):n[0]==='0'?'972'+n.slice(1):n;window.open('https://wa.me/'+n,'_system')};
+ACT.grCtSave=async el=>{const ct=ctMsg(el),P=ctP();if(!ct||!P)return;try{await P.save({name:ct.name,phone:ctNum(ct.phone)})}catch(e){toast('לא נמצאה אפליקציית אנשי קשר')}};
 
 /* ---- העברה לקבוצה אחרת: רק לקבוצה שמותר לי לשלוח בה (ולמדיה – רק כשמדיה מותרת שם). ההודעה החדשה מסומנת fw ---- */
 ACT.grFwd=async el=>{const c=GR.c;if(!c)return;closeDlg();const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
@@ -524,7 +601,7 @@ ACT.grDelG=()=>{const s=GR.s;if(!s||!s.gid||!fbAdmin())return;
   pop.style.top=Math.max(70,r.top-48)+'px';pop.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';document.body.append(pop)};
  const ok=e=>{const b=e.target.closest&&e.target.closest('#grmsgs .gr-b');return b&&!e.target.closest('.gr-emp')?b:null};
  document.addEventListener('touchstart',e=>{if(!e.target.closest||!e.target.closest('.gr-emp'))emoOff();
-  const b=GR.c&&cur().v==='grc'&&e.touches.length===1?ok(e):null;if(g){clearTimeout(g.tm);if(g.b)g.b.style.transform=''}g=null;if(!b)return;const t=e.touches[0];
+  const b=GR.c&&!GR.c.sel&&cur().v==='grc'&&e.touches.length===1?ok(e):null;if(g){clearTimeout(g.tm);if(g.b)g.b.style.transform=''}g=null;if(!b)return;const t=e.touches[0];
   g={b,x:t.clientX,y:t.clientY,mid:b.dataset.mid,lp:0,mv:0,tm:setTimeout(()=>{if(g&&!g.mv){g.lp=1;emoOn(g.b,g.mid)}},500)}},{passive:true});
  document.addEventListener('touchmove',e=>{if(!g)return;const t=e.touches[0],dx=t.clientX-g.x,dy=t.clientY-g.y;
   if(Math.abs(dx)>10||Math.abs(dy)>10){g.mv=1;clearTimeout(g.tm)}
@@ -534,6 +611,7 @@ ACT.grDelG=()=>{const s=GR.s;if(!s||!s.gid||!fbAdmin())return;
   else if(dx>60&&Math.abs(dy)<Math.abs(dx)/2&&Math.abs(dy)<40){sup=Date.now()+500;if(GR.c)ACT.grRe({dataset:{id:o.mid}})}},{passive:true});
  document.addEventListener('touchcancel',()=>{if(g){clearTimeout(g.tm);g.b.style.transform='';g=null}},{passive:true});
  window.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('.gr-emp')){setTimeout(emoOff,0);return}
+  const sb=GR.c&&GR.c.sel&&cur().v==='grc'&&e.target.closest&&e.target.closest('#grmsgs .gr-b');if(sb){e.stopPropagation();e.preventDefault();selTap(sb);return}
   if(Date.now()<sup&&e.target.closest&&e.target.closest('#grmsgs')){e.stopPropagation();e.preventDefault();return}emoOff()},true);
  document.addEventListener('contextmenu',e=>{if(e.target.closest&&e.target.closest('#grmsgs .gr-b'))e.preventDefault()},true);
  window.addEventListener('scroll',emoOff,{passive:true})})();

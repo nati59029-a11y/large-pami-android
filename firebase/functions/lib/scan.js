@@ -172,7 +172,9 @@ async function bizCaps(bizId, perUserDefault, now) {
     if (sq && typeof sq === 'object' && !Array.isArray(sq)) q = sq;
   } catch (e) { /* בלי הגדרות – ברירות המחדל */ }
   const int = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
-  const perUser = int(lim.scanPerUserDaily) !== null ? Math.min(int(lim.scanPerUserDaily), perUserDefault) : perUserDefault;
+  // 25.11.2026 (החלטת הבעלים): התקרה לכל משתמש – מה שמנהל־על קבע (adv.limits.scanPerUserDaily, גם מעל ברירת המחדל).
+  // בלי הגדרה: ללארג' פעמי – בלי הגבלה (null); לעסק אחר – ברירת המחדל (SCAN_DAILY_LIMIT).
+  const perUser = int(lim.scanPerUserDaily) !== null ? int(lim.scanPerUserDaily) : bizId === T.BIZ0 ? null : perUserDefault;
   let bizDaily = int(lim.scanDaily) !== null ? int(lim.scanDaily) : bizId === T.BIZ0 ? null : BIZ_DEFAULT_DAILY;
   if (!q) return { perUser, bizDaily };
   const t = now || Date.now();
@@ -196,7 +198,7 @@ async function reserveScan(uid, limit, bizDaily, pages, bizKey, period) {
     const s = await tx.get(ref);
     const bs = bref ? await tx.get(bref) : null;
     const used = s.exists && s.get('day') === day ? (s.get('count') || 0) : 0;
-    if (used >= limit) {
+    if (limit != null && used >= limit) {
       throw new HttpsError('resource-exhausted',
         `עברת את מגבלת השימוש היומית: ${limit} זיהויים ביום למשתמש. אפשר למלא ידנית, או לנסות שוב מחר.`,
         { reason: 'daily-limit', limit, used });
@@ -209,14 +211,73 @@ async function reserveScan(uid, limit, bizDaily, pages, bizKey, period) {
         `העסק הגיע למגבלת הזיהויים ${word} (${bizDaily} דפים). אפשר למלא ידנית` + (daily ? ', או לנסות שוב מחר.' : '.'),
         { reason: daily ? 'biz-daily-limit' : 'biz-period-limit', period: period || 'day', limit: bizDaily, used: bused, pages: n });
     }
-    tx.set(ref, { day, count: used + 1, updatedAt: new Date().toISOString() });
-    if (bref) tx.set(bref, { day: bkey, count: bused + n, updatedAt: new Date().toISOString() });
-    return { day, used: used + 1, bizUsed: bref ? bused + n : null };
+    // 25.11.2026: הודעה למנהלי העסק ב-80% וב-100% של המכסה – פעם אחת לכל תקופה (הסימון נשמר במונה עצמו, w80/w100 = מפתח התקופה)
+    const ntf = [];
+    const cross = (snap, key, before, after, cap) => {
+      const up = {};
+      if (cap == null || cap <= 0) return up;
+      for (const [f, pct] of [['w80', 80], ['w100', 100]]) {
+        const th = Math.ceil(cap * pct / 100);
+        if (before < th && after >= th && !(snap && snap.exists && snap.get(f) === key)) { up[f] = key; ntf.push(pct); }
+      }
+      return up;
+    };
+    const uUp = cross(s, day, used, used + 1, limit);
+    const uN = ntf.length;
+    const bUp = bref ? cross(bs, bkey, bused, bused + n, bizDaily) : {};
+    tx.set(ref, Object.assign({ day, count: used + 1, updatedAt: new Date().toISOString() }, uUp), { merge: true });
+    if (bref) tx.set(bref, Object.assign({ day: bkey, count: bused + n, updatedAt: new Date().toISOString() }, bUp), { merge: true });
+    return { day, used: used + 1, bizUsed: bref ? bused + n : null, nU: ntf.slice(0, uN), nB: ntf.slice(uN) };
   });
+  if (r.nU.length || r.nB.length) {
+    try { await quotaNotify(uid, r, limit, bizDaily, period); } catch (e) { /* הודעה שנכשלה לא מפילה את הזיהוי */ }
+  }
   // refundScan (באותה קריאה) מחזיר גם את מונה העסק, אם נספר – באותו מפתח ובאותו מספר דפים
   const sc = T.scope();
   if (sc) Object.assign(sc, { scanBiz: !!bref, scanBizKey: bkey, scanPages: n });
   return r;
+}
+
+// 25.11.2026: הודעת דחיפה למנהלי העסק (admins) כשמשתמש או העסק מגיעים ל-80% / 100% מהמכסה. רק למנהל העסק (החלטת הבעלים).
+// בבדיקות: _setNotify(fn) מחליף את השליחה. שמות משתמשים – מ-staff (שם בלבד), בלי פרטים נוספים.
+let notifyHook = null;
+function _setNotify(fn) { notifyHook = fn; }
+async function quotaNotify(uid, r, limit, bizDaily, period) {
+  const db = T.tdb();
+  const sc = T.scope() || {};
+  const msgs = [];
+  if (r.nU.length) {
+    let nm = '';
+    try { const st = await db.doc('staff/' + uid).get(); nm = st.exists ? String(st.get('name') || '') : ''; } catch (e) { nm = ''; }
+    const pct = Math.max(...r.nU);
+    const who = nm ? nm.slice(0, 40) : (uid === 'sec' ? 'המזכירה' : 'משתמש');
+    msgs.push(pct >= 100
+      ? { id: 'su100', title: 'הגעתם למכסת הזיהויים', body: who + ' השתמש/ה היום בכל ' + limit + ' הזיהויים החכמים. המכסה מתאפסת בחצות.' }
+      : { id: 'su80', title: 'מכסת הזיהויים מתקרבת', body: who + ' השתמש/ה היום ב-80% מהזיהויים החכמים (' + Math.ceil(limit * 0.8) + ' מתוך ' + limit + ').' });
+  }
+  if (r.nB.length) {
+    const pct = Math.max(...r.nB);
+    const word = { week: 'השבועית', month: 'החודשית', total: 'הכוללת', release: '' }[period] || 'היומית';
+    const reset = period === 'total' ? 'פנו לספק להגדלה.' : period === 'week' ? 'המכסה מתאפסת בתחילת השבוע.' : period === 'month' ? 'המכסה מתאפסת בתחילת החודש.' : 'המכסה מתאפסת בחצות.';
+    msgs.push(pct >= 100
+      ? { id: 'sb100', title: 'העסק הגיע למכסת הזיהויים', body: 'נוצלו כל ' + bizDaily + ' הדפים במכסה ' + word + '. ' + reset }
+      : { id: 'sb80', title: 'מכסת הזיהויים של העסק מתקרבת', body: 'נוצלו 80% מהמכסה ' + word + ' (' + Math.ceil(bizDaily * 0.8) + ' מתוך ' + bizDaily + ' דפים).' });
+  }
+  const adm = await db.collection('admins').limit(20).get();
+  const to = adm.docs.map((d) => d.id);
+  for (const m of msgs) {
+    const msg = Object.assign({ k: 'scanq' }, m);
+    if (notifyHook) { await notifyHook({ bizId: sc.bizId || T.BIZ0, to, msg }); continue; }
+    const RM = require('../secretary-remind')._core;
+    const { getMessaging } = require('firebase-admin/messaging');
+    for (const u of to) {
+      try {
+        const toks = await RM.tokensOf(db, u);
+        if (!toks.length) continue;
+        await getMessaging().sendEachForMulticast({ tokens: toks, notification: { title: msg.title, body: msg.body }, data: { k: msg.k, id: msg.id }, android: RM.androidOf(msg.k + '_' + msg.id) });
+      } catch (e) { /* בשקט */ }
+    }
+  }
 }
 
 // מחזירה למונה את הזיהוי שנספר ב-reserveScan. scanDocument קוראת לה רק כשאף בקשת זיהוי לא יצאה ל-Gemini
@@ -394,5 +455,5 @@ function _resetCacheForTests() { modelCache.false = null; modelCache.true = null
 
 module.exports = {
   KINDS, KIND_NAMES, isKind, neverConnected, NO_CONNECTION_CODES, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan, bizCaps, BIZ_DEFAULT_DAILY, periodKey, QUOTA_PERIODS,
-  callGemini, parseLikeApp, USAGE, _resetCacheForTests,
+  callGemini, parseLikeApp, USAGE, _resetCacheForTests, _setNotify, quotaNotify,
 };

@@ -1213,6 +1213,40 @@ service cloud.firestore {
       allow create, update: if lpW() && rLbl() && lblpOk(request.resource.data); // lpW: נעילת השורש אחרי המעבר (23.11.2026)
       allow delete: if lpW() && rMgr();
     }
+    // lblt/{id} – תבנית מדבקה (24.11.2026); lbls/main – הגדרות מדבקות של העסק (גדלים, תבנית ברירת מחדל). מנהל או עובד עם lbl; מחיקה – מנהל.
+    function lbltOk(d) {
+      return d.keys().hasOnly(['v', 'name', 'w', 'h', 'base', 'j', 'del', 'at', 'by']) && d.keys().hasAll(['v', 'name', 'w', 'h', 'j', 'at', 'by'])
+        && d.v is int && d.v >= 1 && d.v <= 9
+        && d.name is string && d.name.size() >= 1 && d.name.size() <= 40
+        && d.w is number && d.w >= 15 && d.w <= 104 && d.h is number && d.h >= 10 && d.h <= 100
+        && (!('base' in d) || (d.base is int && d.base >= 0 && d.base <= 5))
+        && d.j is string && d.j.size() >= 2 && d.j.size() <= 16000
+        && (!('del' in d) || d.del is bool)
+        && d.at is int && d.at > 0 && d.by == request.auth.uid;
+    }
+    // גודל מדבקה ב-lbls.sz: { w, h } במ"מ. כל פריט נבדק לפי מיקום (0..9 – בכללים אין לולאות).
+    function szOk(x) {
+      return x is map && x.keys().hasOnly(['w', 'h']) && x.keys().hasAll(['w', 'h'])
+        && x.w is number && x.w >= 15 && x.w <= 104 && x.h is number && x.h >= 10 && x.h <= 100;
+    }
+    function szI(l, i) { return l.size() <= i || szOk(l[i]); }
+    function lblsOk(d) {
+      return d.keys().hasOnly(['sz', 'def', 'at', 'by']) && d.keys().hasAll(['at', 'by'])
+        && (!('sz' in d) || (d.sz is list && d.sz.size() <= 10 && szI(d.sz, 0) && szI(d.sz, 1) && szI(d.sz, 2) && szI(d.sz, 3)
+          && szI(d.sz, 4) && szI(d.sz, 5) && szI(d.sz, 6) && szI(d.sz, 7) && szI(d.sz, 8) && szI(d.sz, 9)))
+        && (!('def' in d) || (d.def is string && d.def.size() <= 40))
+        && d.at is int && d.at > 0 && d.by == request.auth.uid;
+    }
+    match /lblt/{id} {
+      allow read: if rLbl();
+      allow create, update: if lpW() && rLbl() && id.matches('^[A-Za-z0-9_-]{1,40}$') && lbltOk(request.resource.data);
+      allow delete: if lpW() && rMgr();
+    }
+    match /lbls/{id} {
+      allow read: if rLbl() && id == 'main';
+      allow create, update: if lpW() && rLbl() && id == 'main' && lblsOk(request.resource.data);
+      allow delete: if lpW() && rMgr() && id == 'main';
+    }
     match /prod/{id} {
       allow read: if rOrd() || rLbl();
       allow create, update, delete: if false;
@@ -1227,6 +1261,15 @@ service cloud.firestore {
       allow create, update, delete: if false;
       match /log/{k} {
         allow read: if rOrd() && rBrOk(get(/databases/$(database)/documents/ord/$(id)).data.br);
+        allow create, update, delete: if false;
+      }
+    }
+    // 24.11.2026 (הצעת מחיר): qt/{id} – כמו ord (הרשאת הזמנות + סניף ההצעה). כתיבה – רק השרת (functions/quotes.js)
+    match /qt/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+      match /log/{k} {
+        allow read: if rOrd() && rBrOk(get(/databases/$(database)/documents/qt/$(id)).data.br);
         allow create, update, delete: if false;
       }
     }
@@ -2500,6 +2543,17 @@ service cloud.firestore {
         allow create, update: if perm('lbl') && lblpOk(request.resource.data);
         allow delete: if bMgr();
       }
+      // lblt/{id} (תבנית מדבקה) ו-lbls/main (הגדרות מדבקות): מנהל או עובד עם lbl; מחיקה – מנהל. lbltOk / lblsOk – בשורש.
+      match /lblt/{id} {
+        allow read: if perm('lbl');
+        allow create, update: if perm('lbl') && id.matches('^[A-Za-z0-9_-]{1,40}$') && lbltOk(request.resource.data);
+        allow delete: if bMgr();
+      }
+      match /lbls/{id} {
+        allow read: if perm('lbl') && id == 'main';
+        allow create, update: if perm('lbl') && id == 'main' && lblsOk(request.resource.data);
+        allow delete: if bMgr() && id == 'main';
+      }
       match /prod/{id} {
         // קופה (שלב 0, 17.11.2026): גם קופאי / אחראי משמרת (posAny) קורא מוצרים – בלי p/cost ו-p/ws (שם נשאר רק ordOk / מנהל)
         allow read: if ordOk() || posAny() || (feat('orders') && perm('lbl'));
@@ -2515,6 +2569,15 @@ service cloud.firestore {
         allow create, update, delete: if false;
         match /log/{k} {
           allow read: if ordOk() && brOk(get(/databases/$(database)/documents/b/$(bizId)/ord/$(id)).data.br);
+          allow create, update, delete: if false;
+        }
+      }
+      // 24.11.2026 (הצעת מחיר): qt/{id} – כמו ord (ordOk + סניף ההצעה). כתיבה – רק השרת (functions/quotes.js)
+      match /qt/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+        match /log/{k} {
+          allow read: if ordOk() && brOk(get(/databases/$(database)/documents/b/$(bizId)/qt/$(id)).data.br);
           allow create, update, delete: if false;
         }
       }
@@ -2577,6 +2640,7 @@ service cloud.firestore {
         allow read: if ordOk();
         allow create, update, delete: if false;
       }
+      // לקוחות הקפה מכספית (24.11.2026, functions/hk-import.js): hkcfg, hkpend, hkc, hkchk – בכוונה בלי כלל = שרת בלבד (האפליקציה קוראת דרך hkGet).
       // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
       match /lineplan/{id} {
         allow read: if ordOk() && feat('cellular');

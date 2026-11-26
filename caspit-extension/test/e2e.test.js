@@ -40,6 +40,8 @@ async function caspitRoute(route) {
   if (p === '/api/me') return JSONR({ email: 'owner@example.co.il', phone: '052-1234567', token: 'Zx9kQ2mP7vL4nR8sT1wY6bC3', items: [{ id: 4580123412341234, name: 'x' }] });
   // משימות של כספית (run-as-job) והקובץ שלהן
   if (/^\/bo\/merkaz\/(items\/(full_)?report\.xlsx|reports\/sales_items)$/.test(p)) return JSONR({ job_id: 7, success: true });
+  // 0.1.21: "יצוא לאקסל" של לקוחות הקפה (כספית המדומה, hkXlsx) – xlsx כמו באמיתי; bad=1 – כותרות לא מוכרות
+  if (p === '/bo/hakafa/customers_export.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.hkXlsx(X, u.searchParams.get('bad') === '1')) });
   if (p === '/bo/files/get_job_result') {
     const f = u.searchParams.get('filename') || '';
     if (f === 'catalogs_with_barcodes.xlsx') return route.fulfill({ status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: Buffer.from(fx.catalogXlsx(X)) });
@@ -99,7 +101,9 @@ function impOn(dir) {
   const f = path.join(dir, 'selectors.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.equal(j.importEnabled, true, 'במוצר – פעיל (מ-0.1.4)');
   j.importEnabled = true;
+  j.hkSync = false; // 0.1.21: יתרות הקפה – כבוי בעותק של הבדיקה (הבדיקות הקודמות לא משתנות); הבדיקות של hkSnap מדליקות דרך sel()
   j.branch.switch.ms = 8000; j.branch.switch.settle = 800; // 0.1.13: בבדיקה – המתנה קצרה לבחירת סניף שלא נקלטת
+  j.branch.switch.reloadMs = 6000; // 0.1.22: בבדיקה – המתנה קצרה לטעינה מחדש של כספית אחרי החלפת סניף
   fs.writeFileSync(f, JSON.stringify(j));
 }
 test.after(async () => {
@@ -712,7 +716,7 @@ test('ניסיון חוזר: הקובץ של הריצה כבר ב"טעינות �
   delete srv.runId; srv.exportN.price = 2;
 });
 
-test('"טעינות קודמות" נטענת באיחור → מחכים לה ומעלים פעם אחת; לא מופיעה בכלל → selector-miss בלי העלאה ובלי קובץ בתור', async () => {
+test('"טעינות קודמות" נטענת באיחור → מחכים לה ומעלים פעם אחת; לא מופיעה בכלל (0.1.22: אין טעינות אחרונות) → מעלים פעם אחת; כותרת בלי טבלה → selector-miss בלי העלאה ובלי קובץ בתור', async () => {
   const cp = caspitPage();
   await cp.evaluate(() => { localStorage.setItem('histlate', '1'); });
   await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
@@ -722,7 +726,15 @@ test('"טעינות קודמות" נטענת באיחור → מחכים לה ו
   let s = await waitRun(t0);
   assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
   assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  // 0.1.22 – כמו בכספית האמיתית (25.11): בלי טעינות מהזמן האחרון אין כותרת ואין טבלה → אין טעינות קודמות, מעלים; אחרי ההעלאה הטבלה מופיעה
   await cp.evaluate(() => { localStorage.removeItem('histlate'); localStorage.setItem('histnone', '1'); });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ impHash: {} }); });
+  nImp = imports.length; t0 = Date.now();
+  await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+  s = await waitRun(t0);
+  assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+  assert.equal(imports.length, nImp + 1, 'הועלה בדיוק קובץ אחד');
+  await cp.evaluate(() => { localStorage.removeItem('histnone'); localStorage.setItem('histhead', '1'); });
   await sw.evaluate(async () => { await chrome.storage.local.set({ impHash: {} }); });
   nImp = imports.length; t0 = Date.now();
   await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
@@ -732,7 +744,7 @@ test('"טעינות קודמות" נטענת באיחור → מחכים לה ו
   const tabs = ctx.pages().filter((p) => /caspit\.valu\.co\.il\/bo/.test(p.url()));
   const q = (await Promise.all(tabs.map((p) => p.evaluate(() => document.querySelectorAll('#queue tr').length).catch(() => 0)))).reduce((a, b) => a + b, 0);
   assert.equal(q, 0, 'הקובץ שלנו לא נוסף לתור');
-  await cp.evaluate(() => localStorage.removeItem('histnone'));
+  await cp.evaluate(() => localStorage.removeItem('histhead'));
   srv.exportN.price = 2;
 });
 
@@ -844,6 +856,25 @@ test('ייבוא עם שגויים בכספית → import-errors (עם המספ
   assert.match(s.st.lastRun.msg, /בתהליך/);
   await cp.evaluate(() => localStorage.removeItem('imphang'));
   await sw.evaluate(async () => { (await self.__cxTest.sel()).importWaitMs = 600000; });
+});
+
+// 0.1.22 – 25.11: כספית דחתה פריטים חדשים (ברקוד קיים) והריצה נעצרה לפני עדכון המחירים. עכשיו: המחירים נשלחים, והריצה "נכשלה" עם import-errors.
+// גם הסטטוס של כספית האמיתית: "טעינה הסתיימה בהצלחה – קיימים פריטים שלא נטענו ראה קובץ שגיאות" (stfin)
+test('0.1.22 שגויים בפריטים החדשים לא עוצרים את עדכון המחירים; הסטטוס "טעינה הסתיימה בהצלחה" מזוהה כסיום', async () => {
+  const cp = caspitPage();
+  await cp.evaluate(() => { for (const k of ['preq', 'imperr', 'imphang', 'histnone', 'histhead', 'histlate']) localStorage.removeItem(k); localStorage.setItem('imperrNew', '1'); localStorage.setItem('stfin', '1'); });
+  await sw.evaluate(async () => { (await self.__cxTest.sel()).importEnabled = true; await chrome.storage.local.set({ impHash: {} }); });
+  srv.exportN.new = 1; srv.exportN.price = 2;
+  const n0 = srv.ops('importResult').length, nImp = imports.length, t0 = Date.now();
+  try {
+    await sw.evaluate(() => self.__cxTest.startRun({ manual: true }));
+    const s = await waitRun(t0);
+    assert.equal(s.st.lastRun.code, 'import-errors', JSON.stringify(s.st.lastRun));
+    assert.equal(imports.length, nImp + 2, 'גם קובץ המחירים הועלה');
+    const ir = srv.ops('importResult').slice(n0);
+    assert.deepEqual(ir.map((x) => [x.kind, x.ok, x.errors]), [['new', false, 1], ['price', true, 0]]);
+    assert.match(ir[1].status, /הסתיימה בהצלחה/);
+  } finally { await cp.evaluate(() => { localStorage.removeItem('imperrNew'); localStorage.removeItem('stfin'); }); }
 });
 
 test('העלאה לכספית כבויה (importEnabled:false): קטלוג ומכירות בלבד – בלי export לשרת ובלי ייבוא; הריצה "הצליחה" עם imp:off; הודעה בחלון', async () => {
@@ -1023,6 +1054,33 @@ test('0.1.13 (ד) מעבר לנחל לכיש לא נקלט → branch-switch (י
     r = await syncOneDay();
     assert.equal(r.s.st.lastRun.st, 'ok', JSON.stringify(r.s.st.lastRun));
     assert.ok((await picks()).startsWith('יהודה הנשיא;'), 'קודם חזרה ליהודה הנשיא: ' + (await picks()));
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
+});
+// 0.1.22 – תקלה 25.11 בכספית האמיתית: השם החדש מופיע בפקד מיד, אבל הבחירה נשמרת רק כשכספית טוענת את הדף מחדש (אחרי כמה שניות).
+// עד 0.1.21 התוסף עבר למסך הדוח לפני כן → הדוח של "נחל לכיש" יצא של יהודה הנשיא (branch-same).
+test('0.1.22 החלפת סניף שנשמרת רק בטעינה מחדש של כספית (brFail=lag): מחכים לטעינה → נחל לכיש נשלח, חזרה ליהודה הנשיא', async () => {
+  await ls({ brFail: 'lag', brLagMs: '2500', brPicks: null });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ salesHash: {} }); }); // אותו יום כבר נשלח בבדיקה הקודמת – בלי זה "אותו קובץ"
+  try {
+    const { s, sales } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    assert.equal(sales.length, 1);
+    const bks = [...new Set(sales[0].lines.map((l) => l.bk))].sort();
+    assert.equal(bks.length, 2, 'שני הסניפים נשלחו: ' + bks.join(','));
+    assert.equal(await picks(), 'נחל לכיש;יהודה הנשיא;', 'בחירה אחת לכל כיוון, בלי ניסיון חוזר');
+    assert.equal(await store0(), 'יהודה הנשיא');
+  } finally { await ls({ brFail: null, brLagMs: null, store: 'יהודה הנשיא' }); }
+});
+test('0.1.22 השם מופיע בפקד אבל הבחירה לא נשמרת ואין טעינה מחדש (brFail=lost): התוסף טוען מחדש בעצמו, בוחר שוב, ואז branch-switch (לא branch-same)', async () => {
+  await ls({ brFail: 'lost', brPicks: null });
+  await sw.evaluate(async () => { await chrome.storage.local.set({ salesHash: {} }); }); // אותו יום כבר נשלח בבדיקה הקודמת – בלי זה "אותו קובץ"
+  try {
+    const { s, sales, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.code, 'branch-switch', JSON.stringify(s.st.lastRun));
+    assert.equal(rep.err.code, 'branch-switch');
+    assert.equal(sales.length, 1); assert.ok(sales[0].lines.every((l) => l.bk === '1'), 'רק יהודה הנשיא');
+    assert.equal(await picks(), 'נחל לכיש;נחל לכיש;', 'שני ניסיונות בחירה');
     assert.equal(await store0(), 'יהודה הנשיא');
   } finally { await ls({ brFail: null, store: 'יהודה הנשיא' }); }
 });
@@ -1321,6 +1379,67 @@ test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספי
     const st = JSON.stringify(await sw.evaluate(() => chrome.storage.local.get(['hrsSt', 'hrsSeen'])));
     for (const w of HRS_NAMES) assert.ok(!st.includes(w), 'שם / שעה באחסון: ' + w);
   } finally { await sw.evaluate(() => chrome.storage.local.remove('hrsSeen')); await hrsOff(); }
+});
+
+// ---------- 0.1.21: יתרות הקפה (hkSnap) ----------
+// כספית המדומה (hkXlsx=1): "יצוא לאקסל" ב-#/hakafa-customers מחזיר xlsx עם 22 עמודות (fixtures/data.js hkXlsx); כל יצוא נרשם ב-hkXs לפי הסניף
+const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'hkSnap');
+async function hkOn(mode, ms) {
+  if (!caspitPage()) { const pg = await ctx.newPage(); await pg.goto('https://caspit.valu.co.il/bo#/'); await pg.evaluate(() => localStorage.setItem('auth', '1')); }
+  await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית נשארה בנחל לכיש – הריצה מחזירה ליהודה הנשיא
+  for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/bo/.test(x.url()))) { await p.reload(); await p.waitForLoadState('load'); } // הסניף שבמסך = הסניף שבנתונים
+  await sw.evaluate(async (w) => { const S = await self.__cxTest.sel(); S.hkSync = true; if (w) S.flows.hkSnap[1].ms = w; }, ms || 0);
+}
+async function hkOff() {
+  await ls({ hkXlsx: null, hkXs: null, store: 'יהודה הנשיא' });
+  await sw.evaluate(async () => { const S = await self.__cxTest.sel(); S.hkSync = false; S.flows.hkSnap[1].ms = 30000; });
+}
+test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת ביהודה הנשיא, רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
+  await hkOn('1');
+  try {
+    const n0 = srv.calls.length;
+    const { s, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', JSON.stringify(s.st.lastRun));
+    const up = hkUps(n0);
+    assert.equal(up.length, 1, 'פעם אחת (לא לכל סניף)');
+    const b = up[0];
+    assert.deepEqual(Object.keys(b).sort(), ['day', 'op', 'rows', 'run', 'ver'], JSON.stringify(Object.keys(b)));
+    assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.equal(b.day, today);
+    assert.deepEqual(b.rows, fx.HK_WANT);
+    const txt = JSON.stringify(srv.calls.slice(n0)) + JSON.stringify(s.st.lastRun);
+    for (const w of fx.HK_SECRETS) assert.ok(!txt.includes(w), 'עמודה שאסור לשלוח: ' + w);
+    assert.ok(!JSON.stringify(rep).includes('ברקוביץ'), 'בדיווח – רק מספרים');
+    assert.deepEqual([rep.info.hk.n, rep.info.hk.skip, rep.info.hk.bad], [3, 2, 0], JSON.stringify(rep.info.hk));
+    assert.ok(!rep.info.flags.hk);
+    const sl = rep.steps.map((x) => x.s);
+    assert.ok(sl.indexOf('hours') < sl.indexOf('hk') && sl.indexOf('hk') < sl.indexOf('exportNew'), sl.join(','));
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('hkXs')), 'יהודה הנשיא;', 'יצוא אחד, בסניף הבית');
+    assert.equal(await store0(), 'יהודה הנשיא', 'לא נשאר בנחל לכיש');
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'בלי "לקוח חדש" / "טעינת לקוחות" / "עריכה"');
+  } finally { await hkOff(); }
+});
+test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנפרד; המכירות וההעלאות לכספית נשלחו והריצה הצליחה; קובץ במבנה לא מוכר → hk-format', async () => {
+  await hkOn('none', 3000);
+  try {
+    const n0 = srv.calls.length;
+    const { s, rep } = await syncOneDay();
+    assert.equal(s.st.lastRun.st, 'ok', 'כישלון היתרות לא מכשיל את הריצה: ' + JSON.stringify(s.st.lastRun));
+    assert.equal(hkUps(n0).length, 0);
+    assert.equal(rep.st, 'ok'); assert.equal(rep.info.flags.hk.code, 'hk-export', JSON.stringify(rep.info.flags));
+    assert.equal(rep.info.hk.err, 'hk-export');
+    assert.equal(s.st.lastRun.sum.flags.hk.code, 'hk-export', 'מסומן בנפרד בסיכום הריצה');
+    assert.ok(rep.info.sales[days[1]], 'המכירות נקלטו (או שאותו קובץ כבר נשלח)');
+    assert.ok(srv.calls.slice(n0).some((c) => c.op === 'export'), 'ההעלאות לכספית רצו');
+    assert.equal(await store0(), 'יהודה הנשיא');
+    await ls({ hkXlsx: 'bad' });
+    const n1 = srv.calls.length;
+    const r2 = await syncOneDay();
+    assert.equal(r2.s.st.lastRun.st, 'ok');
+    assert.equal(hkUps(n1).length, 0);
+    const f = r2.rep.info.flags.hk;
+    assert.equal(f.code, 'hk-format'); assert.equal(f.fmt.hi, 0); assert.equal(f.fmt.rows, 2); assert.equal(f.fmt.why, 'hdr');
+    assert.ok(!JSON.stringify(r2.rep).includes('ברקוביץ'), 'בלי שמות באבחון');
+  } finally { await hkOff(); }
 });
 
 test('ניתוק: הקוד נמחק', async () => {

@@ -7,7 +7,7 @@
 //                                             מסרב: no-dev (אין מחשב), pending (בקשה ממתינה < 10 דקות – מחזיר אותה), running (סנכרון רץ).
 //                                             התוסף (0.1.5) בודק כל דקה ב-poll; hello עם req לוקח את הבקשה פעם אחת (req.took, req.run).
 //   cxBot (HTTP, europe-west1 בלבד, POST JSON, Authorization: Bearer) – העסק נקבע רק מהאסימון. עסק פעיל + תוספת orders.
-//          זהות סינתטית { uid:'cxbot:<id>', role:'manager', bot:true }. רק הפעולות שב-README (hello, cfg, upload, preview, apply, export, report, importResult, poll)
+//          זהות סינתטית { uid:'cxbot:<id>', role:'manager', bot:true }. רק הפעולות שב-README (hello, cfg, upload, preview, apply, export, report, importResult, poll, hkSnap)
 //          – אף פעם לא cxSetCfg / cxDnOk / cxFix / אסימונים / לקוחות. מגבלות: 600 פניות ו-10 ריצות ביום לעסק; 30 ניסיונות כושלים ביום לכתובת IP (גיבוב);
 //          poll (כל דקה) – פטור מהמונה היומי (600), אבל עובר אימות אסימון ומונה ה-IP; כותב pl לכל היותר פעם ב-5 דקות.
 //          ריצה מבקשה בטלפון (hello עם req תקין) לא נספרת במגבלת 10 הריצות – כל בקשה נוצרה בלחיצה של מנהל.
@@ -33,6 +33,8 @@
 //          0.1.15 (caps hours2): empty:['<מזהה>'] – עובדים שהיצוא שלהם הצליח ואין בו שורה בחודש → נמחק cxHrs של אותו סניף+חודש+עובד בלבד (emps יכול להיות ריק). רק החודש הנוכחי (אחרת bad-empty-month).
 //          קצב: עד 160 העלאות שעות ביום לעסק (0.1.15; היה 120), ולכל סניף+חודש לכל היותר פעם בדקה (hr ב-private/cxbot). poll מחזיר caps:[…, 'hours'].
 //          קריאה: cxBotTok({ op:'hours', m }) – מנהל בלבד (mgrW) → { m, list:[{ br, e, nm, rows, n, at }] } (מסך "שעות עובדים" באפליקציה, cx-hours.js; התאמה לפי שם – shfcfg/map).
+//   לקוחות הקפה (24.11, hk-import.js): op:'hkSnap' – { run?, day:'YYYY-MM-DD', rows:[{ xc, tz, name, ph, addr, bal }] } (bal אגורות, חוב = חיובי, עד 2000 שורות).
+//          לפני אישור ראשון באפליקציה – נשמר כ"ממתין לאישור" בלבד; אחרי האישור – הפרשים מול התמונה הקודמת. עד HK_DAY תמונות ביום לעסק (hk ב-private/cxbot). caps כולל 'hk'.
 // פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים (גם בלי שמות עובדים ושעות).
 
 const crypto = require('node:crypto');
@@ -47,16 +49,18 @@ const TK = require('./lib/tk-time');
 const O = require('./orders')._core;
 const CX = require('./caspit')._core;
 const SC = require('./lib/shifts-core');
+const HK = require('./hk-import')._core;
 
 const EXT_ORIGIN = 'chrome-extension://mianlmahikfdnffiipdfpojnfjhcipbp';
 const MIN_VER = '0.1.0';
-const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult', 'poll'];
+const OPS = ['hello', 'cfg', 'upload', 'preview', 'apply', 'export', 'report', 'importResult', 'poll', 'hkSnap'];
+const HK_DAY = 12; // לקוחות הקפה: תמונות ביום לעסק (לילה + "סנכרן עכשיו" + ניסיונות חוזרים)
 const MAX_BODY = 10 * 1024 * 1024;
 const DISC_MAX = 1024 * 1024;
 const DISC_PART = 300000; // תווים; גם ב-3 בייטים לתו – פחות מ-1MiB למסמך
 const CALLS_DAY = 600, RUNS_DAY = 10, FAIL_IP_DAY = 30;
 const FAIL_BUCKETS = 64; // מוני כישלונות: מספר קבוע של מסמכים (cxbot_fail/b0..b63) – כתובת מזויפת לא יוצרת מסמכים חדשים
-const LIM = { price: 500, newMax: 50 };
+const LIM = { price: 500, newMax: 100000 }; // 24.11.2026 (בעל העסק): פריטים חדשים – ללא הגבלה (100000 = "ללא הגבלה", התקרה הטכנית של cxExport). עד אז 50
 const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
 const SRUN_RE = /^[A-Za-z0-9_-]{6,40}$/; // מזהה ריצה (runId מ-hello, או מזהה של התוסף אם hello נכשל)
@@ -66,7 +70,7 @@ const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
 const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
 const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
-const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf']; // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
+const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf', 'hk']; // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
 // tf (תוסף 0.1.19, 24.11.2026): poll מקבל tf = { s:'YYYY-MM-DD HH', c:קוד } – העדכון השעתי של מכירות היום שנכשל במחשב (עד אז נשמר רק בתוסף)
 const TF_S = /^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3])$/, TF_C = /^[a-z0-9-]{1,30}$/;
 const UST = ['reload', 'same', 'copying', 'busy', 'none'];
@@ -164,7 +168,7 @@ async function cxBotTok(w, input) {
     const cfg = CX.cfgOf(c);
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
-      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
+      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, nwDup: d.nwDup || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
@@ -347,11 +351,13 @@ const OPF = {
   async export(w, b, x) {
     O.onlyKeys(b, ['kind', 'max']);
     if (!['new', 'price'].includes(b.kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
-    if (!Number.isInteger(b.max) || b.max < 0 || b.max > LIM.price) throw bad('bad-max', 'מגבלה לא תקינה');
+    if (!Number.isInteger(b.max) || b.max < 0 || b.max > (b.kind === 'new' ? LIM.newMax : LIM.price)) throw bad('bad-max', 'מגבלה לא תקינה');
     const lim = limitsOf(await cfgNow());
     const max = Math.min(b.max, b.kind === 'new' ? lim.newMax : lim.price);
     await CX.lockTake(w.bizId, 'bot:' + x.dev.id);
     const r = await CX.FNS.cxExport(w, { kind: b.kind, max });
+    // 26.11.2026: מוצרים שהברקוד שלהם כבר בכספית – לא נשלחו; לכרטיס הרובוט (כמה + עד 20 שמות וברקודים)
+    if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) } }, { merge: true });
     return { n: r.n, csv: r.csv, rows: r.rows, added: r.added || 0 };
   },
   async importResult(w, b, x) {
@@ -382,6 +388,21 @@ const OPF = {
     if (b.kind !== 'run') throw bad('bad-kind', 'סוג דיווח לא תקין');
     // דיווח ריצה שנכשל (קלט פגום, תקלה) – המנעול של הרובוט משתחרר בכל זאת
     try { return await reportRun(w, b, x, o); } catch (er) { await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {}); throw er; }
+  },
+  // לקוחות הקפה (24.11): תמונת יתרות – אימות ושמירה ב-hk-import.js. קצב בטרנזקציה, לפני כל כתיבה
+  async hkSnap(w, b, x) {
+    O.onlyKeys(b, ['run', 'day', 'rows']);
+    if (b.run !== undefined && (typeof b.run !== 'string' || !SRUN_RE.test(b.run))) throw bad('bad-run', 'מזהה לא תקין');
+    const ref = priv(w.bizId, 'cxbot'), day = ilDay(x.now);
+    const okRate = await ref.firestore.runTransaction(async (tx) => {
+      const s = await tx.get(ref), hk = (s.exists && s.get('hk')) || {};
+      const n = hk.d === day ? +hk.n || 0 : 0;
+      if (n >= HK_DAY) return false;
+      tx.set(ref, { hk: { d: day, n: n + 1 } }, { merge: true });
+      return true;
+    });
+    if (!okRate) throw new HttpsError('resource-exhausted', 'יותר מדי תמונות לקוחות הקפה היום', { reason: 'rate' });
+    return HK.snap(w, { day: b.day, rows: b.rows }, x.now);
   },
 };
 // מכירות היום (חלקי): רק היום, משעה 07:00 ולא בשבת וחג, חלק אחד. בלי cxRun, בלי מלאי, בלי sd – caspit.js cxPartial
@@ -594,11 +615,15 @@ async function handle(req, res, opts) {
       logger.info('cxBot: refused', { biz: v.bizId, op, log: lg, reason });
       return no(STATUS[e.code] || 500, reason, e.message);
     }
-    logger.error('cxBot: failed', { biz: v.bizId, op, log: lg, name: e && e.name, code: e && e.code, msg: String(e && e.message).slice(0, 200) });
+    logger.error('cxBot: failed', { biz: v.bizId, op, log: lg, name: e && e.name, code: e && e.code, msg: logMsg(e) });
     return no(500, 'internal', 'תקלה בשרת. ננסה שוב.');
   }
 }
 
+// סבב 2 (24.11): הודעת שגיאה ליומן – בלי פרטים אישיים. נתיבי מסמכים (cust/t{ת.ז}, cust/p{טלפון}, hkc/{מספר לקוח}...) מוסתרים, וכל רצף של 5 ספרות ומעלה → #
+function logMsg(e) {
+  return String(e && e.message || '').replace(/\b([A-Za-z]+)\/[^\s"'`,;)\]}]+/g, '$1/…').replace(/\d{5,}/g, '#').slice(0, 200);
+}
 // ---------- התראות ----------
 const MSG = {
   'needs-login': 'צריך להתחבר מחדש לכספית בדפדפן Chrome במחשב החנות. אחרי ההתחברות הסנכרון ימשיך לבד.',
@@ -719,4 +744,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, logMsg, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });

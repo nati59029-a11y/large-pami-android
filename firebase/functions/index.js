@@ -284,6 +284,10 @@ Object.assign(exports, require('./invite-mail'));
 Object.assign(exports, require('./orders'));
 // מסך טיפול/ליקוט (14.11.2026, משוב סבב 3): orderPick, orderPickOk, supOrdSet – ord-pick.js; orderAuth ("המסגרת אושרה", החלטה 32, 15.11.2026)
 Object.assign(exports, require('./ord-pick'));
+// הצעת מחיר ללקוח (24.11.2026): qtSave, qtSet (ובהמשך כל פונקציה שנוספת ל-FNS ב-quotes.js – מיוצאת אוטומטית). quotes.js. לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./quotes'));
+// הצעת מחיר – PDF ושליחה (24.11.2026, שלב 4): qtPdf, qtSend – quotes-pdf.js
+Object.assign(exports, require('./quotes-pdf'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
 // חשבונית ספק של עובד → pinv בשרת (22.11.2026): piInbox / piInboxB – טריגר על יצירת inbox/{id} ו-b/{bizId}/inbox/{id}, זיהוי + piCreate + צילום (pricing-inbox.js). לא מפורסם עד מיזוג ואישור
@@ -298,8 +302,10 @@ Object.assign(exports, require('./ar'));
 Object.assign(exports, require('./ar-remind'));
 // ייבוא מתוכנה קודמת (15.11.2026, שלב 6): arImp (תצוגה מקדימה / ייבוא במנות של 25), arImpVoid (ביטול קבוצה = void), arImpList. ar-import.js
 Object.assign(exports, require('./ar-import'));
+// לקוחות הקפה מכספית (24.11.2026): hkGet (מצב / תצוגה מקדימה / "לבדוק"), hkApprove ("אשר ייבוא ראשון", במנות), hkChkDone ("טופל", סבב 2) – מנהל בלבד. hk-import.js (התמונה עצמה – cxBot op:'hkSnap')
+Object.assign(exports, require('./hk-import'));
 
-// לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
+// לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js). 24.11.2026: delCust – מחיקת לקוח בודד (מנהל)
 Object.assign(exports, require('./customers'));
 
 // המזכירה העסקית – שלב 1 (2026-11-11): secState, secConsent, secSetup (מנהל העסק), secAdminGet, secAdminSetCfg, secAdminReadChat (מנהל־על),
