@@ -465,7 +465,7 @@ const pExtH=p=>{const c=p&&p.cat||'',B=brs(),bp=p&&p.bp||{};
  +(B.length>1?`<label class="f"><span>סניף הבית של הפריט</span><select name="home"><option value="">לא נקבע</option>${B.map(b=>`<option value="${esc(b.id)}"${p&&p.home===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:'')
  +fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"')
  +/* סנכרון ספקים (19.11.2026): ספק המוצר, עם רשימת כל הספקים (כרטסת + מלאי). ריק = בלי ספק */`<label class="f"><span>ספק (רשות)</span><input name="sup" maxlength="60" list="oxPSupDL" autocomplete="off" value="${esc(p&&p.sup||'')}" placeholder="שם הספק"></label>${window.supDL?window.supDL('oxPSupDL'):''}`}; // 00:13: גם עובד עם ord
-function pExtRead(f,x,isNew){const d={};if(window.CatPick){const v=CatPick.val(f);if(!v.cat)throw new Error('בחרו קטגוריה למוצר (אפשר גם לפתוח קטגוריה חדשה)');d.cat=v.cat;d.sub=v.sub||null;
+function pExtRead(f,x,isNew){const d={};if(window.CatPick&&f&&f.querySelector&&f.querySelector('.cpk')){const v=CatPick.val(f);if(!v.cat)throw new Error('בחרו קטגוריה למוצר (אפשר גם לפתוח קטגוריה חדשה)');d.cat=v.cat;d.sub=v.sub||null;
   const s=d.sub&&(O.C||[]).find(c=>c.id===d.sub);if(s&&s.parent!==d.cat)throw new Error('תת־הקטגוריה לא שייכת לקטגוריה שנבחרה')}
  const B=brs();if(B.length>1){const bp={};let any=false;for(const b of B){const v=String(x['bp_'+b.id]||'').trim();if(v){const n=num(v);if(!(n>=0))throw new Error('מחיר לסניף לא תקין');bp[b.id]=n;any=true}else if(!isNew)bp[b.id]=''}if(any||!isNew)d.bp=bp;d.home=x.home||null}
  for(const k of['pk','ct']){const v=String(x[k]||'').trim();if(v){const n=num(v);if(!(n>0)||!Number.isInteger(n))throw new Error('מארז/קרטון: מספר שלם');d[k]=n}else if(!isNew)d[k]=null}
