@@ -116,6 +116,8 @@ async function ingest(db, o) {
   const pslBy = SI.pslSender(SI.invCfgOf(await db.doc('sec_cfg/inv').get()), src.ch, src.from, src.ua) ? 'snd' : SI.pslName(fn) ? 'name' : '';
   const doc = { st: man || pslBy ? 'new' : 'q', k: pslBy ? 'psl' : man ? 'long' : 'q', t: now, src: [src], fn, mime: chk.mime, size: o.buf.length, np, pages: chk.pages, el: false };
   if (pslBy) Object.assign(doc, { pslBy, why: ['type'] });
+  // מייל לא מאומת – מסומן כבר כאן (גם במסמך שלא נסרק: תלוש / קובץ ארוך), כדי שהמכשיר לעולם לא יפעל לפיו לבד (בדיקה עצמאית, סעיף 1)
+  if (src.ua) doc.ua = true;
   if (lng) doc.long = true;
   if (chk.act) doc.act = true; // PDF עם פקודות משולח מאושר
   if (src.sus) doc.sus = true;

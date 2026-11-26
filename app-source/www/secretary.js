@@ -1293,7 +1293,7 @@ function locDup(x){const s=ivSub(x),f=x.f||{};if(!s||x.k!=='inv')return null;con
  if(o.same||o.inv)return o.inv||o.same;return S.inbox.find(i=>i.sec!==x.id&&i.d&&i.d.sub===s.id&&((NINV(f.num)&&NINV(i.d.inv)===NINV(f.num))||(i.d.date===f.date&&rnd(num(i.d.amt))===rnd(+f.total||0))))||null}
 async function ivHold(x,why){if(IV.held[x.id])return;IV.held[x.id]=1;try{await fnCall('secDecide',{op:'hold',id:x.id,why})}catch(e){}}
 /* "נכנס ישר": רק מה שהשרת סימן זכאי; המכשיר רק מחמיר */
-async function ivAuto(){if(IV.ab)return;const L=(IV.L&&IV.L.items||[]).filter(x=>x.st==='new'&&x.el);if(!L.length)return;IV.ab=1;let n=0;
+async function ivAuto(){if(IV.ab)return;const L=(IV.L&&IV.L.items||[]).filter(x=>x.st==='new'&&x.el&&!ivRejR(x));/* 26.11.2026: "לדחות תמיד" גובר על "נכנס ישר" */if(!L.length)return;IV.ab=1;let n=0;
  try{for(const x of L){const s=ivSub(x);
   if(!subOk(s)||s.id!==x.sub){await ivHold(x,'local');continue}
   if(brMulti()&&!(x.br&&brAll().some(b=>b.id===x.br))){await ivHold(x,'local');continue}
@@ -1541,7 +1541,7 @@ const ivSrvK=k=>k.startsWith('w:')?'wa:'+k.slice(2):k;
 const ivRejR=x=>!!(x&&!x.ua&&(ivRk(ivSk(x))||{}).rej);
 const ivPslR=x=>{if(!x||x.ua)return null;const R=ivRk(ivSk(x));return R&&R.psl?R:null};
 const secRj=()=>ivObj('ivRj'),secPs=()=>ivObj('ivPs');
-const ivRuleCan2=x=>!!(ivSk(x)&&!x.ua&&!(IV.L&&IV.L.br)&&x.k!=='bad');
+const ivRuleCan2=x=>!!(ivSk(x)&&!x.ua&&!(IV.L&&IV.L.br)&&!['bad','chk'].includes(x.k));
 const ivAiSubs=()=>S.subs.filter(s=>s&&!s.off&&ivRuleSubOk(s)&&(cat(s.cat)||{}).kind==='exp'&&!(cat(s.cat)||{}).hid).slice(0,400).map(s=>({id:s.id,n:String(s.name||'').slice(0,60),k:(cat(s.cat)||{}).beh==='fixed'?'fixed':'sup'}));
 const ivRuleTxt=R=>R.rej?'לדחות תמיד':R.psl?'תלושי שכר'+(R.ok?'':' (באישור עד הפעם הראשונה)'):((subById(R.sub)||{}).name||'ספק שנמחק')+(R.auto===false?' · באישור':'');
 function ivRuleSet2(k,o){ivObj('ivR')[k]=Object.assign({at:Date.now(),show:ivSkShow(k)},o);save()}
@@ -1592,11 +1592,15 @@ ACT.secIvUnrej=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCa
 /* ---- תלושי שכר ---- */
 async function ivPslFile(x){const du=await ivFile(x);if(!du)return null;const b=du2b(du);const pdf=(x.mime||'')==='application/pdf';
  return new File([b],String(x.fn||'').trim()||(pdf?'payslips.pdf':'payslip.jpg'),{type:x.mime||b.type})}
-async function ivPslDone(x,ids,auto){if(!ids||!ids.length)return false;let ok=false;
- try{const c=await fnCall('secDecide',{op:'claim',id:x.id,mode:'man',dev:devId()});if(c&&c.item){await fnCall('secDecide',{op:'done',id:x.id,dev:devId()});ok=true}}catch(e){}
+/* תפיסה בשרת *לפני* השמירה במכשיר (בדיקה עצמאית, סעיף 3): מכשיר אחר / בלי רשת – לא נשמר כלום. אחרי: done, או release אם לא נשמר */
+async function ivPslClaim(x){try{const c=await fnCall('secDecide',{op:'claim',id:x.id,mode:'man',dev:devId()});return !!(c&&c.item)}catch(e){return false}}
+const ivPslRel=x=>fnCall('secDecide',{op:'release',id:x.id,dev:devId()}).catch(()=>{});
+async function ivPslDone(x,ids,auto){if(!ids||!ids.length){ivPslRel(x);return false}let ok=false;
+ try{await fnCall('secDecide',{op:'done',id:x.id,dev:devId()});ok=true}catch(e){}
  secPs()[x.id]={ids,at:Date.now(),auto:auto?1:0,ok:ok?1:0};if(ok)secRin()[x.id]=Date.now();/* כדי שיופיע ב"נכנסו (3 ימים אחרונים)" עם ביטול */const P=secPs(),old=Date.now()-14*864e5;Object.keys(P).forEach(id=>{if(!(P[id]&&P[id].at>old))delete P[id]});save();IV.at=0;IV.L=null;return true}
 ACT.secIvPsl=async el=>{const x=ivX(el);if(!x||typeof window.pslFromSec!=='function')return;if(el.disabled)return;el.disabled=true;
  try{const f=await ivPslFile(x);if(!f)return toast('הקובץ כבר לא שמור בתור');
+  if(!(await ivPslClaim(x))){IV.at=0;IV.L=null;rerender();return toast('המסמך בטיפול במכשיר אחר, או שאין חיבור. נסו שוב')}
   await window.pslFromSec(f,{done:async ids=>{if(!(await ivPslDone(x,ids,false)))return rerender();
    const k=ivSk(x),R=ivPslR(x);
    if(R&&!R.ok){R.ok=1;save();toast(ids.length+' תלושים נשמרו. מעכשיו תלושים מ-'+ivSkShow(k)+' ייכנסו לבד כשהכול מזוהה, עם אפשרות ביטול');return rerender()}
@@ -1606,10 +1610,11 @@ ACT.secIvPsl=async el=>{const x=ivX(el);if(!x||typeof window.pslFromSec!=='funct
  catch(e){err(e)}finally{el.disabled=false}};
 /* "נכנס לבד" לפי הוראה – רק אחרי אישור ראשון, רק PDF, רק כשהכול מזוהה. מה שלא – מסומן לבדיקה (לא ננסה שוב באותה הפעלה) */
 async function ivPslAuto(){if(IV.pa||!IV.L||IV.L.br||typeof window.pslAutoSec!=='function')return;IV.pn=IV.pn||{};
- const L=(IV.L.items||[]).filter(x=>x.st==='new'&&x.k==='psl'&&x.np&&(x.mime||'')==='application/pdf'&&!IV.pn[x.id]&&!x.hold&&!x.sus&&!x.act&&!secRno()[x.id]&&!secPs()[x.id]&&(ivPslR(x)||{}).ok&&ivPslR(x).auto!==false&&!(IV.L&&IV.L.stop));
+ const L=(IV.L.items||[]).filter(x=>x.st==='new'&&x.k==='psl'&&x.np&&(x.mime||'')==='application/pdf'&&!IV.pn[x.id]&&!x.hold&&!x.ua&&!x.hist&&!x.noStock&&!x.sus&&!x.act&&!secRno()[x.id]&&!secPs()[x.id]&&(ivPslR(x)||{}).ok&&ivPslR(x).auto!==false&&!(IV.L&&IV.L.stop));
  if(!L.length)return;IV.pa=1;let n=0,c=0;
- try{for(const x of L){let ids=null;try{const f=await ivPslFile(x);ids=f?await window.pslAutoSec(f):null}catch(e){ids=null}
-  if(ids&&ids.length&&(await ivPslDone(x,ids,true))){n+=ids.length;c++}else IV.pn[x.id]=1}}finally{IV.pa=0}
+ try{for(const x of L){let ids=null;const f=await ivPslFile(x).catch(()=>null);if(!f||!(await ivPslClaim(x))){IV.pn[x.id]=1;continue}
+  try{ids=await window.pslAutoSec(f)}catch(e){ids=null}
+  if(ids&&ids.length&&(await ivPslDone(x,ids,true))){n+=ids.length;c++}else{if(!(ids&&ids.length))ivPslRel(x);IV.pn[x.id]=1}}}finally{IV.pa=0}
  if(n){toast((c===1?'':c+' קבצים: ')+n+' תלושים נקלטו לפי ההוראה שלך. אפשר לבטל במסך "חשבוניות"');if(['sec','home'].includes(cur().v)&&!typing())rerender()}}
 ACT.secIvPslUndo=el=>{const x=ivX(el),P=x&&secPs()[x.id];if(!P||typeof window.pslUndoSec!=='function')return;
  ask('לבטל את קליטת '+P.ids.length+' התלושים? הם יימחקו מכרטיסי העובדים (כולל עלויות המעביד שלהם), והמסמך יחזור לבדיקה שלך.',async()=>{const r=window.pslUndoSec(P.ids);
@@ -1636,6 +1641,8 @@ function ivPslOk(x,P){const id=esc(x.id);return `<div class="card secinv" id="se
 /* ההוראות שלי – גם "לדחות תמיד" ו"תלושי שכר", ורשימת מה שנדחה */
 ivRlH=function(){const R=S&&S.ivR;if(!R||!IV.L||IV.L.br)return ivRjH();const K=Object.keys(R).filter(k=>R[k]&&(R[k].sub||R[k].rej||R[k].psl));if(!K.length)return ivRjH();
  return `<details class="card secivset" id="secIvRl"><summary>ההוראות שלי למסמכים (${K.length})</summary>${K.map(k=>`<div class="secrow" style="align-items:center"><span style="flex:1;min-width:0;overflow-wrap:anywhere"><bdi dir="ltr">${esc(ivSkShow(k))}</bdi> ← ${esc(ivRuleTxt(R[k]))}</span><button class="chip" data-a="secIvRuleDel" data-k="${esc(k)}">מחיקה</button></div>`).join('')}</details>`+ivRjH()};
+/* הוראת תלושים שהוחלפה בהוראת ספק ("לזכור?" של שלב 1) – גם השרת מפסיק לסמן תלושים (בדיקה עצמאית, סעיף 7) */
+{const o=ivRuleSet;ivRuleSet=function(k){const R=ivRk(k);const r=o.apply(this,arguments);if(R&&R.psl)fnCall('secInv',{op:'cfg',psl:ivSrvK(k),on:false}).catch(()=>{});return r}}
 /* הפעלה: אחרי הסבב האוטומטי של שלב 1 */
 {const o=ivRuleAuto;ivRuleAuto=async function(){const r=await o.apply(this,arguments);try{await ivRejRun(false)}catch(e){}try{await ivPslAuto()}catch(e){}return r}}
 window.__secIvRule={run:ivRuleRun,no:ivRuleNo,sk:ivSk,rej:()=>ivRejRun(true),psl:()=>ivPslAuto()};

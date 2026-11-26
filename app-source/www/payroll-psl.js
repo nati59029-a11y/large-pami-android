@@ -146,7 +146,7 @@ async function imgDU(f){const i=await ldImg(await rdU(f));for(const [w,q] of [[1
 
 /* ---- העלאה ---- */
 const PS={busy:0,q:[],i:0,batch:{},sel:new Set(),sh:null,sub:'',saved:0};
-async function intake(f,mode,sub,o){const Q=await build(f,mode,sub);if(!Q)return;
+async function intake(f,mode,sub,o){const Q=await build(f,mode,sub);if(!Q){if(o&&typeof o.done==='function')o.done([]);return}
   PS.q=Q;PS.i=0;PS.batch={};PS.saved=0;PS.ids=new Set();PS.done=o&&typeof o.done==='function'?o.done:null;showPiece()}
 async function build(f,mode,sub){
   const isPdf=f.type==='application/pdf'||/\.pdf$/i.test(f.name||''),isImg=/^image\/(jpeg|png)$/.test(f.type)||/\.(jpe?g|png)$/i.test(f.name||'');
@@ -227,17 +227,20 @@ async function pslPut(s,mon,du,v,src,old){const fid='ps'+uid();await fput(fid,du
    window.pslAutoSec(file) – "נכנס לבד" לפי הוראה (רק אחרי אישור ראשון): נשמר רק אם *כל* התלושים בקובץ מזוהים בוודאות – עובד, חודש, ברוטו ונטו תקינים,
    בלי תלוש קיים לאותו עובד וחודש (לא מחליף לבד) ובלי שני תלושים לאותו עובד וחודש בקובץ. אחרת – לא נשמר כלום (null), והמסמך מחכה לבדיקה.
    window.pslUndoSec(ids) – ביטול: מוחק את התלושים ואת עלויות המעביד שלהם, אלא אם עלות שויכה לחיוב אשראי / בנק (אז לא מוחק כלום). */
-window.pslFromSec=async(f,o)=>{if(!on())return toast('רק מנהל');if(PS.busy)return toast('קורא קובץ קודם…');PS.busy=1;toast('קורא את התלושים…');
+window.pslFromSec=async(f,o)=>{const no=m=>{toast(m);if(o&&typeof o.done==='function')o.done([])};if(!on())return no('רק מנהל');if(PS.busy)return no('קורא קובץ קודם…');PS.busy=1;toast('קורא את התלושים…');
   const isPdf=f.type==='application/pdf'||/\.pdf$/i.test(f.name||'');
-  try{await intake(f,isPdf?'all':'one','',o)}catch(e){toast(e&&e.user?e.message:'קריאת הקובץ נכשלה')}finally{PS.busy=0}};
+  try{await intake(f,isPdf?'all':'one','',o)}catch(e){toast(e&&e.user?e.message:'קריאת הקובץ נכשלה');if(o&&typeof o.done==='function')o.done([])}finally{PS.busy=0}};
 window.pslAutoSec=async f=>{if(!on()||PS.busy)return null;if(!(f.type==='application/pdf'||/\.pdf$/i.test(f.name||'')))return null;PS.busy=1;
   try{const Q=await build(f,'all','');if(!Q||!Q.length)return null;const seen=new Set();
     for(const it of Q){const s=empOf(it.sub),k=it.sub+'|'+it.mon;
       if(it.src!=='pdfc'||!s||!it.mf||!monV(it.mon)||!it.v||!it.v.found||it.v.gross==null||it.v.net==null||(it.v.warn||[]).length||checkVals(it.v).length||seen.has(k)||duBytes(it.du)>MAXB)return null;
       if(AR('psl').some(p=>p&&p.sub===it.sub&&p.mon===it.mon))return null;seen.add(k)}
-    const ids=[];for(const it of Q){const v={gross:it.v.gross,net:it.v.net,ec:(it.v.ec||[]).filter(e=>e&&typeof e.a==='number'&&Number.isFinite(e.a)).map(e=>({k:e.k,n:e.n,a:e.a}))};
-      ids.push(await pslPut(empOf(it.sub),it.mon,it.du,v,'sec',[]))}
-    rerender();return ids}
+    /* הכול או כלום (בדיקה עצמאית, סעיף 2): קודם כל הקבצים; קובץ שנכשל – מוחקים את מה שנכתב ולא נשמרת אף רשומה. אחר כך כל הרשומות ו-save אחד */
+    const F=[];try{for(const it of Q){const fid='ps'+uid();await fput(fid,it.du);F.push(fid)}}catch(e){delF(F);return null}
+    const ids=[],at=new Date().toISOString();Q.forEach((it,i)=>{const s=empOf(it.sub),mon=it.mon,id=uid(),ec=(it.v.ec||[]).filter(e=>e&&typeof e.a==='number'&&Number.isFinite(e.a)).map(e=>({k:e.k,n:e.n,a:e.a}));
+      AR('psl').push({id,sub:s.id,mon,f:F[i],name:fname({sub:s.id,mon}),gross:it.v.gross,net:it.v.net,ec,src:'sec',ok:1,at});
+      ec.forEach(e=>S.tx.push({id:uid(),t:'exp',cat:s.cat,sub:s.id,date:lastDay(mon),amt:e.a,plan:mon,pays:[],ec:1,eck:e.k,psl:id,note:'עלות מעביד: '+e.n}));ids.push(id)});
+    save();rerender();return ids}
   catch(e){return null}finally{PS.busy=0}};
 window.pslUndoSec=ids=>{if(!on())return {ok:false};const L=(Array.isArray(ids)?ids:[]).map(pslById).filter(Boolean);
   if(L.some(pslLock))return {ok:false,lock:true};const gone=L.map(pslDrop);save();delF(gone);rerender();return {ok:true,n:L.length}};

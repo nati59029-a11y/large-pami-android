@@ -602,6 +602,10 @@ describe('26.11.2026: תלושי שכר – לא נסרקים בשרת, כרטי
     assert.equal(x.k, 'psl'); assert.equal(x.st, 'new'); assert.equal(x.pslBy, 'name'); assert.equal(x.el, false);
     assert.equal(CLS, 0, 'לא נשלח לזיהוי'); assert.equal(await get(`b/${A}/scan_usage/_sec`), null, 'לא נספר במכסה');
     assert.ok(x.np >= 1, 'הקובץ נשמר (לפיצול במכשיר)');
+    // בדיקה עצמאית, סעיף 1: תלוש ממייל לא מאומת – מסומן ua כבר בקליטה (המכשיר לא יפעל לפיו לבד)
+    const u = await arrive(pdf(1), RAW.inv(), { fn: 'תלוש 11.pdf', ch: 'mail', from: SUP_MAIL, auth: false });
+    assert.equal(u.k, 'psl'); assert.equal(u.ua, true);
+    assert.equal((await call('secInv', M1, { op: 'list' })).r.items.find((i) => i.id === u.id).ua, true);
     const y = await arrive(pdf(1), RAW.inv({ number: 'ST1' }), { fn: 'שכר טרחה.pdf' });
     assert.equal(y.k, 'inv'); assert.equal(CLS, 1);
   });

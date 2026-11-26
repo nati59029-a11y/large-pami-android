@@ -67,6 +67,7 @@ async function open(browser, www, o) {
       if (body.op === 'claim') { if (body.mode === 'auto' && !x.el) return no('not-eligible'); if (x.st !== 'new') return no('already'); Object.assign(x, { st: 'cl', mine: true, dev: body.dev, mode: body.mode }); return ok({ ok: true, id: x.id, item: x }); }
       if (body.op === 'done') { Object.assign(x, { st: 'ok', auto: x.mode === 'auto', mineOk: true }); return ok({ ok: true }); }
       if (body.op === 'rej') { x.st = 'rej'; return ok({ ok: true }); }
+      if (body.op === 'release') { if (x.st === 'cl') Object.assign(x, { st: 'new', mine: false }); return ok({ ok: true }); }
       if (body.op === 'unrej') { Object.assign(x, { st: 'new', hold: 'undo' }); return ok({ ok: true }); }
       if (body.op === 'undo') { Object.assign(x, { st: 'new', el: false, hold: 'undo', mineOk: false }); return ok({ ok: true }); }
       return ok({ ok: true });
@@ -203,11 +204,13 @@ const txOf = (page, id) => page.evaluate((id) => { const t = S.tx.find((z) => z.
   check(`${w}: תלושים – ההוראה נשמרה (אחרי אישור ראשון) ונשלחה לשרת`, r8 && r8.psl === 1 && r8.ok === 1 && !!last(bodies, 'secInv', (b) => b.op === 'cfg' && b.psl === 'm:' + ACC && b.on === true), r8);
   // 9. תלוש נוסף מאותו שולח – נכנס לבד כשהכול מזוהה; כשלא – נשאר לבדיקה
   const base = Q.L.find((i) => i.id === ID.PS1);
-  Q.L.push(Object.assign({}, base, { id: ID.PS2, st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'snd', fn: 'slips-11.pdf' }), Object.assign({}, base, { id: ID.PS3, st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'snd', fn: 'slips-12.pdf' }));
+  Q.L.push(Object.assign({}, base, { id: ID.PS2, st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'snd', fn: 'slips-11.pdf' }), Object.assign({}, base, { id: ID.PS3, st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'snd', fn: 'slips-12.pdf' }), Object.assign({}, base, { id: hx('d'), st: 'new', mine: false, mineOk: false, mode: '', pslBy: 'name', fn: 'slips-ua.pdf', ua: true }));
   await page.evaluate((ids) => { window.__pa = []; window.pslAutoSec = async (f) => { window.__pa.push(f.name); return f.name === 'slips-11.pdf' ? ['pslC'] : null; }; }, null);
   await reload(page); await H.settle(page, 1800);
   const p9 = await page.evaluate((a) => ({ pa: window.__pa, P2: S.ivPs && S.ivPs[a[0]], P3: S.ivPs && S.ivPs[a[1]] }), [ID.PS2, ID.PS3]);
   check(`${w}: תלוש מזוהה מהשולח – נכנס לבד`, p9.P2 && p9.P2.auto === 1 && Q.L.find((i) => i.id === ID.PS2).st === 'ok', p9);
+  check(`${w}: תלוש ממייל לא מאומת – לא נכנס לבד, גם עם הוראה`, !p9.pa.includes('slips-ua.pdf') && Q.L.find((i) => i.id === hx('d')).st === 'new', p9.pa);
+  check(`${w}: לפני השמירה – תפיסה בשרת`, bodies.filter((b) => b[0] === 'secDecide' && b[1].op === 'claim' && b[1].id === ID.PS2).length >= 1);
   check(`${w}: תלוש שלא זוהה בוודאות – נשאר לבדיקה`, !p9.P3 && Q.L.find((i) => i.id === ID.PS3).st === 'new', p9);
   await reload(page);
   const c9 = await page.evaluate((s) => (document.querySelector(s) || {}).innerText || '', card(ID.PS3));
