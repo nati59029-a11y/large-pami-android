@@ -65,7 +65,7 @@ service cloud.firestore {
         || (d.last is map && d.last.keys().hasOnly(['txt', 'byN', 't', 'k'])
           && d.last.get('txt', '') is string && d.last.get('txt', '').size() <= 120
           && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
-          && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
+          && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid', 'file', 'aud']);
     }
     function pinOk(d) {
       return !d.keys().hasAny(['pin'])
@@ -73,7 +73,7 @@ service cloud.firestore {
           && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
           && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
           && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
-          && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
+          && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid', 'file', 'aud']);
     }
     function grpOk(d) {
       return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
@@ -94,10 +94,13 @@ service cloud.firestore {
           && d.re.mid is string && d.re.mid.matches('^[A-Za-z0-9_-]{1,128}$')
           && d.re.get('txt', '') is string && d.re.get('txt', '').size() <= 120
           && d.re.get('byN', '') is string && d.re.get('byN', '').size() <= 100
-          && d.re.get('k', 't') in ['t', 'img', 'vid']);
+          && d.re.get('k', 't') in ['t', 'img', 'vid', 'file', 'aud']);
     }
-    // הודעה בקבוצה. vp = הנתיב הצפוי של הסרטון. הבדיקה "md == true" (תמונה/סרטון) נשארת אצל הקורא (צריך את מסמך הקבוצה).
-    function msgOk(d, vp) {
+    // הודעה בקבוצה. vp = הנתיב הצפוי של הסרטון. הבדיקה "md == true" (תמונה/סרטון/קובץ/קולית) נשארת אצל הקורא (צריך את מסמך הקבוצה).
+    // 26.11.2026 (שיתוף לקבוצה): fp = הנתיב הצפוי של קובץ / הודעה קולית (grpf/{gid}/{mid}, בעסק b/{bizId}/grpf/...).
+    //   'file': fn (שם, 1–120), fs (בתים, 1–25MB), fm (mime, 1–100), txt? (כיתוב). 'aud': fs, fm (audio/*), dur (שניות, שלם 1–600).
+    //   tr (תמלול) – רק השרת (grpTr) כותב; הלקוח לא יכול לשלוח אותו (hasOnly), ואין עדכון הודעה.
+    function msgOk(d, vp, fp) {
       return d.keys().hasAll(['by', 'byN', 't', 'k'])
         && d.by == request.auth.uid
         && d.byN is string && d.byN.size() <= 100 && isMyName(d.byN)
@@ -108,7 +111,18 @@ service cloud.firestore {
             && txtOk(d, false)
             && d.vp == vp
             && d.vs is int && d.vs >= 1 && d.vs <= 60
-            && d.vb is int && d.vb >= 1 && d.vb <= 31457280));
+            && d.vb is int && d.vb >= 1 && d.vb <= 31457280)
+          || (d.k == 'file' && d.keys().hasAll(['fp', 'fn', 'fs', 'fm']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'txt', 'fp', 'fn', 'fs', 'fm', 're', 'fw'])
+            && txtOk(d, false)
+            && d.fp == fp
+            && d.fn is string && d.fn.size() >= 1 && d.fn.size() <= 120
+            && d.fs is int && d.fs >= 1 && d.fs <= 26214400
+            && d.fm is string && d.fm.size() >= 1 && d.fm.size() <= 100)
+          || (d.k == 'aud' && d.keys().hasAll(['fp', 'fs', 'fm', 'dur']) && d.keys().hasOnly(['by', 'byN', 't', 'k', 'fp', 'fs', 'fm', 'dur', 're', 'fw'])
+            && d.fp == fp
+            && d.fs is int && d.fs >= 1 && d.fs <= 26214400
+            && d.fm is string && d.fm.size() <= 100 && d.fm.matches('^audio/[A-Za-z0-9.+-]{1,60}(;.*)?$')
+            && d.dur is int && d.dur >= 1 && d.dur <= 600));
     }
     // סימון (אימוג'י). הבדיקה שההודעה קיימת נשארת אצל הקורא.
     function xOk(d, xid) {
@@ -679,7 +693,7 @@ service cloud.firestore {
       allow update: if lpW() && (isManager() && grpOk(nw()) && nw().by == od().by && nw().t == od().t);
       allow delete: if lpW() && (isManager());
 
-      // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid', txt? (<= 2000) }.
+      // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid' | 'file' | 'aud', txt? (<= 2000) } (file/aud – ראו msgOk).
       match /m/{mid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
         function hasG() { return exists(/databases/$(database)/documents/grp/$(gid)); }
@@ -687,7 +701,7 @@ service cloud.firestore {
         function canRead() { return hasG() && (isManager() || isMem()); }
         // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
         allow read: if (canRead());
-        allow create: if lpW() && (hasG() && (isManager() || (isMem() && g().get('ao', false) != true)) && msgOk(nw(), 'grpv/' + gid + '/' + mid) && (nw().k == 't' || g().md == true));
+        allow create: if lpW() && (hasG() && (isManager() || (isMem() && g().get('ao', false) != true)) && msgOk(nw(), 'grpv/' + gid + '/' + mid, 'grpf/' + gid + '/' + mid) && (nw().k == 't' || g().md == true));
         allow update: if false;
         allow delete: if lpW() && (isManager());
 
@@ -2249,7 +2263,7 @@ service cloud.firestore {
         allow update: if feat('groups') && (bMgr() && grpOk(nw()) && nw().by == od().by && nw().t == od().t);
         allow delete: if feat('groups') && (bMgr());
 
-        // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid', txt? (<= 2000) }.
+        // הודעה: grp/{gid}/m/{mid} = { by (uid השולח), byN (השם שלו – כמו by בבקשות, isMyName), t (זמן אמת), k: 't' | 'img' | 'vid' | 'file' | 'aud', txt? (<= 2000) } (file/aud – ראו msgOk).
         match /m/{mid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
           function hasG() { return exists(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)); }
@@ -2257,7 +2271,7 @@ service cloud.firestore {
           function canRead() { return hasG() && (bMgr() || isMem()); }
           // re (תוספת 19.11 – תשובה להודעה): { mid, txt <= 120, byN, k } – ציטוט קצר של ההודעה שעונים עליה. fw: true = הודעה שהועברה.
           allow read: if feat('groups') && (canRead());
-          allow create: if feat('groups') && (hasG() && (bMgr() || (isMem() && g().get('ao', false) != true)) && msgOk(nw(), 'b/' + bizId + '/grpv/' + gid + '/' + mid) && (nw().k == 't' || g().md == true));
+          allow create: if feat('groups') && (hasG() && (bMgr() || (isMem() && g().get('ao', false) != true)) && msgOk(nw(), 'b/' + bizId + '/grpv/' + gid + '/' + mid, 'b/' + bizId + '/grpf/' + gid + '/' + mid) && (nw().k == 't' || g().md == true));
           allow update: if false;
           allow delete: if feat('groups') && (bMgr());
 

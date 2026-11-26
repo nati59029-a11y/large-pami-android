@@ -4,6 +4,7 @@
 //    וגם שחזור REST של הקריאות של groups.js (חבילה ב'): runQuery של העובד, POST ?documentId, PATCH עם updateMask.
 // 2. Storage: grpv/{gid}/{mid} ו-b/bt/grpv/{gid}/{mid} – צפייה, העלאה ומחיקה.
 // 3. השרת (grp-notify.js, onMsg ו-onDel – מחיקה מדורגת): נמענים, השתקה, ao, גוף ההתראה ו-last – מול אמולטור Firestore, עם שליחה מדומה (בלי אמולטור הפונקציות).
+// 4. שיתוף לקבוצה (26.11.2026): הודעות k 'file' / 'aud' (fp = grpf/{gid}/{mid}), Storage grpf/, last/התראה לסוגים החדשים, grpDel/grpMDel ל-grpf, ו-grpTr (תמלול, AI מדומה).
 // לכל תא: "מותר" ו"נחסם".
 
 const { describe, it, before, beforeEach } = require('node:test');
@@ -43,6 +44,10 @@ for (const E of ENVS) {
   const msg = (uid, o) => Object.assign({ by: uid, byN: uid, t: Date.now(), k: 't', txt: 'שלום' }, o);
   const vpOf = (gid, mid) => E.SP + 'grpv/' + gid + '/' + mid;
   const vid = (uid, gid, mid, o) => msg(uid, Object.assign({ k: 'vid', txt: '', vp: vpOf(gid, mid), vs: 30, vb: 1000 }, o));
+  // 26.11.2026 (שיתוף לקבוצה): קובץ והודעה קולית – fp = grpf/{gid}/{mid}
+  const fpOf = (gid, mid) => E.SP + 'grpf/' + gid + '/' + mid;
+  const fil = (uid, gid, mid, o) => msg(uid, Object.assign({ k: 'file', txt: '', fp: fpOf(gid, mid), fn: 'דוח.xlsx', fs: 2048, fm: 'application/vnd.ms-excel' }, o));
+  const aud = (uid, gid, mid, o) => { const m = msg(uid, { k: 'aud', fp: fpOf(gid, mid), fs: 4096, fm: 'audio/webm;codecs=opus', dur: 12 }); delete m.txt; return Object.assign(m, o); };
   const photo = (uid, o) => Object.assign({ img: IMG, t: Date.now(), uid }, o);
 
   // ---------------------------------------------------------------------------------
@@ -194,6 +199,53 @@ for (const E of ENVS) {
       const id2 = fresh('m');
       const noVs = vid(E.e1, 'g1', id2); delete noVs.vs;
       await assertFails(fs(E.e1).doc(R('grp/g1/m/' + id2)).set(noVs), 'סרטון בלי vs');
+    });
+
+    it('m: קובץ (file) והודעה קולית (aud) – רק כש-md == true; fp מדויק; שדות וגבולות; tr אסור ללקוח (26.11)', async () => {
+      const set = (uid, gid, mk, o) => { const id = fresh('f'); return fs(uid).doc(R('grp/' + gid + '/m/' + id)).set(mk(uid, gid, id, o)); };
+      await assertSucceeds(set(E.e1, 'g1', fil));
+      await assertSucceeds(set(E.e1, 'g1', fil, { txt: 'כיתוב', fw: true, re: { mid: 'm1', k: 'file' } }));
+      await assertSucceeds(set(E.mgr, 'g1', fil, { fn: 'א'.repeat(120), fs: 26214400, fm: 'x'.repeat(100) }));
+      await assertSucceeds(set(E.e1, 'g1', aud));
+      await assertSucceeds(set(E.e1, 'g1', aud, { dur: 600, fm: 'audio/mp4' }));
+      await assertSucceeds(set(E.e1, 'g1', aud, { dur: 1, fs: 26214400 }));
+      await assertSucceeds(set(E.mgr, 'gao', aud), 'ao – מנהל');
+      await assertFails(set(E.e1, 'gao', fil), 'ao – חבר');
+      await assertFails(set(E.e1, 'g0', fil), 'md=false – קובץ');
+      await assertFails(set(E.mgr, 'g0', aud), 'md=false – קולית, גם מנהל');
+      await assertFails(set(E.e2, 'g1', fil), 'לא חבר');
+      await assertFails(set(E.off, 'g1', aud), 'מושבת');
+      await assertFails(set(E.e1, 'g1', fil, { fp: fpOf('g1', 'other') }), 'fp של הודעה אחרת');
+      await assertFails(set(E.e1, 'g1', aud, { fp: fpOf('g1', 'other') }), 'fp של הודעה אחרת – קולית');
+      await assertFails(set(E.e1, 'g1', fil, { fp: (E.P ? '' : 'b/bt/') + 'grpf/g1/x' }), 'fp בעסק אחר');
+      { const id = fresh('f'); await assertFails(fs(E.e1).doc(R('grp/g1/m/' + id)).set(fil(E.e1, 'g1', id, { fp: vpOf('g1', id) })), 'fp בתחילית grpv'); }
+      await assertFails(set(E.e1, 'g1', fil, { fn: '' }));
+      await assertFails(set(E.e1, 'g1', fil, { fn: 'א'.repeat(121) }));
+      await assertFails(set(E.e1, 'g1', fil, { fs: 26214401 }), 'מעל 25MB');
+      await assertFails(set(E.e1, 'g1', fil, { fs: 0 }));
+      await assertFails(set(E.e1, 'g1', fil, { fs: '100' }));
+      await assertFails(set(E.e1, 'g1', fil, { fm: '' }));
+      await assertFails(set(E.e1, 'g1', fil, { fm: 'x'.repeat(101) }));
+      await assertFails(set(E.e1, 'g1', fil, { tr: 'מזויף' }), 'tr בקובץ');
+      await assertFails(set(E.e1, 'g1', fil, { vp: vpOf('g1', 'x') }), 'שדה של סרטון בקובץ');
+      { const id = fresh('f'); const x = fil(E.e1, 'g1', id); delete x.fn; await assertFails(fs(E.e1).doc(R('grp/g1/m/' + id)).set(x), 'קובץ בלי fn'); }
+      await assertFails(set(E.e1, 'g1', aud, { tr: 'מזויף' }), 'tr – רק השרת');
+      await assertFails(set(E.e1, 'g1', aud, { fm: 'video/mp4' }), 'קולית – רק audio/*');
+      await assertFails(set(E.e1, 'g1', aud, { fm: 'audio/' }));
+      await assertFails(set(E.e1, 'g1', aud, { dur: 0 }));
+      await assertFails(set(E.e1, 'g1', aud, { dur: 601 }));
+      await assertFails(set(E.e1, 'g1', aud, { dur: 12.5 }), 'dur שלם בלבד');
+      await assertFails(set(E.e1, 'g1', aud, { fs: 26214401 }));
+      await assertFails(set(E.e1, 'g1', aud, { txt: 'x' }), 'קולית בלי txt');
+      await assertFails(set(E.e1, 'g1', aud, { fn: 'a.webm' }), 'קולית בלי fn');
+      { const id = fresh('f'); const x = aud(E.e1, 'g1', id); delete x.dur; await assertFails(fs(E.e1).doc(R('grp/g1/m/' + id)).set(x), 'קולית בלי dur'); }
+      // אין עדכון – גם לא הוספת tr על ידי השולח
+      const id = fresh('f');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g1/m/' + id)).set(aud(E.e1, 'g1', id)));
+      await assertFails(fs(E.e1).doc(R('grp/g1/m/' + id)).update({ tr: 'מזויף' }));
+      // last / pin / re עם הסוגים החדשים (המנהל כותב את הקבוצה)
+      await assertSucceeds(fs(E.mgr).doc(R('grp/g1')).update({ last: { txt: '📎 דוח.xlsx', byN: 'x', t: 1, k: 'file' }, pin: { mid: id, t: 1, k: 'aud' } }));
+      await assertFails(fs(E.mgr).doc(R('grp/g1')).update({ pin: { mid: id, t: 1, k: 'doc' } }), 'k לא מוכר');
     });
 
     it('m: אין עדכון (גם לא לשולח ולא למנהל); מחיקה – מנהל בלבד', async () => {
@@ -413,6 +465,41 @@ for (const E of ENVS) {
       if (E.foreign) await assertFails(st(E.foreign).ref(SEEN).delete());
       await assertSucceeds(st(E.mgr).ref(SEEN).delete());
     });
+
+    it('grpf (קבצים והודעות קוליות, 26.11): כמו grpv – אבל כל סוג קובץ ועד 25MB; get, create, delete, list', async () => {
+      const F = (gid, mid) => E.SP + 'grpf/' + gid + '/' + mid;
+      const SEENF = F('g1', 'mf0');
+      const PDF = { contentType: 'application/pdf' };
+      await env.withSecurityRulesDisabled((c) => c.storage().ref(SEENF).put(new Uint8Array([1, 2, 3]), PDF));
+      await assertSucceeds(st(E.mgr).ref(SEENF).getMetadata());
+      await assertSucceeds(st(E.e1).ref(SEENF).getMetadata());
+      await assertFails(st(E.e2).ref(SEENF).getMetadata(), 'לא חבר');
+      await assertFails(st(E.off).ref(SEENF).getMetadata(), 'מושבת');
+      await assertFails(env.unauthenticatedContext().storage().ref(SEENF).getMetadata());
+      if (E.foreign) await assertFails(st(E.foreign).ref(SEENF).getMetadata(), 'עסק אחר');
+      await assertFails(st(E.e1).ref(E.SP + 'grpf/g1').listAll());
+      const f = (gid) => F(gid, fresh('f'));
+      await assertSucceeds(up(st(E.e1).ref(f('g1')), new Uint8Array([1]), PDF), 'PDF');
+      await assertSucceeds(up(st(E.e1).ref(f('g1')), new Uint8Array([1]), { contentType: 'audio/webm' }), 'הקלטה');
+      await assertSucceeds(up(st(E.e1).ref(f('g1')), new Uint8Array([1]), { contentType: 'application/zip' }), 'כל סוג');
+      await assertSucceeds(up(st(E.mgr).ref(f('g2')), new Uint8Array([1]), PDF), 'מנהל – גם בקבוצה שהוא לא ב-mem שלה');
+      await assertSucceeds(up(st(E.mgr).ref(f('gao')), new Uint8Array([1]), PDF), 'ao – מנהל');
+      await assertSucceeds(up(st(E.e1).ref(f('g1')), new Uint8Array(25 * 1024 * 1024), PDF), 'בדיוק 25MB');
+      await assertFails(up(st(E.e1).ref(f('g1')), new Uint8Array(25 * 1024 * 1024 + 1), PDF), 'מעל 25MB');
+      await assertFails(up(st(E.e1).ref(SEENF), new Uint8Array([3]), PDF), 'דריסה');
+      await assertFails(up(st(E.e2).ref(f('g1')), new Uint8Array([1]), PDF), 'לא חבר');
+      await assertFails(up(st(E.off).ref(f('g1')), new Uint8Array([1]), PDF), 'מושבת');
+      await assertFails(up(env.unauthenticatedContext().storage().ref(f('g1')), new Uint8Array([1]), PDF));
+      if (E.foreign) await assertFails(up(st(E.foreign).ref(f('g1')), new Uint8Array([1]), PDF), 'עסק אחר');
+      await assertFails(up(st(E.e1).ref(f('g0')), new Uint8Array([1]), PDF), 'md=false');
+      await assertFails(up(st(E.e1).ref(f('gao')), new Uint8Array([1]), PDF), 'ao – עובד');
+      await assertFails(up(st(E.e1).ref(f('gnone')), new Uint8Array([1]), PDF), 'קבוצה שלא קיימת');
+      if (E.P) await assertFails(up(st(E.e1).ref('grpf/g1/' + fresh('f')), new Uint8Array([1]), PDF), 'עובד עסק בנתיב legacy');
+      else await assertFails(up(st(E.e1).ref('b/bt/grpf/g1/' + fresh('f')), new Uint8Array([1]), PDF), 'עובד legacy בנתיב של עסק');
+      await assertFails(st(E.e1).ref(SEENF).delete(), 'השולח לא מוחק');
+      if (E.foreign) await assertFails(st(E.foreign).ref(SEENF).delete());
+      await assertSucceeds(st(E.mgr).ref(SEENF).delete());
+    });
   });
 }
 
@@ -485,6 +572,12 @@ describe('grpMsg / grpMsgB – התראה על הודעה חדשה (שרת, של
     assert.equal(r.calls[0].msg.body, 'עובד e2: 📷 תמונה');
     r = await run('gbz', 'g1', { by: 'e2', k: 'vid', txt: 'תראו' });
     assert.equal(r.calls[0].msg.body, 'עובד e2: 🎬 סרטון תראו');
+    r = await run('gbz', 'g1', { by: 'e2', k: 'file', txt: '', fn: 'דוח.pdf', fp: 'b/gbz/grpf/g1/x', fs: 10, fm: 'application/pdf' });
+    assert.equal(r.calls[0].msg.body, 'עובד e2: 📎 דוח.pdf');
+    r = await run('gbz', 'g1', { by: 'e2', k: 'file', txt: 'לעיון', fn: 'דוח.pdf', fs: 10, fm: 'application/pdf' });
+    assert.equal(r.calls[0].msg.body, 'עובד e2: 📎 דוח.pdf לעיון');
+    r = await run('gbz', 'g1', { by: 'e2', k: 'aud', txt: undefined, fs: 10, fm: 'audio/webm', dur: 3 });
+    assert.equal(r.calls[0].msg.body, 'עובד e2: 🎤 הודעה קולית');
     const long = G.msgOf({ k: 't', txt: 'א'.repeat(300) }, 'דנה', 'ק');
     assert.ok(long.body.length <= 'דנה: '.length + 100 && long.body.endsWith('…'));
     assert.equal(G.msgOf({ k: 't', txt: 'שורה\n\nשנייה' }, '', 'ק').body, 'שורה שנייה');
@@ -497,6 +590,10 @@ describe('grpMsg / grpMsgB – התראה על הודעה חדשה (שרת, של
     assert.equal((await get('b/gbz/grp/g1')).last.txt, 'חדשה');
     await run('gbz', 'g1', { by: 'e2', t: T0 + 9000, k: 'img', txt: '' });
     assert.deepEqual((await get('b/gbz/grp/g1')).last, { txt: '', byN: 'עובד e2', t: T0 + 9000, k: 'img' });
+    await run('gbz', 'g1', { by: 'e2', t: T0 + 9500, k: 'file', txt: 'כיתוב', fn: 'מחירון.xlsx', fs: 10, fm: 'application/x' });
+    assert.deepEqual((await get('b/gbz/grp/g1')).last, { txt: '📎 מחירון.xlsx', byN: 'עובד e2', t: T0 + 9500, k: 'file' });
+    await run('gbz', 'g1', { by: 'e2', t: T0 + 9600, k: 'aud', txt: undefined, fs: 10, fm: 'audio/webm', dur: 3 });
+    assert.deepEqual((await get('b/gbz/grp/g1')).last, { txt: '🎤 הודעה קולית', byN: 'עובד e2', t: T0 + 9600, k: 'aud' });
   });
 
   it('legacy בשורש (בלי בדיקת תוספת, כמו החוקים); עסק בלי groups, עסק מושהה, קבוצה שלא קיימת, קלט לא תקין – בלי שליחה', async () => {
@@ -569,6 +666,20 @@ describe('grpMsg / grpMsgB – התראה על הודעה חדשה (שרת, של
       assert.equal((await get(P + 'grp/g1')).pin, undefined);
       assert.equal((await get(P + 'grp/g1')).last, undefined);
     }
+    // קובץ / הודעה קולית (26.11): נמחק רק הקובץ של ההודעה (fp מדויק); last מחושב מחדש עם "📎 <שם>"
+    for (const P of ['b/gbz/', '']) {
+      const biz = P ? 'gbz' : null;
+      await prep((d) => d.doc(P + 'grp/g1/m/f1').set(M('e1', T0 + 4000, { k: 'file', txt: '', fn: 'a.pdf', fp: P + 'grpf/g1/f1', fs: 1, fm: 'application/pdf' })));
+      del.length = 0;
+      let r = await G.onMDel(biz, 'g1', 'a1', M('e1', T0 + 5000, { k: 'aud', fp: P + 'grpf/g1/a1', fs: 1, fm: 'audio/webm', dur: 2 }), { bucket });
+      assert.equal(r.file, 'deleted');
+      assert.equal((await get(P + 'grp/g1')).last.txt, '📎 a.pdf');
+      assert.equal((await get(P + 'grp/g1')).last.k, 'file');
+      r = await G.onMDel(biz, 'g1', 'f9', M('e1', 1, { k: 'file', fp: P + 'grpf/g1/f8' }), { bucket });
+      assert.equal(r.file, 'none', 'fp של הודעה אחרת – לא נמחק');
+      assert.deepEqual(del, [P + 'grpf/g1/a1']);
+      await prep((d) => d.doc(P + 'grp/g1/m/f1').delete());
+    }
     // הקבוצה כולה נמחקה (grpDel) – בלי חישוב last ובלי מחיקת קבצים (בלי לולאה)
     await prep((d) => d.doc('b/gbz/grp/g1').delete());
     del.length = 0;
@@ -594,7 +705,7 @@ describe('grpMsg / grpMsgB – התראה על הודעה חדשה (שרת, של
     const bucket = { deleteFiles: async (o) => { pre.push(o.prefix); } };
     assert.deepEqual(await G.onDel('gbz', 'g1', { bucket }), { ok: true, files: true });
     assert.deepEqual(await G.onDel(null, 'g1', { bucket }), { ok: true, files: true });
-    assert.deepEqual(pre, ['b/gbz/grpv/g1/', 'grpv/g1/']);
+    assert.deepEqual(pre, ['b/gbz/grpv/g1/', 'b/gbz/grpf/g1/', 'grpv/g1/', 'grpf/g1/']);
     for (const p of ['b/gbz/grp/g1/m/a', 'b/gbz/grp/g1/m/a/p/1', 'b/gbz/grp/g1/r/e1', 'grp/g1/m/a', 'grp/g1/m/a/p/1', 'grp/g1/r/e1']) assert.equal(await get(p), null, p);
     assert.ok(await get('b/gbz/grp/g9/m/a'), 'קבוצה אחרת לא נמחקה');
     assert.ok(await get('grp/g9/m/a'));
@@ -604,6 +715,116 @@ describe('grpMsg / grpMsgB – התראה על הודעה חדשה (שרת, של
     assert.equal((await G.onDel('gbz', 'gao', { bucket })).r, 'exists');
     assert.ok(await get('b/gbz/grp/gao/r/e3'));
     assert.equal((await G.onDel('gbz', '../x', { bucket })).ok, false);
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// grpTr – תמלול הודעה קולית (26.11.2026). הליבה נקראת ישירות מול Firestore של האמולטור (כמו tkNudge ב-50-functions),
+// עם Storage ו-AI מדומים (אין Gemini אמיתי). requireStaff אמיתי: מחובר, עובד פעיל / מנהל, התוספת groups.
+describe('grpTr – תמלול הודעה קולית (שרת, AI מדומה)', { skip: !process.env.FIRESTORE_EMULATOR_HOST && 'אמולטור Firestore לא רץ' }, () => {
+  let env, TR, T, RS;
+  const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
+  async function get(p) { let v = null; await prep(async (d) => { const s = await d.doc(p).get(); v = s.exists ? s.data() : null; }); return v; }
+  const AIC = [];
+  let files = {};
+  const bucket = { file: (p) => ({
+    getMetadata: async () => { if (!files[p]) { const e = new Error('nf'); e.code = 404; throw e; } return [{ size: String(files[p].size), contentType: files[p].ct }]; },
+    download: async () => [Buffer.alloc(Math.min(files[p].size, 16), 1)],
+  }) };
+  const ai = async (o) => { AIC.push(o); return { text: '  תמלול לדוגמה  ' }; };
+  const call = (uid, data, o) => T.runInBiz({}, () => TR.tr({ auth: { uid }, data: Object.assign({}, data) }, Object.assign({ bucket, ai }, o)));
+  const err = async (p) => { try { await p; return 'OK'; } catch (e) { return (e.details && e.details.reason) || e.code || String(e); } };
+  const A = (by, P, mid, o) => Object.assign({ by, byN: by, t: Date.now(), k: 'aud', fp: P + 'grpf/g1/' + mid, fs: 100, fm: 'audio/webm;codecs=opus', dur: 5 }, o);
+
+  before(async () => {
+    env = await H.getEnv();
+    require('../functions/index.js');
+    TR = require('../functions/grp-tr.js')._core; T = require('../functions/lib/tenant.js'); RS = require('../functions/lib/roles.js');
+  });
+  beforeEach(async () => {
+    await env.clearFirestore();
+    AIC.length = 0;
+    files = {};
+    await prep(async (d) => {
+      const b = d.batch();
+      // legacy בשורש
+      b.set(d.doc('admins/m1'), { email: 'm1@x.invalid' });
+      b.set(d.doc('staff/e1'), { name: 'דנה', active: true });
+      b.set(d.doc('staff/e2'), { name: 'יוסי', active: true });
+      b.set(d.doc('staff/eoff'), { name: 'מושבת', active: false });
+      b.set(d.doc('grp/g1'), { name: 'כולם', mem: ['e1', 'e2', 'eoff'], ao: false, md: true, by: 'm1', t: 1 });
+      b.set(d.doc('grp/g1/m/a1'), A('e1', '', 'a1'));
+      b.set(d.doc('grp/g1/m/a2'), A('eoff', '', 'a2'));
+      b.set(d.doc('grp/g1/m/f1'), A('e1', '', 'f1', { k: 'file', fn: 'x.pdf', fm: 'application/pdf' }));
+      b.set(d.doc('grp/g1/m/a3'), A('e1', '', 'a3', { fp: 'grpf/g1/other' }));
+      b.set(d.doc('grp/g1/m/a4'), A('e1', '', 'a4', { tr: 'קיים' }));
+      b.set(d.doc('grp/g1/m/a5'), A('e1', '', 'a5'));
+      // עסק עם התוספת (gbz) ובלי (gnz)
+      for (const [biz, on] of [['gbz', true], ['gnz', false]]) {
+        b.set(d.doc('b/' + biz), { name: biz, status: 'active', dataRoot: 'b', features: { tasks: true, groups: on } });
+        const u = biz + '_e1';
+        b.set(d.doc('b/' + biz + '/staff/' + u), { name: u, active: true });
+        b.set(d.doc('users/' + u), { bizId: biz, role: 'worker', active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
+        b.set(d.doc('b/' + biz + '/grp/g1'), { name: 'ק', mem: [u], ao: false, md: true, by: 'x', t: 1 });
+        b.set(d.doc('b/' + biz + '/grp/g1/m/a1'), A(u, 'b/' + biz + '/', 'a1'));
+      }
+      await b.commit();
+    });
+    for (const p of ['grpf/g1/a1', 'grpf/g1/a2', 'grpf/g1/f1', 'grpf/g1/other', 'b/gbz/grpf/g1/a1', 'b/gnz/grpf/g1/a1']) files[p] = { size: 100, ct: 'audio/webm' };
+  });
+
+  it('השולח: תמלול נכתב להודעה (tr), סוג ההקלטה בלי פרמטרים; קריאה שנייה – בלי AI', async () => {
+    assert.deepEqual(await call('e1', { gid: 'g1', mid: 'a1' }), { tr: 'תמלול לדוגמה' });
+    assert.equal((await get('grp/g1/m/a1')).tr, 'תמלול לדוגמה');
+    assert.equal(AIC.length, 1);
+    assert.equal(AIC[0].mime, 'audio/webm');
+    assert.ok(AIC[0].b64.length > 0);
+    assert.deepEqual(await call('e1', { gid: 'g1', mid: 'a1' }), { tr: 'תמלול לדוגמה' });
+    assert.deepEqual(await call('e1', { gid: 'g1', mid: 'a4' }), { tr: 'קיים' }, 'כבר יש tr – מוחזר כמו שהוא');
+    assert.equal(AIC.length, 1, 'בלי פנייה נוספת ל-AI');
+  });
+
+  it('עסק עם התוספת groups – עובד; עסק בלי התוספת – feature-off; bizId של עסק אחר – foreign-biz', async () => {
+    assert.deepEqual(await call('gbz_e1', { gid: 'g1', mid: 'a1', bizId: 'gbz' }), { tr: 'תמלול לדוגמה' });
+    assert.equal((await get('b/gbz/grp/g1/m/a1')).tr, 'תמלול לדוגמה');
+    assert.equal(await err(call('gnz_e1', { gid: 'g1', mid: 'a1' })), 'feature-off');
+    assert.equal(await err(call('gbz_e1', { gid: 'g1', mid: 'a1', bizId: 'gnz' })), 'foreign-biz');
+    assert.equal((await get('b/gnz/grp/g1/m/a1')).tr, undefined);
+  });
+
+  it('נדחה: לא מחובר, לא השולח (גם מנהל), מושבת, לא קולית, fp של הודעה אחרת, הודעה/קובץ חסרים, מזהה לא תקין, קובץ גדול', async () => {
+    assert.equal(await err(call(undefined, { gid: 'g1', mid: 'a1' })), 'not-signed-in');
+    assert.equal(await err(call('e2', { gid: 'g1', mid: 'a1' })), 'not-sender');
+    assert.equal(await err(call('m1', { gid: 'g1', mid: 'a1' })), 'not-sender', 'גם מנהל – רק השולח');
+    assert.equal(await err(call('eoff', { gid: 'g1', mid: 'a2' })), 'staff-disabled');
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'f1' })), 'not-audio');
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'a3' })), 'not-audio');
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'nope' })), 'no-msg');
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'a5' })), 'no-file');
+    assert.equal(await err(call('e1', { gid: '../x', mid: 'a1' })), 'bad-id');
+    assert.equal(await err(call('e1', { gid: 'g1' })), 'bad-id');
+    files['grpf/g1/a1'] = { size: TR.FILE_MAX + 1, ct: 'audio/webm' };
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'a1' })), 'too-big');
+    files['grpf/g1/a1'] = { size: 100, ct: 'application/octet-stream' };
+    await prep((d) => d.doc('grp/g1/m/a1').update({ fm: 'video/mp4' }));
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'a1' })), 'not-audio', 'לא audio לא ב-Storage ולא בהודעה');
+    assert.equal(AIC.length, 0);
+    assert.equal((await get('grp/g1/m/a1')).tr, undefined);
+  });
+
+  it('מגבלת קצב: ' + 30 + ' בשעה לכל משתמש; אחרי שעה – שוב מותר. כישלון AI – בלי tr', async () => {
+    const t = Date.now();
+    await prep((d) => d.doc('fn_rate/grpTr_e1').set({ t: Array.from({ length: TR.RL_MAX }, (_, i) => t - i * 1000) }));
+    assert.equal(await err(call('e1', { gid: 'g1', mid: 'a1' }, { now: t + 1000 })), 'rate-limit');
+    assert.deepEqual(await call('e1', { gid: 'g1', mid: 'a1' }, { now: t + 3600e3 + 60e3 }), { tr: 'תמלול לדוגמה' });
+    await prep((d) => d.doc('fn_rate/grpTr_e2').delete());
+    await prep((d) => d.doc('grp/g1/m/a6').set(A('e2', '', 'a6')));
+    files['grpf/g1/a6'] = { size: 100, ct: 'audio/mp4' };
+    const boom = async () => { throw new Error('ai down'); };
+    assert.notEqual(await err(call('e2', { gid: 'g1', mid: 'a6' }, { ai: boom })), 'OK');
+    assert.equal((await get('grp/g1/m/a6')).tr, undefined, 'ההודעה הקולית נשארת בלי תמלול');
+    assert.deepEqual(TR.mimeOf({ contentType: 'audio/mp4' }, 'audio/webm'), 'audio/mp4');
+    assert.deepEqual(TR.mimeOf({ contentType: 'application/octet-stream' }, 'audio/AAC; x=1'), 'audio/aac');
   });
 });
 
