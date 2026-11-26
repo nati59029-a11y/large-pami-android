@@ -80,7 +80,7 @@ const sheetHtml = (page) => page.evaluate(() => { const S = () => { openAdd(); r
   await A.page.evaluate(() => go('posCfgSec', 'ret')); await sleep(400);
   dis = await A.page.evaluate(() => ({ ret: document.querySelector('[name=pa_retDays]').disabled }));
   await A.page.fill('[name=pa_retDays]', '30');
-  await A.page.click('[data-f=posCfgSecF] button'); await sleep(800);
+  await A.page.click('[data-f=posCfgSecF] button:has-text("שמירה")'); await sleep(800); // במדור יש גם כפתורי "מחק" ו"הוסף" (טפסים רגילים, d7b5805) – לוחצים על "שמירה"
   const set = A.calls.filter((c) => c.fn === 'posCfgSet');
   check('3ג מדור החזרות: retDays פתוח למנהל, ושמירה שולחת רק את מה שהשתנה (posCfgSet, set.retDays=30)', !dis.ret && set.length === 1 && JSON.stringify(set[0].b) === JSON.stringify({ set: { retDays: 30 } }), set);
   await A.page.evaluate(() => go('posAdm')); await sleep(600);

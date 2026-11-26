@@ -109,7 +109,8 @@ const tag=n=>n?`<span class="tag t1">${n}</span>`:'';
 function tilePaint(){document.querySelectorAll('[data-hsn]').forEach(e=>{e.innerHTML=tag(tileN())})}
 /* k='go' – משבצת במסך הבית של העובד; אחרת – משבצת במסך ה-+ (סוגרת את החלון) */
 window.hsTile=k=>{if(!on())return '';chk();if(!HS.busy&&Date.now()-HS.at>60000)hsLoad();
- return `<button class="tile" data-a="${k==='go'?'go':'addGo'}" data-v="hs" style="font-size:1rem">${ico('doc')}חוסרים<span data-hsn>${tag(tileN())}</span></button>`};
+ return k==='go'?`<button class="tile" data-a="go" data-v="hs" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">${ico('doc')}חוסרים<span data-hsn>${tag(tileN())}</span></button>` // מסך הבית: כתום כמו שאר המשבצות שם
+ :`<button class="tile" data-a="addGo" data-v="hs" style="font-size:1rem">${ico('doc')}חוסרים<span data-hsn>${tag(tileN())}</span></button>`};
 
 /* ---------- רשימה ---------- */
 const WHYT=w=>C.WHY_L[w]||'';

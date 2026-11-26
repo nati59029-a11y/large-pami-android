@@ -428,6 +428,8 @@ cp android-plugin/LpWorkPlugin.java $J/LpWorkPlugin.java
 for f in LpPosEscPos LpPosTransport LpPosBtUsb LpPosRender LpPosDisplay LpPosPlugin; do cp android-plugin/$f.java $J/$f.java; done
 # Notifications from the phone for the secretary (22.11.2026): listener service + plugin (www/sec-notif.js)
 for f in LpNotifListen LpNotifPlugin; do cp android-plugin/$f.java $J/$f.java; done
+# Contacts in group chats (25.11.2026): pick a contact / open "new contact" (www/groups.js), no permission
+cp android-plugin/LpContactPlugin.java $J/LpContactPlugin.java
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -456,6 +458,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LpPosPlugin.class);
         // Notifications from the phone for the secretary: allow list, queue, "notification access" settings (www/sec-notif.js)
         registerPlugin(LpNotifPlugin.class);
+        // Group chats: pick a contact to send / save a received contact (www/groups.js)
+        registerPlugin(LpContactPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them

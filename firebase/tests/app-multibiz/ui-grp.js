@@ -107,7 +107,7 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   await shot(wp, shots, 'r3-ב-צ׳אט-לא-נקרא');
   // 23.11 (וי): הרשימה כותבת קודם d,u,n ("התקבל"); הכניסה כותבת t (ועמו d,u,n) – מחפשים את הכתיבה עם t
   const rd = LOG.find((l) => l.m === 'PATCH' && /\/grp\/g1\/r\/w1/.test(l.R) && l.body.fields.t);
-  check('4 כניסה עדכנה r/w1.t להודעה האחרונה (בלי לגעת ב-mu)', rd && rd.body.fields.t.integerValue === String(T0 - 30 * MIN) && !rd.body.fields.mu && /updateMask.fieldPaths=t(&|$)/.test(rd.q) && !/fieldPaths=mu/.test(rd.q), rd && rd.body);
+  check('4 כניסה עדכנה r/w1: t להודעה האחרונה + d,u,n (נקרא/התקבל) בבקשה אחת, בלי לגעת ב-mu', rd && rd.body.fields.t.integerValue === String(T0 - 30 * MIN) && !!rd.body.fields.d && !!rd.body.fields.u && !!rd.body.fields.n && !rd.body.fields.mu && /updateMask.fieldPaths=t(&|$)/.test(rd.q) && !/fieldPaths=mu/.test(rd.q), rd && rd.body);
   await wp.click('[data-a=grVid]'); await waitFor(() => wp.evaluate(() => !!document.querySelector('#viewer video')));
   check('4א לחיצה על סרטון: <video> מתוך Storage (הורדה עם הרשאה)', await wp.evaluate(() => !!document.querySelector('#viewer video[src^=blob]')) && LOG.some((l) => l.st && l.m === 'GET' && /grpv/.test(l.url)));
   await wp.evaluate(() => ACT.grVidX());
@@ -119,25 +119,24 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   const P = sent(/\/grp\/g1\/m$/)[0], f = P && P.body.fields;
   check('5 שליחה: by = uid של העובד, byN, k=t, txt, t; בלי שדות אחרים', f && f.by.stringValue === 'w1' && f.byN.stringValue === 'w1' && f.k.stringValue === 't' && f.txt.stringValue === 'תודה רבה' && +f.t.integerValue > 0 && Object.keys(f).sort().join() === 'by,byN,k,t,txt', f && Object.keys(f));
   await sleep(300); check('5א ההודעה מופיעה כבועה שלי והשורה נוקתה', await wp.evaluate(() => document.querySelectorAll('.gr-b.me').length === 2 && document.getElementById('grtx').value === ''));
-  // תמונה
-  LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'a.png', mimeType: 'image/png', buffer: Buffer.from(PNG.split(',')[1], 'base64') });
+  // תמונה (8d29a58: בחירת הקובץ עברה לחלון "צירוף" שנפתח מכפתור 📎)
+  LOG.length = 0; await wp.click('[data-a=grAtt]'); await sleep(200); await wp.setInputFiles('#dlg input[data-c=grFile]', { name: 'a.png', mimeType: 'image/png', buffer: Buffer.from(PNG.split(',')[1], 'base64') });
   await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && /\/m\/[^/]+\/p\/1$/.test(l.R)), 6000);
   const pm = sent(/\/grp\/g1\/m$/)[0], pp = LOG.find((l) => l.m === 'PATCH' && /\/p\/1$/.test(l.R));
   check('5ב שליחת תמונה: הודעה k=img ואז p/1 עם img, t, uid', pm && pm.body.fields.k.stringValue === 'img' && pp && /^data:image\//.test(pp.body.fields.img.stringValue) && pp.body.fields.uid.stringValue === 'w1' && pp.R.includes('/m/' + (Object.keys(DB.m.g1).find((k) => DB.m.g1[k].k.stringValue === 'img' && k !== 'm5')) + '/'), pp && Object.keys(pp.body.fields));
   // סרטון גדול
   await wp.evaluate(() => { window.__T = []; new MutationObserver((l) => l.forEach((r) => r.addedNodes.forEach((n) => n.classList && n.classList.contains('toast') && window.__T.push(n.innerText)))).observe(document.body, { childList: true }); });
-  LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'big.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(31 * 1024 * 1024) }); await waitFor(() => wp.evaluate(() => window.__T.some((x) => /30MB/.test(x))), 5000);
+  LOG.length = 0; await wp.click('[data-a=grAtt]'); await sleep(200); await wp.setInputFiles('#dlg input[data-c=grFile]', { name: 'big.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(31 * 1024 * 1024) }); await waitFor(() => wp.evaluate(() => window.__T.some((x) => /30MB/.test(x))), 5000);
   check('5ג סרטון מעל 30MB: הודעה ברורה, בלי העלאה ובלי הודעה', (await wp.evaluate(() => window.__T)).some((x) => /30MB/.test(x)) && !LOG.some((l) => l.st || (l.m === 'POST' && !/:runQuery$/.test(l.R))), await wp.evaluate(() => window.__T));
-  LOG.length = 0; await wp.setInputFiles('input[data-c=grFile]', { name: 'x.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(100) }); await sleep(500);
+  LOG.length = 0; await wp.click('[data-a=grAtt]'); await sleep(200); await wp.setInputFiles('#dlg input[data-c=grFile]', { name: 'x.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(100) }); await sleep(500);
   // 25.11.2026: נכשל לסירוגין ב-CI בלבד. "שליחה" = העלאה ל-Storage או POST (לא הורדה של תמונה/סרטון קיימים שמוצגים שוב); ה-toast נבדק גם מהרישום (__T); פירוט בכשל
   const s5d = LOG.filter((l) => (l.st && l.m !== 'GET') || (l.m === 'POST' && !/:runQuery$/.test(l.R))).map((l) => l.m + ' ' + (l.R || l.url));
   check('5ד פורמט לא נתמך: הודעה ובלי שליחה', /פורמט/.test((await wp.evaluate(() => window.__T.join('|'))) + '|' + (await toasts(wp))) && !s5d.length, { sent: s5d, all: LOG.map((l) => l.m + ' ' + (l.R || l.url)) });
-  // השתקה
-  // 23.11: ההשתקה בוטלה (mu רק false) – אין מתג השתקה במסך
-  check('6 השתקה בוטלה: אין מתג השתקה בקבוצה', await wp.evaluate(() => !document.querySelector('input[data-c=grMute]')));
+  // השתקה בוטלה (docs/tasks/2026-11-23-read-presence-actlog.md): אין בקרת השתקה, והאפליקציה לא כותבת mu=true לעולם
+  check('6 השתקה בוטלה: אין תיבת "השתק התראות" בקבוצה, ואף כתיבה ל-r/w1 לא מגדירה mu=true', await wp.evaluate(() => !document.querySelector('input[data-c=grMute]') && !/השתק התראות/.test(document.getElementById('main').innerText)) && !LOG.some((l) => l.m === 'PATCH' && /\/r\/w1$/.test(l.R) && l.body && l.body.fields.mu && l.body.fields.mu.booleanValue === true) && !(DB.r['g1/w1'].mu && DB.r['g1/w1'].mu.booleanValue === true));
   check('6א לעובד אין כפתור הגדרות/הצמדה בקבוצה (תפריט ⋯ לכל הודעה – לכולם מ-#150, מחיקה/הצמדה רק למנהל)', await wp.evaluate(() => !document.querySelector('[data-a=grPin]') && !document.querySelector('[data-a=grSet]')));
   await wp.evaluate(() => goBack()); await sleep(400); await wp.click('.gr-row[data-id=g2]'); await sleep(900);
-  const ao = await wp.evaluate(() => ({ lock: (document.querySelector('.gr-lock') || {}).innerText || '', ta: !!document.getElementById('grtx'), clip: !!document.querySelector('input[data-c=grFile]'), mute: !!document.querySelector('input[data-c=grMute]') }));
+  const ao = await wp.evaluate(() => ({ lock: (document.querySelector('.gr-lock') || {}).innerText || '', ta: !!document.getElementById('grtx'), clip: !!document.querySelector('#main [data-a=grAtt]'), /* 8d29a58: כפתור 📎 במקום שדה קובץ במסך (תוכן חלון ישן נשאר ב-#dlg גם כשהוא סגור) */ mute: !!document.querySelector('input[data-c=grMute]') }));
   check('7 קבוצה עם ao לעובד: פס "רק המנהל יכול לשלוח", בלי שורת כתיבה, בלי השתקה', /רק המנהל יכול לשלוח הודעות בקבוצה הזו/.test(ao.lock) && !ao.ta && !ao.clip && !ao.mute, ao);
   await shot(wp, shots, 'r3-ב-רק-מנהל-שולח');
   await wp.evaluate(() => goBack()); await sleep(400); await wp.click('.gr-row[data-id=g4]'); await sleep(900);

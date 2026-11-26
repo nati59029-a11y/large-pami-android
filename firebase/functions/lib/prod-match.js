@@ -144,8 +144,15 @@ function search(idx, text, opt) {
       }
     }
   }
-  const out = [...R.values()].map((r) => { const x = idx.P[r.i]; return { id: x.id, p: x.p, s: Math.round(r.s * 1000) / 1000, k: r.k, n: r.n, b: bt.has(x.id) }; });
-  out.sort((a, b) => ((b.s >= W.code) - (a.s >= W.code)) || (b.b - a.b) || (b.s - a.s) || String(a.p.name).localeCompare(String(b.p.name), 'he'));
+  // o.pri(p) (רשות): מספר, גבוה = קודם. נקרא פעם אחת לכל תוצאה; שגיאה או ערך לא מספרי = 0
+  const pf = typeof o.pri === 'function' ? o.pri : null;
+  const out = [...R.values()].map((r) => {
+    const x = idx.P[r.i]; let pr = 0;
+    if (pf) { try { const v = pf(x.p); pr = typeof v === 'number' && isFinite(v) ? v : 0; } catch (e) { pr = 0; } }
+    return { id: x.id, p: x.p, s: Math.round(r.s * 1000) / 1000, k: r.k, n: r.n, b: bt.has(x.id), pr };
+  });
+  out.sort((a, b) => ((b.s >= W.code) - (a.s >= W.code)) || (b.pr - a.pr) || (b.b - a.b) || (b.s - a.s) || String(a.p.name).localeCompare(String(b.p.name), 'he'));
+  if (pf) for (const r of out) delete r.pr;
   return out.slice(0, limit);
 }
 // ---------- כמות בשורה ----------

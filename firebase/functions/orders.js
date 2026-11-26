@@ -958,7 +958,8 @@ function freeCheck(raw, hit, old) {
 }
 // לכל שורת מוצר: מחיר ברירת המחדל (שורה שנשלחה בלי מחיר מקבלת אותו), בדיקת מינימום לעובד, והערות "מחיר שונה מברירת המחדל" ליומן (הבהרה 29).
 // keep = "pid|מחיר" של שורות שלא השתנו בעריכה – לא נבדקות שוב (כדי לא לחסום הזמנה קיימת כשהעלות עלתה).
-function priceRun(w, items, raw, pc, pd, br, costs, keep) {
+// floorOk (24.11.2026, הצעת מחיר) = true רק מקוד השרת (qtConvert, אחרי אישור מנהל להצעה) – בלי בדיקת מינימום. ברירת מחדל כבוי; לעולם לא מקלט.
+function priceRun(w, items, raw, pc, pd, br, costs, keep, floorOk) {
   const notes = [];
   items.forEach((it, i) => {
     if (!it.pid) return;
@@ -967,7 +968,7 @@ function priceRun(w, items, raw, pc, pd, br, costs, keep) {
     const def = AC.defPrice({ cp: cpOf(pc, it.pid), wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
     if (raw && raw[i] && raw[i].price == null) it.price = def;
     if (AC.ag(it.price) !== AC.ag(def)) notes.push(`${it.n}: ₪${def} → ₪${it.price}`);
-    if (w.role === 'manager' || (keep && keep.has(it.pid + '|' + it.price + '|' + it.qty))) return;
+    if (w.role === 'manager' || floorOk === true || (keep && keep.has(it.pid + '|' + it.price + '|' + it.qty))) return;
     // סבב 2 (ליקויים 2, 3): מחיר קבוע לא מכשיר את עצמו (בודקים מול base); לקוח עסקי – לא מתחת לעלות גם בלי מגבלה
     // סבב 3 (החלטה 8): mcp = מחיר קבוע שמנהל שמר – מאושר לעובד
     const r = AC.staffOk({ price: it.price, base, mcp: mcpOf(pc, it.pid), cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.vm === 'ex', p.cat, p.sub), on: !!pc.cfg, biz: pc.vm === 'ex' });
@@ -1039,6 +1040,10 @@ async function createOrder(request) {
 // 15.11.2026 (המזכירה, שלב ג/6): גוף הטרנזקציה של createOrder – בלי בדיקת הרשאות ובלי ניקוי קלט (הקורא אחראי לשניהם).
 // w = היוצר: { uid, name, branches, activeBr, mine, biz? } (by/byName בהזמנה). p = { reqId, br, cust, raw, note, custId, input, src?, sec? }.
 // לא נחשף כ-callable/HTTP – רק דרך _core (כמו saveCore ב-customers.js). createOrder עצמה לא השתנתה: src:'staff', בלי sec.
+// p.floorOk (24.11.2026, רשות) – רק qtConvert שולח true (הצעה שמנהל אישר): המחירים השמורים לא נבדקים מול המינימום של היום.
+//   createOrder והמזכירה לא שולחים אותו (כבוי). רק הערך הבוליאני true מפעיל.
+// p.qt (24.11.2026, רשות) – רק qtConvert שולח: מזהה ההצעה נשמר בהזמנה החדשה (ord.qt), כדי שההמרה תוודא שההזמנה o{cvReq} באמת נוצרה ממנה.
+//   לא מקלט (createOrder לא מקבל qt – onlyKeys), ולא נכתב בהזמנה קיימת (dup).
 async function createCore(db, w, p) {
   const { reqId, br, cust, raw, note, custId, input, disc } = p;
   const ref = db.doc('ord/o' + reqId);
@@ -1061,7 +1066,7 @@ async function createCore(db, w, p) {
     const pd = plain(prods);
     const { items } = resolveItems(w, br, raw, pd, src);
     freeCheck(raw, pc.vm === 'ex' ? fh : null, null);
-    const pnotes = priceRun(w, items, raw, pc, pd, br, costs, null);
+    const pnotes = priceRun(w, items, raw, pc, pd, br, costs, null, p.floorOk === true);
     snapCosts(items, costs);
     cartons(items, pd, await isWs(tx, db, custId), null, cell);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
@@ -1075,6 +1080,7 @@ async function createCore(db, w, p) {
     const doc = Object.assign({ no, src: p.src || 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now }, { vm: pc.vm, vr: pc.vat }, sums(total, pc.vm, pc.vat, disc));
     if (disc) doc.disc = disc;
     if (p.sec) doc.sec = p.sec;
+    if (typeof p.qt === 'string' && p.qt) doc.qt = p.qt;
     if (note) doc.note = note;
     if (custId) doc.custId = custId;
     if (cell && cell.n + Object.keys(cell).length > 2) doc.cell = cell;
@@ -2232,4 +2238,6 @@ const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכנ
 const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
 const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, priceRef, snapAll, ixDrop, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, priceRef, snapAll, ixDrop, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin,
+  // 24.11.2026 (הצעת מחיר, quotes.js): ייצוא בלבד – אותו תמחור ואותו ניקוי כמו createCore, בלי שינוי התנהגות
+  priceRun, discOk, cartons, loadCosts, snapCosts, plain, freeHits, freeCheck, sums } });

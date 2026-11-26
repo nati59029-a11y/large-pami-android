@@ -126,6 +126,29 @@ describe('ar-pdf: קובץ PDF – חילוץ טקסט מהקובץ עצמו', (
     assert.ok(has(pg2, '7 רפסמ הלבק סמ תינובשחל יוכיז'), pg2.join('\n'));
     assert.ok(!extract(await P.render(base))[0].some((l) => l.includes(rev('זיכוי לחשבונית'))));
   });
+  it('הצעת מחיר (24.11.2026): כותרת "הצעת מחיר", מס׳ רץ, "בתוקף עד" עם התאריך, לתשלום – הסכום שחושב ביד', async () => {
+    assert.equal(P.TITLES.qt, 'הצעת מחיר');
+    const buf = await P.render({ t: 'qt', no: 17, d: '2026-11-24', vu: '2026-12-08', biz: BIZ, cust: { name: 'מסעדת הים' }, vm: 'ex', rate: 18, lines: [{ n: 'כוס', q: 6, p: 6.25 }, { n: 'מגש עמוק', q: 1, p: 89.9 }] });
+    const [pg] = extract(buf);
+    assert.ok(has(pg, rev('הצעת מחיר')), pg.join('\n'));
+    assert.ok(!has(pg, rev('אישור הזמנה')), 'לא נשארה כותרת אישור הזמנה');
+    assert.ok(has(pg, '17 ׳סמ'), 'מס׳ 17');
+    assert.ok(has(pg, '08/12/2026 :דע ףקותב'), 'בתוקף עד: 08/12/2026 – התאריך לא הפוך');
+    assert.ok(has(pg, '24/11/2026 :ךיראת'));
+    assert.ok(!has(pg, rev('יום')), 'לא מוצג מספר ימים – רק תאריך');
+    // 37.50 + 89.90 = 127.40; מע״מ 18% = 22.932 → 22.93; לתשלום 150.33
+    assert.ok(pg.some((l) => l.startsWith('₪150.33') && l.endsWith(P.visual('לתשלום'))), 'לתשלום 150.33');
+    assert.equal(P.calc({ vm: 'ex', rate: 18, lines: [{ n: 'כוס', q: 6, p: 6.25 }, { n: 'מגש עמוק', q: 1, p: 89.9 }] }).gross, 15033);
+  });
+  it('בלי vu (או vu לא תקין) – אין שורת "בתוקף עד"; במסמך אחר (אישור הזמנה) – אין שינוי', async () => {
+    for (const vu of [undefined, '', '8.12.2026', 'בתוקף']) {
+      const pg = extract(await P.render({ t: 'qt', no: 3, d: '2026-11-24', vu, biz: BIZ, cust: { name: 'א' }, vm: 'inc', rate: 18, lines: [{ n: 'x', q: 1, p: 1 }] }))[0];
+      assert.ok(!has(pg, rev('בתוקף עד')), String(vu));
+      assert.ok(has(pg, rev('הצעת מחיר')));
+    }
+    const oc = extract(await P.render({ t: 'oc', no: 3, d: '2026-11-24', biz: BIZ, cust: { name: 'א' }, vm: 'inc', rate: 18, lines: [{ n: 'x', q: 1, p: 1 }] }))[0];
+    assert.ok(!has(oc, rev('בתוקף עד')) && has(oc, rev('אישור הזמנה')));
+  });
   it('טבלה כללית (קבלה / כרטסת) עם סיכומים', async () => {
     const pg = extract(await P.render({ t: 'rc', no: 3, d: '2026-11-14', biz: BIZ, cust: { name: 'א' }, table: { head: ['תאריך', 'אמצעי', 'סכום'], rows: [['14/11/2026', 'העברה', 500], ['14/11/2026', 'צ׳ק 1234', 734.5]], num: [2] }, sums: [['סה״כ שולם', 1234.5]] }))[0];
     assert.ok(has(pg, '₪734.50') && has(pg, '1234 ק׳צ'));
