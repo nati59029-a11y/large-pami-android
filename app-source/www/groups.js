@@ -118,8 +118,9 @@ body.grc .bar,body.grc .wbar{display:none!important}body.grc main{padding-bottom
 .gr-pr{display:flex;gap:8px;overflow-x:auto;margin-bottom:8px;padding-bottom:2px;-webkit-overflow-scrolling:touch}.gr-pr:empty{display:none}
 .gr-pc{flex:none;display:inline-flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:3px 10px;font-size:.78rem;white-space:nowrap;color:var(--ink)}.gr-pc small{color:var(--mut);font-size:.7rem}
 .gr-pc i{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none}.gr-pc i.on{background:#2ecc71}
-.gr-emp{position:fixed;z-index:60;display:flex;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.45)}
-.gr-emp button{min-height:0;min-width:0;width:38px;height:38px;font-size:1.4rem;background:none;border:0;padding:0;cursor:pointer;border-radius:50%}
+.gr-emp{position:fixed;z-index:60;display:flex;flex-direction:column;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.45)}
+.gr-emp .er,.gr-emp .ec{display:flex;gap:2px;justify-content:center}.gr-emp .ec{gap:6px;padding-bottom:2px}.gr-emp .ec button{width:auto;height:36px;font-size:.9rem;font-weight:700;padding:0 10px;border-radius:18px;background:var(--bg);border:1px solid var(--line);color:var(--ink)}
+.gr-emp .er button{min-height:0;min-width:0;width:38px;height:38px;font-size:1.4rem;background:none;border:0;padding:0;cursor:pointer;border-radius:50%}
 .gr-b.pk{outline:3px solid var(--acc);outline-offset:2px}.gr-b.pk::after{content:'✓';position:absolute;top:-8px;inset-inline-start:-8px;width:24px;height:24px;border-radius:50%;background:var(--acc);color:var(--onacc);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:.85rem}
 .gr-b.no{opacity:.45}
 .gr-selbar{display:flex;align-items:center;gap:6px;position:sticky;top:calc(64px + env(safe-area-inset-top));z-index:6;background:var(--bg);padding:6px 0;margin-bottom:8px;border-bottom:1px solid var(--line)}.gr-selbar b{flex:1}
@@ -211,7 +212,7 @@ const fIco=t=>{t=String(t||'');return t==='application/pdf'?'📄':/^image\//.te
 function fxH(m){const I=`data-id="${esc(m.id)}"`;
  if(m.k==='aud'){if(fGone(m))return '<div class="gr-file"><span class="ic">🎤</span><div class="t"><span>ההודעה הקולית נמחקה אחרי 90 יום</span></div></div>';return `<button class="gr-aud" data-a="grAud" ${I} aria-label="השמעת הודעה קולית">${audIn(m)}</button>`}
  const f=`<div class="gr-file"><span class="ic">${fIco(m.fm)}</span><div class="t"><b dir="auto">${esc(m.fn)}</b><span>${fGone(m)?'הקובץ נמחק אחרי 90 יום':esc(fsz(m.fs))}</span></div></div>`;
- return fGone(m)?f:f+`<div class="gr-cta"><button data-a="grFOpen" ${I}>📤 פתיחה / שיתוף</button><button data-a="grFSave" ${I}>⬇ שמירה</button></div>`}
+ return fGone(m)?f:f+`<div class="gr-cta">${m.k==='file'?`<button data-a="grFView" ${I}>📂 פתיחה</button>`:''}<button data-a="grFOpen" ${I}>📤 שיתוף</button><button data-a="grFSave" ${I}>⬇ שמירה</button></div>`}
 const AP={a:null,id:'',u:'',busy:''};
 function audIn(m){const on=AP.id===m.id&&AP.a,pl=on&&!AP.a.paused,t=on?dur(AP.a.currentTime)+' / ':'';return `<span class="pb">${AP.busy===m.id?'…':pl?'⏸':'▶'}</span><span>🎤 הודעה קולית</span><span class="ad" data-apt="${esc(m.id)}">${t}${dur(m.dur)}</span>`}
 /* "מתמלל…" – רק בדקות הראשונות אחרי השליחה (או כל עוד הבקשה שלי לשרת פתוחה); אחר כך בלי תמלול */
@@ -761,6 +762,14 @@ ACT.grAud=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.
  finally{AP.busy='';apPaint()}};
 ACT.grFOpen=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k!=='file')return;
  try{toast('מכין את הקובץ לשיתוף…');await shareFile(await mFile(c,m),'')}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'הפתיחה נכשלה')}};
+/* 27.11.2026: פתיחה = הקובץ נפתח באפליקציה שמתאימה לו (אקסל, קורא PDF…) דרך SaveFile.open.
+   APK ישן בלי open (עדכון חי של הקוד בלי APK חדש) – חוזרים לחלון השיתוף, שגם בו אפשר לבחור אפליקציה לפתיחה */
+ACT.grFView=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k!=='file')return;const C=window.Capacitor;
+ try{toast('פותח את הקובץ…');const o=await mFile(c,m),P=isNat()&&C.Plugins.SaveFile&&C.Plugins.Filesystem?C.Plugins.SaveFile:null;
+  if(P&&typeof P.open==='function'){const w=await C.Plugins.Filesystem.writeFile({path:o.name,data:u8b64(new Uint8Array(await o.b.arrayBuffer())),directory:'CACHE'});
+   try{await P.open({uri:w.uri,mime:o.mime});return}catch(e){const s=String(e&&(e.message||e));if(/no_app/.test(s))return toast('אין בטלפון אפליקציה שפותחת קובץ כזה. אפשר לשתף אותו או לשמור');if(!/not implemented|unimplemented/i.test(s))throw e}}
+  if(!isNat()){const u=URL.createObjectURL(o.b);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000);return}
+  await shareFile(o,'')}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'הפתיחה נכשלה')}};
 ACT.grFSave=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k!=='file')return;
  try{toast('מוריד את הקובץ…');const o=await mFile(c,m);await saveFile(o.name,o.b,o.mime)}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'השמירה נכשלה')}};
 
@@ -875,9 +884,11 @@ try{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.
 /* ---- החלקה ימינה = תשובה; לחיצה ארוכה = שורת אימוג'י. החלקה שמאלה (חזרה, index.html) לא מושפעת ---- */
 (function(){let g=null,sup=0,pop=null;
  const emoOff=()=>{if(pop){pop.remove();pop=null}};
- const emoOn=(b,mid)=>{emoOff();const c=GR.c;if(!c||c.xoff)return;const r=b.getBoundingClientRect(),w=EMO.length*40+16;
-  pop=document.createElement('div');pop.className='gr-emp';pop.innerHTML=EMO.map(e=>`<button data-a="grReact" data-id="${esc(mid)}" data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('');
-  pop.style.top=Math.max(70,r.top-48)+'px';pop.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';document.body.append(pop)};
+ const emoOn=(b,mid)=>{emoOff();const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===mid),tx=m&&!m.pend&&mTxt(m);if(c.xoff&&!tx)return;/* 27.11.2026: בלחיצה ארוכה – גם העתקה (כשיש טקסט) */
+  const r=b.getBoundingClientRect(),w=Math.max(c.xoff?0:EMO.length*40+16,tx?236:0),I=`data-id="${esc(mid)}"`;
+  pop=document.createElement('div');pop.className='gr-emp';pop.innerHTML=(c.xoff?'':`<div class="er">${EMO.map(e=>`<button data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`)
+   +(tx?`<div class="ec"><button data-a="grCopyAll" ${I}>📋 העתק הכל</button><button data-a="grCopy" ${I}>✂ בחירת חלק</button></div>`:'');
+  pop.style.top=Math.max(70,r.top-(c.xoff||!tx?48:94))+'px';pop.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';document.body.append(pop)};
  const ok=e=>{const b=e.target.closest&&e.target.closest('#grmsgs .gr-b');return b&&!e.target.closest('.gr-emp')?b:null};
  document.addEventListener('touchstart',e=>{if(!e.target.closest||!e.target.closest('.gr-emp'))emoOff();
   const b=GR.c&&!GR.c.sel&&cur().v==='grc'&&e.touches.length===1?ok(e):null;if(g){clearTimeout(g.tm);if(g.b)g.b.style.transform=''}g=null;if(!b)return;const t=e.touches[0];
