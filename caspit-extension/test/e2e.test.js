@@ -956,7 +956,7 @@ test('מכירות היום כל שעה (0.1.10): רק דוח המכירות ש�
   assert.equal(await tt(W), null);
   srv.caps = ['today', 'uq'];
   await sw.evaluate(() => self.__cxTest.pollOnce());
-  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false, tf: false, prod30: false });
+  assert.deepEqual((await store()).caps, { today: true, uq: true, hours: false, hours2: false, tf: false, prod30: false, upf: false });
   const c0 = cnt(), H0 = (await store()).salesHash || {};
   const r = await tt(W);
   assert.equal(r && r.st, 'ok', JSON.stringify(r));
@@ -1166,17 +1166,27 @@ test('0.1.19 poll: עדכון שעתי שנכשל → tf פעם אחת; שינו
   srv.caps = null;
 });
 
-test('0.1.13 (תיקון בודק) שעתי: נחל לכיש נכשל → בלי העלאה חלקית בכלל (התמונה הקודמת של נחל לכיש לא נמחקת), רישום ב-todaySt', async () => {
+test('0.1.24 (תקלה 26.11) שעתי: הסניף השני נכשל (branch-same / branch-switch) → מעלים את הסניף המוצג בלבד, ואז הכשל נרשם ב-todaySt', async () => {
   const TZ = 'Asia/Jerusalem', W = D.zonedToUtc('2026-11-18', '16:05', TZ);
   await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.storage.local.set({ caps: { today: true, uq: false } }); return chrome.storage.local.remove('todaySt'); });
   nlMode = 'same';
   try {
-    const n0 = srv.ops('upload').filter((c) => c.partial).length;
+    const parts = () => srv.ops('upload').filter((c) => c.partial);
+    const n0 = parts().length;
     const r = await sw.evaluate((n) => self.__cxTest.todayTick({ now: n }), W);
     assert.equal(r.st, 'fail', JSON.stringify(r)); assert.equal(r.code, 'branch-same'); assert.equal(r.br.code, 'branch-same');
-    assert.equal(srv.ops('upload').filter((c) => c.partial).length, n0, 'לא הועלה כלום');
+    assert.equal(parts().length, n0 + 1, 'הסניף המוצג הועלה');
+    const up = parts().at(-1);
+    assert.ok(up.lines.length > 0 && up.lines.every((l) => l.bk === '1'), 'רק הסניף המוצג (לפי מספר הסניף בדוח)');
+    assert.equal(r.n, up.lines.length);
     assert.equal(await store0(), 'יהודה הנשיא');
-  } finally { nlMode = 'rows'; await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); }); }
+    // המעבר לנחל לכיש לא נקלט (התקלה בחנות) – אותו דבר
+    nlMode = 'rows'; await ls({ brFail: 'switch', brPicks: null });
+    const r2 = await sw.evaluate((n) => self.__cxTest.todayTick({ now: n }), W + 3600e3);
+    assert.equal(r2.st, 'fail', JSON.stringify(r2)); assert.equal(r2.code, 'branch-switch');
+    assert.equal(parts().length, n0 + 2);
+    assert.ok(parts().at(-1).lines.every((l) => l.bk === '1'));
+  } finally { nlMode = 'rows'; await ls({ brFail: null, store: 'יהודה הנשיא' }); await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); }); }
 });
 test('0.1.13 (תיקון בודק) היכרות שמתחילה כשכספית בנחל לכיש: קודם חזרה ליהודה הנשיא; לא מצליח → branch-restore, בלי לקרוא אף מסך', async () => {
   await ls({ store: 'נחל לכיש', brFail: 'restore', brPicks: null });
@@ -1448,7 +1458,7 @@ test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת (
     assert.equal(up.length, 1, 'פעם אחת (לא לכל סניף)');
     const b = up[0];
     assert.deepEqual(Object.keys(b).sort(), ['day', 'op', 'rows', 'run', 'ver'], JSON.stringify(Object.keys(b)));
-    assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.equal(b.day, today);
+    assert.match(b.run, /^[A-Za-z0-9_-]{8,40}$/); assert.ok([today, D.dayStr(Date.now(), 'Asia/Jerusalem')].includes(b.day), b.day); // ריצה שחוצה חצות (שעון העסק)
     assert.deepEqual(b.rows, fx.HK_WANT);
     const txt = JSON.stringify(srv.calls.slice(n0)) + JSON.stringify(s.st.lastRun);
     for (const w of fx.HK_SECRETS) assert.ok(!txt.includes(w), 'עמודה שאסור לשלוח: ' + w);
@@ -1488,13 +1498,13 @@ test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנ�
 
 // 0.1.23 – מוצרים כל 30 דקות (prodTick): בלי hello / מכירות / שעות, בלי שום החלפת סניף
 test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → apply → פריטים חדשים / מחירים / עדכוני פריטים → report prod; בלי hello / מכירות; בלי החלפת סניף (גם בנחל לכיש); פעם אחת בחצי שעה; לא לפני 07:00 / בשבת / בריצה פעילה; שרת בלי prod30 – לא', async () => {
-  srv.caps = ['prod30']; srv.exportN = { new: 1, price: 2, upd: 1 };
-  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('hrs'); await chrome.storage.local.set({ caps: { prod30: true } }); return chrome.storage.local.remove('prodSt'); });
+  srv.caps = ['prod30', 'upf']; srv.exportN = { new: 1, price: 2, upd: 1 };
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('hrs'); await chrome.storage.local.set({ caps: { prod30: true, upf: true } }); return chrome.storage.local.remove('prodSt'); });
   await ls({ store: 'נחל לכיש', brPicks: null });
   try {
     const W = curDay('08:10');
     const pt = (now) => sw.evaluate((n) => self.__cxTest.prodTick({ now: n }), now);
-    const n0 = srv.calls.length;
+    const n0 = srv.calls.length, i0 = imports.length;
     const r = await pt(W);
     assert.equal(r && r.st, 'ok', JSON.stringify(r));
     const calls = srv.calls.slice(n0), ops = calls.map((c) => c.op + (c.kind ? ':' + c.kind : ''));
@@ -1505,6 +1515,10 @@ test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → a
     const rp = calls.find((c) => c.op === 'report');
     assert.deepEqual([rp.st, rp.n.up, rp.n.pr, rp.n.nw], ['ok', 1, 2, 1]);
     assert.equal(calls.find((c) => c.op === 'export' && c.kind === 'upd').max, 5, 'updMax מ-cfg');
+    // 0.1.24: עדכוני הפריטים נטענים בסוג הייבוא "עדכון פריטים" (importUpd), לא כ"פריטים חדשים"
+    const im = imports.slice(i0).filter((b) => b.name.startsWith('lp-upd-')); // new / price – אולי כבר נטענו היום באותו קובץ (impHash)
+    assert.deepEqual(im.map((b) => b.type), ['upd'], JSON.stringify(imports.slice(i0).map((b) => [b.name, b.type])));
+    assert.match(im[0].text, /^\ufeff?קוד פריט,שם פריט,/, 'הקובץ מהשרת כמו שהוא'); // ה-BOM נבלע בקריאת הקובץ בדף
     assert.equal(await picks(), '', 'בלי שום בחירת סניף');
     assert.equal(await store0(), 'נחל לכיש');
     assert.ok((await store()).st.prodAt >= r.at - 1000, 'מוצרים סונכרנו לאחרונה');
@@ -1516,17 +1530,38 @@ test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → a
     assert.equal(await pt(W + 30 * 60e3), null, 'ריצה אחרת פעילה');
     await sw.evaluate(async () => { const { runSaved } = await chrome.storage.local.get('runSaved'); await chrome.storage.local.set({ run: runSaved }); await chrome.storage.local.remove('runSaved'); });
     // עדכוני פריטים מעל המגבלה – לא נשלחים לכספית, הריצה "נכשלה" עם limit, המחירים נשלחו
-    srv.updMax = 0;
+    srv.updMax = 1; srv.exportN.upd = 2;
     const n1 = srv.calls.length;
     const r2 = await pt(W + 30 * 60e3);
     assert.equal(r2.st, 'fail', JSON.stringify(r2)); assert.equal(r2.code, 'limit');
     assert.ok(srv.calls.slice(n1).some((c) => c.op === 'export' && c.kind === 'price'));
     assert.equal(srv.calls.slice(n1).filter((c) => c.op === 'report').at(-1).c, 'limit');
+    srv.exportN.upd = 1;
+    // 0.1.24 (סבב בדיקה 1): updMax 0 = כבוי – בלי export upd ובלי limit
+    srv.updMax = 0;
+    const n0b = srv.calls.length;
+    const r0 = await pt(W + 60 * 60e3);
+    assert.equal(r0 && r0.st, 'ok', JSON.stringify(r0));
+    assert.ok(!srv.calls.slice(n0b).some((c) => c.op === 'export' && c.kind === 'upd'), 'updMax 0 – בלי export upd');
     srv.updMax = null;
+    // 0.1.24 (סבב בדיקה 1): קובץ upd שהכותרת שלו לא HDR_UPD – לא נטען לכספית, flag upd-format (המחירים נשלחו)
+    srv.updBad = true;
+    const n2 = srv.calls.length, i2 = imports.length;
+    const r3 = await pt(W + 90 * 60e3);
+    assert.deepEqual([r3.st, r3.code], ['fail', 'upd-format'], JSON.stringify(r3));
+    assert.ok(srv.calls.slice(n2).some((c) => c.op === 'export' && c.kind === 'upd'));
+    assert.ok(!imports.slice(i2).some((b) => b.name.startsWith('lp-upd-')), 'לא נטען');
+    srv.updBad = false;
+    // שרת בלי upf – לא מבקשים upd בכלל
+    await sw.evaluate(() => chrome.storage.local.set({ caps: { prod30: true, upf: false } }));
+    const n3 = srv.calls.length;
+    const r4 = await pt(W + 120 * 60e3);
+    assert.equal(r4 && r4.st, 'ok', JSON.stringify(r4));
+    assert.ok(!srv.calls.slice(n3).some((c) => c.op === 'export' && c.kind === 'upd'), 'בלי upf – בלי export upd');
     await sw.evaluate(() => chrome.storage.local.set({ caps: { prod30: false } }));
-    assert.equal(await pt(W + 60 * 60e3), null, 'שרת בלי prod30');
+    assert.equal(await pt(W + 150 * 60e3), null, 'שרת בלי prod30');
   } finally {
-    srv.caps = null; srv.exportN = { new: 1, price: 2 }; srv.updMax = null;
+    srv.caps = null; srv.exportN = { new: 1, price: 2 }; srv.updMax = null; srv.updBad = false;
     await ls({ store: 'יהודה הנשיא', brPicks: null });
     await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'prodSt']); await self.__cxTest.setupAlarms(); });
   }

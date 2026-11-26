@@ -126,7 +126,7 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true });
     assert.deepEqual(h.days, [yday]);
     assert.equal(h.lastSales, null);
-    assert.deepEqual(h.limits, { price: 500, newMax: 1, updMax: 0 }); // סבב בדיקה 1: עדכוני פריטים כבויים עד אימות מול כספית
+    assert.deepEqual(h.limits, { price: 500, newMax: 1, updMax: 1 }); // 26.11.2026: "עדכון פריטים" פועל; סבב בדיקה 1 – מתחילים מ-1 בכל ריצה
     assert.equal(h.minVer, BOT.MIN_VER); assert.equal(h.enabled, true); assert.equal(h.biz.name, 'עסק ' + A);
     assert.match(h.runId, /^[A-Za-z0-9_-]{6,40}$/);
     const r = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).data();
@@ -265,21 +265,48 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
   });
 
   it('26.11 (תוסף 0.1.23): export upd לפי updMax; report kind:prod → p30 / pok ושחרור המנעול; info.prod ו-flags.back בדיווח ריצה; caps prod30; עד 60 קטלוגים ביום', async () => {
-    assert.match((await ok('cxBotTok', MGR, { op: 'info' })).updOff, /עדכוני פריטים כבויים/);
-    await adm().doc(`b/${A}/cxcfg/main`).set({ updOk: true }, { merge: true }); // כאילו אומת מול כספית
+    const i0 = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.deepEqual([i0.updOff, i0.updMax], [null, 1], 'פועל כברירת מחדל, 1 בכל ריצה (מתג חירום: cxcfg.updOk=false)');
+    assert.ok(BOT.CAPS.includes('upf') && (await okb(TOK, { op: 'poll', ver: '0.1.24' })).caps.includes('upf'), 'סבב בדיקה 1: cap upf');
     await P(A, 'cx400001').update({ name: 'כוס נייר גדולה' }); await P(A, 'cx400002').update({ name: 'צלחת גדולה' });
     const nmPd = async (c) => ((await adm().doc(`b/${A}/cxItem/${c}`).get()).get('nm') || {}).pd;
-    const l1 = await bot(TOK, { op: 'export', kind: 'upd', max: 100, ver: '0.1.0' });
-    assert.equal(l1.body.reason, 'limit', 'updMax=1 כברירת מחדל ויש 2 עדכונים');
+    // תוסף לפני 0.1.24 טוען upd בסוג "פריטים חדשים" (שלא מעדכן) – מקבל קובץ ריק, ושום דבר לא מסומן
+    const old = await okb(TOK, { op: 'export', kind: 'upd', max: 100, ver: '0.1.23' });
+    assert.deepEqual([old.n, old.csv], [0, '']); assert.equal(await nmPd('400001'), undefined);
+    await ok('cxSetCfg', MGR, { updMax: 0 });
+    const z = await okb(TOK, { op: 'export', kind: 'upd', max: 100, ver: '0.1.24' });
+    assert.equal(z.n, 0, 'updMax 0 = כבוי, בלי limit'); assert.equal(await nmPd('400001'), undefined);
+    await ok('cxSetCfg', MGR, { updMax: 1 });
+    const l1 = await bot(TOK, { op: 'export', kind: 'upd', max: 100, ver: '0.1.24' });
+    assert.equal(l1.body.reason, 'limit', 'updMax=1 ויש 2 עדכונים');
     assert.equal(await nmPd('400001'), undefined, 'לא סומן');
     assert.equal((await call('cxSetCfg', MGR, { updMax: -1 })).reason, 'bad-updmax');
     await ok('cxSetCfg', MGR, { updMax: 5 });
     const h0 = await okb(TOK, { op: 'hello', mode: 'connect' });
     assert.deepEqual([h0.limits.updMax, h0.limits.newMax], [5, 5], 'newMax לא נפגע');
     assert.equal((await bot(TOK, { op: 'export', kind: 'upd', max: 100001, ver: '0.1.0' })).body.reason, 'bad-max');
-    const u = await okb(TOK, { op: 'export', kind: 'upd', max: 100000 });
-    assert.equal(u.n, 2); assert.match(u.csv, /400001,,כוס נייר גדולה,/);
+    const u = await okb(TOK, { op: 'export', kind: 'upd', max: 100000, ver: '0.1.24' });
+    assert.equal(u.n, 2); assert.ok(u.csv.startsWith('\ufeff' + CC.HDR_UPD.join(',') + '\n400001,כוס נייר גדולה,,'), u.csv.slice(0, 400));
     assert.equal(await nmPd('400001'), 'כוס נייר גדולה');
+    // סבב בדיקה 1: מונה הניסיונות עולה רק בדיווח טעינה של אותו קובץ (sha256) עם מזהה טעינה – לא בהפקה, לא בקובץ אחר, לא בלי מזהה
+    const uqOf = async (c) => (await adm().doc(`b/${A}/cxItem/${c}`).get()).get('uq');
+    const hu = crypto.createHash('sha256').update(Buffer.from(u.csv, 'utf8')).digest('hex');
+    assert.equal(await uqOf('400001'), undefined, 'הפקה – לא נספר');
+    await okb(TOK, { op: 'importResult', run: rid('ci'), kind: 'upd', n: 2, ok: true, text: 'x', hash: hu });
+    await okb(TOK, { op: 'importResult', run: rid('ci'), kind: 'upd', n: 2, ok: true, text: 'x', hash: 'c'.repeat(64), id: 25600, status: 'בוצע', errors: 0, loaded: 2 });
+    assert.equal(await uqOf('400001'), undefined, 'בלי מזהה טעינה / קובץ אחר – לא נספר');
+    await okb(TOK, { op: 'importResult', run: rid('ci'), kind: 'upd', n: 2, ok: true, text: 'x', hash: hu, id: 25601, status: 'בוצע', errors: 0, loaded: 2 });
+    assert.deepEqual([await uqOf('400001'), await uqOf('400002')], [1, 1], 'נטען – נספר פעם אחת');
+    await okb(TOK, { op: 'importResult', run: rid('ci'), kind: 'upd', n: 2, ok: true, text: 'x', hash: hu, id: 25602, status: 'בוצע', errors: 0, loaded: 2 });
+    assert.equal(await uqOf('400001'), 1, 'אותו קובץ שוב – לא נספר פעמיים');
+    // "נסה שוב" (מנהל): פריט תקוע – המונה מתאפס ויוצא מרשימת "לא נקלט"
+    await adm().doc(`b/${A}/cxItem/400002`).update({ uq: 3 });
+    await okb(TOK, { op: 'export', kind: 'upd', max: 100000, ver: '0.1.24' });
+    assert.deepEqual((await dev()).upStuck.l.map((d) => d.c), ['400002']);
+    assert.equal((await call('cxBotTok', MGR, { op: 'retry', c: '../x' })).reason, 'bad-code');
+    assert.ok((await ok('cxBotTok', MGR, { op: 'retry', c: '400002' })).ok);
+    assert.equal(await uqOf('400002'), undefined);
+    assert.deepEqual([(await dev()).upStuck.n, (await dev()).upStuck.l], [0, []]);
     const L = adm().doc(`b/${A}/private/cxbot.lock`);
     assert.ok((await L.get()).exists, 'export לקח את המנעול');
     assert.equal((await bot(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'maybe', ver: '0.1.0' })).body.reason, 'bad-report');
@@ -667,10 +694,10 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     assert.equal(s1.days.length, 2); assert.ok(s1.days.every((x) => x.pt && x.pt.hm === '10:05'));
     assert.equal(CC.aggDays(CC.unpackDays(s1)).net, 42);
     assert.equal((await call('cxSales', MGR, { from: DAY, to: DAY, pt: 1 })).reason, 'bad-field');
-    // שעה אחר כך: רק סניף א (סניף ב נעלם → נמחק), סכום חדש
+    // שעה אחר כך: רק סניף א (26.11.2026: המעבר לסניף השני נכשל – סניף ב נשאר מההעלאה הקודמת, לא נמחק), סכום חדש
     const L2 = lines(DAY, [['כוס נייר', '400001', '9101', 'סניף א', '6200', '', '0.0', '24'], ['כוס נייר', '400001', '9103', 'סניף א', '6200', '', '0.0', '12']]);
     assert.equal((await part({ day: DAY, hm: '11:05', lines: L2 }, at(DAY, '11:05'))).code, 200);
-    assert.equal((await PD('7700_20261202').get()).exists, false);
+    assert.equal((await PD('7700_20261202').get()).get('pt.hm'), '10:05', 'סניף שלא נשלח – נשאר כמו שהיה');
     const a2 = (await PD('6200_20261202').get()).data();
     assert.equal(a2.gross, 36); assert.equal(a2.ntx, 2); assert.equal(a2.pt.hm, '11:05'); assert.equal(a2.it['400001'].q, 3);
     // שעון מחשב שמקדים – "עד השעה" לא בעתיד
@@ -681,6 +708,13 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     assert.equal(rr.code, 429); assert.equal(rr.body.reason, 'rate');
     assert.equal((await PD('6200_20261202').get()).get('pt.hm'), '12:01', 'לא נשמר');
     assert.equal((await part({ day: DAY, hm: '12:22', lines: L2 }, at(DAY, '12:22'))).code, 200, 'אחרי 20 דקות – מותר');
+    // שני סניפים בהעלאות נפרדות – שניהם נשארים, וכל אחד מתעדכן רק בהעלאה שלו
+    const L3 = lines(DAY, [['כוס נייר', '400001', '9201', 'סניף ב', '7700', '', '0.0', '30']]);
+    assert.equal((await part({ day: DAY, hm: '13:05', lines: L3 }, at(DAY, '13:05'))).code, 200);
+    const a3 = (await PD('6200_20261202').get()).data(), b3 = (await PD('7700_20261202').get()).data();
+    assert.deepEqual([a3.pt.hm, a3.gross], ['12:22', 36], 'סניף א מההעלאה שלו');
+    assert.deepEqual([b3.pt.hm, b3.gross, b3.ntx], ['13:05', 30, 1], 'סניף ב – רק מההעלאה החדשה');
+    assert.equal((await ok('cxSales', MGR, { from: DAY, to: DAY, pt: true })).days.length, 2);
   });
 
   it('upload חלקי נדחה: לא היום, לפני 07:00, שישי מ-14:00 / שבת, כמה חלקים, שורות מיום אחר, שעה / שדה לא תקינים', async () => {

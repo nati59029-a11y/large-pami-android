@@ -137,8 +137,8 @@ async function pollOnce() {
   const cl = Array.isArray(r.caps) ? r.caps : [];
   // 0.1.15: hours2 = השרת מקבל empty (עובדים שכל השעות שלהם בחודש נמחקו בכספית). שרת בלי hours2 – לא שולחים empty (שדה לא מוכר נדחה)
   // 0.1.19: tf = השרת מקבל ב-poll את העדכון השעתי שנכשל
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf'), prod30: cl.includes('prod30') }; // 0.1.23: prod30 = מוצרים כל 30 דקות
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf || caps.prod30 !== !!caps0.prod30) await set({ caps });
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf'), prod30: cl.includes('prod30'), upf: cl.includes('upf') }; // 0.1.23: prod30 = מוצרים כל 30 דקות; 0.1.24: upf = השרת מפיק upd בתבנית "עדכון פריטים"
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf || caps.prod30 !== !!caps0.prod30 || caps.upf !== !!caps0.upf) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
@@ -187,11 +187,12 @@ async function runToday(slot, now, tz) {
     hm = D.hmOf(now + (Date.now() - t0), tz); // "עד השעה" = מתי הדוח הורד מכספית
     const lines = A.list.flatMap((x) => x.p.lines.filter((l) => l.d === day));
     if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
-    // 0.1.13 (תיקון בודק): נחל לכיש נכשל – לא מעלים בכלל. השרת מחליף את כל מסמכי היום (cxDayP), והעלאה של יהודה הנשיא בלבד
-    // הייתה מוחקת את נחל לכיש מהשעה הקודמת. התמונה הקודמת נשארת; השעה הבאה תנסה שוב
-    if (A.unsure) throw P.err(A.unsure.code, A.unsure.msg, { br: A.unsure, back: A.back }); // ליקוי 7: בלי בסיס להשוואה – לא מעלים
-    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br, back: A.back });
+    // 0.1.24 (תקלה 26.11): הסניף השני נכשל (A.br) – מעלים את מה שיש (הסניף המוצג; השיוך לסניף לפי מספר הסניף שבדוח), ורק אחר כך זורקים
+    // את שגיאת הסניף (todaySt / tf). השרת מחליף רק את מסמכי הסניפים שנשלחו – הסניף השני נשאר מההעלאה הקודמת
     if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
+    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br, back: A.back, n: lines.length });
+    // ליקוי 7: הסניף השני בלי בסיס להשוואה – לא נכנס לרשימה ולא עלה; הסניף המוצג כבר עלה למעלה
+    if (A.unsure) throw P.err(A.unsure.code, A.unsure.msg, { br: A.unsure, back: A.back, n: lines.length });
     out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {}, A.back ? { back: A.back } : {});
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
@@ -201,7 +202,7 @@ async function runToday(slot, now, tz) {
       if (P.isTerminal(run)) await (await api()).call('report', { run: U.rid('ct'), kind: 'run', st: 'fail', err: { code, msg: String(e.message || '').slice(0, 300), step: 'today' }, steps: [], info: { today: day } }).catch(() => {});
     }
     // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
-    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {}, e && e.back ? { back: e.back } : {});
+    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {}, e && Number.isInteger(e.n) ? { n: e.n } : {}, e && e.back ? { back: e.back } : {});
     // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
     if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }
@@ -1278,9 +1279,10 @@ const STEP = {
     }
   },
   exportPrice: (run) => exportImport(run, 'price'),
-  // 0.1.23: עדכוני שם / ברקוד / קטגוריה לכספית (תבנית "פריטים חדשים" עם הקוד הקיים) – רק מול שרת עם caps.prod30. תקלה לא עוצרת: flags.up
+  // 0.1.23: עדכוני פריטים לכספית – רק מול שרת עם caps.prod30. תקלה לא עוצרת: flags.up. 0.1.24: שם / קטגוריה / ספק בסוג הייבוא "עדכון פריטים" (importUpd)
   async exportUpd(run) {
-    if (!((await get('caps')) || {}).prod30) return { skip: 'caps' };
+    const cp = (await get('caps')) || {};
+    if (!cp.prod30 || !cp.upf) return { skip: 'caps' }; // 0.1.24 (סבב בדיקה 1): רק מול שרת שמודיע upf – שרת ישן מפיק upd בתבנית אחרת
     try { return await exportImport(run, 'upd'); } catch (e) {
       const code = e && typeof e.code === 'string' ? e.code : 'tab';
       if (!NW_SOFT.has(code)) throw e;
@@ -1314,17 +1316,20 @@ async function applyLoop(sub, log) {
   }
   throw P.err('server', 'השמירה בשרת לא הסתיימה');
 }
-const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout']); // 0.1.22: תקלות בפריטים חדשים שלא עוצרות את עדכון המחירים
+const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout', 'upd-format']); // 0.1.22: תקלות בפריטים חדשים שלא עוצרות את עדכון המחירים
 async function exportImport(run, kind) {
   const L = run.limits || U.LIMITS;
   const max = kind === 'new' ? Math.min(L.newMax, U.LIMITS.newMax) : kind === 'upd' ? Math.min(L.updMax == null ? 1 : L.updMax, U.LIMITS.updMax) : Math.min(L.price, U.LIMITS.price);
-  const what = kind === 'new' ? 'טעינת פריטים חדשים' : kind === 'upd' ? 'עדכון פריטים' : 'עדכון מחירים', flow = kind === 'price' ? 'importPrice' : 'importNew'; // upd – אותה תבנית ("פריטים חדשים")
+  const what = kind === 'new' ? 'טעינת פריטים חדשים' : kind === 'upd' ? 'עדכון פריטים' : 'עדכון מחירים', flow = kind === 'price' ? 'importPrice' : kind === 'upd' ? 'importUpd' : 'importNew'; // 0.1.24: upd – סוג הייבוא "עדכון פריטים" (importUpd)
+  if (kind === 'upd' && max === 0) return { n: 0, skip: 'off' }; // 0.1.24: updMax 0 = כבוי (בלי limit)
   const cl = await api();
   const r = await cl.call('export', { kind, max, log: run.srv });
   const n = +r.n || 0;
   if (!n) return { n: 0 };
   if (n > max || (Array.isArray(r.rows) && r.rows.length > max)) throw P.err('limit', `${n} שורות ${kind === 'new' ? 'פריטים חדשים' : kind === 'upd' ? 'עדכוני פריטים' : 'מחירים'} – מעל המגבלה (${max}). לא נשלח לכספית.`);
   if (typeof r.csv !== 'string' || !r.csv || r.csv.length > 5e6) throw P.err('fail', 'קובץ לא תקין מהשרת');
+  // 0.1.24 (סבב בדיקה 1): "עדכון פריטים" – רק קובץ שהכותרת שלו זהה בדיוק ל-HDR_UPD; אחרת לא טוענים (flags.up)
+  if (kind === 'upd' && r.csv.replace(/^\ufeff/, '').split('\n')[0] !== C.HDR_UPD.join(',')) throw P.err('upd-format');
   const bytes = new TextEncoder().encode(r.csv), hash = await U.sha256(bytes);
   const today = D.dayStr(Date.now(), (await sched()).tz);
   const done = (await get('impHash')) || {};
