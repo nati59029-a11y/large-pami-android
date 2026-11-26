@@ -1407,7 +1407,7 @@ test('0.1.15 שעות: עובד שכל השורות שלו נמחקו בכספי
 const hkUps = (n0) => srv.calls.slice(n0).filter((c) => c.op === 'hkSnap');
 async function hkOn(mode, ms) {
   if (!caspitPage()) { const pg = await ctx.newPage(); await pg.goto('https://caspit.valu.co.il/bo#/'); await pg.evaluate(() => localStorage.setItem('auth', '1')); }
-  await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית נשארה בנחל לכיש – הריצה מחזירה ליהודה הנשיא
+  await ls({ auth: '1', hkXlsx: mode, hkXs: null, hkX: null, attHits: null, store: 'נחל לכיש' }); // מתחילים כשכספית בנחל לכיש (0.1.23: בלי החלפה – היתרות בסניף שמוצג, והמכירות חוזרות אליו)
   for (const p of ctx.pages().filter((x) => /caspit\.valu\.co\.il\/bo/.test(x.url()))) { await p.reload(); await p.waitForLoadState('load'); } // הסניף שבמסך = הסניף שבנתונים
   await sw.evaluate(async (w) => { const S = await self.__cxTest.sel(); S.hkSync = true; if (w) S.flows.hkSnap[1].ms = w; }, ms || 0);
 }
@@ -1415,7 +1415,7 @@ async function hkOff() {
   await ls({ hkXlsx: null, hkXs: null, store: 'יהודה הנשיא' });
   await sw.evaluate(async () => { const S = await self.__cxTest.sel(); S.hkSync = false; S.flows.hkSnap[1].ms = 30000; });
 }
-test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת ביהודה הנשיא, רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
+test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת (0.1.23: בסניף שמוצג, בלי החלפה), רק xc/tz/name/ph/addr/bal (באגורות), בלי עמודות אחרות; הריצה הצליחה', async () => {
   await hkOn('1');
   try {
     const n0 = srv.calls.length;
@@ -1433,9 +1433,9 @@ test('0.1.21 יתרות הקפה בריצה הלילית: hkSnap פעם אחת �
     assert.deepEqual([rep.info.hk.n, rep.info.hk.skip, rep.info.hk.bad], [3, 2, 0], JSON.stringify(rep.info.hk));
     assert.ok(!rep.info.flags.hk);
     const sl = rep.steps.map((x) => x.s);
-    assert.ok(sl.indexOf('hours') < sl.indexOf('hk') && sl.indexOf('hk') < sl.indexOf('exportNew'), sl.join(','));
-    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('hkXs')), 'יהודה הנשיא;', 'יצוא אחד, בסניף הבית');
-    assert.equal(await store0(), 'יהודה הנשיא', 'לא נשאר בנחל לכיש');
+    assert.ok(sl.indexOf('exportUpd') < sl.indexOf('hours') && sl.indexOf('hours') < sl.indexOf('hk'), sl.join(',')); // 0.1.23: ההעלאות לכספית ראשונות
+    assert.equal(await caspitPage().evaluate(() => localStorage.getItem('hkXs')), 'נחל לכיש;', 'יצוא אחד, בסניף שמוצג');
+    assert.equal(await store0(), 'נחל לכיש', 'חזרה לסניף שהיה מוצג בתחילת הריצה');
     assert.equal(await caspitPage().evaluate(() => localStorage.getItem('attHits')), null, 'בלי "לקוח חדש" / "טעינת לקוחות" / "עריכה"');
   } finally { await hkOff(); }
 });
@@ -1451,7 +1451,7 @@ test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנ�
     assert.equal(s.st.lastRun.sum.flags.hk.code, 'hk-export', 'מסומן בנפרד בסיכום הריצה');
     assert.ok(rep.info.sales[days[1]], 'המכירות נקלטו (או שאותו קובץ כבר נשלח)');
     assert.ok(srv.calls.slice(n0).some((c) => c.op === 'export'), 'ההעלאות לכספית רצו');
-    assert.equal(await store0(), 'יהודה הנשיא');
+    assert.equal(await store0(), 'נחל לכיש', '0.1.23: חזרה לסניף שהיה מוצג');
     await ls({ hkXlsx: 'bad' });
     const n1 = srv.calls.length;
     const r2 = await syncOneDay();
