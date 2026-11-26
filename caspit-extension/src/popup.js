@@ -14,6 +14,7 @@ async function load() {
   $('impN').classList.toggle('hide', s.imp !== false);
   $('upd').textContent = updTxt(s);
   $('today').textContent = todayTxt(s);
+  $('prod').textContent = prodTxt(s);
   $('sync').disabled = !s.connected || s.busy;
   $('disc').disabled = s.busy;
   $('dl').classList.toggle('hide', !s.disc);
@@ -52,6 +53,15 @@ function todayTxt(s) {
   if (t.st === 'ok') return 'עודכן עד ' + (t.hm || h) + (t.n === 0 ? ' (אין מכירות היום)' : '') + ' · ' + at;
   if (t.st === 'run') return 'רץ עכשיו (' + h + ') · התחיל ' + at;
   return 'נכשל' + (h ? ' ב-' + h : '') + ': ' + self.CxPlan.msgOf(t.code) + (t.msg ? ' (' + t.msg + ')' : '') + ' · ' + at;
+}
+// 0.1.23: המוצרים (קטלוג, פריטים חדשים, מחירים, עדכוני פריטים) – נפרד מהמכירות. סונכרנו לאחרונה + ריצת 30 הדקות האחרונה
+function prodTxt(s) {
+  const f = (t) => new Date(t).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const ok = s.st && s.st.prodAt ? f(s.st.prodAt) : '—', p = s.prod;
+  if (!p || !p.st || p.st === 'ok') return ok;
+  if (p.st === 'run') return ok + ' · רץ עכשיו';
+  if (p.st === 'skip') return ok + ' · ממתין לסנכרון קטלוג ראשון באפליקציה';
+  return ok + ' · הניסיון האחרון (' + f(p.at) + ') נכשל: ' + self.CxPlan.msgOf(p.code);
 }
 // גרסה + מצב העדכון האוטומטי (upd.json שהסקריפט במחשב כותב)
 function updTxt(s) {

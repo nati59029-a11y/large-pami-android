@@ -35,6 +35,10 @@
 //          קריאה: cxBotTok({ op:'hours', m }) – מנהל בלבד (mgrW) → { m, list:[{ br, e, nm, rows, n, at }] } (מסך "שעות עובדים" באפליקציה, cx-hours.js; התאמה לפי שם – shfcfg/map).
 //   לקוחות הקפה (24.11, hk-import.js): op:'hkSnap' – { run?, day:'YYYY-MM-DD', rows:[{ xc, tz, name, ph, addr, bal }] } (bal אגורות, חוב = חיובי, עד 2000 שורות).
 //          לפני אישור ראשון באפליקציה – נשמר כ"ממתין לאישור" בלבד; אחרי האישור – הפרשים מול התמונה הקודמת. עד HK_DAY תמונות ביום לעסק (hk ב-private/cxbot). caps כולל 'hk'.
+//   מוצרים כל 30 דקות (26.11.2026, תוסף 0.1.23, caps 'prod30'): התוסף מוריד קטלוג → upload → preview → apply → export new/price/upd, בלי hello,
+//          ומסיים ב-report { kind:'prod', run, st:'ok'|'fail'|'skip', c?, n? } → p30:{ at, st, c, n } ב-private/cxbot (ok → גם pok = "מוצרים סונכרנו לאחרונה") ושחרור המנעול.
+//          export kind:'upd' – עדכוני שם/ברקוד/קטגוריה, עד min(LIM.updMax, cxcfg.bot.updMax). קצב: CALLS_DAY 1500 (היה 600), עד CAT_DAY קטלוגים ביום לעסק.
+//          דיווח ריצה: info.prod === true → pok; info.flags.back (החזרה לסניף שהיה מוצג נכשלה) → bw:{ at, msg } (אזהרה בכרטיס, לא עוצר).
 // פרטיות: ביומן השרת רק סיבות וקודים – בלי אסימון, בלי תוכן קבצים (גם בלי שמות עובדים ושעות).
 
 const crypto = require('node:crypto');
@@ -58,9 +62,10 @@ const HK_DAY = 12; // לקוחות הקפה: תמונות ביום לעסק (ל�
 const MAX_BODY = 10 * 1024 * 1024;
 const DISC_MAX = 1024 * 1024;
 const DISC_PART = 300000; // תווים; גם ב-3 בייטים לתו – פחות מ-1MiB למסמך
-const CALLS_DAY = 600, RUNS_DAY = 10, FAIL_IP_DAY = 30;
+const CALLS_DAY = 1500, RUNS_DAY = 10, FAIL_IP_DAY = 30; // 26.11.2026: 600 → 1500 – מוצרים כל 30 דקות (~16 פניות × 33) לצד המכירות השעתיות והשעות
+const CAT_DAY = 60; // 26.11.2026: קטלוגים (upload part 0) ביום לעסק – 33 ריצות מוצרים + לילה + "סנכרן עכשיו" + ניסיונות חוזרים
 const FAIL_BUCKETS = 64; // מוני כישלונות: מספר קבוע של מסמכים (cxbot_fail/b0..b63) – כתובת מזויפת לא יוצרת מסמכים חדשים
-const LIM = { price: 500, newMax: 100000 }; // 24.11.2026 (בעל העסק): פריטים חדשים – ללא הגבלה (100000 = "ללא הגבלה", התקרה הטכנית של cxExport). עד אז 50
+const LIM = { price: 500, newMax: 100000, updMax: 100000 }; // 24.11.2026 (בעל העסק): פריטים חדשים – ללא הגבלה (100000 = "ללא הגבלה", התקרה הטכנית של cxExport). עד אז 50
 const SCHED = { at: '03:00', tz: TK.TZ };
 const MAX_DAYS = 14;
 const SRUN_RE = /^[A-Za-z0-9_-]{6,40}$/; // מזהה ריצה (runId מ-hello, או מזהה של התוסף אם hello נכשל)
@@ -70,7 +75,7 @@ const REQ_MS = 10 * 60e3, RUN_MS = 30 * 60e3, PL_MS = 5 * 60e3;
 const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
 const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
-const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf', 'hk']; // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
+const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf', 'hk', 'prod30']; // prod30 (תוסף 0.1.23): מוצרים כל 30 דקות + export upd + report kind:'prod' // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
 // tf (תוסף 0.1.19, 24.11.2026): poll מקבל tf = { s:'YYYY-MM-DD HH', c:קוד } – העדכון השעתי של מכירות היום שנכשל במחשב (עד אז נשמר רק בתוסף)
 const TF_S = /^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3])$/, TF_C = /^[a-z0-9-]{1,30}$/;
 const UST = ['reload', 'same', 'copying', 'busy', 'none'];
@@ -168,7 +173,8 @@ async function cxBotTok(w, input) {
     const cfg = CX.cfgOf(c);
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
-      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, nwDup: d.nwDup || null, newMax: cfg.bot.newMax, limits: LIM, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
+      sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, nwDup: d.nwDup || null, nwVar: d.nwVar || null, newMax: cfg.bot.newMax, updMax: cfg.bot.updMax, limits: LIM,
+      p30: d.h ? d.p30 || null : null, updOff: CX.updOff(cfg) || null, upStuck: d.upStuck || null, pok: d.pok || null, bw: d.h ? d.bw || null : null, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
@@ -274,7 +280,7 @@ async function useOk(bizId, day, isRun, lim) {
 
 // ---------- הפעולות של הרובוט ----------
 const runRef = (id) => T.tdb().doc('cxBotRun/' + id);
-const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)) });
+const limitsOf = (cfg) => ({ price: LIM.price, newMax: Math.max(0, Math.min(LIM.newMax, cfg.bot.newMax)), updMax: CX.updOff(cfg) ? 0 : Math.max(0, Math.min(LIM.updMax, cfg.bot.updMax)) }); // עדכוני פריטים כבויים עד אימות מול כספית (caspit.js updOff)
 async function cfgNow() { return CX.cfgOf(await T.tdb().doc(CX.CFG).get()); }
 // מצב העדכון האוטומטי של התוסף (0.1.7, upd.json מהמחשב, ב-hello). לא תקין → מתעלמים (לא מכשילים את הסנכרון).
 // { at, ok, ver, err, fails, rx (מתי התקבל) }; at לא בעתיד (שעון מחשב שגוי → rx)
@@ -328,6 +334,18 @@ const OPF = {
       return CX.FNS.cxUpload(w, pick(b, ['run', 'kind', 'part', 'parts', 'lines']));
     }
     O.onlyKeys(b, ['run', 'part', 'parts', 'items']);
+    // 26.11.2026: עד CAT_DAY קטלוגים ביום (נספר בחלק הראשון) – מוצרים כל 30 דקות לא יכולים לברוח
+    if (b.part === 0) {
+      const ref = priv(w.bizId, 'cxbot'), day = ilDay(x.now);
+      const okRate = await ref.firestore.runTransaction(async (tx) => {
+        const s0 = await tx.get(ref), cu = (s0.exists && s0.get('cu')) || {};
+        const n = cu.d === day ? +cu.n || 0 : 0;
+        if (n >= CAT_DAY) return false;
+        tx.set(ref, { cu: { d: day, n: n + 1 } }, { merge: true });
+        return true;
+      });
+      if (!okRate) throw new HttpsError('resource-exhausted', 'יותר מדי קטלוגים היום', { reason: 'rate' });
+    }
     return CX.FNS.cxUpload(w, pick(b, ['run', 'part', 'parts', 'items']));
   },
   async preview(w, b) {
@@ -350,14 +368,18 @@ const OPF = {
   },
   async export(w, b, x) {
     O.onlyKeys(b, ['kind', 'max']);
-    if (!['new', 'price'].includes(b.kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
-    if (!Number.isInteger(b.max) || b.max < 0 || b.max > (b.kind === 'new' ? LIM.newMax : LIM.price)) throw bad('bad-max', 'מגבלה לא תקינה');
+    if (!['new', 'price', 'upd'].includes(b.kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
+    const cap = (L) => (b.kind === 'new' ? L.newMax : b.kind === 'upd' ? L.updMax : L.price);
+    if (!Number.isInteger(b.max) || b.max < 0 || b.max > cap(LIM)) throw bad('bad-max', 'מגבלה לא תקינה');
     const lim = limitsOf(await cfgNow());
-    const max = Math.min(b.max, b.kind === 'new' ? lim.newMax : lim.price);
+    const max = Math.min(b.max, cap(lim));
     await CX.lockTake(w.bizId, 'bot:' + x.dev.id);
     const r = await CX.FNS.cxExport(w, { kind: b.kind, max });
     // 26.11.2026: מוצרים שהברקוד שלהם כבר בכספית – לא נשלחו; לכרטיס הרובוט (כמה + עד 20 שמות וברקודים)
-    if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) } }, { merge: true });
+    if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) },
+      nwVar: { n: r.varN || 0, at: x.now, l: (r.vars || []).slice(0, 100).map((d) => ({ n: str(d.n, 80), cx: str(d.cx, 40) })) } }, { merge: true }); // 26.11.2026: וריאנטים של פריט בכספית (לא "כפולים")
+    // סבב בדיקה 1: עדכוני פריטים שנשלחו 3 פעמים ולא נקלטו – לכרטיס הרובוט ("לבדוק")
+    if (b.kind === 'upd' && !r.off) await priv(w.bizId, 'cxbot').set({ upStuck: { n: r.stuckN || 0, at: x.now, l: (r.stuck || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), c: str(d.c, 40) })) } }, { merge: true });
     return { n: r.n, csv: r.csv, rows: r.rows, added: r.added || 0 };
   },
   async importResult(w, b, x) {
@@ -366,7 +388,7 @@ const OPF = {
     const int = (v) => (v === undefined ? undefined : Number.isInteger(v) && v >= -1 && v <= 1e9 ? v : NaN);
     const ex = { id: int(b.id), errors: int(b.errors), loaded: int(b.loaded) };
     if (Object.values(ex).some((v) => Number.isNaN(v)) || (b.status !== undefined && typeof b.status !== 'string')) throw bad('bad-import', 'דיווח טעינה לא תקין');
-    if (typeof b.run !== 'string' || !SRUN_RE.test(b.run) || !['new', 'price'].includes(b.kind) || !Number.isInteger(b.n) || b.n < 0 || b.n > 100000) throw bad('bad-import', 'דיווח טעינה לא תקין');
+    if (typeof b.run !== 'string' || !SRUN_RE.test(b.run) || !['new', 'price', 'upd'].includes(b.kind) || !Number.isInteger(b.n) || b.n < 0 || b.n > 100000) throw bad('bad-import', 'דיווח טעינה לא תקין');
     if (b.hash !== undefined && (typeof b.hash !== 'string' || !/^[0-9a-f]{64}$/.test(b.hash))) throw bad('bad-import', 'דיווח טעינה לא תקין');
     const rec = Object.assign({ n: b.n, ok: b.ok === true, text: str(b.text, 500), hash: b.hash || '', at: x.now }, ex.id !== undefined ? { id: ex.id, status: str(b.status, 40), errors: ex.errors === undefined ? -1 : ex.errors, loaded: ex.loaded === undefined ? -1 : ex.loaded } : {});
     await runRef(b.run).set({ imp: { [b.kind]: rec }, upd: x.now }, { merge: true });
@@ -384,6 +406,25 @@ const OPF = {
       for (let k = 0, i = 0; i < s.length; k++, i += DISC_PART) bt.set(ref.collection('p').doc(String(k)), { s: s.slice(i, i + DISC_PART) });
       await bt.commit();
       return { id };
+    }
+    // 26.11.2026: סיום ריצת מוצרים (30 דקות) – דיווח קצר בלבד, ושחרור המנעול
+    if (b.kind === 'prod') {
+      try {
+        O.onlyKeys(b, ['run', 'kind', 'st', 'c', 'n']);
+        if (typeof b.run !== 'string' || !SRUN_RE.test(b.run) || !['ok', 'fail', 'skip'].includes(b.st) || (b.c !== undefined && (typeof b.c !== 'string' || !TF_C.test(b.c)))) throw bad('bad-report', 'דיווח לא תקין');
+        const nn = b.n && typeof b.n === 'object' && !Array.isArray(b.n) ? b.n : {};
+        const n = {}; for (const k of ['cat', 'nw', 'pr', 'up']) if (Number.isInteger(nn[k]) && nn[k] >= 0) n[k] = Math.min(nn[k], 1e6);
+        const up = { p30: Object.assign({ at: x.now, st: b.st, run: b.run, n }, b.c ? { c: b.c } : {}) };
+        if (b.st === 'ok') up.pok = x.now;
+        await priv(w.bizId, 'cxbot').set(up, { merge: true });
+        return {};
+      } finally {
+        // סבב בדיקה 1: לא משחררים את המנעול כשריצה לילית של המחשב באמצע (אותו בעלים) – היא תשחרר בדיווח שלה
+        const last = await T.tdb().collection('cxBotRun').orderBy('at', 'desc').limit(1).get().catch(() => null);
+        const lr0 = last && last.docs[0] ? last.docs[0].data() : null;
+        const busy = lr0 && ['run', 'wait'].includes(lr0.st) && x.now - (lr0.at || 0) < 3 * 3600e3;
+        if (!busy) await CX.lockFree(w.bizId, 'bot:' + x.dev.id).catch(() => {});
+      }
     }
     if (b.kind !== 'run') throw bad('bad-kind', 'סוג דיווח לא תקין');
     // דיווח ריצה שנכשל (קלט פגום, תקלה) – המנעול של הרובוט משתחרר בכל זאת
@@ -524,6 +565,12 @@ async function reportRun(w, b, x, o) {
     const sd = x.dev.sd || null;
     const up = { last: x.now, lr: { id: b.run, at: x.now, st, code: e ? e.code : '', msg: e ? e.msg : '', step: e ? e.step : '', manual: rs.exists ? !!rs.get('manual') : false } };
     if (st === 'ok') up.lok = x.now;
+    // 26.11.2026: שלבי המוצרים הצליחו (גם אם מכירות של סניף נכשלו אחר כך) → "מוצרים סונכרנו לאחרונה"
+    if (info.prod === true) up.pok = x.now;
+    // החזרה לסניף שהיה מוצג בתחילת הריצה נכשלה – אזהרה בכרטיס (לא עוצר). ריצה שהגיעה לסוף בלי זה – מנקה
+    const back = info.flags && typeof info.flags === 'object' ? info.flags.back : null;
+    if (back && typeof back === 'object') up.bw = { at: x.now, msg: str(back.msg, 200), br: str(back.br, 40) };
+    else if (st === 'ok') up.bw = null;
     if (last && (!sd || last > sd) && last < ilDay(x.now)) up.sd = last;
     await priv(w.bizId, 'cxbot').set(up, { merge: true });
     if (up.sd) await CX.partDrop(up.sd).catch((er) => logger.warn('cxBot: partDrop failed', { name: er && er.name })); // תמונות חלקיות של ימים שנקלטו במלואם

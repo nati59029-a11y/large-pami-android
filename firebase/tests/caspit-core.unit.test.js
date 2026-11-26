@@ -446,3 +446,57 @@ describe('C1: שעת מכירה ופילוח לפי שעה', () => {
     assert.deepEqual(C.salesHours(D).hours, { '2026-11-16': { 14: 10 } });
   });
 });
+
+// 26.11.2026: שם / ברקוד ראשי / קטגוריה – decideF / afterF (טקסט, מעבר בטוח)
+describe('decideF / afterF – שדות טקסט', () => {
+  it('מעבר בטוח: בלי ab → base0, רק רישום בסיס (בלי שינוי בשום צד)', () => {
+    for (const s of [undefined, null, {}, { fb: 'א' }]) assert.equal(C.decideF('שם בכספית', 'שם באפליקציה', s).act, 'base0');
+    assert.deepEqual(C.afterF({ act: 'base0' }, ' שם  בכספית ', '', 'app'), { fb: 'שם בכספית', ab: null });
+  });
+  it('keep: שונים ואף צד לא השתנה – לא נוגעים; base: שווים (רווחים לא משנים)', () => {
+    const s = { fb: 'עט', ab: 'עט כחול' };
+    assert.equal(C.decideF('עט', 'עט כחול', s).act, 'keep');
+    assert.equal(C.afterF({ act: 'keep' }, 'עט', 'עט כחול'), null);
+    assert.equal(C.decideF('עט  כחול', 'עט כחול', s).act, 'base');
+  });
+  it('in / out / conf / ack', () => {
+    const s = { fb: 'א', ab: 'א' };
+    assert.deepEqual(C.decideF('ב', 'א', s), { act: 'in', v: 'ב' });
+    assert.deepEqual(C.decideF('א', 'ג', s), { act: 'out', v: 'ג' });
+    assert.deepEqual(C.decideF('ב', 'ג', s), { act: 'conf', v: 'ג', f: 'ב' });
+    assert.deepEqual(C.afterF(C.decideF('ב', 'ג', s), 'ב', 'ג', 'app'), { fb: 'ב', ab: 'ג', pd: 'ג' });
+    assert.equal(C.decideF('ג', 'ג', { fb: 'א', ab: 'ג', pd: 'ג' }).act, 'ack');
+    assert.equal(C.decideF('', 'ג', { fb: null, ab: 'ג', pd: 'ג' }).act, 'out', 'נשלח וטרם נקלט – יוצא שוב');
+  });
+  it('קטגוריה: ctOf / ctSplit; משנית בלי ראשית – אין קטגוריה', () => {
+    assert.equal(C.ctOf('כלים', 'צלחות'), 'כלים›צלחות');
+    assert.equal(C.ctOf('', 'צלחות'), null);
+    assert.deepEqual(C.ctSplit('כלים›צלחות'), ['כלים', 'צלחות']);
+    assert.deepEqual(C.ctSplit('כלים'), ['כלים', '']);
+    assert.deepEqual(C.ctSplit(null), ['', '']);
+  });
+  it('decide למספרים לא השתנה (q ברירת מחדל)', () => {
+    assert.deepEqual(C.decide(10, 12, { fb: 10, ab: 10 }), { act: 'out', v: 12 });
+    assert.deepEqual(C.decide(10.001, 10, {}), { act: 'base', v: 10 });
+  });
+});
+
+// סבב בדיקה 1: נרמול כמו בכספית (ליקוי 3) ו-clean בלי איחוד לקודים ממתינים (ליקוי 4)
+describe('fxNorm / clean solo', () => {
+  it('fxNorm: שם מעל 60 → 59 + "…", קטגוריה עד 40 לכל חלק, ברקוד לא תקין = אין', () => {
+    const L = 'א'.repeat(70);
+    assert.equal(C.fxNorm('nm', L), 'א'.repeat(59) + '…');
+    assert.equal(C.fxNorm('nm', 'קצר'), 'קצר');
+    assert.equal(C.fxNorm('ct', 'ב'.repeat(45) + '›' + 'ג'.repeat(45)), 'ב'.repeat(40) + '›' + 'ג'.repeat(40));
+    assert.equal(C.fxNorm('bc', '$7290000000011'), '7290000000011');
+    assert.equal(C.fxNorm('bc', 'אב#'), null);
+    assert.equal(C.decideF(C.fxNorm('nm', L), C.fxNorm('nm', L), { fb: 'x', ab: 'y', pd: C.fxNorm('nm', L) }).act, 'ack');
+  });
+  it('clean: קוד ב-solo לא מתאחד (שם ומחיר זהים) – לא כראשי ולא כמשני', () => {
+    const items = [{ c: '1', n: 'מחק', p: 2 }, { c: '2', n: 'מחק', p: 2 }, { c: '3', n: 'מחק', p: 2 }];
+    assert.equal(C.clean(items).keep.length, 1);
+    const r = C.clean(items, { solo: ['2'] });
+    assert.deepEqual(r.keep.map((x) => x.c), ['1', '2']);
+    assert.deepEqual(r.merged.map((x) => [x.c, x.to]), [['3', '1']]);
+  });
+});
