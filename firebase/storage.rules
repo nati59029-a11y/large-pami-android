@@ -202,6 +202,30 @@ service firebase.storage {
       allow list, update: if false;
     }
 
+    // קבצים והודעות קוליות בקבוצות (26.11.2026, שיתוף לקבוצה): grpf/{gid}/{mid} ו-b/{bizId}/grpf/{gid}/{mid} – בדיוק כמו grpv,
+    // אבל כל סוג קובץ (contentType לא ריק) ועד 25MB. ההודעה (k 'file' / 'aud', fp = הנתיב המלא) נכתבת אחרי ההעלאה;
+    // חוקי Firestore מוודאים ש-fp הוא הנתיב של אותה הודעה, ובהודעה קולית – fm audio/*. נמחק אחרי 90 יום (lifecycle grpf/) ובמחיקת קבוצה (grpDel).
+    function grpfOk() {
+      return request.resource.size <= 25 * 1024 * 1024
+        && request.resource.contentType is string && request.resource.contentType.size() > 0;
+    }
+    match /grpf/{gid}/{mid} {
+      allow get: if uIn('largpeami', 'admin')
+        || (uIn('largpeami', 'worker') && request.auth.uid in firestore.get(/databases/(default)/documents/grp/$(gid)).data.get('mem', []));
+      allow create: if resource == null && grpfOk()
+        && grpvSend('largpeami', firestore.get(/databases/(default)/documents/grp/$(gid)).data);
+      allow delete: if isManager();
+      allow list, update: if false;
+    }
+    match /b/{bizId}/grpf/{gid}/{mid} {
+      allow get: if uIn(bizId, 'admin')
+        || (uIn(bizId, 'worker') && request.auth.uid in firestore.get(/databases/(default)/documents/b/$(bizId)/grp/$(gid)).data.get('mem', []));
+      allow create: if resource == null && grpfOk()
+        && grpvSend(bizId, firestore.get(/databases/(default)/documents/b/$(bizId)/grp/$(gid)).data);
+      allow delete: if bMgr(bizId);
+      allow list, update: if false;
+    }
+
     // דיווח יומי (dailyRep, 16.11.2026): הקלטות העובדים – b/{bizId}/dr/{id}/a{i}.wav. רק השרת (Admin SDK) כותב וקורא;
     // ההשמעה למנהל דרך drMgr op 'audio'. כלל חוסם מפורש (הכלל הכללי למטה כבר חוסם – זה רק תיעוד והגנה מפני כלל רחב בעתיד).
     match /b/{bizId}/dr/{allPaths=**} {

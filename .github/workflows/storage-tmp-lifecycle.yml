@@ -7,6 +7,7 @@ name: Storage – auto-delete temp media (manual)
 # עסק חדש נכנס לכלל רק בהרצה הבאה (עד אז secMediaClean מכסה). כללי lifecycle אחרים ב-bucket נשמרים כמו שהם.
 # 17.11.2026 (קבוצות התכתבות, סבב 3 – החלטת בעל הפרויקט): סרטונים בקבוצות (grpv/ ו-b/<biz>/grpv/) נמחקים אחרי 90 יום.
 # ההודעה עצמה (Firestore) נשארת. גם כאן עסק חדש נכנס רק בהרצה הבאה – להריץ שוב אחרי פתיחת עסק חדש.
+# 26.11.2026 (שיתוף לקבוצה – החלטת בעל הפרויקט): קבצים והודעות קוליות בקבוצות (grpf/ ו-b/<biz>/grpf/) – גם הם נמחקים אחרי 90 יום.
 
 on:
   workflow_dispatch:
@@ -54,7 +55,7 @@ jobs:
           [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
-      - name: Set lifecycle rules for sec_tmp (1 day) and grpv (90 days) (keeps all other rules)
+      - name: Set lifecycle rules for sec_tmp (1 day), grpv and grpf (90 days) (keeps all other rules)
         env:
           P: ${{ inputs.project }}
         run: |
@@ -75,8 +76,8 @@ jobs:
                   print('::error::' + msg); sys.exit(1)
           meta = call(API + '?fields=lifecycle')
           rules = (meta.get('lifecycle') or {}).get('rule') or []
-          KINDS = (('sec_tmp/', 1), ('grpv/', 90))  # (תחילית, ימים) – הכללים שהתהליך הזה מנהל
-          OURS = re.compile(r'^(b/[^/]+/)?(sec_tmp|grpv)/$')  # רק תחיליות שהתהליך הזה יוצר (הערה 3 של הבודק)
+          KINDS = (('sec_tmp/', 1), ('grpv/', 90), ('grpf/', 90))  # (תחילית, ימים) – הכללים שהתהליך הזה מנהל
+          OURS = re.compile(r'^(b/[^/]+/)?(sec_tmp|grpv|grpf)/$')  # רק תחיליות שהתהליך הזה יוצר (הערה 3 של הבודק)
           ours = lambda p: bool(OURS.match(p))
           mine = lambda r: all(ours(p) for p in ((r.get('condition') or {}).get('matchesPrefix') or ['x']))
           keep = [r for r in rules if not mine(r)]

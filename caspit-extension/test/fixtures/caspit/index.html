@@ -46,6 +46,15 @@ const STORE = () => localStorage.getItem('store') || 'יהודה הנשיא';
     const nm = o.textContent.trim(), bf = localStorage.getItem('brFail') || '';
     localStorage.setItem('brPicks', (localStorage.getItem('brPicks') || '') + nm + ';');
     if ((bf === 'switch' && nm === 'נחל לכיש') || (bf === 'restore' && nm === 'יהודה הנשיא')) return;
+    // 0.1.23 (השערה לתקלה 26.11): brFail=confirm – כספית שואלת "לעבור לחנות…?" והבחירה נשמרת רק אחרי "אישור"
+    if (bf === 'confirm') {
+      const dl = document.createElement('div'); dl.setAttribute('role', 'dialog'); dl.className = 'modal show';
+      dl.innerHTML = '<p>האם לעבור לחנות ' + nm + '?</p><button type="button" class="cok">אישור</button><button type="button" class="cno">ביטול</button>';
+      document.body.appendChild(dl);
+      dl.querySelector('.cno').onclick = () => dl.remove();
+      dl.querySelector('.cok').onclick = () => { localStorage.setItem('brOk', (localStorage.getItem('brOk') || '') + nm + ';'); dl.remove(); localStorage.setItem('store', nm); setTimeout(() => location.reload(), 300); };
+      return;
+    }
     // 0.1.22 (כמו בכספית האמיתית, 25.11): השם מופיע בפקד מיד, והבחירה נשמרת רק בטעינה מחדש של כספית אחרי brLagMs.
     // מעבר מסך לפני כן (שינוי hash) מבטל את השמירה. brFail=lost – השם מופיע, אבל לא נשמר ואין טעינה מחדש
     if (bf === 'lag' || bf === 'lost') {

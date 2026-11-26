@@ -44,7 +44,8 @@ open(p, "w", encoding="utf-8").write(s)
 print("speech queries: OK")
 PYQ
 # --- SHARE-TARGET BEGIN ---
-# "Share" menu of Android (WhatsApp, bank app, gallery): images and PDF, one file or many.
+# "Share" menu of Android (WhatsApp, bank app, gallery): any file (images/PDF for the scan queue, anything else for groups)
+# and shared text, one file or many (26.11.2026: */* and text/plain added).
 # Adds ONE intent-filter to MainActivity (running twice does not add it twice) and keeps launchMode="singleTask",
 # so a share while the app is open reaches the running app (onNewIntent -> ShareInPlugin) instead of a second copy.
 python3 - "$M" <<'PY'
@@ -74,13 +75,15 @@ if "android.intent.action.SEND_MULTIPLE" not in s[start:end]:
          '                <category android:name="android.intent.category.DEFAULT" />\n'
          '                <data android:mimeType="image/*" />\n'
          '                <data android:mimeType="application/pdf" />\n'
+         '                <data android:mimeType="text/plain" />\n'
+         '                <data android:mimeType="*/*" />\n'
          '            </intent-filter>\n\n        ')
     s = s[:end] + f + s[end:]
 open(p, "w", encoding="utf-8").write(s)
 n = s.count("android.intent.action.SEND_MULTIPLE")
 if n != 1:
     sys.exit("::error::share target: expected 1 SEND_MULTIPLE filter, found %d" % n)
-print("share target: OK (launchMode=singleTask, SEND + SEND_MULTIPLE, image/* + application/pdf)")
+print("share target: OK (launchMode=singleTask, SEND + SEND_MULTIPLE, image/* + application/pdf + text/plain + */*)")
 PY
 # --- SHARE-TARGET END ---
 mkdir -p android/app/src/main/res/xml

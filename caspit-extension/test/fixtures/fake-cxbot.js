@@ -35,13 +35,15 @@ function start(o) {
       if (op === 'upload' && b.partial !== undefined && S.noPartial) return send(400, { ok: false, reason: 'bad-field', msg: 'שדה לא מוכר' });
       if (op === 'hello' && b.req !== undefined) { if (b.req !== S.req || S.taken) return send(409, { ok: false, reason: 'req-gone', msg: 'הבקשה כבר טופלה' }); S.taken = true; }
       if (op === 'hello') return send(200, { ok: true, runId: S.runId || 'srvrun' + S.calls.length, minVer: '0.0.1', biz: { name: 'עסק בדיקה' }, days: S.days, schedule: { at: '03:00', tz: 'Asia/Jerusalem' }, limits: { price: 500, newMax: 50 } });
+      // 0.1.23: cfg (מגבלות לריצת המוצרים כל 30 דקות); S.updMax
+      if (op === 'cfg') return send(200, { ok: true, schedule: { at: '03:00', tz: 'Asia/Jerusalem' }, lastSales: null, limits: { price: 500, newMax: 50, updMax: S.updMax == null ? 5 : S.updMax } });
       if (op === 'upload' || op === 'hkSnap') return send(200, { ok: true });
       if (op === 'preview') return send(200, { ok: true, cnt: { nw: 1, in: 2 } });
       if (op === 'apply') return send(200, { ok: true, done: true, res: { nw: 1 } });
       if (op === 'export') {
         const n = S.exportN[b.kind] || 0;
         if (!n) return send(200, { ok: true, n: 0, csv: '', rows: [] });
-        return send(200, { ok: true, n, csv: b.kind === 'new' ? csvNew : csvPrice, rows: Array.from({ length: Math.min(n, 5) }, (_, i) => ({ c: String(100 + i) })) });
+        return send(200, { ok: true, n, csv: b.kind === 'new' ? csvNew : b.kind === 'upd' ? csvNew.replace('900001', '101') : csvPrice, rows: Array.from({ length: Math.min(n, 5) }, (_, i) => ({ c: String(100 + i) })) });
       }
       if (op === 'importResult' || op === 'report') return send(200, { ok: true });
       return send(400, { ok: false, reason: 'bad-op' });
