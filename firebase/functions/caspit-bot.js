@@ -76,7 +76,8 @@ const REQ_RE = /^q[a-z0-9]{6,30}$/;
 const NOW_VER = '0.1.5'; // הגרסה הראשונה של התוסף שמגיבה ל"סנכרן עכשיו"
 const UPF_VER = '0.1.24'; // 26.11.2026: התוסף הראשון שטוען את export upd בסוג הייבוא "עדכון פריטים" (קודם – "פריטים חדשים", שלא מעדכן). לתוסף ישן יותר – upd ריק, בלי סימון
 const UPD_VER = '0.1.10'; // הגרסה הראשונה שמגיבה ל"עדכון המחשב" ושולחת את מכירות היום
-const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf', 'hk', 'prod30']; // prod30 (תוסף 0.1.23): מוצרים כל 30 דקות + export upd + report kind:'prod' // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
+const CAPS = ['today', 'uq', 'hours', 'hours2', 'tf', 'hk', 'prod30', 'upf']; // upf (תוסף 0.1.24): export upd בתבנית "עדכון פריטים" (CC.HDR_UPD) – התוסף טוען upd רק כשהיכולת קיימת
+// prod30 (תוסף 0.1.23): מוצרים כל 30 דקות + export upd + report kind:'prod' // hours2 (תוסף 0.1.15): upload kind:'hours' מקבל empty – עובדים שכל השעות שלהם בחודש נמחקו בכספית
 // tf (תוסף 0.1.19, 24.11.2026): poll מקבל tf = { s:'YYYY-MM-DD HH', c:קוד } – העדכון השעתי של מכירות היום שנכשל במחשב (עד אז נשמר רק בתוסף)
 const TF_S = /^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3])$/, TF_C = /^[a-z0-9-]{1,30}$/;
 const UST = ['reload', 'same', 'copying', 'busy', 'none'];
@@ -147,7 +148,7 @@ async function verify(tok) {
 
 // cxBotTok({ op }) – מנהל. new → { token, id } (פעם אחת). revoke → { ok }. info → מצב הרובוט
 async function cxBotTok(w, input) {
-  O.onlyKeys(input, input.op === 'hours' ? ['op', 'm'] : ['op']);
+  O.onlyKeys(input, input.op === 'hours' ? ['op', 'm'] : input.op === 'retry' ? ['op', 'c'] : ['op']);
   if (!w.bizId) throw pre('no-biz', 'בחרו עסק');
   const ref = priv(w.bizId, 'cxbot');
   if (input.op === 'new') {
@@ -175,7 +176,7 @@ async function cxBotTok(w, input) {
     const out = {
       dev: d.h ? { id: d.id, at: d.at || null, last: d.last || null, ver: d.ver || '', ua: str(d.ua, 120), upd: d.upd || null } : null,
       sd: d.sd || null, lr: d.lr || null, lok: d.lok || null, li: d.li || null, nwDup: d.nwDup || null, nwVar: d.nwVar || null, newMax: cfg.bot.newMax, updMax: cfg.bot.updMax, limits: LIM,
-      p30: d.h ? d.p30 || null : null, updOff: CX.updOff(cfg) || null, upStuck: d.upStuck || null, pok: d.pok || null, bw: d.h ? d.bw || null : null, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
+      p30: d.h ? d.p30 || null : null, updOff: CX.updOff(cfg) || null, upStuck: d.upStuck || null, upMan: d.upMan || null, pok: d.pok || null, bw: d.h ? d.bw || null : null, schedule: SCHED, first: !cfg.last, sa: !!w.superadmin,
       req: d.h && d.req ? { id: d.req.id, at: d.req.at || 0, took: d.req.took || null, wait: d.req.wait || null } : null, pl: d.h ? d.pl || null : null, nowVer: NOW_VER, now: Date.now(), reqMs: REQ_MS,
       ureq: d.h && d.ureq && d.ureq.id ? { id: d.ureq.id, at: d.ureq.at || 0, took: d.ureq.took || null, res: d.ureq.res || null } : null, updVer: UPD_VER,
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
@@ -215,6 +216,17 @@ async function cxBotTok(w, input) {
     return { m: input.m, list };
   }
   // "עדכון המחשב": בקשה לתוסף לבדוק אם המשימה ב-Windows כבר הורידה גרסה חדשה, ולהיטען מחדש אם בטוח. לא מוריד כלום בעצמו.
+  // סבב בדיקה 1: "נסה שוב" לעדכון פריט שנתקע (uq) – המונה מתאפס, והפריט יוצא מרשימת "לא נקלט" בכרטיס
+  if (input.op === 'retry') {
+    await CX.updRetry(input.c);
+    await ref.firestore.runTransaction(async (tx) => {
+      const s = await tx.get(ref), u = s.exists ? s.get('upStuck') : null;
+      if (!u || !Array.isArray(u.l)) return;
+      const l = u.l.filter((d) => d.c !== input.c);
+      if (l.length !== u.l.length) tx.update(ref, { upStuck: Object.assign({}, u, { l, n: Math.max(0, (u.n || 0) - 1) }) });
+    });
+    return { ok: true };
+  }
   if (input.op === 'upd') {
     const now = Date.now(), id = 'q' + now.toString(36) + crypto.randomBytes(3).toString('hex');
     const r = await ref.firestore.runTransaction(async (tx) => {
@@ -375,13 +387,14 @@ const OPF = {
     const lim = limitsOf(await cfgNow());
     const max = Math.min(b.max, cap(lim));
     await CX.lockTake(w.bizId, 'bot:' + x.dev.id);
-    if (b.kind === 'upd' && cmpVer(x.ver, UPF_VER) < 0) return { n: 0, csv: '', rows: [], added: 0 };
+    if (b.kind === 'upd' && (cmpVer(x.ver, UPF_VER) < 0 || max === 0)) return { n: 0, csv: '', rows: [], added: 0 }; // תוסף ישן / updMax 0 = כבוי (בלי limit)
     const r = await CX.FNS.cxExport(w, { kind: b.kind, max });
     // 26.11.2026: מוצרים שהברקוד שלהם כבר בכספית – לא נשלחו; לכרטיס הרובוט (כמה + עד 20 שמות וברקודים)
     if (b.kind === 'new') await priv(w.bizId, 'cxbot').set({ nwDup: { n: r.dupN || 0, at: x.now, l: (r.dup || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), bc: str(d.bc, 40), cx: str(d.cx, 40) })) },
       nwVar: { n: r.varN || 0, at: x.now, l: (r.vars || []).slice(0, 100).map((d) => ({ n: str(d.n, 80), cx: str(d.cx, 40) })) } }, { merge: true }); // 26.11.2026: וריאנטים של פריט בכספית (לא "כפולים")
     // סבב בדיקה 1: עדכוני פריטים שנשלחו 3 פעמים ולא נקלטו – לכרטיס הרובוט ("לבדוק")
-    if (b.kind === 'upd' && !r.off) await priv(w.bizId, 'cxbot').set({ upStuck: { n: r.stuckN || 0, at: x.now, l: (r.stuck || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), c: str(d.c, 40) })) } }, { merge: true });
+    if (b.kind === 'upd' && !r.off && !r.noLast) await priv(w.bizId, 'cxbot').set({ upStuck: { n: r.stuckN || 0, at: x.now, l: (r.stuck || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), c: str(d.c, 40) })) },
+      upMan: { n: r.manN || 0, at: x.now, l: (r.man || []).slice(0, 20).map((d) => ({ n: str(d.n, 80), c: str(d.c, 40), k: (d.k || []).filter((k) => ['nm', 'ct', 'sp'].includes(k)) })) } }, { merge: true }); // סבב בדיקה 1: "לעדכן ידנית בכספית"
     return { n: r.n, csv: r.csv, rows: r.rows, added: r.added || 0 };
   },
   async importResult(w, b, x) {
@@ -395,6 +408,7 @@ const OPF = {
     const rec = Object.assign({ n: b.n, ok: b.ok === true, text: str(b.text, 500), hash: b.hash || '', at: x.now }, ex.id !== undefined ? { id: ex.id, status: str(b.status, 40), errors: ex.errors === undefined ? -1 : ex.errors, loaded: ex.loaded === undefined ? -1 : ex.loaded } : {});
     await runRef(b.run).set({ imp: { [b.kind]: rec }, upd: x.now }, { merge: true });
     await priv(w.bizId, 'cxbot').set({ li: Object.assign({ kind: b.kind, run: b.run }, rec) }, { merge: true }); // הטעינה האחרונה לכספית (לכרטיס הרובוט)
+    if (b.kind === 'upd' && ex.id > 0 && b.hash) await CX.updAck(b.hash); // סבב בדיקה 1: ניסיון נספר רק כשהקובץ באמת נטען
     return {};
   },
   async report(w, b, x, o) {

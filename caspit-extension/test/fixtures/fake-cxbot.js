@@ -5,7 +5,7 @@ const http = require('http');
 function start(o) {
   const S = { calls: [], token: o.token, days: o.days || [], mode: {}, exportN: { new: 1, price: 2 } };
   const csvNew = '﻿קוד פריט,ברקוד,שם פריט\n900001,7290000009001,פריט חדש\n';
-  const csvUpd = '\ufeffקוד פריט,שם פריט,מחיר לצרכן כולל מעמ\n101,שם חדש,\n'; // 0.1.24: "עדכון פריטים" (CC.csvUpd – כאן מקוצר)
+  const csvUpd = require('../../src/lib/caspit-core.js').csvUpd([{ c: '101', n: 'שם חדש' }]); // 0.1.24: "עדכון פריטים" (S.updBad – קובץ בתבנית אחרת)
   const csvPrice = '﻿קוד פריט,מחיר לצרכן כולל מעמ\n101,5.5\n102,10.9\n';
   const srv = http.createServer((req, res) => {
     const send = (st, body) => {
@@ -44,7 +44,7 @@ function start(o) {
       if (op === 'export') {
         const n = S.exportN[b.kind] || 0;
         if (!n) return send(200, { ok: true, n: 0, csv: '', rows: [] });
-        return send(200, { ok: true, n, csv: b.kind === 'new' ? csvNew : b.kind === 'upd' ? csvUpd : csvPrice, rows: Array.from({ length: Math.min(n, 5) }, (_, i) => ({ c: String(100 + i) })) });
+        return send(200, { ok: true, n, csv: b.kind === 'new' ? csvNew : b.kind === 'upd' ? (S.updBad ? csvNew : csvUpd) : csvPrice, rows: Array.from({ length: Math.min(n, 5) }, (_, i) => ({ c: String(100 + i) })) });
       }
       if (op === 'importResult' || op === 'report') return send(200, { ok: true });
       return send(400, { ok: false, reason: 'bad-op' });

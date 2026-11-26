@@ -137,8 +137,8 @@ async function pollOnce() {
   const cl = Array.isArray(r.caps) ? r.caps : [];
   // 0.1.15: hours2 = השרת מקבל empty (עובדים שכל השעות שלהם בחודש נמחקו בכספית). שרת בלי hours2 – לא שולחים empty (שדה לא מוכר נדחה)
   // 0.1.19: tf = השרת מקבל ב-poll את העדכון השעתי שנכשל
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf'), prod30: cl.includes('prod30') }; // 0.1.23: prod30 = מוצרים כל 30 דקות
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf || caps.prod30 !== !!caps0.prod30) await set({ caps });
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf'), prod30: cl.includes('prod30'), upf: cl.includes('upf') }; // 0.1.23: prod30 = מוצרים כל 30 דקות; 0.1.24: upf = השרת מפיק upd בתבנית "עדכון פריטים"
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf || caps.prod30 !== !!caps0.prod30 || caps.upf !== !!caps0.upf) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
@@ -1280,7 +1280,8 @@ const STEP = {
   exportPrice: (run) => exportImport(run, 'price'),
   // 0.1.23: עדכוני פריטים לכספית – רק מול שרת עם caps.prod30. תקלה לא עוצרת: flags.up. 0.1.24: שם / קטגוריה / ספק בסוג הייבוא "עדכון פריטים" (importUpd)
   async exportUpd(run) {
-    if (!((await get('caps')) || {}).prod30) return { skip: 'caps' };
+    const cp = (await get('caps')) || {};
+    if (!cp.prod30 || !cp.upf) return { skip: 'caps' }; // 0.1.24 (סבב בדיקה 1): רק מול שרת שמודיע upf – שרת ישן מפיק upd בתבנית אחרת
     try { return await exportImport(run, 'upd'); } catch (e) {
       const code = e && typeof e.code === 'string' ? e.code : 'tab';
       if (!NW_SOFT.has(code)) throw e;
@@ -1314,17 +1315,20 @@ async function applyLoop(sub, log) {
   }
   throw P.err('server', 'השמירה בשרת לא הסתיימה');
 }
-const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout']); // 0.1.22: תקלות בפריטים חדשים שלא עוצרות את עדכון המחירים
+const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout', 'upd-format']); // 0.1.22: תקלות בפריטים חדשים שלא עוצרות את עדכון המחירים
 async function exportImport(run, kind) {
   const L = run.limits || U.LIMITS;
   const max = kind === 'new' ? Math.min(L.newMax, U.LIMITS.newMax) : kind === 'upd' ? Math.min(L.updMax == null ? 1 : L.updMax, U.LIMITS.updMax) : Math.min(L.price, U.LIMITS.price);
   const what = kind === 'new' ? 'טעינת פריטים חדשים' : kind === 'upd' ? 'עדכון פריטים' : 'עדכון מחירים', flow = kind === 'price' ? 'importPrice' : kind === 'upd' ? 'importUpd' : 'importNew'; // 0.1.24: upd – סוג הייבוא "עדכון פריטים" (importUpd)
+  if (kind === 'upd' && max === 0) return { n: 0, skip: 'off' }; // 0.1.24: updMax 0 = כבוי (בלי limit)
   const cl = await api();
   const r = await cl.call('export', { kind, max, log: run.srv });
   const n = +r.n || 0;
   if (!n) return { n: 0 };
   if (n > max || (Array.isArray(r.rows) && r.rows.length > max)) throw P.err('limit', `${n} שורות ${kind === 'new' ? 'פריטים חדשים' : kind === 'upd' ? 'עדכוני פריטים' : 'מחירים'} – מעל המגבלה (${max}). לא נשלח לכספית.`);
   if (typeof r.csv !== 'string' || !r.csv || r.csv.length > 5e6) throw P.err('fail', 'קובץ לא תקין מהשרת');
+  // 0.1.24 (סבב בדיקה 1): "עדכון פריטים" – רק קובץ שהכותרת שלו זהה בדיוק ל-HDR_UPD; אחרת לא טוענים (flags.up)
+  if (kind === 'upd' && r.csv.replace(/^\ufeff/, '').split('\n')[0] !== C.HDR_UPD.join(',')) throw P.err('upd-format');
   const bytes = new TextEncoder().encode(r.csv), hash = await U.sha256(bytes);
   const today = D.dayStr(Date.now(), (await sched()).tz);
   const done = (await get('impHash')) || {};

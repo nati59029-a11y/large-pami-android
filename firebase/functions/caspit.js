@@ -25,6 +25,7 @@ const logger = require('firebase-functions/logger');
 const T = require('./lib/tenant');
 const { inputObject } = require('./lib/roles');
 const CC = require('./lib/caspit-core');
+const crypto = require('crypto');
 const PM = require('./lib/prod-match');
 const O = require('./orders')._core;
 const FV = () => require('firebase-admin/firestore').FieldValue;
@@ -39,6 +40,10 @@ const SEEN = 'cxcfg/seen'; // { codes:[כל הקודים שהופיעו בקטל
 // 26.11.2026: ברקודים של הקטלוג האחרון שאושר → קוד בכספית. { s:'ברקוד\tקוד\n…' } (מחרוזת אחת – בלי אלפי שדות במסמך).
 // cxExport new לא שולח (ולא נותן קוד חדש) למוצר שהברקוד שלו כבר בכספית – כספית דוחה אותו ("ברקוד כבר קיים בקטלוג פריטים")
 const SEEN_BC = 'cxcfg/seenBc';
+// סבב בדיקה 1 (עדכון פריטים): הקודים של הקטלוג האחרון בלבד { s:'<קוד>\n…', n, run, at } – cxExport upd שולח רק לקוד שבו (seen מצטבר: גם קודים שנמחקו בכספית)
+const SEEN_LAST = 'cxcfg/seenLast';
+// הקובץ האחרון של cxExport upd: { h: sha256 של הקובץ, codes, at }. מונה הניסיונות (uq) עולה רק כשהתוסף מדווח שהקובץ הזה באמת נטען (updAck)
+const UPD_SENT = 'cxcfg/updSent';
 const bcKey = (b) => CC.bcNorm(b);
 function bcMapOf(snap) { const m = new Map(); const t = snap && snap.exists ? snap.get('s') : ''; if (typeof t === 'string') for (const ln of t.split('\n')) { const i = ln.indexOf('\t'); if (i > 0) m.set(ln.slice(0, i), ln.slice(i + 1)); } return m; }
 const prodBcs = (p) => [p && p.barcode].concat(p && Array.isArray(p.bcx) ? p.bcx : []).map(bcKey).filter(Boolean);
@@ -50,7 +55,7 @@ const runOf = (v) => { if (typeof v !== 'string' || !RUN_RE.test(v)) throw bad('
 const cfgOf = (s) => { const d = s && s.exists ? s.data() : {}; return { reg: d.reg && typeof d.reg === 'object' ? d.reg : {}, br: typeof d.br === 'string' ? d.br : null, skip: Array.isArray(d.skip) ? d.skip : CC.SKIP, next: Number.isInteger(d.next) ? d.next : CC.NEW_FROM, gen: d.gen || 0, bak: d.bak || null, last: d.last || null, lastSales: d.lastSales || null,
   bot: { newMax: d.bot && Number.isInteger(d.bot.newMax) ? d.bot.newMax : BOT_NEW0, updMax: d.bot && Number.isInteger(d.bot.updMax) ? d.bot.updMax : BOT_UPD0 }, updOk: d.updOk !== false, cats: Array.isArray(d.cats) ? d.cats : [] }; };
 const NEW_ALL = 100000; // "ללא הגבלה" לפריטים חדשים – התקרה הטכנית של cxExport (max עד 100000)
-const BOT_UPD0 = 20; // 26.11.2026: עדכוני פריטים (שם/קטגוריה/ספק) לכספית בכל ריצה של הרובוט – 20 עד שהמנהל משנה (כמו newMax)
+const BOT_UPD0 = 1; // 26.11.2026: עדכוני פריטים (שם/קטגוריה/ספק) לכספית בכל ריצה של הרובוט – 1 (התחלה זהירה, סבב בדיקה 1) עד שהמנהל משנה. 0 = כבוי
 const UPD_ALL = 100000;
 const BOT_NEW0 = 1; // רובוט כספית: פריטים חדשים לכספית בכל ריצה – 1 (בדיקה ראשונה עם פריט אחד) עד שהמנהל מעלה (החלטות 2, 11)
 const numOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -327,10 +332,12 @@ async function cxApply(w, input) {
   // ליקוי 6: כל הקודים שהופיעו בקטלוג (גם מסוננים ושורות שבוטל סימונן) נשמרים כתפוסים – קוד 900000+ לפריט חדש לא יתנגש בהם
   const seenRef = db.doc(SEEN);
   const codes = new Set(((await seenRef.get()).get('codes')) || []);
-  const bcs = new Map();
-  (await ref.collection('in').get()).docs.forEach((d) => (d.get('items') || []).forEach((x) => { codes.add(x.c); for (const b of x.bcs || []) { const k = bcKey(b); if (k && !bcs.has(k)) bcs.set(k, x.c); } }));
+  const bcs = new Map(), lastC = new Set();
+  (await ref.collection('in').get()).docs.forEach((d) => (d.get('items') || []).forEach((x) => { codes.add(x.c); lastC.add(x.c); for (const b of x.bcs || []) { const k = bcKey(b); if (k && !bcs.has(k)) bcs.set(k, x.c); } }));
   await seenRef.set({ codes: [...codes], at: Date.now() });
   // הקטלוג האחרון בלבד (המצב הנוכחי בכספית). כישלון כאן (למשל מסמך גדול מדי) לא מפיל את האישור – רק מדלגים על ההגנה בקובץ הפריטים החדשים
+  // הקטלוג האחרון בלבד (עדכוני פריטים). כישלון – המסמך נמחק, כדי שלא יישאר קטלוג ישן; בלי המסמך לא נשלחים עדכוני פריטים
+  try { await db.doc(SEEN_LAST).set({ s: [...lastC].join('\n'), n: lastC.size, run, at: Date.now() }); } catch (e) { logger.warn('cxApply: seenLast not saved', { biz: w.bizId || '', n: lastC.size, msg: String((e && e.message) || '').slice(0, 200) }); await db.doc(SEEN_LAST).delete().catch(() => {}); }
   try { await db.doc(SEEN_BC).set({ s: [...bcs].map(([b, c]) => b + '\t' + c).join('\n'), n: bcs.size, run, at: Date.now() }); } catch (e) { logger.warn('cxApply: seenBc not saved', { biz: w.bizId || '', n: bcs.size, msg: String((e && e.message) || '').slice(0, 200) }); }
   await db.runTransaction(async (tx) => {
     const x = await tx.get(ref), c = await tx.get(cref);
@@ -456,6 +463,29 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen, catN0)
 // price: כל קוד מקושר שהמחיר/העלות שלו באפליקציה שונים מהסנכרון האחרון, או שנשלח וטרם נקלט. מסמן pd (ממתין לקליטה).
 // new: מוצרים באפליקציה בלי קוד כספית (זמינים בלבד) מקבלים קוד מ-900000 ומעלה (cxcfg.next), ועוד פריטים חדשים שנשלחו וטרם נקלטו.
 //      זמין רק אחרי סנכרון קטלוג ראשון (כדי לא לתת קוד חדש למוצר שכבר קיים בכספית).
+// סבב בדיקה 1: התוסף דיווח שקובץ upd נטען בכספית (importResult עם מזהה טעינה) – רק אם זה הקובץ האחרון שהופק (אותו sha256), מונה הניסיונות של שורותיו עולה ב-1
+async function updAck(hash) {
+  const db = T.tdb(), ref = db.doc(UPD_SENT), s = await ref.get();
+  if (!s.exists || typeof hash !== 'string' || s.get('h') !== hash) return 0;
+  const codes = (s.get('codes') || []).filter((c) => typeof c === 'string' && CC.CODE_RE.test(c)).slice(0, 100000);
+  let n = 0;
+  for (let i = 0; i < codes.length; i += 300) {
+    const xs = await db.getAll(...codes.slice(i, i + 300).map((c) => db.doc('cxItem/' + c)));
+    const b = db.batch();
+    xs.forEach((x) => { if (x.exists) { b.update(x.ref, { uq: FV().increment(1) }); n++; } });
+    await b.commit();
+  }
+  await ref.delete();
+  return n;
+}
+// "נסה שוב" (מנהל, כרטיס הרובוט): פריט שנתקע (uq ≥ UPD_TRIES) – המונה מתאפס והוא יישלח שוב בריצה הבאה
+async function updRetry(code) {
+  if (typeof code !== 'string' || !CC.CODE_RE.test(code)) throw bad('bad-code', 'קוד פריט לא תקין');
+  const ref = T.tdb().doc('cxItem/' + code), x = await ref.get();
+  if (!x.exists) throw pre('not-found', 'הפריט לא נמצא');
+  if (x.get('uq') !== undefined) await ref.update({ uq: FV().delete() });
+  return { ok: true };
+}
 async function cxExport(w, input) {
   onlyKeys(input, ['kind', 'max']);
   if (!['price', 'new', 'upd'].includes(input.kind)) throw bad('bad-kind', 'סוג קובץ לא תקין');
@@ -489,15 +519,19 @@ async function cxExport(w, input) {
   }
   if (!S.cfg.last) throw pre('no-cat', 'קודם מסנכרנים קטלוג מכספית, כדי לא לתת קוד חדש למוצר שכבר קיים שם');
   // 26.11.2026 – upd: סוג הייבוא "עדכון פריטים" בכספית (CC.csvUpd). שורה = קוד + רק מה שהשתנה באפליקציה מהבסיס (או נשלח וטרם נקלט): שם, קטגוריה ראשית/משנית, ספק.
-  //   כל השאר ריק (= לא משתנה בכספית); אף פעם לא NULL; ערך ריק באפליקציה (למשל קטגוריה שהוסרה) לא נשלח. מחיר / עלות – רק בקובץ המחירים. ברקוד – לא נשלח (כספית לא מעדכנת ברקוד בייבוא הזה).
-  //   הגנה (לקח מבדיקה ידנית שעדכנה פריט לא נכון): רק קוד שמופיע בקטלוגים מכספית (cxcfg/seen), מקושר ב-cxItem למוצר שקיים ושה-cx שלו הוא אותו קוד; לא nw / ישן / מאוחד / וריאנט.
-  //   cxcfg/main.updOk = false – כבוי (מתג חירום): n:0 ו-off, בלי לסמן דבר. שורה שנשלחה UPD_TRIES פעמים בלי להיקלט – לא נשלחת שוב (stuck). מעל max → limit לפני שמשהו מסומן.
+  //   כל השאר ריק (= לא משתנה בכספית); אף פעם לא NULL; ערך ריק באפליקציה לא נשלח. מחיר / עלות – רק בקובץ המחירים. ברקוד – לא נשלח (כספית לא מעדכנת ברקוד בייבוא הזה).
+  //   הגנה (לקח מבדיקה ידנית שעדכנה פריט לא נכון): רק קוד מהקטלוג האחרון (SEEN_LAST; בלי הרשימה – לא שולחים כלום), מקושר ב-cxItem למוצר שה-cx שלו הוא אותו קוד; לא nw / ישן / מאוחד / וריאנט.
+  //   סבב בדיקה 1: "לעדכן ידנית בכספית" (man, לא נשלח): קטגוריה בלי משנית כשבכספית יש משנית (אי אפשר למחוק בלי NULL); שם / קטגוריה / ספק שמתחילים ב- = + - @ (cell מוסיף גרש).
+  //   רק המשנית שונתה → הראשית נשלחת כמו שבכספית (fb), ו-pd = מה שנשלח (CC.decideF מזהה את הקליטה).
+  //   uq לא עולה כאן – רק כשהתוסף מדווח שהקובץ נטען (updAck). cxcfg/main.updOk = false – כבוי (מתג חירום). uq ≥ UPD_TRIES – לא נשלח (stuck; "נסה שוב" – updRetry). מעל max → limit לפני שמשהו מסומן.
   if (input.kind === 'upd') {
     const off = updOff(S.cfg);
     if (off) return { csv: '', n: 0, rows: [], off };
+    const ls = await db.doc(SEEN_LAST).get();
+    if (!ls.exists || typeof ls.get('s') !== 'string') return { csv: '', n: 0, rows: [], noLast: true };
+    const seen = new Set(ls.get('s').split('\n').filter(Boolean));
     const catN = await catNames(db);
-    const seen = new Set(((await db.doc(SEEN).get()).get('codes')) || []);
-    const rows = [], stuck = [];
+    const rows = [], stuck = [], man = [];
     for (const [c, x] of [...S.X].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       if (!x.pid || x.nw || x.old || x.m || !seen.has(c) || !S.P.has(x.pid)) continue;
       const p = S.P.get(x.pid);
@@ -508,17 +542,35 @@ async function cxExport(w, input) {
       if (sa && sp && sp.ab != null && (sp.pd != null || sa !== sp.ab)) need.push('sp');
       if (!need.length) continue;
       if ((x.uq || 0) >= UPD_TRIES) { stuck.push({ c, n: String(p.name || '').slice(0, 80) }); continue; }
-      const [c1, c2] = need.includes('ct') ? CC.ctSplit(av.ct) : ['', ''];
-      rows.push({ c, n: need.includes('nm') ? av.nm : '', c1, c2, sup: need.includes('sp') ? sa : '', f: need });
-      const u = { xAt: now, uq: (x.uq || 0) + 1 };
-      for (const k of need) { const v = k === 'sp' ? sa : av[k]; u[k + '.pd'] = v; u[k + '.ab'] = v; }
-      if (need.includes('ct')) u['ct.ai'] = catIds(p);
+      const send = {}, why = [];
+      if (need.includes('nm')) { if (CC.csvRisky(av.nm)) why.push('nm'); else send.nm = av.nm; }
+      if (need.includes('sp')) { if (CC.csvRisky(sa)) why.push('sp'); else send.sp = sa; }
+      if (need.includes('ct')) {
+        const [a1, a2] = CC.ctSplit(av.ct), [f1, f2] = CC.ctSplit(x.ct.fb), [b1, b2] = CC.ctSplit(x.ct.ab);
+        if (x.ct.pd != null && CC.eqS(av.ct, x.ct.ab)) send.ct = CC.sv(x.ct.pd); // נשלח וטרם נקלט, והאפליקציה לא השתנתה מאז – אותו ערך שוב
+        else if (!a2 && f2) why.push('ct'); // בכספית יש משנית, באפליקציה אין – אי אפשר למחוק בלי NULL
+        else {
+          const ai1 = typeof x.ct.ai === 'string' ? x.ct.ai.split('/')[0] : null, main0 = ai1 != null ? ai1 === (p.cat || '') : CC.eqS(a1, b1); // הראשית לא הוחלפה (לפי מזהה הקטגוריה)
+          const c1 = a2 && f1 && main0 && !CC.eqS(a2, b2) ? f1 : a1; // רק המשנית שונתה – הראשית של כספית
+          if (CC.csvRisky(c1) || CC.csvRisky(a2)) why.push('ct'); else send.ct = CC.ctOf(c1, a2);
+        }
+      }
+      if (why.length) man.push({ c, n: String(p.name || '').slice(0, 80), k: why });
+      const f = Object.keys(send);
+      if (!f.length) continue;
+      const [c1, c2] = send.ct ? CC.ctSplit(send.ct) : ['', ''];
+      rows.push({ c, n: send.nm || '', c1, c2, sup: send.sp || '', f });
+      const u = { xAt: now };
+      for (const k of f) { u[k + '.pd'] = send[k]; u[k + '.ab'] = k === 'sp' ? sa : av[k]; }
+      if (send.ct) u['ct.ai'] = catIds(p);
       ups.push([db.doc('cxItem/' + c), u]);
     }
     if (rows.length > max) throw over(rows.length);
     for (let i = 0; i < ups.length; i += 400) { const b = db.batch(); ups.slice(i, i + 400).forEach(([rf, u]) => b.update(rf, u)); await b.commit(); }
     if (ups.length) await bumpGen(db);
-    return { csv: CC.csvUpd(rows), n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n || String(S.P.get(S.X.get(x.c).pid).name || '').slice(0, 80), f: x.f })), stuckN: stuck.length, stuck: stuck.slice(0, 50) };
+    const csv = CC.csvUpd(rows);
+    if (rows.length) await db.doc(UPD_SENT).set({ h: crypto.createHash('sha256').update(Buffer.from(csv, 'utf8')).digest('hex'), codes: rows.map((x) => x.c), at: now });
+    return { csv, n: rows.length, rows: rows.map((x) => ({ c: x.c, n: x.n || String(S.P.get(S.X.get(x.c).pid).name || '').slice(0, 80), f: x.f })), stuckN: stuck.length, stuck: stuck.slice(0, 50), manN: man.length, man: man.slice(0, 50) };
   }
   // ליקוי 5: הכול בטרנזקציה – מוצרי המועמדים וההגדרות נקראים בתוכה; מוצר שכבר קיבל קוד (cx) בקריאה מקבילה – מדולג.
   // ליקוי 6: תפוסים = cxItem + כל הקודים שהופיעו בקטלוג (cxcfg/seen).
@@ -1186,4 +1238,4 @@ async function phone(k, request) {
   return r;
 }
 for (const k of Object.keys(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 300, memory: '1GiB' } : {}, wrap(k, (request) => phone(k, request)));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { updOff, botLate, cleanIn, cleanLine, cleanTm, cxPartial, partDrop, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { updOff, updAck, updRetry, botLate, cleanIn, cleanLine, cleanTm, cxPartial, partDrop, loadState, applyPart, applySalesPart, PV_PART, SPV, FNS, cfgOf, mgrW, wrap, lockTake, lockFree, CFG, RUN_RE, DATE_RE } });

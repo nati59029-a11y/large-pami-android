@@ -229,6 +229,8 @@ function fxNorm(k, v) {
 }
 function decideF(f, a, s) {
   if (!s || typeof s !== 'object' || s.ab === undefined) return { act: 'base0' };
+  // עדכון פריטים (סבב בדיקה 1): נשלח ערך ששונה מהאפליקציה (pd ≠ ab – רק המשנית שונתה, והראשית נשלחה כמו בכספית). כספית קלטה והאפליקציה לא השתנתה מאז → נקלט
+  if (s.pd != null && !eqS(s.pd, s.ab) && eqS(f, s.pd) && eqS(a, s.ab)) return { act: 'ack', v: sv(a), f: sv(f) };
   const fc = !eqS(f, s.fb), ac = !eqS(a, s.ab) || s.pd != null;
   if (!fc && !ac) return eqS(f, a) ? { act: 'base', v: sv(a) } : { act: 'keep' };
   return decide(sv(f), sv(a), s, eqS);
@@ -237,6 +239,7 @@ function decideF(f, a, s) {
 function afterF(d, f, a, take) {
   if (d.act === 'keep') return null;
   if (d.act === 'base0') return { fb: sv(f), ab: sv(a) };
+  if (d.act === 'ack' && d.f !== undefined) return { fb: d.f, ab: d.v }; // נקלט ערך ששונה מהאפליקציה – הבסיס: כספית = מה שנקלט, האפליקציה = שלה
   return after(d, sv(f), sv(a), take);
 }
 
@@ -266,6 +269,8 @@ function csvNew(rows, vat) {
     return a;
   }));
 }
+// ערך שמתחיל ב- = + - @ – cell מוסיף גרש (הגנה מנוסחאות), ולכן בכספית ייכתב ערך שגוי: cxExport upd לא שולח אותו ("לעדכן ידנית")
+const csvRisky = (v) => /^[=+\-@\t]/.test(String(v == null ? '' : v).trim());
 // rows: [{ c, n?, c1?, c2?, sup? }] – רק קוד ומה שהשתנה באפליקציה; כל השאר ריק (= לא משתנה בכספית). ערך ריק / "NULL" לא נשלח לעולם
 function csvUpd(rows) {
   const ix = (h) => HDR_UPD.indexOf(h), v = (x) => { const t = x == null ? '' : String(x).trim(); return /^null$/i.test(t) ? '' : t; };
@@ -574,7 +579,7 @@ function unpackDays(p) {
 function chunks(from, to, n) { const out = []; let a = from; while (a <= to) { let b = addDay(a, (n || 92) - 1); if (b > to) b = to; out.push([a, b]); a = addDay(b, 1); } return out; }
 const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
 
-const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_UPD, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvUpd, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF, fxNorm };
+const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_UPD, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvUpd, csvRisky, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF, fxNorm };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);

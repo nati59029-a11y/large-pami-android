@@ -166,17 +166,57 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     await sync(rs('ספק אחר'));
     assert.equal((await P('pd').get()).get('sup'), 'ספק הדר');
     assert.equal((await up()).n, 0, 'שינוי רק בכספית – לא נשלח בחזרה');
-    // קוד שלא בקטלוג מכספית (cxcfg/seen) / מוצר שה-cx שלו קוד אחר – לא נשלח
+    // סבב בדיקה 1: רק קוד מהקטלוג האחרון (cxcfg/seenLast) – לא מ-seen המצטבר; מוצר שה-cx שלו קוד אחר – לא נשלח; בלי הרשימה – לא נשלח כלום
     await P('pe').set({ name: 'שם חדש', price: 1, barcode: '', on: true, q: {}, cx: '300051', at: 1 });
     await adm().doc(`b/${A}/cxItem/300050`).set({ c: '300050', pid: 'pe', st: 'link', n: 'שם ישן', pr: { fb: 1, ab: 1 }, co: { fb: null, ab: null }, nm: { fb: 'שם ישן', ab: 'שם ישן' }, run: 'old', at: 1 });
-    assert.equal((await up()).n, 0, 'לא בקטלוג');
     const seenRef = adm().doc(`b/${A}/cxcfg/seen`), codes0 = (await seenRef.get()).get('codes');
     await seenRef.set({ codes: codes0.concat(['300050']) });
+    const lastRef = adm().doc(`b/${A}/cxcfg/seenLast`), last0 = (await lastRef.get()).data();
+    assert.deepEqual(last0.s.split('\n'), ['300004'], 'הקטלוג האחרון בלבד');
+    assert.equal((await up()).n, 0, 'הופיע פעם בקטלוג (seen), אבל לא בקטלוג האחרון');
+    await lastRef.set(Object.assign({}, last0, { s: last0.s + '\n300050' }));
     assert.equal((await up()).n, 0, 'בקטלוג, אבל המוצר מקושר לקוד אחר');
     await P('pe').update({ cx: '300050' });
+    await lastRef.delete();
+    const nl = await up();
+    assert.deepEqual([nl.n, nl.noLast], [0, true], 'בלי רשימת הקטלוג האחרון – לא שולחים כלום');
+    await lastRef.set(Object.assign({}, last0, { s: last0.s + '\n300050' }));
     const e2 = await up();
     assert.deepEqual(e2.rows.map((x) => [x.c, x.n, x.f]), [['300050', 'שם חדש', ['nm']]]);
-    await adm().doc(`b/${A}/cxItem/300050`).delete(); await P('pe').delete(); await seenRef.set({ codes: codes0 });
+    assert.equal((await X('300050')).uq, undefined, 'הפקת הקובץ לא מעלה את מונה הניסיונות (רק דיווח טעינה)');
+    await adm().doc(`b/${A}/cxItem/300050`).delete(); await P('pe').delete(); await seenRef.set({ codes: codes0 }); await lastRef.set(last0);
+  });
+  it('עדכון פריטים – סבב בדיקה 1: רק המשנית שונתה → הראשית של כספית ונקלט; קטגוריה בלי משנית (בכספית יש) / שם שמתחיל ב-"-" → "לעדכן ידנית", לא נשלח', async () => {
+    const up = () => ok('cxExport', MGR, { kind: 'upd' });
+    await sync([r('300003', 'סרגל', '7100000000035', 3, 'משרד', 'סרגלים'), ['300004', 'מחק', '7100000000042', 'ספק אחר', '', '', 0, 2, 'לא']]);
+    assert.equal((await up()).n, 0);
+    const pc = (await P('pc').get()).data();
+    assert.deepEqual((await X('300003')).ct, { fb: 'משרד›סרגלים', ab: 'משרד›סרגלים', ai: pc.cat + '/' + pc.sub });
+    // שם הראשית שונה באפליקציה (keep), ואז רק המשנית מוחלפת
+    await adm().doc(`b/${A}/cat/${pc.cat}`).update({ name: 'משרד ראשי' });
+    await adm().doc(`b/${A}/cat/csubx`).set({ name: 'מחוגים', parent: pc.cat, ord: 0 });
+    await P('pc').update({ sub: 'csubx' });
+    const e = await up();
+    assert.equal(e.n, 1);
+    const row = e.csv.slice(1).split('\n')[1].split(',');
+    assert.deepEqual([row[0], row[CC.HDR_UPD.indexOf('שם קטגוריה ראשית')], row[CC.HDR_UPD.indexOf('שם קטגוריה משנית')]], ['300003', 'משרד', 'מחוגים'], 'הראשית כמו בכספית');
+    assert.deepEqual([(await X('300003')).ct.pd, (await X('300003')).ct.ab], ['משרד›מחוגים', 'משרד ראשי›מחוגים']);
+    assert.deepEqual((await up()).rows.map((x) => x.c), ['300003'], 'טרם נקלט – אותו ערך שוב');
+    await sync([r('300003', 'סרגל', '7100000000035', 3, 'משרד', 'מחוגים')]);
+    const ct = (await X('300003')).ct;
+    assert.deepEqual([ct.fb, ct.ab, ct.pd], ['משרד›מחוגים', 'משרד ראשי›מחוגים', undefined], 'נקלט');
+    assert.equal((await up()).n, 0);
+    // המשנית הוסרה באפליקציה, ובכספית יש משנית – אי אפשר בלי NULL: לא נשלח, "לעדכן ידנית"
+    await P('pc').update({ sub: require(require.resolve('firebase-admin/firestore', { paths: [FN] })).FieldValue.delete() });
+    const m = await up();
+    assert.equal(m.n, 0); assert.deepEqual(m.man.map((x) => [x.c, x.k]), [['300003', ['ct']]]);
+    assert.equal((await X('300003')).ct.pd, undefined, 'לא סומן');
+    // שם שמתחיל ב-"-" (cell היה מוסיף גרש) – לא נשלח, "לעדכן ידנית"
+    await P('pc').update({ sub: 'csubx', name: '-50% סרגל' });
+    const m2 = await up();
+    assert.equal(m2.n, 0); assert.deepEqual(m2.man.map((x) => [x.c, x.k]), [['300003', ['nm']]]);
+    await P('pc').update({ name: 'סרגל' });
+    await adm().doc(`b/${A}/cat/${pc.cat}`).update({ name: 'משרד' });
   });
   it('cxCode: מנהל בלבד; קוד שמקושר למוצר אחר – חסימה', async () => {
     assert.notEqual((await call('cxCode', E1, { pid: 'pd', code: '300009' })).status, 'OK');

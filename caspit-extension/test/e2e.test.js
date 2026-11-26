@@ -1488,8 +1488,8 @@ test('0.1.21 יתרות הקפה: אין כפתור יצוא → hk-export בנ�
 
 // 0.1.23 – מוצרים כל 30 דקות (prodTick): בלי hello / מכירות / שעות, בלי שום החלפת סניף
 test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → apply → פריטים חדשים / מחירים / עדכוני פריטים → report prod; בלי hello / מכירות; בלי החלפת סניף (גם בנחל לכיש); פעם אחת בחצי שעה; לא לפני 07:00 / בשבת / בריצה פעילה; שרת בלי prod30 – לא', async () => {
-  srv.caps = ['prod30']; srv.exportN = { new: 1, price: 2, upd: 1 };
-  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('hrs'); await chrome.storage.local.set({ caps: { prod30: true } }); return chrome.storage.local.remove('prodSt'); });
+  srv.caps = ['prod30', 'upf']; srv.exportN = { new: 1, price: 2, upd: 1 };
+  await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.alarms.clear('hrs'); await chrome.storage.local.set({ caps: { prod30: true, upf: true } }); return chrome.storage.local.remove('prodSt'); });
   await ls({ store: 'נחל לכיש', brPicks: null });
   try {
     const W = curDay('08:10');
@@ -1520,17 +1520,38 @@ test('0.1.23 מוצרים כל 30 דקות: cfg → קטלוג → preview → a
     assert.equal(await pt(W + 30 * 60e3), null, 'ריצה אחרת פעילה');
     await sw.evaluate(async () => { const { runSaved } = await chrome.storage.local.get('runSaved'); await chrome.storage.local.set({ run: runSaved }); await chrome.storage.local.remove('runSaved'); });
     // עדכוני פריטים מעל המגבלה – לא נשלחים לכספית, הריצה "נכשלה" עם limit, המחירים נשלחו
-    srv.updMax = 0;
+    srv.updMax = 1; srv.exportN.upd = 2;
     const n1 = srv.calls.length;
     const r2 = await pt(W + 30 * 60e3);
     assert.equal(r2.st, 'fail', JSON.stringify(r2)); assert.equal(r2.code, 'limit');
     assert.ok(srv.calls.slice(n1).some((c) => c.op === 'export' && c.kind === 'price'));
     assert.equal(srv.calls.slice(n1).filter((c) => c.op === 'report').at(-1).c, 'limit');
+    srv.exportN.upd = 1;
+    // 0.1.24 (סבב בדיקה 1): updMax 0 = כבוי – בלי export upd ובלי limit
+    srv.updMax = 0;
+    const n0b = srv.calls.length;
+    const r0 = await pt(W + 60 * 60e3);
+    assert.equal(r0 && r0.st, 'ok', JSON.stringify(r0));
+    assert.ok(!srv.calls.slice(n0b).some((c) => c.op === 'export' && c.kind === 'upd'), 'updMax 0 – בלי export upd');
     srv.updMax = null;
+    // 0.1.24 (סבב בדיקה 1): קובץ upd שהכותרת שלו לא HDR_UPD – לא נטען לכספית, flag upd-format (המחירים נשלחו)
+    srv.updBad = true;
+    const n2 = srv.calls.length, i2 = imports.length;
+    const r3 = await pt(W + 90 * 60e3);
+    assert.deepEqual([r3.st, r3.code], ['fail', 'upd-format'], JSON.stringify(r3));
+    assert.ok(srv.calls.slice(n2).some((c) => c.op === 'export' && c.kind === 'upd'));
+    assert.ok(!imports.slice(i2).some((b) => b.name.startsWith('lp-upd-')), 'לא נטען');
+    srv.updBad = false;
+    // שרת בלי upf – לא מבקשים upd בכלל
+    await sw.evaluate(() => chrome.storage.local.set({ caps: { prod30: true, upf: false } }));
+    const n3 = srv.calls.length;
+    const r4 = await pt(W + 120 * 60e3);
+    assert.equal(r4 && r4.st, 'ok', JSON.stringify(r4));
+    assert.ok(!srv.calls.slice(n3).some((c) => c.op === 'export' && c.kind === 'upd'), 'בלי upf – בלי export upd');
     await sw.evaluate(() => chrome.storage.local.set({ caps: { prod30: false } }));
-    assert.equal(await pt(W + 60 * 60e3), null, 'שרת בלי prod30');
+    assert.equal(await pt(W + 150 * 60e3), null, 'שרת בלי prod30');
   } finally {
-    srv.caps = null; srv.exportN = { new: 1, price: 2 }; srv.updMax = null;
+    srv.caps = null; srv.exportN = { new: 1, price: 2 }; srv.updMax = null; srv.updBad = false;
     await ls({ store: 'יהודה הנשיא', brPicks: null });
     await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'prodSt']); await self.__cxTest.setupAlarms(); });
   }
