@@ -69,7 +69,7 @@ async function newPage(browser, www, cfg, log, label) {
     const rec = { who: label, step: page.__step || 'boot', gen: page.__gen, method, url: u.href, body: body || '' }; log.push(rec);
     if (cfg.fwd && cfg.fwd[u.port]) { // העברה לאמולטור האמיתי בפורט של הסוכן הזה
       const t = new URL(u.href); t.port = String(cfg.fwd[u.port]);
-      try { const resp = await route.fetch({ url: t.href }); rec.status = resp.status(); return route.fulfill({ response: resp }); } catch (e) { rec.status = 'ERR ' + e.message; return route.abort(); }
+      try { const resp = await route.fetch({ url: t.href }); rec.status = resp.status(); return route.fulfill({ response: resp }); } catch (e) { rec.status = 'ERR ' + e.message; return route.abort().catch(() => {}); } // 26.11.2026: כשהדף נסגר באמצע בקשה גם abort זורק ("Fetch response has been disposed") – זה הפיל את כל הבדיקה אחרי שכל הבדיקות עברו
     }
     if (u.port === '9099' && /signInWithPassword/.test(u.pathname)) {
       const j = JSON.parse(body); const uid = j.email.split('@')[0];

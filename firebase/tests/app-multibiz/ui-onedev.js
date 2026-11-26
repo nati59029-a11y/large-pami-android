@@ -208,8 +208,10 @@ async function trigger(A, ms, fn) {
   A.st.mode = 'kick';
   await A.page.evaluate(() => { dlg('<h3>טופס</h3><textarea id="tq"></textarea><button class="btn" data-a="closeDlg">סגור</button>'); });
   await A.page.fill('#tq', 'טקסט שעוד לא נשמר');
+  // ההודעה הקצרה (toast) נעלמת אחרי 2.6 שניות, וההמתנה כאן 2.5 שניות – במכונה איטית היא כבר נעלמה כשבודקים. לכן רושמים כל toast שנוסף (24.11.2026)
+  await A.page.evaluate(() => { window.__T = []; new MutationObserver((l) => l.forEach((x) => x.addedNodes.forEach((n) => n.classList && n.classList.contains('toast') && window.__T.push(n.textContent)))).observe(document.body, { childList: true }); });
   r = await trigger(A, 2500); s = await state(A.page);
-  const p1 = await A.page.evaluate(() => ({ p: DV1.p, k: DV1.k, toast: [...document.querySelectorAll('.toast')].map((e) => e.textContent).join('|'), v: document.getElementById('tq').value })).catch((e) => ({ err: String(e) }));
+  const p1 = await A.page.evaluate(() => ({ p: DV1.p, k: DV1.k, toast: (window.__T || []).concat([...document.querySelectorAll('.toast')].map((e) => e.textContent)).join('|'), v: document.getElementById('tq').value })).catch((e) => ({ err: String(e) }));
   check('26 שדה בפוקוס עם טקסט: הניתוק נדחה (בלי טעינה), הטקסט נשאר, והודעה קצרה "' + MSG + '"', r.navMs === null && s.sync && p1.p === 1 && !p1.k && p1.v === 'טקסט שעוד לא נשמר' && p1.toast.includes(MSG), { r, p1 });
   await A.page.evaluate(() => { document.activeElement.blur(); });
   r = await trigger(A, 2500); s = await state(A.page);

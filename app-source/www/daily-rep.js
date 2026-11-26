@@ -27,9 +27,19 @@ const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he
 const mmss=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const tag=d=>{const c=d.st==='ok'?'t3':d.st==='raw'?'t4':'t1';return `<span class="tag ${c}">${esc(ST[d.st]||'נשלח')}</span>`};
 const stf=u=>{const s=(D.staff||[]).find(x=>x.uid===u);return s?s.name:''};
-const load=(k,fn)=>{if(ld[k]||D.err)return;ld[k]=1;fn().catch(e=>{D.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(['dr','staff','tk','wk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})};
+const load=(k,fn)=>{if(ld[k]||D.err)return;ld[k]=1;fn().then(()=>{if(SCK.includes(k))scSave()},e=>{/* B2a: מוצג עותק שמור – בלי חיבור: נשאר, עם שורת "אין חיבור"; כל שגיאה אחרת: העותק יורד (403 – נמחק גם מהמכשיר) והשגיאה מוצגת */if(D.csc&&e&&e.offline){DC.soff(e,D.cst);return}if(D.csc)reset();/* 403 – נמחק מהמכשיר תמיד, גם אם העותק עוד לא הוצג: sput חוסם גם קריאה מהמכשיר שעוד בדרך (אחרת היא הייתה מציגה את העותק אחרי השגיאה) */if(e&&e.code===403)DC.sput('dr',null);D.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(['dr','staff','tk','wk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
-const reset=()=>{D.cfg=null;D.staff=null;D.dayL=null;D.pend=null;D.my=null;D.hl=null;D.card=null;D.w={};D.err='';D.cap=null};
+/* B2a (24.11.2026): המסך (והמשבצת בבית של העובד) נפתח מיד מהעותק השמור במכשיר (DC.sfill – תצוגה בלבד, פעם אחת בהפעלה), ואז נטען מהשרת ברקע.
+   נשמר אחרי כל טעינה מוצלחת: הגדרות, הסיכומים שלי (עובד), עובדים, ממתין לאישור ורשימת היום (מנהל). כרטיס סיכום ופעולות – תמיד מהשרת, כמו היום */
+const SCK=['cfg','my','staff','pend','day'];
+function scSave(){if(!D.cfg)return;DC.sput('dr',{cfg:D.cfg,my:D.my,staff:D.staff,pend:D.pend,day:D.dayL?D.day:'',dayL:D.dayL})}
+function scFill(){if(!on()||D.cfg)return;DC.sfill('dr',(v,t)=>{if(D.cfg||!v||!v.cfg||typeof v.cfg!=='object'||!on())return;const A=a=>Array.isArray(a)?a:null;
+ D.cfg=v.cfg;D.csc=1;D.cst=t;if(!D.my&&isW()&&!mgr())D.my=A(v.my);if(mgr()){if(!D.staff)D.staff=A(v.staff);if(!D.pend)D.pend=A(v.pend);if(!D.dayL&&v.day&&v.day===(D.day||todayIL())){D.day=v.day;D.dayL=A(v.dayL)}}
+ /* רענון ברקע: אותן טעינות שהמסך היה מפעיל, כשהזיכרון ריק */
+ load('cfg',cfgLoad);if(mgr()){load('staff',staffLoad);load('pend',pendLoad);if(D.dayL){const dd=D.day;load('day',async()=>{const L=await runQ('day',dd,500);if(dd===D.day)D.dayL=L})}}else if(isW())load('my',myLoad);
+ if(['dr','staff','tk','wk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})}
+const myLoad=async()=>{D.my=await runQ('uid',SY.uid,60)},pendLoad=async()=>{D.pend=await runQ('st',PEND,300)};
+const reset=()=>{D.csc=0;D.cfg=null;D.staff=null;D.dayL=null;D.pend=null;D.my=null;D.hl=null;D.card=null;D.w={};D.err='';D.cap=null};
 const loading=(T)=>({t:T,h:D.err?`<div class="card"><p class="note" style="margin:0">${esc(D.err)}</p><button class="btn g w" data-a="drRe" style="margin-top:10px">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'});
 const deny=T=>({t:T,h:'<div class="empty">התכונה לא פעילה בעסק הזה</div>'});
 
@@ -37,7 +47,7 @@ const deny=T=>({t:T,h:'<div class="empty">התכונה לא פעילה בעסק 
 async function runQ(field,val,lim){const sq={from:[{collectionId:'dr'}],where:{fieldFilter:{field:{fieldPath:field},op:Array.isArray(val)?'IN':'EQUAL',value:Array.isArray(val)?{arrayValue:{values:val.map(v=>({stringValue:v}))}}:{stringValue:val}}},limit:lim||60};/* מערך = IN (ממתין לאישור: st) */if(field==='uid')sq.orderBy=[{field:{fieldPath:'day'},direction:'DESCENDING'}];/* היסטוריה: החדשים קודם (אינדקס uid+day). יום: where day== בלבד */
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document)).sort((a,b)=>String(b.day).localeCompare(String(a.day)))}
 const get404=async p=>{try{return dec(await fsx(p))}catch(e){if(e&&e.code===404)return null;throw e}};
-async function cfgLoad(){const c=await get404('/drcfg/main');D.cfg=c||{}}
+async function cfgLoad(){const c=await get404('/drcfg/main');D.cfg=c||{};if(D.csc){D.csc=0;D.cf=null}}
 async function staffLoad(){const j=await fsx('/staff?pageSize=300');D.staff=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d});return{uid:idOf(d),name:String(f.name||'').trim()||String(f.email||'').split('@')[0]||idOf(d),active:f.active===true,role:String(f.role||'')}}).filter(x=>x.active).sort((a,b)=>a.name.localeCompare(b.name,'he'))}
 async function capLoad(){const c=await get404('/drcfg/cap');D.cap={capCents:c&&Number.isFinite(c.capCents)?c.capCents:500}}
 async function cardLoad(id){const C={id,doc:null,p:[],m:null,w:null,nd:[],sumW:'',dirty:0,busy:0};
@@ -110,7 +120,7 @@ function wView(id){const C=D.card;if(!C||C.id!==id){load('c'+id,()=>cardLoad(id)
  <div class="card"><b>מה ששלחת</b>${(d.e||[]).map((e,i)=>`<p style="white-space:pre-wrap;margin:8px 0 0"><small class="note">שליחה ${i+1} · ${tm(e.t)}${e.au?' · עם הקלטה':''}${e.np?' · '+e.np+' תמונות':''}</small><br>${esc(e.txt||e.tr||'')}</p>`).join('')}</div>`}
 function workerV(){const T='סיכום יום';
  if(!D.cfg){load('cfg',cfgLoad);return loading(T)}
- if(!D.my){load('my',async()=>{D.my=await runQ('uid',SY.uid,60)});return loading(T)}
+ if(!D.my){load('my',myLoad);return loading(T)}
  const tab=D.tab==='hist'?'hist':'today';
  const tabs=`<div class="chips" role="tablist" style="margin:0 0 10px"><button class="chip ${tab==='today'?'on':''}" data-a="drTab" data-v="today" aria-pressed="${tab==='today'}">סיכום היום</button><button class="chip ${tab==='hist'?'on':''}" data-a="drTab" data-v="hist" aria-pressed="${tab==='hist'}">היסטוריה</button></div>`;
  if(D.open)return{t:T,h:wView(D.open)};
@@ -160,12 +170,12 @@ function mgrV(){const T='סיכום יום';
  if(D.open)return{t:T,h:cardH(D.open)};
  const tab=['day','pend','hist','cfg'].includes(D.tab)?D.tab:'day';
  if(!D.day)D.day=todayIL();
- if(!D.pend)load('pend',async()=>{D.pend=await runQ('st',PEND,300)});
+ if(!D.pend)load('pend',pendLoad);
  if(tab==='pend'&&!D.pend)return loading(T);
  if(tab==='day'&&!D.dayL){const dd=D.day;load('day',async()=>{const L=await runQ('day',dd,500);if(dd===D.day)D.dayL=L});return loading(T)}
  const tb=[['day','היום'],['pend',D.pend?'ממתין לאישור ('+D.pend.length+')':'ממתין לאישור'],['hist','היסטוריה'],['cfg','הגדרות']].map(([k,l])=>`<button class="chip ${tab===k?'on':''}" data-a="drTab" data-v="${k}" aria-pressed="${tab===k}">${l}</button>`).join('');
  return{t:T,s:'סיכומי העובדים',h:`<div class="chips" role="tablist" style="margin:0 0 10px">${tb}</div>`+(tab==='day'?dayH():tab==='pend'?pendH():tab==='hist'?mHist():cfgH())}}
-V.dr=()=>{const T='סיכום יום';if(!on())return deny(T);return mgr()?mgrV():isW()?workerV():deny(T)};
+V.dr=()=>{const T='סיכום יום';if(!on())return deny(T);scFill();return mgr()?mgrV():isW()?workerV():deny(T)};
 
 /* ---------- פעולות ---------- */
 ACT.drRe=()=>{reset();rerender()};
@@ -174,10 +184,10 @@ ACT.drOpen=el=>{D.open=el.dataset.id;D.card=null;rerender()};
 ACT.drBack=()=>{D.open='';D.card=null;rerender()};
 window.drOpen=id=>{if(!on()||!/^[A-Za-z0-9_-]{1,80}$/.test(String(id||''))){if(on())go('dr');return}D.open=String(id);D.card=null;D.dayL=null;D.my=null;if(!isW())D.tab='day';else D.tab='hist';if(cur().v!=='dr')go('dr');else rerender()};
 /* מצב סיכום היום של העובד – למשבצות: drPin (ראש מסך המשימות, tasks-wc.js) ו-drTile ("בית"). null = אין משבצת (לא חייב / נטען) */
-function myStat(){if(!on()||mgr()||!isW())return null;if(!D.cfg){load('cfg',cfgLoad);return null}
+function myStat(){if(!on()||mgr()||!isW())return null;if(!D.cfg){scFill();load('cfg',cfgLoad);return null}
  const c=D.cfg,t=todayIL();if(!(c.req&&c.req[SY.uid]===true))return null;
  if(!isRepDay(t,c))return{k:'no',txt:'היום אין סיכום'};
- if(!D.my){load('my',async()=>{D.my=await runQ('uid',SY.uid,60)});return null}
+ if(!D.my){load('my',myLoad);return null}
  const doc=D.my.find(x=>x.id===SY.uid+'_'+t.replace(/-/g,''))||null;
  if(!doc)return{k:'new',txt:'לא נשלח · תזכורת בסוף המשמרת (בלי משמרת – '+String(c.hr||'18:00')+')'};
  return doc.st==='ok'?{k:'ok',txt:'✓ אושר'}:{k:'wait',txt:'ממתין לאישור'}}
@@ -247,12 +257,12 @@ FRM.drTkF=async(f,ev)=>{const C=D.card;if(!C||C.busy)return;const i=+f.dataset.n
 ACT.drDayT=el=>{const F=D.cf;if(!F)return;const i=+el.dataset.n,k=F.days.indexOf(i);if(k<0)F.days.push(i);else F.days.splice(k,1);F.days.sort();rerender()};
 ACT.drOffAdd=()=>{const F=D.cf,v=(document.getElementById('drOffIn')||{}).value;if(!F||!/^\d{4}-\d{2}-\d{2}$/.test(v||''))return toast('בחרו תאריך');if(F.off.includes(v))return;if(F.off.length>=60)return toast('אפשר עד 60 ימים');F.off.push(v);F.off.sort();rerender()};
 ACT.drOffDel=el=>{if(D.cf){D.cf.off.splice(+el.dataset.n,1);rerender()}};
-ACT.drCfgSave=async el=>{const F=D.cf;if(!F)return;if(!F.days.length)return toast('בחרו לפחות יום אחד');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(F.hr||''))return toast('שעת תזכורת לא תקינה');
+ACT.drCfgSave=async el=>{if(D.csc)return toast('מעדכן מהשרת… נסו שוב בעוד רגע');const F=D.cf;if(!F)return;if(!F.days.length)return toast('בחרו לפחות יום אחד');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(F.hr||''))return toast('שעת תזכורת לא תקינה');
  el.disabled=true;try{await fnCall('drSetCfg',{days:F.days,hr:F.hr,off:F.off});Object.assign(D.cfg,{days:F.days.slice(),hr:F.hr,off:F.off.slice()});D.dayL=null;toast('ההגדרות נשמרו')}catch(e){err(e)}finally{el.disabled=false}};
 FRM.drCapF=async f=>{const v=Number(String(new FormData(f).get('usd')||'').replace(',','.'));if(!Number.isFinite(v)||v<0||v>10000)return toast('סכום לא תקין');
  try{await fnCall('drSetCap',{capCents:Math.round(v*100)});D.cap={capCents:Math.round(v*100)};toast('התקרה נשמרה');rerender()}catch(e){err(e)}};
 /* מתג "חייב בסיכום יום" לכל עובד, במסך העובדים */
-ACT.drReq=async el=>{const u=el.dataset.uid;if(!on()||!mgr()||!/^[A-Za-z0-9_-]{1,128}$/.test(u||'')||el.disabled)return;const c=D.cfg;if(!c)return;const nv=!(c.req&&c.req[u]===true);el.disabled=true;
+ACT.drReq=async el=>{const u=el.dataset.uid;if(!on()||!mgr()||!/^[A-Za-z0-9_-]{1,128}$/.test(u||'')||el.disabled)return;if(D.csc)return toast('מעדכן מהשרת… נסו שוב בעוד רגע');const c=D.cfg;if(!c)return;const nv=!(c.req&&c.req[u]===true);el.disabled=true;
  try{await fnCall('drSetCfg',{req:{[u]:nv}});c.req=Object.assign({},c.req,{[u]:nv});D.dayL=null}catch(e){err(e)}finally{el.disabled=false;if(cur().v==='staff')rerender()}};
 {const o=V.staff;if(typeof o==='function')V.staff=function(){const r=o.apply(this,arguments);try{if(on()&&mgr()&&r&&r.h){if(!D.cfg){load('cfg',cfgLoad)}else r.h=r.h.replace(/<button class="btn s g" data-a="admStf" data-uid="([A-Za-z0-9_-]{1,128})">/g,(m,u)=>{const q=D.cfg.req&&D.cfg.req[u]===true;return `<button class="chip ${q?'on':''}" data-a="drReq" data-uid="${u}" aria-pressed="${q}">חייב בסיכום יום</button>`+m})}}catch(e){}return r}}
 })();

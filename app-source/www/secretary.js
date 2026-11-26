@@ -772,8 +772,8 @@ ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disab
 const PN={done:0,ready:0};
 const pnTkOn=()=>{try{return typeof bzF!=='function'||bzF('tasks')===true}catch(e){return true}};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
- const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;PN.act=g.act===true;
- /* 16.11.2026: act:1 רק כשה-APK עצמו (Java) בונה התראות עם כפתורים – לא לפי קוד המסכים, שעדכון חי יכול להביא ל-APK ישן. act נשלח תמיד (0/1): רישום בלי act = מסכים ישנים */
+ const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;PN.act=g.act===true;PN.rcv=g.rcv===true;
+ /* 16.11.2026: act:1 רק כשה-APK עצמו (Java) בונה התראות עם כפתורים – לא לפי קוד המסכים, שעדכון חי יכול להביא ל-APK ישן. act נשלח תמיד (0/1): רישום בלי act = מסכים ישנים. 24.11.2026: rcv:1 – ה-APK (Java) שולח אישור קבלה בקבוצות; בלי rcv השרת שולח לו בקבוצות את ההתראה הרגילה */
  await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW())){PN.tk=t.value;pnSend()}});
  await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}/* מרכז עבודה סבב 3: "הזכר לעובד" (tkNudge) – פותח את המשימות בלשונית "היום שלי" *//* רובוט כספית (caspit-bot.js בשרת): התראה למנהל – פותח את "סנכרון כספית" */if(d.k==='cx'&&isA()&&typeof V.cxSync==='function'){try{go('cxSync')}catch(e){}return}/* משמרות (shifts.js בשרת, shTick): תזכורת לעובד / זמנים בלי עובדים למנהל – פותח את טבלת המשמרות */if(d.k==='sh'&&(isA()||isW())&&typeof window.shOpen==='function'){try{window.shOpen()}catch(e){}return}if(d.k==='dr'&&(isA()||isW())&&typeof window.drOpen==='function'){try{window.drOpen(d.id)}catch(e){}return}if(d.k==='tk'&&(isA()||isW())&&typeof V.tk==='function'){try{TKT='my';if(window.TKW)TKW.d0=1;if(cur().v!=='tk')go('tk');else rerender()}catch(e){}return}if(d.k==='grp'&&window.GRP&&typeof GRP.open==='function'){GRP.open(d.id);return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
@@ -782,7 +782,7 @@ async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.C
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
  if(p.receive==='granted')await P.register()}catch(e){}}
 /* 16.11.2026 מכשיר אחד: s = מזהה הכניסה (SY.ds), רק אחרי שהשרת אישר אותה (SY.dsc) – כך השרת רושם רק את הטלפון הנוכחי. secPushRe: רישום חוזר אחרי אישור מאוחר (dvCur) */
-function pnSend(){if(!PN.tk||!(isA()||isW()))return;const d={token:PN.tk,act:PN.act?1:0};if(SY.dsc&&typeof SY.ds==='string')d.s=SY.ds;fnCall('registerPushToken',d).catch(()=>{})}
+function pnSend(){if(!PN.tk||!(isA()||isW()))return;const d={token:PN.tk,act:PN.act?1:0};if(PN.act&&PN.rcv)d.rcv=1;if(SY.dsc&&typeof SY.ds==='string')d.s=SY.ds;fnCall('registerPushToken',d).catch(()=>{})}
 window.secPushRe=()=>{try{pnSend()}catch(e){}};
 window.secPushBoot=()=>{try{pushReg()}catch(e){}};
 /* 15.11.2026 (סריקת חנות, שלב 12): בקשת הרשאה בכניסה לתכונה (החלטת המשתמש) – גם לעובד, שעד עכשיו לא התבקש, ולכן באנדרואיד 13+ לא קיבל

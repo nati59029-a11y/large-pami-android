@@ -185,6 +185,45 @@ describe('מכשיר אחד – מול האמולטור', { skip: !EMU && 'אמ�
     assert.equal((await reg(E1, F(E1, 'x'), S1)).result.ok, true, 's בלי רישום – כמו קודם');
     assert.equal(await get('dev_cur/' + E1), null, 'בלי רישום חדש');
   });
+  it('24.11.2026 אישור קבלה: rcv:1 עם act:1 – pushRcvAt (tokensRcv); act:1 בלי rcv – נמחק; בלי act – לא משתנה; rcv בלי act – לא נשמר', async () => {
+    const RM = require('../functions/secretary-remind.js')._core;
+    const T = require('../functions/lib/tenant.js');
+    const h = PA.hashOf(F(E1));
+    const rcvAt = async () => ((await get(`b/${A}/staff/${E1}`)) || {}).pushRcvAt;
+    const tr = () => T.runInBiz({ bizId: A, prefix: 'b/' + A + '/' }, () => RM.tokensRcv(T.tdb(), E1));
+    // רישום ישן בלי rcv (APK עם כפתורים בלבד) – אין pushRcvAt, ולא נוסף שדה
+    assert.equal((await call('registerPushToken', E1, { token: F(E1), act: 1 })).result.ok, true);
+    assert.equal(await rcvAt(), undefined, 'בלי rcv – לא נוסף שדה');
+    assert.deepEqual(await tr(), []);
+    // APK חדש: rcv:1
+    assert.equal((await call('registerPushToken', E1, { token: F(E1), act: 1, rcv: 1 })).result.ok, true);
+    const m = await rcvAt();
+    assert.deepEqual(Object.keys(m), [h]);
+    assert.equal(m[h], ((await get(`b/${A}/staff/${E1}`)).pushActAt || {})[h], 'באותו זמן כמו pushActAt');
+    assert.deepEqual(await tr(), [F(E1)]);
+    // מסכים ישנים / orders/api.js – בלי act: לא משתנה (אבל pushPlainAt עוצר את הכפתורים, ולכן גם את האישור)
+    assert.equal((await call('registerPushToken', E1, { token: F(E1) })).result.ok, true);
+    assert.deepEqual(Object.keys(await rcvAt()), [h]);
+    assert.deepEqual(await tr(), [], 'רישום בלי act אחרי – בלי כפתורים ובלי אישור קבלה');
+    // חזרה ל-APK עם כפתורים בלבד (act:1 בלי rcv) – נמחק
+    await call('registerPushToken', E1, { token: F(E1), act: 1, rcv: 1 });
+    assert.deepEqual(await tr(), [F(E1)]);
+    await call('registerPushToken', E1, { token: F(E1), act: 1 });
+    assert.deepEqual(await rcvAt(), {}, 'act:1 בלי rcv – נמחק');
+    assert.deepEqual(await tr(), []);
+    // rcv בלי act – לא נחשב (רק יחד עם act); act:0 – נמחק
+    await call('registerPushToken', E1, { token: F(E1), rcv: 1 });
+    assert.deepEqual(await rcvAt(), {});
+    await call('registerPushToken', E1, { token: F(E1), act: 1, rcv: 1 });
+    await call('registerPushToken', E1, { token: F(E1), act: 0, rcv: 1 });
+    assert.deepEqual(await rcvAt(), {}, 'act:0 – נמחק');
+    assert.deepEqual(await tr(), []);
+    // קיצוץ: טלפון שיצא מ-pushTokens יוצא גם מ-pushRcvAt
+    await call('registerPushToken', E1, { token: F(E1), act: 1, rcv: 1 });
+    for (const n of ['x1', 'x2', 'x3', 'x4', 'x5']) await call('registerPushToken', E1, { token: F(E1, n), act: 1 });
+    assert.ok(!(await toks(E1)).includes(F(E1)));
+    assert.deepEqual(await rcvAt(), {}, 'טלפון שיצא – נמחק מהמפה');
+  });
   it('registerPushToken עם s של הטלפון הנוכחי: רק הוא נשאר רשום, fh נכתב; בלי s – רק מהטלפון הנוכחי; s שגוי / טלפון אחר – not-current בלי כתיבה', async () => {
     await claim(E1, 'phone', S1);
     // טלפון ישן שעוד רשום (נוסף ידנית אחרי התפיסה – למשל רישום שהיה באמצע)

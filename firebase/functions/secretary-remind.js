@@ -101,6 +101,24 @@ async function tokensAct(db, uid, now) {
   }
   return [...new Set(out)];
 }
+// 24.11.2026 (אישור קבלה בקבוצות, תיקון אבטחה): הטלפונים שה-APK שלהם גם שולח אישור קבלה (LpActJob.receipt). תת־קבוצה של tokensAct:
+//   pushRcvAt[sha256] – נכתב רק ברישום עם rcv:1 (הדגל מגיע מ-Java, PushGatePlugin.state), באותו רישום כמו act:1, ולכן לא ישן מ-pushActAt.
+//   APK ישן עם כפתורים בלבד (בלי rcv) – לא כאן: מקבל בקבוצות את ההודעה הרגילה של היום (Firebase), ולא נוצר לו אסימון.
+async function tokensRcv(db, uid, now) {
+  const act = await tokensAct(db, uid, now);
+  if (!act.length) return [];
+  const [s, p] = await Promise.all([db.doc('staff/' + uid).get(), db.doc('push_tokens/' + uid).get()]);
+  const PA = require('./push-act')._core;
+  const ok = new Set();
+  for (const d of [s, p]) {
+    const at = mapOf(d, 'pushActAt'), rc = mapOf(d, 'pushRcvAt');
+    for (const t of act) {
+      const h = PA.hashOf(t);
+      if (typeof rc[h] === 'number' && typeof at[h] === 'number' && rc[h] >= at[h]) ok.add(t);
+    }
+  }
+  return act.filter((t) => ok.has(t));
+}
 async function dropTokens(db, uid, bad) {
   if (!bad.length) return;
   for (const p of ['staff/' + uid, 'push_tokens/' + uid]) {
@@ -657,4 +675,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, runCmt, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, ACT_DAYS, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, runCmt, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, tokensRcv, ACT_DAYS, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js

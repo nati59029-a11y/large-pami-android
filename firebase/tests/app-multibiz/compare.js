@@ -86,6 +86,14 @@ if (mode === 'legacy') {
   let dcA = 0, dcB = 0; for (let i = B2.length - 1; i >= 0; i--) if (dcQ(B2[i])) { dcB++; B2.splice(i, 1); }
   for (let i = A.length - 1; i >= 0; i--) if (dcQ(A[i])) { dcA++; A.splice(i, 1); }
   console.log(`מכשיר אחד – קריאות devClaim: main ${dcA}, ענף ${dcB}`);
+  /* מטמון מכשיר (B2b, 24.11.2026): לפני שאילתת "הפקדות שלא אושרו" (dpLoad – runQuery על cashout עם dep == '1' ו-dp == '') האפליקציה מחכה לקריאה מהמכשיר (DC.swait),
+     ולכן השאילתה זזה מאוחר יותר ברצף של שלב הכניסה – אותה בקשה בדיוק, רק בסדר אחר. חריג צר: רק השאילתה הזו (גוף זהה ל-main), מוצאת משני הצדדים,
+     ולכל משתמש ושלב – אותו מספר בדיוק בענף וב-main. כל שאר הבקשות – אותו סדר ואותו גוף כמו קודם */
+  const dpQ = (r) => { try { const q = JSON.parse(r.body).structuredQuery; return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && q.from[0].collectionId === 'cashout' && !!(q.where && q.where.compositeFilter); } catch (e) { return false; } };
+  const dpK = (L) => L.filter(dpQ).map((r) => key(r)).sort().join('\n');
+  if (dpK(A) !== dpK(B2)) { console.log('נכשל: שאילתות הפקדות (cashout, dep/dp) שונות בין main לענף'); fail++; }
+  const dpN = A.filter(dpQ).length; for (const L of [A, B2]) for (let i = L.length - 1; i >= 0; i--) if (dpQ(L[i])) L.splice(i, 1);
+  console.log(`הפקדות שלא אושרו – שאילתות cashout (dep/dp): ${dpN} בכל צד`);
   /* סנכרון כספית A1 (17.11.2026): המוצרים נטענים בעמודים (orderBy __name__, startAt בעמוד הבא). חריג צר: רק runQuery על prod –
      עמוד ראשון (בלי startAt) שאחרי הסרת orderBy זהה בדיוק לגוף של main מנורמל לגוף של main; עמודי המשך (startAt) – רק בענף, מוצאים */
   const pdQ = (r) => { try { const q = JSON.parse(r.body).structuredQuery; return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && q.from[0].collectionId === 'prod' ? q : null; } catch (e) { return null; } };
