@@ -163,7 +163,7 @@ describe('סנכרון כספית A1', () => {
   it('26.11: מוצר באפליקציה שהברקוד שלו כבר בכספית (קוד אחר) – לא נשלח כפריט חדש ולא מקבל קוד; מוחזר ב-dup', async () => {
     const seen = await adm().doc(`b/${A}/cxcfg/seenBc`).get();
     assert.ok(seen.exists && /(^|\n)7000000000011\t200001(\n|$)/.test(seen.get('s')), 'מפת הברקודים נשמרה באישור הקטלוג');
-    await P('pdupbc').set({ name: 'כוס נייר – כפול', price: 3, barcode: '7000000000011', on: true });
+    await P('pdupbc').set({ name: 'כוס נייר – כפול', price: 3, barcode: '7000000000011', on: true, cxvNo: true }); // 26.11: בלי cxvNo הוא היה מסומן וריאנט (caspit-fields.test.js)
     try {
       const e = await ok('cxExport', MGR, { kind: 'new' });
       assert.equal(e.n, 1, 'רק הפריט החדש הקודם (900000)'); assert.equal(e.added, 0);

@@ -126,7 +126,7 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     const h = await okb(TOK, { op: 'hello', mode: 'sync', manual: true });
     assert.deepEqual(h.days, [yday]);
     assert.equal(h.lastSales, null);
-    assert.deepEqual(h.limits, { price: 500, newMax: 1 });
+    assert.deepEqual(h.limits, { price: 500, newMax: 1, updMax: 0 }); // סבב בדיקה 1: עדכוני פריטים כבויים עד אימות מול כספית
     assert.equal(h.minVer, BOT.MIN_VER); assert.equal(h.enabled, true); assert.equal(h.biz.name, 'עסק ' + A);
     assert.match(h.runId, /^[A-Za-z0-9_-]{6,40}$/);
     const r = (await adm().doc(`b/${A}/cxBotRun/${h.runId}`).get()).data();
@@ -264,6 +264,59 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     assert.equal((await adm().doc(`b/${A}/cxItem/400001`).get()).get('pr.pd'), 13);
   });
 
+  it('26.11 (תוסף 0.1.23): export upd לפי updMax; report kind:prod → p30 / pok ושחרור המנעול; info.prod ו-flags.back בדיווח ריצה; caps prod30; עד 60 קטלוגים ביום', async () => {
+    assert.match((await ok('cxBotTok', MGR, { op: 'info' })).updOff, /עדכוני פריטים כבויים/);
+    await adm().doc(`b/${A}/cxcfg/main`).set({ updOk: true }, { merge: true }); // כאילו אומת מול כספית
+    await P(A, 'cx400001').update({ name: 'כוס נייר גדולה' }); await P(A, 'cx400002').update({ name: 'צלחת גדולה' });
+    const nmPd = async (c) => ((await adm().doc(`b/${A}/cxItem/${c}`).get()).get('nm') || {}).pd;
+    const l1 = await bot(TOK, { op: 'export', kind: 'upd', max: 100, ver: '0.1.0' });
+    assert.equal(l1.body.reason, 'limit', 'updMax=1 כברירת מחדל ויש 2 עדכונים');
+    assert.equal(await nmPd('400001'), undefined, 'לא סומן');
+    assert.equal((await call('cxSetCfg', MGR, { updMax: -1 })).reason, 'bad-updmax');
+    await ok('cxSetCfg', MGR, { updMax: 5 });
+    const h0 = await okb(TOK, { op: 'hello', mode: 'connect' });
+    assert.deepEqual([h0.limits.updMax, h0.limits.newMax], [5, 5], 'newMax לא נפגע');
+    assert.equal((await bot(TOK, { op: 'export', kind: 'upd', max: 100001, ver: '0.1.0' })).body.reason, 'bad-max');
+    const u = await okb(TOK, { op: 'export', kind: 'upd', max: 100000 });
+    assert.equal(u.n, 2); assert.match(u.csv, /400001,,כוס נייר גדולה,/);
+    assert.equal(await nmPd('400001'), 'כוס נייר גדולה');
+    const L = adm().doc(`b/${A}/private/cxbot.lock`);
+    assert.ok((await L.get()).exists, 'export לקח את המנעול');
+    assert.equal((await bot(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'maybe', ver: '0.1.0' })).body.reason, 'bad-report');
+    // סבב בדיקה 1: ריצה לילית של המחשב באמצע – הדיווח של ריצת המוצרים לא משחרר את המנעול שלה; אחרי הדיווח הלילי – משוחרר
+    const hN = await okb(TOK, { op: 'hello', mode: 'sync' });
+    await okb(TOK, { op: 'export', kind: 'price', max: 500 });
+    await okb(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'ok', n: { cat: 2, nw: 0, pr: 0, up: 2, bad: 'x' } });
+    assert.ok((await L.get()).exists, 'ריצה לילית פעילה – המנעול נשאר');
+    await okb(TOK, { op: 'report', run: hN.runId, kind: 'run', st: 'ok', steps: [], info: {} });
+    assert.ok(!(await L.get()).exists, 'הריצה הלילית דיווחה – המנעול שוחרר');
+    await okb(TOK, { op: 'export', kind: 'price', max: 500 });
+    await okb(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'ok', n: { cat: 2, nw: 0, pr: 0, up: 2, bad: 'x' } });
+    assert.ok(!(await L.get()).exists, 'בלי ריצה לילית פעילה – ריצת המוצרים משחררת');
+    const d1 = await dev();
+    assert.deepEqual([d1.p30.st, d1.p30.n], ['ok', { cat: 2, nw: 0, pr: 0, up: 2 }]); assert.ok(d1.pok > 0);
+    await okb(TOK, { op: 'report', kind: 'prod', run: rid('cp'), st: 'fail', c: 'import-errors' });
+    const info = await ok('cxBotTok', MGR, { op: 'info' });
+    assert.deepEqual([info.p30.st, info.p30.c, info.pok, info.updMax], ['fail', 'import-errors', d1.pok, 5], 'כישלון לא מוחק את "מוצרים סונכרנו לאחרונה"');
+    // דיווח ריצה לילית: המוצרים עברו, המכירות של הסניף השני נכשלו, והחזרה לסניף שהיה מוצג נכשלה (אזהרה)
+    const h = await okb(TOK, { op: 'hello', mode: 'sync' });
+    await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'fail', err: { code: 'branch-switch', msg: 'x', step: 'sales' }, steps: [], info: { prod: true, flags: { back: { code: 'branch-back', br: 'נחל לכיש', msg: 'לא חזר' } } } });
+    const d2 = await dev();
+    assert.ok(d2.pok >= d1.pok); assert.deepEqual([d2.bw.br, d2.bw.msg], ['נחל לכיש', 'לא חזר']); assert.equal(d2.lr.code, 'branch-switch');
+    const h2 = await okb(TOK, { op: 'hello', mode: 'sync' });
+    await okb(TOK, { op: 'report', run: h2.runId, kind: 'run', st: 'ok', steps: [], info: { prod: true, flags: {} } });
+    assert.equal((await dev()).bw, null, 'ריצה תקינה מנקה את האזהרה');
+    assert.ok((await okb(TOK, { op: 'poll', ver: '0.1.23' })).caps.includes('prod30'));
+    // עד 60 קטלוגים ביום (נספר בחלק הראשון)
+    const D = adm().doc(`b/${A}/private/cxbot`);
+    await D.set({ cu: { d: today, n: 60 } }, { merge: true });
+    const g = CC.groupCat([HDR, cr('400001', 'כוס נייר', 11, 6)]);
+    const rr = await bot(TOK, { op: 'upload', run: rid(), part: 0, parts: 1, items: g.items, ver: '0.1.0' });
+    assert.equal(rr.code, 429); assert.equal(rr.body.reason, 'rate');
+    await D.set({ cu: { d: today, n: 0 } }, { merge: true });
+    await okb(TOK, { op: 'upload', run: rid(), part: 0, parts: 1, items: g.items });
+    assert.equal((await dev()).cu.n, 1);
+  });
   it('אסימון שהוחלף / בוטל → 401; עסק מושהה / בלי הזמנות → 403', async () => {
     const r2 = await ok('cxBotTok', MGR, { op: 'new' });
     assert.equal((await bot(TOK, { op: 'cfg', ver: '0.1.0' })).code, 401, 'הקודם בוטל');
@@ -281,13 +334,13 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     }
   });
 
-  it('מגבלות: 600 פניות / 10 ריצות ביום לעסק; 30 ניסיונות כושלים ביום מאותה כתובת', async () => {
+  it('מגבלות: 1500 פניות (26.11: היה 600) / 10 ריצות ביום לעסק; 30 ניסיונות כושלים ביום מאותה כתובת', async () => {
     const U = adm().doc(`b/${A}/private/cxbot.use`);
     const day = (await U.get()).get('day');
     await U.set({ day, n: 5, runs: 10 });
     assert.equal((await bot(TOK, { op: 'hello', mode: 'sync', ver: '0.1.0' })).code, 429, '11 ריצות');
     await okb(TOK, { op: 'hello', mode: 'connect' });
-    await U.set({ day, n: 600, runs: 0 });
+    await U.set({ day, n: 1500, runs: 0 });
     const r = await bot(TOK, { op: 'cfg', ver: '0.1.0' });
     assert.equal(r.code, 429); assert.equal(r.body.reason, 'rate');
     await U.set({ day, n: 0, runs: 0 });
@@ -405,7 +458,7 @@ describe('רובוט כספית – "סנכרן עכשיו" מהטלפון (cxBo
     for (let k = 0; k < 40; k += 10) await Promise.all(Array.from({ length: 10 }, () => okb(TOK, { op: 'poll', ver: '0.1.5' })));
     assert.equal((await U().get()).get('n'), 0, 'poll לא נספר');
     assert.equal((await dev()).pl, pl, 'pl לא נכתב שוב בתוך 5 דקות');
-    await U().set({ day, n: 600, runs: 0 });
+    await U().set({ day, n: 1500, runs: 0 });
     assert.equal((await bot(TOK, { op: 'cfg', ver: '0.1.5' })).code, 429, 'המונה מלא');
     await okb(TOK, { op: 'poll', ver: '0.1.5' }); // גם אז poll עובד
     await U().set({ day, n: 0, runs: 0 });

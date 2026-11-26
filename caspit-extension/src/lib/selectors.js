@@ -592,21 +592,62 @@ function branchCur(doc, cfg) {
 }
 // פתיחת הרשימה (פוקוס על .multiselect, כמו vue-multiselect) ולחיצה על האפשרות של הסניף. לא מחכים כאן לתוצאה –
 // כספית עשויה לטעון את הדף מחדש; ה-service worker בודק אחר כך (branchCur) שהבחירה נקלטה
+// 0.1.23 (תקלה 26.11: הבחירה לא נקלטה בשני הכיוונים, גם אחרי טעינה מחדש): ev = האירועים שנשלחו (לאבחון).
+//   select רגיל בתוך הפקד → השמה + input/change (setValue). חלון אישור של כספית אחרי הבחירה – רק אם cfg.confirm, רק חלון גלוי שמזכיר
+//   סניף/חנות, ורק כפתור אישור מתוך רשימה סגורה (BR_OK) בתוך החלון. אחרת – כמו קודם.
+const BR_BTN = ['אישור', 'כן', 'המשך', 'מעבר', 'החלף', 'ביטול', 'לא', 'סגור', 'אוקיי', 'ok', 'yes', 'no', 'cancel', 'close'];
+const BR_OK = ['אישור', 'כן', 'המשך', 'מעבר', 'החלף', 'אוקיי', 'ok', 'yes'];
+const BR_BTNS = 'button,[role=button],a.btn,input[type=button]';
+const btnTxt = (b) => norm(b.textContent || b.value).toLowerCase();
+function brDlgs(doc) {
+  return all(doc, DLG).filter(visible).slice(0, 3).map((d) => ({ el: d, kw: /סניף|חנות|להחליף|לעבור|מעבר/.test(norm(d.textContent)), btns: all(d, BR_BTNS).filter(visible).map(btnTxt).filter((x) => BR_BTN.includes(x)).slice(0, 6) }));
+}
+// אבחון פקד הסניף (0.1.23) – בלי נתונים פרטיים: סוג הרכיב, select רגיל / רשימה מותאמת, פתוח / פעיל, הסניף המוצג (רק שם מתוך names),
+// מספר אפשרויות, חלונות גלויים (רק: האם מזכירים סניף/חנות, ומילות כפתורים מרשימה סגורה), ושמות מפתחות אחסון שקשורים לחנות/סניף (בלי ערכים)
+function branchDiag(doc, cfg, win) {
+  const f = all(doc, cfg.field)[0];
+  if (!f) return { found: false, dlg: brDlgs(doc).map((d) => ({ kw: d.kw, btns: d.btns })) };
+  const N = brNames(cfg), el = f.querySelector(cfg.cur), box = f.querySelector(cfg.box) || f, wr = f.querySelector('.multiselect__content-wrapper');
+  const keys = [];
+  for (const st of ['localStorage', 'sessionStorage']) {
+    try { const S = win[st]; for (let i = 0; i < S.length && keys.length < 10; i++) { const k = String(S.key(i)); if (/store|branch|shop|חנות|סניף/i.test(k)) keys.push(st[0] + ':' + k.replace(/[^\w.-]/g, '?').slice(0, 40)); } } catch (e) { /* */ }
+  }
+  return { found: true, tag: String(box.tagName).toLowerCase(), sel: !!f.querySelector('select'), ms: /multiselect/.test(String(box.className)), act: /is-active|is-open/.test(String(box.className)), open: !!(wr && visible(wr)),
+    cur: el ? brOf(el.textContent, N) : '', nOpt: all(f, cfg.opt).length, dlg: brDlgs(doc).map((d) => ({ kw: d.kw, btns: d.btns })), keys };
+}
 async function branchPick(doc, cfg, name, ctx) {
   const f = all(doc, cfg.field)[0];
   if (!f) return { ok: false, why: 'no-field' };
-  const N = brNames(cfg), want = norm(name);
-  const opt = () => all(f, cfg.opt).find((o) => brOf(o.textContent, N) === want);
-  if (!opt()) return { ok: false, why: 'no-opt' };
-  const box = f.querySelector(cfg.box) || f;
-  try { box.focus(); } catch (e) { /* */ }
-  fire(box, 'focus', ctx.win);
-  for (let k = 0; k < 10 && !visible(opt()); k++) await ctx.sleep(200);
-  const o = opt();
-  if (!o) return { ok: false, why: 'no-opt' };
-  fire(o, 'mousedown', ctx.win);
-  o.click();
-  return { ok: true };
+  const N = brNames(cfg), want = norm(name), ev = [];
+  const sel = f.querySelector('select');
+  if (sel) {
+    const so = Array.from(sel.options || []).find((x) => brOf(x.textContent, N) === want);
+    if (!so) return { ok: false, why: 'no-opt' };
+    setValue(sel, so.value, ctx.win);
+    ev.push('select');
+  } else {
+    const opt = () => all(f, cfg.opt).find((o) => brOf(o.textContent, N) === want);
+    if (!opt()) return { ok: false, why: 'no-opt' };
+    const box = f.querySelector(cfg.box) || f;
+    try { box.focus(); } catch (e) { /* */ }
+    fire(box, 'focus', ctx.win); ev.push('focus');
+    for (let k = 0; k < 10 && !visible(opt()); k++) await ctx.sleep(200);
+    const o = opt();
+    if (!o) return { ok: false, why: 'no-opt' };
+    fire(o, 'mousedown', ctx.win);
+    o.click(); ev.push('click');
+  }
+  if (cfg.confirm) {
+    for (let k = 0; k < 8; k++) {
+      await ctx.sleep(250);
+      const d = brDlgs(doc).find((x) => x.kw && x.btns.some((b) => BR_OK.includes(b)));
+      if (!d) continue;
+      const b = all(d.el, BR_BTNS).filter(visible).find((x) => BR_OK.includes(btnTxt(x)));
+      if (b) { b.click(); ev.push('confirm'); }
+      break;
+    }
+  }
+  return { ok: true, ev };
 }
 // רשימות בחירה קצרות בדף (0.1.13, היכרות אמצעי תשלום – קריאה בלבד, בלי לפתוח): <select> ו-vue-multiselect מחוץ לטבלאות, עד 30 אפשרויות.
 // רק התווית והאפשרויות כמו שהן – הסינון (תווית מוכרת, לא שמות אנשים / לקוחות) נעשה ב-service worker (sanitize.js listSafe) לפני שנשמר
@@ -675,6 +716,6 @@ function rowScan(doc) {
     .filter((x) => visible(x) && !(x.closest && x.closest(DATA))).map((x) => own(x).slice(0, 80)).filter(Boolean).slice(0, 4);
   return { tables, msgs };
 }
-const api = { OPS, DENY_HE, denied, deniedLink, norm, find, setValue, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes, branchCur, branchPick, lists, errDialogs, rowScan };
+const api = { OPS, DENY_HE, denied, deniedLink, norm, find, setValue, onPath, runSteps, peek, monthYear, pickCal, histRows, queueRows, controls, screen, isLogin, dateFor, fill, cssPath, b64bytes, branchCur, branchPick, branchDiag, lists, errDialogs, rowScan };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CxSel = api;
 })(typeof self !== 'undefined' ? self : this);
