@@ -10,6 +10,8 @@
 //   מי שהשתיק (grp/{gid}/r/{uid}.mu == true) – לא מקבל, חוץ מבקבוצה עם ao == true ("רק המנהל שולח" – אי אפשר להשתיק).
 // תנאים לעסק: עסק קיים ופעיל, תוספת groups מופעלת (כמו החוקים). בשורש – רק כשלארג' פעמי במצב legacy (שם החוקים לא בודקים תוספת).
 // ההתראה: כותרת = שם הקבוצה, גוף = "<שולח>: <תחילת ההודעה>" או "<שולח>: 📷 תמונה" / "<שולח>: 🎬 סרטון".
+//   26.11.2026 (שיתוף לקבוצה): קובץ – "<שולח>: 📎 <שם הקובץ>" (+ כיתוב); הודעה קולית – "<שולח>: 🎤 הודעה קולית".
+//   last.txt לקובץ = "📎 <שם>" ולהודעה קולית = "🎤 הודעה קולית" (גם אפליקציה ישנה שמציגה את last.txt כמו שהוא – רואה נכון).
 //   tag לכל קבוצה (grp_<gid>) – הודעה חדשה מחליפה את ההתראה הקודמת של אותה קבוצה. במסך נעול מוסתר (private). data: { k: 'grp', id: gid }.
 //   בלי כפתורים. טלפון ישן / בלי תמיכה בכפתורים – הודעת notification רגילה, בדיוק כמו קודם (fcmPayload בלי act).
 //   אישור קבלה (24.11.2026): רק טלפון שה-APK שלו שולח אישור קבלה (tokensRcv – רישום עם rcv:1; APK עם כפתורים בלבד מקבל את ההודעה הרגילה) – הודעת data בלבד, priority high (sendItem), עם אסימון חד־פעמי
@@ -28,15 +30,24 @@ const T = require('./lib/tenant');
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_TO = 300; // כמו מגבלת mem בחוקים – לחברים; המנהלים נוספים מעבר לזה (הערה 1 של הבודק)
 const PREV = 100; // אורך תחילת ההודעה בגוף ההתראה
-const KIND_TXT = { img: '📷 תמונה', vid: '🎬 סרטון' };
+const KIND_TXT = { img: '📷 תמונה', vid: '🎬 סרטון', aud: '🎤 הודעה קולית' };
+const KINDS = ['t', 'img', 'vid', 'file', 'aud'];
 
 const clean = (v) => String(typeof v === 'string' ? v : '').replace(/\s+/g, ' ').trim();
 const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
+// הטקסט של last: טקסט / כיתוב (תמונה, סרטון – האפליקציה מוסיפה את הסמל לפי k); קובץ – "📎 <שם>"; קולית – "🎤 הודעה קולית"
+function lastTxt(m) {
+  if (m.k === 'file') return cut('📎 ' + (clean(m.fn) || 'קובץ'), 120);
+  if (m.k === 'aud') return KIND_TXT.aud;
+  return cut(clean(m.txt), 120);
+}
+
 // גוף ההתראה. m = ההודעה, name = שם השולח, gname = שם הקבוצה
 function msgOf(m, name, gname) {
-  const txt = clean(m.txt);
-  const what = m.k === 't' ? cut(txt, PREV) : KIND_TXT[m.k] + (txt ? ' ' + cut(txt, PREV) : '');
+  const txt = m.k === 'aud' ? '' : clean(m.txt);
+  const head = m.k === 'file' ? '📎 ' + cut(clean(m.fn) || 'קובץ', 60) : KIND_TXT[m.k];
+  const what = m.k === 't' ? cut(txt, PREV) : head + (txt ? ' ' + cut(txt, PREV) : '');
   return { title: cut(clean(gname) || 'קבוצה', 60), body: (name ? cut(name, 40) + ': ' : '') + what };
 }
 
@@ -67,7 +78,7 @@ async function fcmSend(tokens, msg, gid) {
 async function onMsg(bizId, gid, mid, m, opts) {
   const o = opts || {};
   if (!ID_RE.test(String(gid || '')) || !ID_RE.test(String(mid || '')) || !m || typeof m !== 'object') return { ok: false, r: 'bad' };
-  if (!['t', 'img', 'vid'].includes(m.k) || typeof m.by !== 'string' || !ID_RE.test(m.by)) return { ok: false, r: 'bad' };
+  if (!KINDS.includes(m.k) || typeof m.by !== 'string' || !ID_RE.test(m.by)) return { ok: false, r: 'bad' };
   const biz = await T.loadBiz(bizId || T.BIZ0);
   if (!biz || biz.status !== 'active') return { ok: false, r: 'biz' };
   if (!bizId && biz.dataRoot !== 'legacy') return { ok: false, r: 'not-legacy' }; // השורש שייך רק ללארג' פעמי ב-legacy
@@ -95,7 +106,7 @@ async function onMsg(bizId, gid, mid, m, opts) {
         if (!s.exists) return;
         const l = s.get('last');
         if (l && typeof l === 'object' && Number(l.t) > t) return;
-        tx.update(gRef, { last: { txt: cut(clean(m.txt), 120), byN: name, t, k: m.k } });
+        tx.update(gRef, { last: { txt: lastTxt(m), byN: name, t, k: m.k } });
       });
     } catch (e) { logger.warn('grpMsg: last failed', { bizId: biz.bizId, name: e && e.name, code: e && e.code }); }
     const to = await recipients(g, m.by, admins, staffOf, muted);
@@ -133,7 +144,7 @@ async function onMsg(bizId, gid, mid, m, opts) {
 }
 
 // מחיקה מדורגת (grpDel / grpDelB): כשהמנהל מוחק את grp/{gid}, השרת מוחק את כל תתי-האוספים (m, m/{mid}/p, r)
-// ואת קובצי הסרטונים בתחילית grpv/{gid}/ (בעסק: b/{bizId}/grpv/{gid}/). בלי זה ההודעות נשארות יתומות (בלתי נגישות, אבל תופסות מקום).
+// ואת קובצי הסרטונים בתחילית grpv/{gid}/ (בעסק: b/{bizId}/grpv/{gid}/), וגם קבצים והודעות קוליות בתחילית grpf/{gid}/ (26.11.2026). בלי זה ההודעות נשארות יתומות (בלתי נגישות, אבל תופסות מקום).
 // אין בדיקת הרשאה כאן – רק מנהל רשאי למחוק קבוצה (החוקים), והטריגר רץ רק אחרי שהמחיקה כבר קרתה.
 // opts: { bucket } לבדיקות (אובייקט עם deleteFiles({ prefix })).
 async function onDel(bizId, gid, opts) {
@@ -149,6 +160,7 @@ async function onDel(bizId, gid, opts) {
   try {
     const bucket = o.bucket || require('firebase-admin/storage').getStorage().bucket();
     await bucket.deleteFiles({ prefix: P + 'grpv/' + gid + '/' });
+    await bucket.deleteFiles({ prefix: P + 'grpf/' + gid + '/' });
   } catch (e) {
     files = false; // לא קריטי: כלל ה-lifecycle מוחק את הסרטונים אחרי 90 יום בכל מקרה
     logger.warn('grpDel: video cleanup failed', { bizId: bizId || T.BIZ0, name: e && e.name, code: e && e.code });
@@ -161,6 +173,7 @@ async function onDel(bizId, gid, opts) {
 //    ואם לא נשארה אף הודעה – last נמחק. כך הטקסט של הודעה שנמחקה לא נשאר ברשימת הקבוצות.
 // 1א. pin (תוספת 17.11): אם ההודעה שנמחקה היא ההודעה המוצמדת (pin.mid == mid) – pin נמחק.
 // 2. סרטון: נמחק רק הקובץ של אותה הודעה, ורק אם vp שווה בדיוק ל-grpv/{gid}/{mid} (בעסק: b/{bizId}/grpv/{gid}/{mid}).
+//    קובץ / הודעה קולית (26.11.2026): אותו דבר, לפי fp == grpf/{gid}/{mid}.
 // בלי לולאה: כשהקבוצה כולה נמחקת (grpDel → recursiveDelete), מסמך הקבוצה כבר לא קיים – לא מחושב last ולא נוגעים בקבצים
 // (grpDel מוחק את כל התחילית בעצמו). כתיבת last לא מפעילה שום טריגר של הודעות.
 // m = נתוני ההודעה שנמחקה (ev.data). opts: { bucket } לבדיקות (אובייקט עם file(path).delete()).
@@ -194,7 +207,8 @@ async function onMDel(bizId, gid, mid, m, opts) {
         const by = typeof x.by === 'string' && ID_RE.test(x.by) ? x.by : '';
         const st = by ? await tx.get(db.doc(P + 'staff/' + by)) : null;
         const name = clean((st && st.exists && st.get('name')) || x.byN).slice(0, 100);
-        upd.last = { txt: cut(clean(x.txt), 120), byN: name, t: Number.isInteger(x.t) ? x.t : 0, k: ['t', 'img', 'vid'].includes(x.k) ? x.k : 't' };
+        const k = KINDS.includes(x.k) ? x.k : 't';
+        upd.last = { txt: lastTxt(Object.assign({}, x, { k })), byN: name, t: Number.isInteger(x.t) ? x.t : 0, k };
         r = 'recalc';
       }
     }
@@ -204,14 +218,16 @@ async function onMDel(bizId, gid, mid, m, opts) {
   if (last === 'no-group') return { ok: true, last, file: 'skip', pin: false };
   let file = 'none';
   const vp = P + 'grpv/' + gid + '/' + mid;
-  if (d.k === 'vid' && d.vp === vp) {
+  const fp = P + 'grpf/' + gid + '/' + mid;
+  const own = (d.k === 'vid' && d.vp === vp) ? vp : ((d.k === 'file' || d.k === 'aud') && d.fp === fp) ? fp : '';
+  if (own) {
     try {
       const bucket = o.bucket || require('firebase-admin/storage').getStorage().bucket();
-      await bucket.file(vp).delete({ ignoreNotFound: true });
+      await bucket.file(own).delete({ ignoreNotFound: true });
       file = 'deleted';
     } catch (e) {
       file = 'failed'; // לא קריטי: כלל ה-lifecycle מוחק אחרי 90 יום
-      logger.warn('grpMDel: video delete failed', { bizId: bizId || T.BIZ0, name: e && e.name, code: e && e.code });
+      logger.warn('grpMDel: file delete failed', { bizId: bizId || T.BIZ0, name: e && e.name, code: e && e.code });
     }
   }
   return { ok: true, last, file, pin };
@@ -249,4 +265,4 @@ exports.grpMDelB = onDocumentDeleted(Object.assign({ document: 'b/{bizId}/grp/{g
   if (!T.BIZ_RE.test(String(ev.params.bizId || ''))) return null;
   return mdel(ev.params.bizId, ev);
 });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { onMsg, onDel, onMDel, msgOf, recipients, MAX_TO } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { onMsg, onDel, onMDel, msgOf, lastTxt, recipients, MAX_TO } });

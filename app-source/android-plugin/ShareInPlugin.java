@@ -31,15 +31,19 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 /**
- * "Share" menu of Android: receives images and PDF files (ACTION_SEND / ACTION_SEND_MULTIPLE).
+ * "Share" menu of Android: receives files of any type and shared text (ACTION_SEND / ACTION_SEND_MULTIPLE).
  *
  * Every shared file is copied into the app's own cache folder (cache/sharein), under a random name.
  * The name the other app gave is only used as a label (it never becomes a path).
- * The real type is checked from the first bytes of the file (JPEG / PNG / WEBP / GIF / PDF), not from what the other app claims.
+ * kind "doc": image or PDF up to 15MB - the real type is checked from the first bytes (JPEG / PNG / WEBP / GIF / PDF),
+ *   not from what the other app claims (these can go to the scan queue).
+ * kind "file" (26.11.2026): anything else up to 25MB, with the type the sending app declared (cleaned; default
+ *   application/octet-stream). "why" = why it cannot go to the scan queue (type / heic / big). For groups only.
+ * kind "text": EXTRA_TEXT of a share without files (no temporary file; the text is in the item).
  *
  * JS side:
- *   getPending()  -> { items: [{id, name, mime, size}], over: N, rejected: [{name, why}] }  and clears the list
- *   read({id})    -> { id, name, mime, size, dataURL }  and deletes the temporary file
+ *   getPending()  -> { items: [{id, kind, name, mime, size, why?, text?}], over: N, rejected: [{name, why}] }  and clears the list
+ *   read({id})    -> { id, mime, size, dataURL }  and deletes the temporary file
  *   discard({id}) -> deletes the temporary file without reading it
  *   event "shareIn" ({n}) when new files arrived while the app is running (then JS calls getPending()).
  * No storage permission is needed: the sending app grants read access to these files only.
@@ -49,6 +53,10 @@ public class ShareInPlugin extends Plugin {
 
     static final int MAX_FILES = 20;
     static final long MAX_BYTES = 15L * 1024 * 1024;
+    /** Any other file (for groups): up to 25MB */
+    static final long MAX_ANY = 25L * 1024 * 1024;
+    static final int MAX_TEXT = 10000;
+    private static final Pattern MIME_OK = Pattern.compile("^[a-z0-9][a-z0-9.+_-]{0,80}/[a-z0-9][a-z0-9.+_-]{0,80}$");
     private static final String DONE = "com.largepami.finance.sharein.done";
     private static final Pattern ID_OK = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
 
@@ -65,7 +73,20 @@ public class ShareInPlugin extends Plugin {
      */
     static volatile boolean recreated = false;
     /** id -> temporary file. Only ids created here can be read; a path never comes from JS. */
-    private final Map<String, File> files = new LinkedHashMap<>();
+    private final Map<String, Entry> files = new LinkedHashMap<>();
+
+    /** A temporary file and what it is. doc = image/PDF checked from the bytes; otherwise mime is the cleaned declared type. */
+    static final class Entry {
+        final File f;
+        final String mime;
+        final boolean doc;
+
+        Entry(File f, String mime, boolean doc) {
+            this.f = f;
+            this.mime = mime;
+            this.doc = doc;
+        }
+    }
 
     @Override
     public void load() {
@@ -154,6 +175,17 @@ public class ShareInPlugin extends Plugin {
         intent.putExtra(DONE, true);
         List<Uri> uris = urisOf(intent);
         if (uris.isEmpty()) {
+            // Shared text (a message, a link) - only when no file was shared, so a caption never blocks the scan of an image
+            JSObject t = textItem(intent);
+            if (t == null) {
+                return;
+            }
+            synchronized (lock) {
+                pending.add(t);
+            }
+            JSObject ev = new JSObject();
+            ev.put("n", 1);
+            notifyListeners("shareIn", ev, true);
             return;
         }
         int extra = Math.max(0, uris.size() - MAX_FILES);
@@ -166,7 +198,7 @@ public class ShareInPlugin extends Plugin {
         String own = getContext().getPackageName();
         for (Uri u : uris) {
             String au = u.getAuthority();
-            if (au == null || au.startsWith(own)) {
+            if (au == null || au.indexOf('@') >= 0 || au.startsWith(own) || ownProvider(au, own)) {
                 // Our own FileProvider (cache + external storage): another app must not make us import our own files
                 JSObject b = new JSObject();
                 b.put("name", cleanName(u.getLastPathSegment()));
@@ -176,7 +208,7 @@ public class ShareInPlugin extends Plugin {
             }
             String name = displayName(u);
             try {
-                JSObject it = copyOne(u, name, dir);
+                JSObject it = copyOne(u, name, dir, intent);
                 got.add(it);
             } catch (Reject r) {
                 JSObject b = new JSObject();
@@ -201,6 +233,19 @@ public class ShareInPlugin extends Plugin {
         notifyListeners("shareIn", ev, true);
     }
 
+    /**
+     * true when the provider behind this authority belongs to this app (any of its names).
+     * "user@authority" (e.g. 0@...) is rejected before this: ContentResolver strips the user part and would open our own provider.
+     */
+    private boolean ownProvider(String au, String own) {
+        try {
+            android.content.pm.ProviderInfo pi = getContext().getPackageManager().resolveContentProvider(au, 0);
+            return pi != null && own.equals(pi.packageName);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
     /** A label only: no folders, no control characters, max 80 characters. */
     static String cleanName(String n) {
         if (n == null) {
@@ -223,6 +268,74 @@ public class ShareInPlugin extends Plugin {
             return "file";
         }
         return r;
+    }
+
+    /** Shared text: no control characters except new line and tab, no direction overrides, max MAX_TEXT characters. */
+    static String cleanText(CharSequence cs) {
+        if (cs == null) {
+            return "";
+        }
+        String s = cs.toString();
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length() && b.length() < MAX_TEXT; i++) {
+            char c = s.charAt(i);
+            if ((c >= 0x20 || c == '\n' || c == '\t') && c != 0x7f && c != 0x202e && c != 0x202d) {
+                b.append(c);
+            }
+        }
+        return b.toString().trim();
+    }
+
+    private static JSObject textItem(Intent intent) {
+        if (!Intent.ACTION_SEND.equals(intent.getAction())) {
+            return null;
+        }
+        String t;
+        try {
+            t = cleanText(intent.getCharSequenceExtra(Intent.EXTRA_TEXT));
+        } catch (Exception e) {
+            return null;
+        }
+        if (t.isEmpty()) {
+            return null;
+        }
+        JSObject it = new JSObject();
+        it.put("id", UUID.randomUUID().toString());
+        it.put("kind", "text");
+        it.put("name", "text");
+        it.put("mime", "text/plain");
+        it.put("size", t.length());
+        it.put("text", t);
+        return it;
+    }
+
+    /** The type another app declared: only a plain "type/subtype" (no wildcard, no parameters), else application/octet-stream. */
+    static String cleanMime(String m) {
+        if (m == null) {
+            return "application/octet-stream";
+        }
+        String s = m.trim().toLowerCase(java.util.Locale.ROOT);
+        int k = s.indexOf(';');
+        if (k >= 0) {
+            s = s.substring(0, k).trim();
+        }
+        if (s.length() > 100 || !MIME_OK.matcher(s).matches()) {
+            return "application/octet-stream";
+        }
+        return s;
+    }
+
+    private String declaredMime(Uri u, Intent intent) {
+        String m = null;
+        try {
+            m = getContext().getContentResolver().getType(u);
+        } catch (Exception ignored) {
+            // some providers do not answer; the type is only a hint for groups
+        }
+        if (m == null || m.contains("*")) {
+            m = intent.getType();
+        }
+        return cleanMime(m);
     }
 
     private String displayName(Uri u) {
@@ -296,14 +409,15 @@ public class ShareInPlugin extends Plugin {
         }
     }
 
-    private JSObject copyOne(Uri u, String name, File dir) throws IOException, Reject {
+    private JSObject copyOne(Uri u, String name, File dir, Intent intent) throws IOException, Reject {
         long ds = declaredSize(u);
-        if (ds > MAX_BYTES) {
+        if (ds > MAX_ANY) {
             throw new Reject("big");
         }
         String id = UUID.randomUUID().toString();
         File tmp = new File(dir, id + ".part");
         String mime;
+        boolean heic;
         long total = 0;
         try (InputStream in = getContext().getContentResolver().openInputStream(u)) {
             if (in == null) {
@@ -319,9 +433,7 @@ public class ShareInPlugin extends Plugin {
                 hn += r;
             }
             mime = sniff(head, hn);
-            if (mime == null) {
-                throw new Reject(isHeic(head, hn) ? "heic" : "type");
-            }
+            heic = mime == null && isHeic(head, hn);
             try (OutputStream out = new FileOutputStream(tmp)) {
                 out.write(head, 0, hn);
                 total = hn;
@@ -329,7 +441,7 @@ public class ShareInPlugin extends Plugin {
                 int r;
                 while ((r = in.read(buf)) > 0) {
                     total += r;
-                    if (total > MAX_BYTES) {
+                    if (total > MAX_ANY) {
                         throw new Reject("big");
                     }
                     out.write(buf, 0, r);
@@ -340,7 +452,17 @@ public class ShareInPlugin extends Plugin {
             tmp.delete();
             throw e;
         }
-        File fin = new File(dir, id + ext(mime));
+        if (total <= 0) {
+            // empty file: same message as before ("only an image or PDF")
+            // noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            throw new Reject("type");
+        }
+        // Image / PDF up to 15MB = "doc" (scan queue, as before). Anything else = "file" (groups only), with the reason
+        boolean doc = mime != null && total <= MAX_BYTES;
+        String why = doc ? null : mime != null ? "big" : heic ? "heic" : "type";
+        String fm = mime != null ? mime : declaredMime(u, intent);
+        File fin = new File(dir, id + (doc ? ext(mime) : ".bin"));
         if (!tmp.renameTo(fin) || !inside(dir, fin)) {
             // noinspection ResultOfMethodCallIgnored
             tmp.delete();
@@ -349,13 +471,17 @@ public class ShareInPlugin extends Plugin {
             throw new Reject("read");
         }
         synchronized (lock) {
-            files.put(id, fin);
+            files.put(id, new Entry(fin, fm, doc));
         }
         JSObject it = new JSObject();
         it.put("id", id);
+        it.put("kind", doc ? "doc" : "file");
         it.put("name", name);
-        it.put("mime", mime);
+        it.put("mime", fm);
         it.put("size", total);
+        if (why != null) {
+            it.put("why", why);
+        }
         return it;
     }
 
@@ -392,11 +518,12 @@ public class ShareInPlugin extends Plugin {
             r.put("over", o);
             r.put("max", MAX_FILES);
             r.put("maxBytes", MAX_BYTES);
+            r.put("maxAny", MAX_ANY);
             call.resolve(r);
         });
     }
 
-    private File take(PluginCall call) {
+    private Entry take(PluginCall call) {
         String id = call.getString("id", "");
         if (id == null || !ID_OK.matcher(id).matches()) {
             return null;
@@ -409,14 +536,15 @@ public class ShareInPlugin extends Plugin {
     @PluginMethod
     public void read(final PluginCall call) {
         final String id = call.getString("id", "");
-        final File f = take(call);
-        if (f == null) {
+        final Entry e0 = take(call);
+        if (e0 == null) {
             call.reject("unknown id");
             return;
         }
+        final File f = e0.f;
         worker.execute(() -> {
             try {
-                if (!inside(shareDir(), f) || f.length() > MAX_BYTES) {
+                if (!inside(shareDir(), f) || f.length() > (e0.doc ? MAX_BYTES : MAX_ANY)) {
                     call.reject("bad file");
                     return;
                 }
@@ -431,8 +559,8 @@ public class ShareInPlugin extends Plugin {
                         off += r;
                     }
                 }
-                String mime = sniff(b, Math.min(b.length, 16));
-                if (mime == null) {
+                String mime = e0.doc ? sniff(b, Math.min(b.length, 16)) : e0.mime;
+                if (mime == null || (!e0.doc && !MIME_OK.matcher(mime).matches())) {
                     call.reject("bad file");
                     return;
                 }
@@ -443,7 +571,7 @@ public class ShareInPlugin extends Plugin {
                 r.put("dataURL", "data:" + mime + ";base64," + Base64.encodeToString(b, Base64.NO_WRAP));
                 call.resolve(r);
             } catch (OutOfMemoryError e) {
-                // a 15MB file becomes ~20 million characters for the screens; a weak phone may not have the memory
+                // a 25MB file becomes ~33 million characters for the screens; a weak phone may not have the memory
                 call.reject("הקובץ גדול מדי לטלפון הזה");
             } catch (Exception e) {
                 call.reject("read failed");
@@ -456,10 +584,10 @@ public class ShareInPlugin extends Plugin {
 
     @PluginMethod
     public void discard(final PluginCall call) {
-        File f = take(call);
-        if (f != null) {
+        Entry e = take(call);
+        if (e != null) {
             // noinspection ResultOfMethodCallIgnored
-            f.delete();
+            e.f.delete();
         }
         call.resolve();
     }
