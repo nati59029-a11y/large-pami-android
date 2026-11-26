@@ -88,23 +88,55 @@ function mkPdf(pg){const parts=[],offs=[];let len=0;const I=pg.imgs||[];
  const out=new Uint8Array(len);let o=0;for(const p of parts){out.set(p,o);o+=p.length}return out}
 // עיצוב חדש (ds[i]) – סבב 2 ייתן עיצוב לכל משבצת
 const newD=img=>({img:img||0,x:0,y:0,z:1,rot:0,fl:false,auto:false,br:0,ct:0,sat:0,tx:[]});
-const API={PG,K,PT,DPI,CAP,LAYS,fitGrid,place,layout,layTxt,laySz,cm,dpi,grade,CAL0,calNorm,calFrom,calMap,calXf,pdfScale,fitCap,levels,luts,adjust,adjNeeded,visual,mkPdf,newD};
+/* ---------- סבב 2ב: היסטוריה (ביטול / חזרה), הסרת רקע לפי צבע, שמירת פרויקטים ---------- */
+// היסטוריה: מחרוזות JSON של פרמטרים בלבד (בלי תמונות). cap צעדי ביטול. commit זהה למצב הנוכחי – לא נרשם
+function mkHist(cap){cap=cap||30;let u=[],r=[],cur=null;
+ return{init(s){u=[];r=[];cur=s},commit(s){if(s===cur)return false;if(cur!=null)u.push(cur);while(u.length>cap)u.shift();r=[];cur=s;return true},
+  undo(){if(!u.length)return null;r.push(cur);cur=u.pop();return cur},redo(){if(!r.length)return null;u.push(cur);cur=r.pop();return cur},
+  canUndo:()=>u.length>0,canRedo:()=>r.length>0,cur:()=>cur,all:()=>u.concat(cur!=null?[cur]:[],r)}}
+const hexRgb=h=>{const m=/^#([0-9a-f]{6})$/i.exec(String(h||''));if(!m)return null;const v=parseInt(m[1],16);return[v>>16&255,v>>8&255,v&255]};
+// הסרת רקע לפי צבע: פיקסל קרוב לצבע (מרחק RGB עד tol% מהמרחק המקסימלי) הופך שקוף; ברבע החיצוני של הטווח – שקיפות הדרגתית (קצה חלק)
+function keyColor(data,r,g,b,tol){const T=clamp(+tol||0,0,100)/100*441.6729,lo=T*0.75;if(!(T>0))return data;
+ for(let i=0;i<data.length;i+=4){const a=data[i]-r,c=data[i+1]-g,e=data[i+2]-b,d=Math.sqrt(a*a+c*c+e*e);if(d<=lo)data[i+3]=0;else if(d<T)data[i+3]=Math.round(data[i+3]*(d-lo)/(T-lo))}return data}
+const nm=(v,a,b,df)=>{v=+v;return isFinite(v)?clamp(v,a,b):df},hx=(v,df)=>hexRgb(v)?String(v).toLowerCase():df;
+function normT(t){t=t||{};return{s:String(t.s==null?'':t.s).slice(0,60),f:String(t.f||'Rubik').slice(0,40),b:!!t.b,sz:nm(t.sz,1,200,10),col:hx(t.col,'#ffffff'),ol:hx(t.ol,'#000000'),ow:nm(t.ow,0,20,3),sh:!!t.sh,x:nm(t.x,-0.5,1.5,0.5),y:nm(t.y,-0.5,1.5,0.5),arc:t.arc==='top'||t.arc==='bot'?t.arc:''}}
+// עיצוב משבצת (נקרא מהמכשיר): ערכים בטווח, שדות חסרים – ברירת מחדל. im = אינדקס תמונה פרטית של המשבצת (אין = התמונה הכללית); kc/kt = צבע להסרה ורגישות
+function normD(d){d=d||{};const o={img:0,x:nm(d.x,-5,5,0),y:nm(d.y,-5,5,0),z:nm(d.z,0.3,6,1),rot:nm(d.rot,-360,360,0),fl:!!d.fl,auto:!!d.auto,br:nm(d.br,-100,100,0),ct:nm(d.ct,-100,100,0),sat:nm(d.sat,-100,100,0),tx:(Array.isArray(d.tx)?d.tx:[]).slice(0,8).map(normT)};
+ if(d.im!=null&&Number.isInteger(+d.im)&&+d.im>=0)o.im=+d.im;const kc=hx(d.kc,'');if(kc){o.kc=kc;o.kt=nm(d.kt,1,100,25)}return o}
+// גודל מקסימלי (בצד הארוך) לתמונה פרטית של משבצת: הצורך ב-300 DPI כפול 2 (מרווח לזום), לפחות 600, עד CAP
+const imgCap=L=>!L||!L.n?600:Math.round(clamp(Math.max(L.w,L.h)*2/25.4*DPI,600,CAP));
+// st: {name,k,cu,cut,ds,slots,gi,imgs:[{id,name,w,h,cap}|null]} ← → רשומה לשמירה (בלי תמונות; הקבצים נשמרים בנפרד)
+function projPack(st){st=st||{};return JSON.parse(JSON.stringify({v:1,name:String(st.name||'').slice(0,60),k:st.k,cu:st.cu,cut:st.cut!==false,ds:st.ds||[],slots:st.slots||[],gi:st.gi==null?-1:st.gi,
+ imgs:(st.imgs||[]).map(m=>m?{id:String(m.id),name:String(m.name||'').slice(0,60),w:m.w|0,h:m.h|0,cap:m.cap|0}:null)}))}
+function projUnpack(rec){if(!rec||typeof rec!=='object'||!Array.isArray(rec.imgs))return null;
+ const imgs=rec.imgs.map(m=>m&&m.id&&m.w>0&&m.h>0?{id:String(m.id),name:String(m.name||'תמונה').slice(0,60),w:m.w|0,h:m.h|0,cap:m.cap>0?m.cap|0:CAP}:null),ok=i=>Number.isInteger(i)&&i>=0&&i<imgs.length&&!!imgs[i];
+ let ds=(Array.isArray(rec.ds)?rec.ds:[]).slice(0,64).map(normD);if(!ds.length)ds=[newD(0)];ds.forEach(d=>{if(d.im!=null&&!ok(d.im))delete d.im});
+ const cu0=rec.cu||{},cu={sh:cu0.sh==='s'||cu0.sh==='r'?cu0.sh:'c',w:nm(cu0.w,10,200,50),h:nm(cu0.h,10,287,50)},k=rec.k==='cu'||LAYS.some(x=>x[0]===rec.k)?rec.k:'c12';
+ const n=layout(k,cu).n,slots=(Array.isArray(rec.slots)?rec.slots:[]).slice(0,n).map(s=>({d:s&&Number.isInteger(+s.d)&&+s.d>=0&&+s.d<ds.length?+s.d:0}));
+ let gi=ok(rec.gi)?rec.gi:imgs.findIndex(Boolean);
+ return{name:String(rec.name||'').slice(0,60),k,cu,cut:rec.cut!==false,ds,slots,gi,imgs}}
+const API={PG,K,PT,DPI,CAP,LAYS,fitGrid,place,layout,layTxt,laySz,cm,dpi,grade,CAL0,calNorm,calFrom,calMap,calXf,pdfScale,fitCap,levels,luts,adjust,adjNeeded,visual,mkPdf,newD,mkHist,hexRgb,keyColor,normD,imgCap,projPack,projUnpack};
 root.EdbCore=API;
 if(typeof module!=='undefined'&&module.exports)module.exports=API;
 if(typeof window==='undefined'||typeof ACT==='undefined'||typeof V==='undefined')return;
 
 /* =================== המסך =================== */
 const CALK='lp-edb-cal',T='הדפסת דף אכיל';
-const S={st:1,k:'c12',cu:{sh:'c',w:50,h:50},L:null,img:null,ds:[newD(0)],slots:[],cut:true,pdf:null,busy:0,sel:-1};
+const S={st:1,k:'c12',cu:{sh:'c',w:50,h:50},L:null,img:null,imgs:[],gi:-1,ds:[newD(0)],slots:[],selS:-1,mode:'all',pvBig:false,cut:true,pdf:null,ptg:-1,busy:0,sel:-1,pid:null,pname:'',saveErr:'',rst:0};
 const mgr=()=>(typeof isA==='function'&&isA())||!!(SY&&SY.sa);
 const ok=()=>!!SY&&!SY.mg&&(mgr()||(typeof isW==='function'&&isW()&&!!(SY.perms&&SY.perms.edb===true)));
-const lay=()=>{if(!S.L||S.L.k!==S.k||S.k==='cu')S.L=layout(S.k,S.cu);if(S.slots.length!==S.L.n)S.slots=S.L.slots.map(()=>({d:0}));return S.L};
+const lay=()=>{if(!S.L||S.L.k!==S.k||S.k==='cu')S.L=layout(S.k,S.cu);if(S.slots.length!==S.L.n){S.slots=S.L.slots.map((_,i)=>S.slots[i]||{d:0});if(S.selS>=S.slots.length)S.selS=-1}return S.L};
 const calGet=()=>{try{return calNorm(JSON.parse(localStorage.getItem(CALK)||'null'))}catch(e){return calNorm()}};
 const calSet=c=>{try{localStorage.setItem(CALK,JSON.stringify(calNorm(c)))}catch(e){}};
 const St=()=>root.EdbSt||null,isNatv=()=>!!(typeof shNat==='function'&&shNat());
-const redraw=()=>{try{if(cur().v==='edb')rerender()}catch(e){}};
+const redraw=()=>{try{mark();if(cur().v==='edb')rerender()}catch(e){}};
 const freeCv=c=>{if(c){c.width=0;c.height=0}};
-const relImg=()=>{if(S.img){freeCv(S.img.c);freeCv(S.img.p)}S.img=null};
+const freeImg=m=>{if(m){freeCv(m.c);freeCv(m.p)}};
+// סבב 2ב: כל התמונות של העבודה (imgs; האינדקס יציב, מקום ריק = null). S.img = התמונה הכללית (imgs[gi]); לכל עיצוב (ds[i]) אפשר im = תמונה פרטית
+const imgOfD=d=>d&&d.im!=null&&S.imgs[d.im]?S.imgs[d.im]:S.img;
+const curD=()=>{lay();const i=S.selS>=0&&S.selS<S.slots.length?S.selS:0;return S.ds[S.slots[i]?S.slots[i].d:0]||S.ds[0]};
+const freeAll=()=>{S.imgs.forEach(freeImg);S.imgs=[];S.gi=-1;S.img=null;try{if(root.EdbEdit)root.EdbEdit.freeKey()}catch(e){}H=mkHist(30)};
+let H=mkHist(30);
 const relPdf=()=>{if(S.pdf&&S.pdf.doc){try{S.pdf.doc.destroy()}catch(e){}}S.pdf=null};
 const css=`<style>#edbW .edSt{display:flex;gap:6px;margin-bottom:10px}#edbW .edSt button{flex:1;min-height:44px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--mut);font-weight:700;font-size:.85rem;padding:0 2px}
 #edbW .edSt button.on{border-color:var(--acc);color:var(--acc)}#edbW .edSt button.dn{color:var(--acc)}
@@ -121,6 +153,8 @@ const css=`<style>#edbW .edSt{display:flex;gap:6px;margin-bottom:10px}#edbW .edS
 #edbW .edQ.g i{background:#2fae5b}#edbW .edQ.y i{background:#e6b422}#edbW .edQ.r i{background:#e0483e}#edbW .edQ.r{color:#e0483e}
 #edbW .edWarn{border:2px solid var(--acc);border-radius:12px;padding:10px;font-weight:700;color:var(--acc);margin:10px 0}
 #edbW label.f{display:block;margin:6px 0}#edbW label.f input,#edbW label.f select{width:100%;min-height:44px}
+#edbW .edPv{display:flex;gap:10px;align-items:flex-start}#edbW .edPv .edPg{flex:none;width:136px;padding:0}#edbW .edPv.big{flex-direction:column;align-items:stretch}#edbW .edPv.big .edPg{width:100%}#edbW .edPv.big canvas{max-width:300px}
+#edbW .edPv canvas{margin:0 auto;max-width:136px}#edbW .edTb{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}#edbW .edPv.big .edTb{flex-direction:row;flex-wrap:wrap}#edbW .edTb .btn{min-height:40px;padding:4px 6px;font-size:.85rem}#edbW .edPv.big .edTb .btn{flex:1}
 #edbW .edR{display:flex;gap:8px;align-items:center}#edbW .edR>*{flex:1}#edbW details{margin-top:10px}#edbW input[type=range]{accent-color:var(--acc)}#edbW .edBig svg{width:30px;height:30px}#edbW summary{min-height:44px;display:flex;align-items:center;font-weight:700;cursor:pointer}</style>`;
 // סבב 2 (בקשת בעל העסק): 3 צעדים – 1 תמונה · 2 עריכה ופריסה (מסך אחד, עם תצוגת הדף האמיתי) · 3 הדפסה
 const steps=()=>{const n=['תמונה','עריכה ופריסה','הדפסה'];return `<div class="edSt">${n.map((t,i)=>`<button data-a="edbSt" data-v="${i+1}" class="${S.st===i+1?'on':S.st>i+1?'dn':''}">${i+1} ${t}</button>`).join('')}</div>`};
@@ -134,26 +168,48 @@ function layBar(){const L=lay(),o=(k,t,c)=>`<button class="edO edO2${c?' '+c:''}
 <div class="edR"><label class="f"><span>${S.cu.sh==='c'?'קוטר':'רוחב'} (מ"מ) – ${cm(S.cu.w)} ס"מ</span><input type="number" inputmode="decimal" min="10" max="200" data-c="edbCu" name="w" value="${S.cu.w}"></label>${S.cu.sh==='r'?`<label class="f"><span>גובה (מ"מ) – ${cm(S.cu.h)} ס"מ</span><input type="number" inputmode="decimal" min="10" max="287" data-c="edbCu" name="h" value="${S.cu.h}"></label>`:''}</div>`;
  return h+`<div style="margin-top:6px;font-weight:700">${esc(layTxt(L))}</div></div>`}
 // צעד 2: פריסה + עורך הצורה + "איך זה ייראה בדף" (הדף האמיתי, ברזולוציה נמוכה)
+const SW=L=>L.shape==='c'?['עיגול','עיגולים']:L.shape==='s'?['ריבוע','ריבועים']:['חלק','החלקים'];
+function slotPanel(L){if(L.n<2)return '';const w=SW(L),i=S.selS,own=i>=0&&S.slots[i]&&S.slots[i].d!==0,pk=(t,ic,acc,cap)=>`<label class="edO" style="min-height:44px;font-size:.9rem"><span>${t}</span><input type="file" accept="${acc}"${cap?' capture="environment"':''} data-c="${ic}" data-t="s" hidden></label>`;
+ if(i<0)return `<div class="card"><b>תמונה שונה לכל ${w[0]}</b><p class="note" style="margin:6px 0 0">לחצו על ${w[0]} בתצוגת הדף כדי לבחור אותו: אפשר לתת לו תמונה משלו, עריכה משלו וכיתוב משלו. בלי בחירה – העריכה חלה על כולם.</p></div>`;
+ return `<div class="card"><b>${w[0]} ${i+1} נבחר (מסומן בזהב)</b><p class="note" style="margin:4px 0 8px">${own?'העריכה למטה חלה על '+w[0]+' הזה בלבד.':'העריכה למטה חלה על כל ה'+w[1]+' שאין להם עריכה נפרדת.'}</p>
+<div class="edR"><button class="btn ${own?'g ':''}s" data-a="edbMode" data-v="all">תמונה לכל ה${w[1]}</button><button class="btn ${own?'':'g '}s" data-a="edbMode" data-v="one">תמונה שונה ל${w[0]} הזה</button></div>
+<div class="edLh" style="margin-top:8px">בחירת תמונה ${own?'ל'+w[0]+' הזה':'לכל ה'+w[1]} (בחרו אחת מהאפשרויות)</div><div class="edG" style="grid-template-columns:repeat(3,1fr)">${pk('מצלמה','edbImg','image/*',1)}${pk('גלריה','edbImg','image/*',0)}${pk('PDF','edbPdf','application/pdf,.pdf',0)}</div>
+${own?`<div class="edR" style="margin-top:8px"><button class="btn g s" data-a="edbCopyAll">העתק לכולם</button><button class="btn g s" data-a="edbMode" data-v="all">ביטול העריכה הנפרדת</button></div>`:''}</div>`}
+const urBtns=()=>`<button class="btn g s" id="edbUn" data-a="edbUndo" aria-label="ביטול פעולה"${H.canUndo()?'':' disabled'}>↶ ביטול</button><button class="btn g s" id="edbRe" data-a="edbRedo" aria-label="חזרה על פעולה"${H.canRedo()?'':' disabled'}>↷ חזרה</button>`;
+// צעד 2: פריסה + תצוגת הדף (קטנה, מיד מתחת לפריסה) + בחירת משבצת + עורך הצורה
 function stepEdit(){const L=lay(),E=root.EdbEdit;
- return layBar()+(L.n&&E?E.html(S):'')+`<div class="card edPg"><b>איך זה ייראה בדף</b><canvas id="edbPg" width="300" height="424" aria-label="תצוגת דף A4"></canvas><small class="note">דף A4, שוליים 0.5 ס"מ (קו מקווקו), רווח 0.3 ס"מ בין חלקים${S.cut?', קווי חיתוך אפורים':''}</small></div>`+nav(1,1,'הבא – הדפסה',!L.n)}
+ return layBar()+(S.saveErr?`<div class="edWarn">${esc(S.saveErr)}</div>`:'')+`<div class="card"><div class="edPv${S.pvBig?' big':''}"><div class="edPg"><canvas id="edbPg" width="360" height="509" aria-label="תצוגת דף A4"></canvas>${S.pvBig?`<small class="note">איך זה ייראה בדף. שוליים 0.5 ס"מ (מקווקו), רווח 0.3 ס"מ${S.cut?', קווי חיתוך אפורים':''}</small>`:''}</div>
+<div class="edTb"><b style="font-size:.85rem">איך זה ייראה בדף</b>${urBtns()}<button class="btn g s" data-a="edbBig">${S.pvBig?'הקטנה':'🔍 הגדלה'}</button><button class="btn g s" data-a="edbProjs">📁 פרויקטים</button></div></div></div>`+slotPanel(L)+(L.n&&E?E.html(S):'')+nav(1,1,'הבא – הדפסה',!L.n)}
 // תצוגת הדף: משבצת אחת מצוירת פעם אחת בגודל קטן ומשוכפלת לכל המשבצות. לכל היותר פעם ב-300ms
 let PVT=0;const pvSoon=()=>{if(PVT)return;PVT=setTimeout(()=>{PVT=0;pvDraw()},300)};
-function pvDraw(){const c=document.getElementById('edbPg'),E=root.EdbEdit;if(!c||!S.img||!E)return;const L=lay(),W=c.width,H=c.height,k=W/PG.w,g=c.getContext('2d');
- g.setTransform(1,0,0,1,0,0);g.fillStyle='#fff';g.fillRect(0,0,W,H);if(!L.n)return;
- const sw=Math.max(8,Math.round(L.w*k*1.5)),sh=Math.max(8,Math.round(L.h*k*1.5)),tc=document.createElement('canvas');tc.width=sw;tc.height=sh;
- try{E.draw(tc.getContext('2d'),sw,sh,{d:S.ds[0],img:S.img,src:S.img.p,ox:0,oy:0,ppm:sw/L.w,wMm:L.w,hMm:L.h,shape:L.shape,bl:0});g.imageSmoothingQuality='high';L.slots.forEach(q=>g.drawImage(tc,q.x*k,q.y*k,q.w*k,q.h*k))}finally{freeCv(tc)}
+// תצוגת הדף מצוירת על קנבס c (גם לתמונה הממוזערת של הפרויקט). כל עיצוב בשימוש מצויר פעם אחת בגודל קטן ומשוכפל. hl – סימון המשבצת הנבחרת
+function pgPaint(c,hl){const E=root.EdbEdit,L=lay(),W=c.width,H=c.height,k=W/PG.w,g=c.getContext('2d');
+ g.setTransform(1,0,0,1,0,0);g.fillStyle='#fff';g.fillRect(0,0,W,H);if(!L.n||!E)return;const tiles={};
+ try{L.slots.forEach((q,i)=>{const di=S.slots[i]?S.slots[i].d:0,d=S.ds[di]||S.ds[0],I=imgOfD(d);if(!I)return;
+  let tc=tiles[di];if(!tc){const sw=Math.max(8,Math.round(L.w*k*1.5)),sh=Math.max(8,Math.round(L.h*k*1.5));tc=tiles[di]=document.createElement('canvas');tc.width=sw;tc.height=sh;
+   E.draw(tc.getContext('2d'),sw,sh,{d,img:I,src:I.p,ox:0,oy:0,ppm:sw/L.w,wMm:L.w,hMm:L.h,shape:L.shape,bl:0})}
+  g.imageSmoothingQuality='high';g.drawImage(tc,q.x*k,q.y*k,q.w*k,q.h*k)})}finally{Object.values(tiles).forEach(freeCv)}
  if(S.cut){g.strokeStyle='#999';g.lineWidth=1;L.slots.forEach(q=>{g.beginPath();if(L.shape==='c')g.arc((q.x+q.w/2)*k,(q.y+q.h/2)*k,q.w/2*k,0,Math.PI*2);else g.rect(q.x*k,q.y*k,q.w*k,q.h*k);g.stroke()})}
- g.setLineDash([4,3]);g.strokeStyle='#bbb';g.lineWidth=1;g.strokeRect(PG.m*k,PG.m*k,(PG.w-2*PG.m)*k,(PG.h-2*PG.m)*k);g.setLineDash([])}
+ g.setLineDash([4,3]);g.strokeStyle='#bbb';g.lineWidth=1;g.strokeRect(PG.m*k,PG.m*k,(PG.w-2*PG.m)*k,(PG.h-2*PG.m)*k);g.setLineDash([]);
+ const q=hl&&L.n>1&&S.selS>=0?L.slots[S.selS]:null;if(q){g.strokeStyle='#e7b84d';g.lineWidth=4;g.beginPath();if(L.shape==='c')g.arc((q.x+q.w/2)*k,(q.y+q.h/2)*k,q.w/2*k+2,0,Math.PI*2);else g.rect(q.x*k-2,q.y*k-2,q.w*k+4,q.h*k+4);g.stroke()}}
+function pvDraw(){const c=document.getElementById('edbPg');if(!c||!S.img)return;pgPaint(c,true)}
+// לחיצה על התצוגה: על משבצת = בחירתה (שוב = ביטול הבחירה); מחוץ למשבצות (או בפריסה של משבצת אחת) = הגדלה / הקטנה
+function pgTap(e){const L=lay(),r=e.currentTarget.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*PG.w,y=(e.clientY-r.top)/r.height*PG.h;let hit=-1;
+ if(L.n>1)L.slots.forEach((q,i)=>{if(L.shape==='c'?Math.hypot(x-q.x-q.w/2,y-q.y-q.h/2)<=q.w/2:x>=q.x&&x<=q.x+q.w&&y>=q.y&&y<=q.y+q.h)hit=i});
+ if(hit<0){S.pvBig=!S.pvBig}else{S.selS=S.selS===hit?-1:hit;S.mode=S.selS>=0&&S.slots[hit].d!==0?'one':'all';S.sel=-1}
+ if(root.EdbEdit)root.EdbEdit.unmount();rerender()}
 function stepImg(){const I=S.img,P=S.pdf;
  let h=`<div class="edBig"><label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>מצלמה</span><input type="file" accept="image/*" capture="environment" data-c="edbImg" hidden></label>
 <label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg><span>גלריה</span><input type="file" accept="image/*" data-c="edbImg" hidden></label>
 <label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v4h4"/><path d="M9.5 13h5M9.5 17h5"/></svg><span>PDF</span><input type="file" accept="application/pdf,.pdf" data-c="edbPdf" hidden></label></div>`;
  if(S.busy)h+=`<p class="note" style="margin-top:12px">טוען…</p>`;
- if(P&&P.th)h+=`<div class="edH">בחרו עמוד מתוך הקובץ (${P.n} עמודים${P.n>P.th.length?', מוצגים '+P.th.length+' ראשונים':''})</div><div class="edTh">${P.th.map((u,i)=>`<button data-a="edbPg" data-v="${i+1}" class="${P.sel===i+1?'on':''}"><img src="${u}" alt=""><small>עמוד ${i+1}</small></button>`).join('')}</div>`;
+ if(P&&P.th&&S.ptg<0)h+=`<div class="edH">בחרו עמוד מתוך הקובץ (${P.n} עמודים${P.n>P.th.length?', מוצגים '+P.th.length+' ראשונים':''})</div><div class="edTh">${P.th.map((u,i)=>`<button data-a="edbPg" data-v="${i+1}" class="${P.sel===i+1?'on':''}"><img src="${u}" alt=""><small>עמוד ${i+1}</small></button>`).join('')}</div>`;
  if(I)h+=`<div class="card" style="margin-top:12px;display:flex;gap:10px;align-items:center"><canvas id="edbTh" width="96" height="96" style="width:72px;height:72px;border-radius:8px;background:#fff;flex:none"></canvas><div><b>${esc(I.name)}</b><small class="note" style="display:block"><span dir="ltr">${I.w}×${I.h}</span> פיקסלים</small></div></div>`;
  else if(!P)h+=`<p class="note" style="margin-top:12px">בחרו תמונה מהגלריה, צלמו, או טענו קובץ PDF. בצעד הבא בוחרים פריסה (עיגולים, ריבועים, דף שלם) ועורכים.</p>`;
+ h+=`<div class="edR" style="margin-top:12px"><button class="btn g s" data-a="edbProjs">📁 הפרויקטים שלי</button>${S.pid?'<button class="btn g s" data-a="edbNew">פרויקט חדש</button>':''}</div>${S.saveErr?`<div class="edWarn">${esc(S.saveErr)}</div>`:''}`;
  return h+nav(0,1,'הבא – עריכה ופריסה',!I)}
-function step4(){const L=lay(),c=calGet(),X=St(),p=X?X.cfg():{on:false,name:'',port:''},E=root.EdbEdit,q=S.img&&E?E.quality(S.ds[0]):null,nat=isNatv(),sOn=X&&X.stnOn(S.stn);
+const worstQ=E=>{let w=null;new Set(S.slots.map(s=>s.d)).forEach(di=>{const v=S.ds[di]?E.quality(S.ds[di]):null;if(v&&(!w||v.d<w.d))w=v});return w};
+function step4(){const L=lay(),c=calGet(),X=St(),p=X?X.cfg():{on:false,name:'',port:''},E=root.EdbEdit,q=S.img&&E?worstQ(E):null,nat=isNatv(),sOn=X&&X.stnOn(S.stn);
  stnLoad();
  let h=p.on?`<div class="edWarn">המחשב הזה הוא תחנת ההדפסה: ההדפסה נשלחת ישר למדפסת "${esc(p.name)}" דרך עוזר ההדפסה</div>`
   :`${sOn?`<div class="card" style="font-weight:700">יש תחנת הדפסה במחשב – בלחיצה על "הדפסה" אפשר לבחור: שליחה למחשב או ${nat?'הדפסה מהטלפון':'הדפסה מהמכשיר הזה'}</div>`:''}<div class="edWarn">${sOn?'בהדפסה מהמכשיר הזה: ':''}בחלון ההדפסה בחרו גודל 100% (לא 'התאם לדף')</div>`;
@@ -179,9 +235,10 @@ ${nat?'<p class="note">ההגדרה נעשית במחשב שמחוברת אלי�
 // מצב התחנה בעסק (edbs/main) – נטען פעם בדקה כשמסך ההדפסה פתוח
 let stnB=0;const stnLoad=()=>{const X=St();if(!X||stnB)return;stnB=1;const f=S.stnF;S.stnF=0;X.stn(f).then(v=>{stnB=0;const a=JSON.stringify(S.stn||null),b=JSON.stringify(v||null);S.stn=v;if(a!==b&&S.st===3)redraw()},()=>{stnB=0})};
 V.edb=()=>{if(!ok())return{t:T,h:'<div class="empty">אין לך הרשאה להדפסת דף אכיל</div>'};
+ if(!S.img&&!S.busy&&!S.rst){S.rst=1;const id=lsCur();if(id)setTimeout(()=>openProj(id,true),0)}
  if(!S.img&&S.st>1)S.st=1;lay();const E=root.EdbEdit;
  const body=S.st===1?stepImg():S.st===2?stepEdit():step4();
- setTimeout(()=>{try{if(cur().v!=='edb')return;if(S.st===2){if(E&&lay().n)E.mount(S);pvDraw()}if(S.st===1&&S.img)thumb()}catch(e){}},0);
+ setTimeout(()=>{try{if(cur().v!=='edb')return;if(S.st===2){if(E&&lay().n)E.mount(S);pvDraw();const pc=document.getElementById('edbPg');if(pc&&!pc.dataset.on){pc.dataset.on='1';pc.addEventListener('click',pgTap)}}if(S.st===1&&S.img)thumb()}catch(e){}},0);
  return{t:T,h:css+`<div id="edbW">${steps()}${body}</div>`}};
 const thumb=()=>{const c=document.getElementById('edbTh');if(!c||!S.img)return;const g=c.getContext('2d'),s=S.img.p,k=Math.min(96/s.width,96/s.height);g.fillStyle='#fff';g.fillRect(0,0,96,96);g.drawImage(s,(96-s.width*k)/2,(96-s.height*k)/2,s.width*k,s.height*k)};
 window.edbTile=k=>ok()?(k==='add'?`<button class="tile" data-a="addGo" data-v="edb" style="font-size:1rem">${ico('doc')}הדפסת דף אכיל</button>`:`<button class="tile" data-a="go" data-v="edb" style="font-size:1.15rem;text-align:center;border-color:var(--acc);color:var(--acc)">${ico('doc')}הדפסת דף אכיל</button>`):'';
@@ -189,31 +246,116 @@ window.edbTile=k=>ok()?(k==='add'?`<button class="tile" data-a="addGo" data-v="e
 ACT.edbSt=el=>{const v=+el.dataset.v;if(!(v>=1&&v<=3))return;if(v>=2&&!S.img){toast('קודם בוחרים תמונה');return}if(v>=3&&!lay().n)return;if(S.st===2&&root.EdbEdit)root.EdbEdit.unmount();S.st=v;if(v===3)S.stnF=1;rerender()};
 // החלפת פריסה שומרת את התמונה והעריכה: מיקום וזום יחסיים למשבצת (מתאימים לבד); גודל הכיתוב (מ"מ) – לפי היחס בין הגדלים
 function relay(fn){const a=S.L&&S.L.n?Math.min(S.L.w,S.L.h):0;fn();S.L=null;const L=lay(),b=L.n?Math.min(L.w,L.h):0;
- if(a&&b&&a!==b)S.ds.forEach(d=>(d.tx||[]).forEach(x=>{x.sz=Math.round(clamp(x.sz*b/a,3,60)*2)/2}));if(root.EdbEdit)root.EdbEdit.unmount();rerender()}
+ if(a&&b&&a!==b)S.ds.forEach(d=>(d.tx||[]).forEach(x=>{x.sz=Math.round(clamp(x.sz*b/a,3,60)*2)/2}));mark();if(root.EdbEdit)root.EdbEdit.unmount();rerender()}
 ACT.edbLay=el=>relay(()=>{S.k=el.dataset.v});
 CHG.edbCu=el=>{const n=el.name;relay(()=>{S.cu[n]=n==='sh'?el.value:clamp(+el.value||10,10,n==='h'?287:200)})};
 CHG.edbCut=el=>{S.cut=!!el.checked};
-// תמונה: מוקטנת למה שצריך ל-300 DPI (עד 4000 בצד הארוך) + עותק קטן לתצוגה (עד 1024). כתובת ה-blob משוחררת מיד
+// תמונה: מוקטנת למה שצריך ל-300 DPI (עד cap בצד הארוך; לכללית – 4000, לפרטית של משבצת – לפי גודלה) + עותק קטן לתצוגה (עד 1024). כתובת ה-blob משוחררת מיד
 const loadImg=f=>new Promise((res,rej)=>{const u=URL.createObjectURL(f),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);res(im)};im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('התמונה לא נפתחה'))};im.src=u});
-function setImg(src,w,h,name){relImg();const F=fitCap(w,h),c=document.createElement('canvas');c.width=F.w;c.height=F.h;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,F.w,F.h);g.imageSmoothingQuality='high';g.drawImage(src,0,0,F.w,F.h);
+function mkImg(src,w,h,name,cap,blob){const F=fitCap(w,h,cap),c=document.createElement('canvas');c.width=F.w;c.height=F.h;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,F.w,F.h);g.imageSmoothingQuality='high';g.drawImage(src,0,0,F.w,F.h);
  const P=fitCap(F.w,F.h,1024),p=document.createElement('canvas');p.width=P.w;p.height=P.h;const q=p.getContext('2d');q.imageSmoothingQuality='high';q.drawImage(c,0,0,P.w,P.h);
  let lv=null;try{lv=levels(q.getImageData(0,0,P.w,P.h).data)}catch(e){}
- S.img={c,p,w:F.w,h:F.h,name:String(name||'תמונה').slice(0,60),lv};const d=S.ds[0];S.ds[0]=Object.assign(newD(0),{tx:d?d.tx:[]})}
-CHG.edbImg=async el=>{const f=el.files&&el.files[0];el.value='';if(!f)return;S.busy=1;redraw();
- try{const im=await loadImg(f);setImg(im,im.naturalWidth,im.naturalHeight,f.name);im.src='';relPdf();S.busy=0;S.st=2;redraw()}catch(e){S.busy=0;toast(e.message||'התמונה לא נפתחה');redraw()}};
-CHG.edbPdf=async el=>{const f=el.files&&el.files[0];el.value='';if(!f)return;if(typeof pdfLoad!=='function'){toast('PDF לא נתמך כאן');return}
- relPdf();S.busy=1;redraw();
+ return{id:'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),c,p,w:F.w,h:F.h,name:String(name||'תמונה').slice(0,60),lv,cap:cap||CAP,blob:blob||null,stored:false}}
+const addImg=m=>{S.imgs.push(m);return S.imgs.length-1};
+function setImg(src,w,h,name,blob){const m=mkImg(src,w,h,name,CAP,blob);S.gi=addImg(m);S.img=m;const d=S.ds[0];S.ds[0]=Object.assign(newD(0),{tx:d?d.tx:[]});initProj()}
+// עיצוב נפרד למשבצת (עותק של העיצוב המשותף; אותה תמונה עד שבוחרים אחרת)
+const cloneD=d=>JSON.parse(JSON.stringify(d));
+function fork(i){if(!S.slots[i]||S.slots[i].d!==0)return;S.ds.push(cloneD(S.ds[0]));S.slots[i].d=S.ds.length-1}
+function slotImg(src,w,h,name,blob){const i=S.selS;lay();if(i<0||!S.slots[i])return;const k=addImg(mkImg(src,w,h,name,imgCap(lay()),blob));fork(i);
+ const d=S.ds[S.slots[i].d];Object.assign(d,{x:0,y:0,z:1,rot:0,fl:false,im:k});delete d.kc;delete d.kt;S.mode='one';mark()}
+const tgtSlot=el=>!!(el&&el.dataset&&el.dataset.t==='s'&&S.mode==='one'&&S.selS>=0);
+CHG.edbImg=async el=>{const f=el.files&&el.files[0],sl=tgtSlot(el);el.value='';if(!f)return;S.busy=1;redraw();
+ try{const im=await loadImg(f),bl=f.size<=25e6?f:null;if(sl)slotImg(im,im.naturalWidth,im.naturalHeight,f.name,bl);else{setImg(im,im.naturalWidth,im.naturalHeight,f.name,bl);S.st=2}im.src='';if(!sl)relPdf();S.busy=0;redraw()}catch(e){S.busy=0;toast(e.message||'התמונה לא נפתחה');redraw()}};
+CHG.edbPdf=async el=>{const f=el.files&&el.files[0],sl=tgtSlot(el);el.value='';if(!f)return;if(typeof pdfLoad!=='function'){toast('PDF לא נתמך כאן');return}
+ relPdf();S.ptg=sl?S.selS:-1;S.busy=1;redraw();
  try{const lib=await pdfLoad(),doc=await lib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise,n=doc.numPages,th=[];
   for(let i=1;i<=Math.min(n,24);i++){const pg=await doc.getPage(i),v0=pg.getViewport({scale:1}),vp=pg.getViewport({scale:120/v0.width}),c=document.createElement('canvas');c.width=Math.ceil(vp.width);c.height=Math.ceil(vp.height);const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
    await pg.render({canvasContext:g,viewport:vp}).promise;th.push(c.toDataURL('image/jpeg',0.7));freeCv(c);try{pg.cleanup()}catch(e){}}
-  S.pdf={doc,n,th,sel:0,name:String(f.name||'PDF')};S.busy=0;if(n===1)await pickPg(1);else redraw()}
+  S.pdf={doc,n,th,sel:0,name:String(f.name||'PDF')};S.busy=0;
+  if(n===1)await pickPg(1);
+  else if(sl){redraw();dlg(`<h3>בחרו עמוד</h3><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:60vh;overflow:auto">${th.map((u,i)=>`<button data-a="edbPg" data-v="${i+1}" style="border:2px solid var(--line);border-radius:8px;background:#fff;padding:3px;color:#333;min-height:60px"><img src="${u}" alt="" style="width:100%;display:block"><small>עמוד ${i+1}</small></button>`).join('')}</div><button class="btn g w" data-a="edbPgX" style="margin-top:8px">ביטול</button>`)}
+  else redraw()}
  catch(e){S.busy=0;relPdf();toast('קובץ ה-PDF לא נפתח');redraw()}};
-async function pickPg(i){const P=S.pdf;if(!P||!P.doc)return;S.busy=1;P.sel=i;redraw();
- try{const L=lay(),pg=await P.doc.getPage(i),v0=pg.getViewport({scale:1}),vp=pg.getViewport({scale:pdfScale(v0.width,v0.height,PG.w-2*PG.m,PG.h-2*PG.m)}),c=document.createElement('canvas');c.width=Math.ceil(vp.width);c.height=Math.ceil(vp.height);
+async function pickPg(i){const P=S.pdf;if(!P||!P.doc)return;S.busy=1;P.sel=i;redraw();const sl=S.ptg>=0;
+ try{const L=lay(),pg=await P.doc.getPage(i),v0=pg.getViewport({scale:1}),vp=pg.getViewport({scale:sl?pdfScale(v0.width,v0.height,L.w,L.h,imgCap(L)):pdfScale(v0.width,v0.height,PG.w-2*PG.m,PG.h-2*PG.m)}),c=document.createElement('canvas');c.width=Math.ceil(vp.width);c.height=Math.ceil(vp.height);
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);await pg.render({canvasContext:g,viewport:vp}).promise;
-  setImg(c,c.width,c.height,P.name+' – עמוד '+i);freeCv(c);try{pg.cleanup()}catch(e){}S.busy=0;S.st=2;redraw()}
+  if(sl){slotImg(c,c.width,c.height,P.name+' – עמוד '+i,null);S.ptg=-1;relPdf();closeDlg()}else{setImg(c,c.width,c.height,P.name+' – עמוד '+i,null);S.st=2}
+  freeCv(c);try{pg.cleanup()}catch(e){}S.busy=0;redraw()}
  catch(e){S.busy=0;toast('העמוד לא נטען');redraw()}}
 ACT.edbPg=el=>pickPg(+el.dataset.v);
+ACT.edbPgX=()=>{S.ptg=-1;relPdf();closeDlg();redraw()};
+
+/* =================== סבב 2ב: היסטוריה (ביטול / חזרה) =================== */
+// מצב העבודה כפרמטרים בלבד (בלי תמונות). כל שינוי מסמן mark(); 400ms בלי שינוי נוספים = צעד אחד בהיסטוריה (עד 30)
+const snap=()=>{lay();return JSON.stringify({k:S.k,cu:S.cu,ds:S.ds,slots:S.slots,gi:S.gi})};
+let MT=0,AT=0;
+function prune(){if(!S.slots.length)return;const used=new Set([0]);S.slots.forEach(s=>used.add(s.d));if(used.size===S.ds.length)return;const map={},nd=[];S.ds.forEach((d,i)=>{if(used.has(i)){map[i]=nd.length;nd.push(d)}});S.ds=nd;S.slots.forEach(s=>{s.d=map[s.d]})}
+function gc(){const ref=new Set(),add=o=>{ref.add(o.gi);(o.ds||[]).forEach(d=>{if(d&&d.im!=null)ref.add(d.im)})};add({ds:S.ds,gi:S.gi});H.all().forEach(x=>{try{add(JSON.parse(x))}catch(e){}});S.imgs.forEach((m,i)=>{if(m&&!ref.has(i)){freeImg(m);S.imgs[i]=null}})}
+const updUR=()=>{const a=document.getElementById('edbUn'),b=document.getElementById('edbRe');if(a)a.disabled=!H.canUndo();if(b)b.disabled=!H.canRedo()};
+function commit(){if(MT){clearTimeout(MT);MT=0}if(!S.pid||!S.img)return;prune();if(H.commit(snap())){gc();updUR();asv()}}
+function mark(){if(!S.pid)return;clearTimeout(MT);MT=setTimeout(()=>{MT=0;commit()},400)}
+function hstep(dir){commit();const s=dir<0?H.undo():H.redo();if(!s)return;let o;try{o=JSON.parse(s)}catch(e){return}
+ S.k=o.k;S.cu=o.cu;S.ds=o.ds;S.slots=o.slots;S.gi=o.gi;S.img=S.imgs[S.gi]||S.img;S.L=null;S.sel=-1;lay();S.mode=S.selS>=0&&S.slots[S.selS]&&S.slots[S.selS].d!==0?'one':'all';
+ if(root.EdbEdit)root.EdbEdit.unmount();rerender();asv()}
+ACT.edbUndo=()=>{if(!S.busy)hstep(-1)};ACT.edbRedo=()=>{if(!S.busy)hstep(1)};
+ACT.edbBig=()=>{S.pvBig=!S.pvBig;if(root.EdbEdit)root.EdbEdit.unmount();rerender()};
+// בחירת מצב למשבצת הנבחרת: תמונה לכולם (חוזרת לעיצוב המשותף) / תמונה שונה (עיצוב נפרד, אותה תמונה עד שבוחרים אחרת)
+ACT.edbMode=el=>{const i=S.selS;lay();if(i<0||!S.slots[i])return;if(el.dataset.v==='all'){S.slots[i].d=0;S.mode='all'}else{fork(i);S.mode='one'}S.sel=-1;mark();if(root.EdbEdit)root.EdbEdit.unmount();rerender()};
+// "העתק לכולם": העיצוב (והתמונה) של המשבצת הנבחרת הופכים לעיצוב המשותף של כל המשבצות
+ACT.edbCopyAll=()=>{const i=S.selS;lay();if(i<0||!S.slots[i]||S.slots[i].d===0)return;const c=cloneD(S.ds[S.slots[i].d]);if(c.im!=null){S.gi=c.im;S.img=S.imgs[S.gi]||S.img;delete c.im}
+ S.ds=[c];S.slots=S.slots.map(()=>({d:0}));S.mode='all';S.sel=-1;mark();if(root.EdbEdit)root.EdbEdit.unmount();rerender();toast('הועתק לכולם (אפשר לבטל ב-↶)')};
+
+/* =================== סבב 2ב: פרויקטים במכשיר (IndexedDB) ===================
+   מסד lp-edb: proj = רשומה לכל פרויקט (שם, פריסה, משבצות עם פרמטרים, רשימת תמונות, תמונה ממוזערת), img = קובצי התמונות (Blob) לפי מפתח "<פרויקט>|<תמונה>".
+   העבודה הנוכחית נשמרת לבד (1.5 שניות אחרי שינוי, ביציאה מהמסך ובמעבר לרקע) ונפתחת מחדש בכניסה. הכול בתוך try/catch; חריגת מכסה – הודעה בעברית */
+const LSK='lp-edb-cur',lsCur=()=>{try{return localStorage.getItem(LSK)||''}catch(e){return ''}},lsSet=v=>{try{if(v)localStorage.setItem(LSK,v);else localStorage.removeItem(LSK)}catch(e){}};
+let DBP=null;const db=()=>DBP||(DBP=new Promise((res,rej)=>{try{const r=indexedDB.open('lp-edb',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('proj',{keyPath:'id'});d.createObjectStore('img')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('idb'));r.onblocked=()=>rej(new Error('idb'))}catch(e){rej(e)}}).catch(e=>{DBP=null;throw e}));
+const dbTx=(stores,mode,fn)=>db().then(d=>new Promise((res,rej)=>{let out;const t=d.transaction(stores,mode);t.oncomplete=()=>res(out&&out.result!==undefined?out.result:out);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error||new Error('abort'));try{out=fn(t)}catch(e){try{t.abort()}catch(x){}rej(e)}}));
+const dbGet=(st,k)=>dbTx(st,'readonly',t=>t.objectStore(st).get(k)),dbAll=st=>dbTx(st,'readonly',t=>t.objectStore(st).getAll()),keysOf=pid=>dbTx('img','readonly',t=>t.objectStore('img').getAllKeys(IDBKeyRange.bound(pid+'|',pid+'|￿')));
+const quotaErr=e=>!!e&&(e.name==='QuotaExceededError'||/quota/i.test(String(e.message||'')));
+const tb=c=>new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('התמונה לא נשמרה')),'image/jpeg',0.92));
+const autoName=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return `דף אכיל ${p(d.getDate())}.${p(d.getMonth()+1)} ${p(d.getHours())}:${p(d.getMinutes())}`};
+function thumbURL(){let c=null;try{c=document.createElement('canvas');c.width=120;c.height=170;pgPaint(c,false);return c.toDataURL('image/jpeg',0.6)}catch(e){return ''}finally{freeCv(c)}}
+function initProj(){if(!S.pid){S.pid='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);S.pname=autoName();lsSet(S.pid);H=mkHist(30);H.init(snap());asv()}else mark()}
+const asv=()=>{clearTimeout(AT);AT=setTimeout(()=>{save()},1500)};
+let SQ=Promise.resolve();
+// החלק הסינכרוני (הקלטת הפרמטרים, התחלת קידוד התמונות והתמונה הממוזערת) קורה מיד – אפשר לשחרר את הקנבסים מיד אחרי הקריאה
+function save(){if(!S.pid||!S.img)return SQ;const pid=S.pid,ims=S.imgs.slice(),need=ims.filter(m=>m&&!m.stored&&m.c&&m.c.width>0);
+ let bl,rec;try{bl=need.map(m=>m.blob?Promise.resolve(m.blob):tb(m.c));rec=root.EdbCore.projPack({name:S.pname||autoName(),k:S.k,cu:S.cu,cut:S.cut,ds:S.ds,slots:S.slots,gi:S.gi,imgs:ims});rec.id=pid;rec.at=Date.now();rec.th=thumbURL()}catch(e){return SQ}
+ const job=async()=>{try{const bs=await Promise.all(bl);
+   await dbTx(['proj','img'],'readwrite',t=>{need.forEach((m,i)=>t.objectStore('img').put(bs[i],pid+'|'+m.id));t.objectStore('proj').put(rec)});
+   need.forEach(m=>{m.stored=true;m.blob=null});
+   const live=new Set(ims.filter(Boolean).map(m=>pid+'|'+m.id)),old=(await keysOf(pid)).filter(k=>!live.has(k));
+   if(old.length)await dbTx('img','readwrite',t=>old.forEach(k=>t.objectStore('img').delete(k)));
+   S.saveErr=''}
+  catch(e){const m=quotaErr(e)?'אין מספיק מקום פנוי במכשיר לשמירת הפרויקט. מוחקים פרויקטים ישנים (📁 פרויקטים) או מפנים מקום. העבודה הנוכחית עדיין פתוחה, אבל לא נשמרת.':'שמירת הפרויקט במכשיר נכשלה. העבודה הנוכחית עדיין פתוחה.';if(S.saveErr!==m){S.saveErr=m;try{toast(m)}catch(x){}}}};
+ return SQ=SQ.then(job,job)}
+function resetWork(){if(root.EdbEdit)root.EdbEdit.unmount();clearTimeout(MT);MT=0;clearTimeout(AT);freeAll();relPdf();S.pid=null;S.pname='';S.st=1;S.ds=[newD(0)];S.slots=[];S.selS=-1;S.sel=-1;S.mode='all';S.L=null;S.ptg=-1;PEND=null}
+async function openProj(id,silent){if(S.busy)return;S.busy=1;redraw();
+ try{if(S.pid&&S.img&&S.pid!==id){commit();await save()}
+  const rec=await dbGet('proj',id),st=root.EdbCore.projUnpack(rec);if(!st)throw new Error('missing');
+  resetWork();const L=[];
+  for(const m of st.imgs){if(!m){L.push(null);continue}const b=await dbGet('img',id+'|'+m.id);if(!b){L.push(null);continue}
+   const im=await loadImg(b);try{const o=mkImg(im,im.naturalWidth,im.naturalHeight,m.name,m.cap,null);o.id=m.id;o.stored=true;L.push(o)}finally{im.src=''}}
+  st.ds.forEach(d=>{if(d.im!=null&&!L[d.im])delete d.im});if(!L[st.gi])st.gi=L.findIndex(Boolean);if(st.gi<0)throw new Error('noimg');
+  S.imgs=L;S.gi=st.gi;S.img=L[st.gi];S.k=st.k;S.cu=st.cu;S.cut=st.cut;S.ds=st.ds;S.slots=st.slots;S.L=null;S.pid=id;S.pname=st.name||autoName();lsSet(id);
+  lay();H=mkHist(30);H.init(snap());S.st=2;S.saveErr='';if(!silent)closeDlg();toast(silent?'ממשיכים מהעבודה האחרונה (פרויקט חדש: בצעד 1)':'הפרויקט נפתח')}
+ catch(e){resetWork();if(silent)lsSet('');else toast('הפרויקט לא נפתח')}
+ finally{S.busy=0;redraw()}}
+async function projDlg(){try{if(S.pid&&S.img){commit();await save()}const R=(await dbAll('proj')).sort((a,b)=>(b.at||0)-(a.at||0)),dt=t=>{try{return new Date(t).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
+ dlg(`<h3>הפרויקטים שלי</h3><p class="note">הפרויקטים נשמרים במכשיר הזה בלבד (לא בענן). העבודה הנוכחית נשמרת לבד.</p><div style="max-height:55vh;overflow:auto">${R.length?R.map(r=>{let lt='';try{lt=layTxt(layout(r.k,r.cu))}catch(e){}
+  return `<div style="display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:6px;margin-bottom:6px${r.id===S.pid?';border-color:var(--acc)':''}"><button data-a="edbPOpen" data-v="${esc(r.id)}" style="flex:1;min-width:0;display:flex;gap:8px;align-items:center;background:none;border:0;color:inherit;text-align:start;min-height:64px;font:inherit"><img src="${esc(r.th||'')}" alt="" style="width:42px;height:60px;object-fit:contain;background:#fff;border-radius:4px;flex:none"><span style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis">${esc(r.name||'פרויקט')}${r.id===S.pid?' (פתוח)':''}</b><small class="note" style="display:block">${esc(dt(r.at))} · ${esc(lt)}</small></span></button><button class="btn g s" data-a="edbPRen" data-v="${esc(r.id)}" style="flex:none">שם</button><button class="btn r s" data-a="edbPDel" data-v="${esc(r.id)}" style="flex:none">מחיקה</button></div>`}).join(''):'<p class="note">אין עדיין פרויקטים שמורים.</p>'}</div>
+<div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" data-a="edbNew">פרויקט חדש</button><button class="btn g w" data-a="closeDlg">סגירה</button></div>`)}
+ catch(e){toast('אין גישה לפרויקטים השמורים במכשיר הזה')}}
+ACT.edbProjs=()=>{projDlg()};
+ACT.edbPOpen=el=>{openProj(el.dataset.v)};
+ACT.edbNew=async()=>{if(S.busy)return;try{if(S.pid&&S.img){commit();await save()}}catch(e){}resetWork();lsSet('');closeDlg();rerender()};
+ACT.edbPRen=async el=>{try{const r=await dbGet('proj',el.dataset.v);if(!r)return;dlg(`<h3>שינוי שם</h3><form data-f="edbPRen"><input type="hidden" name="id" value="${esc(r.id)}"><label class="f"><span>שם הפרויקט</span><input name="n" maxlength="60" value="${esc(r.name||'')}" required></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" type="submit">שמירה</button><button class="btn g w" type="button" data-a="edbProjs">ביטול</button></div></form>`)}catch(e){toast('לא ניתן לפתוח את הפרויקט')}};
+FRM.edbPRen=async f=>{const id=(f.querySelector('[name=id]')||{}).value,n=String((f.querySelector('[name=n]')||{}).value||'').trim().slice(0,60);if(!id||!n){toast('הקלידו שם');return}
+ try{const r=await dbGet('proj',id);if(!r)return;if(id===S.pid)S.pname=n;r.name=n;await dbTx('proj','readwrite',t=>t.objectStore('proj').put(r));projDlg()}catch(e){toast(quotaErr(e)?'אין מספיק מקום פנוי במכשיר':'שינוי השם נכשל')}};
+ACT.edbPDel=async el=>{try{const r=await dbGet('proj',el.dataset.v);if(!r)return;dlg(`<h3>מחיקת פרויקט</h3><p>למחוק את "${esc(r.name||'פרויקט')}"? אי אפשר לשחזר אותו.</p><div style="display:flex;gap:8px"><button class="btn r w" data-a="edbPDel2" data-v="${esc(r.id)}">מחיקה</button><button class="btn g w" data-a="edbProjs">ביטול</button></div>`)}catch(e){toast('לא ניתן לפתוח את הפרויקט')}};
+ACT.edbPDel2=async el=>{const id=el.dataset.v;try{const ks=await keysOf(id);await dbTx(['proj','img'],'readwrite',t=>{ks.forEach(k=>t.objectStore('img').delete(k));t.objectStore('proj').delete(id)});
+  if(id===S.pid){resetWork();lsSet('');rerender()}projDlg()}catch(e){toast('המחיקה נכשלה')}};
 
 /* =================== הדפסה =================== */
 // איכות לפני מהירות: תמונת המשבצת נכנסת ל-PDF בלי איבוד – RGB גולמי דחוס Flate (CompressionStream, ברצועות של 256 שורות כדי לא להחזיק עוד עותק מלא).
@@ -266,11 +408,11 @@ ACT.edbHow=async el=>{const o=PEND;PEND=null;if(!o)return;closeDlg();o.how=el.da
  try{doneMsg(await send(o))}catch(e){toast('ההדפסה נכשלה: '+(e&&e.message||e))}};
 // הדף: כל עיצוב (ds) מרונדר פעם אחת ב-300 DPI עם גלישה של 1.5 מ"מ; משבצות עם אותו עיצוב חולקות תמונה
 async function build(){const L=lay(),E=root.EdbEdit,bl=PG.bl,used=[...new Set(S.slots.map(s=>s.d))],imgs=[],cvs=[],ix={};
- for(const di of used){const d=S.ds[di];if(!d||!S.img)continue;const W=px(L.w+2*bl),H=px(L.h+2*bl),c=document.createElement('canvas');c.width=W;c.height=H;
-  E.draw(c.getContext('2d'),W,H,{d,img:S.img,src:S.img.c,ox:bl*W/(L.w+2*bl),oy:bl*H/(L.h+2*bl),ppm:W/(L.w+2*bl),wMm:L.w,hMm:L.h,shape:L.shape,bl});
+ for(const di of used){const d=S.ds[di],I=imgOfD(d);if(!d||!I)continue;const W=px(L.w+2*bl),H=px(L.h+2*bl),c=document.createElement('canvas');c.width=W;c.height=H;
+  E.draw(c.getContext('2d'),W,H,{d,img:I,src:I.c,ox:bl*W/(L.w+2*bl),oy:bl*H/(L.h+2*bl),ppm:W/(L.w+2*bl),wMm:L.w,hMm:L.h,shape:L.shape,bl});
   ix[di]=imgs.length;imgs.push(await imgOf(c));cvs.push(c)}
  const pg={imgs,draws:L.slots.map((q,i)=>({i:ix[S.slots[i].d],x:q.x-bl,y:q.y-bl,w:q.w+2*bl,h:q.h+2*bl})).filter(d=>d.i!=null),cuts:S.cut?L.slots.map(q=>({c:L.shape==='c',x:q.x,y:q.y,w:q.w,h:q.h})):[],cal:calGet()};
- return{pg,cvs}}
+ E.freeKey();return{pg,cvs}}
 let pBusy=0;
 ACT.edbPrint=async el=>{if(pBusy||!S.img)return;pBusy=1;if(el)el.disabled=true;toast('מכין להדפסה…');let cvs=[];
  try{const r=await build();cvs=r.cvs;const pdf=mkPdf(r.pg);API.last={pg:r.pg,size:pdf.length};
@@ -299,6 +441,7 @@ ACT.edbHlp=async()=>{const X=St(),o=document.getElementById('edbHlpR');if(!X||!o
  const P=Array.isArray(r.j.printers)?r.j.printers:[];
  e.innerHTML=`<b>העוזר עונה.</b> ${r.j.chosen?'מדפסת: <span dir="ltr">'+esc(r.j.chosen)+'</span>':'<b style="color:#e0483e">לא נמצאה מדפסת שמכילה "'+esc(c.name)+'"</b>'} · הגדרות איכות שמורות: ${r.j.saved?'כן':'לא (להריץ edb-helper-setup.bat)'}${P.length?'<br>מדפסות במחשב: <span dir="ltr">'+P.map(esc).join(' · ')+'</span>':''}`};
 // ביציאה מהמסך – משחררים את התמונה ואת קובץ ה-PDF (זיכרון). בדיקה כל 2 שניות כשיש תמונה
-setInterval(()=>{if(!S.img&&!S.pdf)return;let on=false;try{on=cur().v==='edb'}catch(e){}if(!on){if(root.EdbEdit)root.EdbEdit.unmount();relImg();relPdf();S.st=1;S.ds=[newD(0)];PEND=null}},2000);
-root.EdbPrint={S,pvSoon,pvDraw,send,go,build,pageImg,pageBlob,calGet,setImg,ok,redraw,lay};
+setInterval(()=>{if(!S.img&&!S.pdf)return;let on=false;try{on=cur().v==='edb'}catch(e){}if(!on){commit();save();resetWork();S.rst=0}},2000); // יציאה מהמסך: שמירה אוטומטית (הפרמטרים והתמונות נשמרים במכשיר) ואז שחרור הזיכרון; בכניסה הבאה העבודה נפתחת מחדש
+try{document.addEventListener('visibilitychange',()=>{if(document.hidden&&S.pid&&S.img){commit();save()}})}catch(e){}
+root.EdbPrint={S,pvSoon,pvDraw,send,go,build,pageImg,pageBlob,calGet,setImg,ok,redraw,lay,mark,imgOfD,cd:curD,ci:()=>imgOfD(curD()),commit,save,hstep,openProj};
 })(typeof window!=='undefined'?window:globalThis);

@@ -6083,7 +6083,7 @@ async function dvLinkIn(oc){const e=dvGet('lp-elink');try{localStorage.removeIte
 let DVW=null;
 function dvWipe(){try{localStorage.clear()}catch(e){}try{sessionStorage.clear()}catch(e){}
  const del=n=>new Promise(r=>{try{const q=indexedDB.deleteDatabase(n);q.onsuccess=q.onerror=()=>r()}catch(e){r()}});
- const L=['lp-files','firebaseLocalStorageDb'];if(BZP)L.push('lp-files:'+BZP.slice(0,-1));
+ const L=['lp-files','firebaseLocalStorageDb','lp-edb'];if(BZP)L.push('lp-files:'+BZP.slice(0,-1));
  DVW=Promise.all(L.map(del).concat([(async()=>{try{if(indexedDB.databases)await Promise.all((await indexedDB.databases()).filter(d=>d&&/^lp-files(:|$)/.test(d.name||'')&&!L.includes(d.name)).map(d=>del(d.name)))}catch(e){}})()]))}
 /* מסד שעדיין פתוח נמחק ברגע שהדף נסגר; לא מחכים לו יותר משנייה */
 const dvWiped=()=>Promise.race([DVW||Promise.resolve(),new Promise(r=>setTimeout(r,1000))]);
