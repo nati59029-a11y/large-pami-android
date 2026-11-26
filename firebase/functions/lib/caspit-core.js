@@ -35,7 +35,7 @@ const SALES = ['מספר עסקה', 'פדיון', 'מספר ברקוד']; // ד�
 const SAL = { d: 'תאריך מכירה', n: 'שם פריט', c: 'מספר ברקוד', tx: 'מספר עסקה', bn: 'שם סניף', bno: 'מספר סניף', w: 'משקל', ds: 'הנחה', a: 'פדיון', h: 'שעת מכירה' };
 const SAL_H2 = 'שעה';
 const WHY = { skip: 'קוד מיוחד', code: 'קוד פריט לא תקין', noname: 'בלי שם', junk: 'שם קצר ומחיר 0', price: 'מחיר חסר או שלילי' };
-const WARN = { long: 'שם ארוך – קוצר', badbc: 'ברקוד לא תקין – לא נשמר', dupbc: 'ברקוד של קוד אחר – לא נשמר', p0: 'מחיר 0', same: 'שם זהה לקוד אחר (מחיר/צבע/מידה שונים) – לא אוחד, מסומן "שם כפול – לבדוק"', mcost: 'אוחד, אבל העלות שלו שונה מהקוד הראשי – נשמרה העלות של הראשי', sku: 'קוד פריט אחר באפליקציה – לא נדרס' };
+const WARN = { long: 'שם ארוך – קוצר', badbc: 'ברקוד לא תקין – לא נשמר', dupbc: 'ברקוד של קוד אחר – לא נשמר', p0: 'מחיר 0', same: 'שם זהה לקוד אחר (מחיר/צבע/מידה שונים) – לא אוחד, מסומן "שם כפול – לבדוק"', mcost: 'אוחד, אבל העלות שלו שונה מהקוד הראשי – נשמרה העלות של הראשי', sku: 'קוד פריט אחר באפליקציה – לא נדרס', bcdup: 'הברקוד החדש מכספית כבר שייך למוצר אחר באפליקציה – לא שונה, לבדוק' };
 
 const str = (v) => (v == null ? '' : String(v)).replace(/^﻿/, '').trim();
 const hk = (s) => str(s).replace(/[”“״"]/g, '"').replace(/\s+/g, ' ');
@@ -177,17 +177,19 @@ function clean(items, opt) {
 }
 
 // ---------- החלטת מחיר / עלות ----------
-function decide(f, a, s) {
+// q = פונקציית השוואה (ברירת מחדל eq למספרים; eqS לשדות טקסט – decideF)
+function decide(f, a, s, q) {
   const st = s || {};
+  q = q || eq;
   if (f == null && a == null) return { act: 'same' };
-  if (st.pd != null && eq(f, st.pd)) return eq(a, st.pd) ? { act: 'ack', v: a } : { act: 'out', v: a };
-  if (eq(f, a)) return { act: 'base', v: a };
+  if (st.pd != null && q(f, st.pd)) return q(a, st.pd) ? { act: 'ack', v: a } : { act: 'out', v: a };
+  if (q(f, a)) return { act: 'base', v: a };
   if (st.fb === undefined) { // אין סנכרון קודם
     if (a == null) return { act: 'in', v: f };
     if (f == null) return { act: 'out', v: a };
     return { act: 'first', v: a, f };
   }
-  const fc = !eq(f, st.fb), ac = !eq(a, st.ab) || st.pd != null; // נשלח וטרם נקלט = האפליקציה עדיין "השתנתה"
+  const fc = !q(f, st.fb), ac = !q(a, st.ab) || st.pd != null; // נשלח וטרם נקלט = האפליקציה עדיין "השתנתה"
   if (fc && !ac) return f == null ? { act: 'out', v: a } : { act: 'in', v: f };
   if (fc && ac) return a == null ? { act: 'in', v: f } : { act: 'conf', v: a, f };
   return a == null ? { act: 'in', v: f } : { act: 'out', v: a }; // האפליקציה השתנתה, או שנשלח בעבר וטרם נקלט – יוצא שוב
@@ -199,6 +201,28 @@ function after(d, f, a, take) {
   if (x === 'base' || x === 'ack') return { fb: d.v, ab: d.v };
   if (x === 'in' || (x === 'first' && take === 'cx')) return { fb: f, ab: f };
   return { fb: f == null ? null : f, ab: a, pd: a }; // out / conf / first (האפליקציה) – ממתין לקליטה בכספית
+}
+
+// ---------- שם / ברקוד ראשי / קטגוריה (26.11.2026) ----------
+// cxItem: nm / bc / ct = { fb, ab, pd? } – אותו דפוס כמו pr/co, אבל טקסט (ריק = null). ct = "ראשית›משנית" (שמות).
+// מעבר בטוח: פריט בלי ab לשדה (מלפני השדרוג) → base0: רק נרשם בסיס (fb = כספית, ab = האפליקציה), בלי לשנות אף צד.
+// keep: שונים, ואף צד לא השתנה מאז הבסיס – לא נוגעים (בלי זה decide היה שולח את האפליקציה לכספית).
+const sv = (v) => { const x = hk(v); return x ? x : null; };
+const eqS = (x, y) => sv(x) === sv(y);
+const CT_SEP = '›';
+const ctOf = (c1, c2) => { const a = sv(c1); if (!a) return null; const b = sv(c2); return b ? a + CT_SEP + b : a; };
+const ctSplit = (v) => { const x = sv(v); if (!x) return ['', '']; const i = x.indexOf(CT_SEP); return i < 0 ? [x, ''] : [x.slice(0, i), x.slice(i + 1)]; };
+function decideF(f, a, s) {
+  if (!s || typeof s !== 'object' || s.ab === undefined) return { act: 'base0' };
+  const fc = !eqS(f, s.fb), ac = !eqS(a, s.ab) || s.pd != null;
+  if (!fc && !ac) return eqS(f, a) ? { act: 'base', v: sv(a) } : { act: 'keep' };
+  return decide(sv(f), sv(a), s, eqS);
+}
+// null = לא משנים את הבסיס (keep)
+function afterF(d, f, a, take) {
+  if (d.act === 'keep') return null;
+  if (d.act === 'base0') return { fb: sv(f), ab: sv(a) };
+  return after(d, sv(f), sv(a), take);
 }
 
 // ---------- CSV לכספית ----------
@@ -521,7 +545,7 @@ function unpackDays(p) {
 function chunks(from, to, n) { const out = []; let a = from; while (a <= to) { let b = addDay(a, (n || 92) - 1); if (b > to) b = to; out.push([a, b]); a = addDay(b, 1); } return out; }
 const RST = { ok: 'תואם', gap: 'פער', over: 'פער מעל הסף', noz: 'אין סגירת קופה', nocx: 'אין נתוני כספית', span: 'לא ניתן להשוות – הסגירה נפתחה ביום אחר', part: 'לא ניתן להשוות את הסך היומי', none: '—' };
 
-const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts };
+const api = { qSignOk, addDay, packDays, unpackDays, chunks, SAL, SBAD, QS, UNSURE_WHY, RST, SURE_TOL, dateOf, timeOf, clockOf, tmMask, hourKey, HOUR_NA, HOUR_RE, salesHours, brKey, dayId, txId, txKey, d8, parseSales, salesGroup, qtyOf, stockQ, aggDays, itemList, recon, bcNorm, SKIP, NAME_MAX, BC_RE, CODE_RE, NEW_FROM, PART, HDR_NEW, HDR_PRICE, CAT, WHY, WARN, num, eq, r2, str, nameKey, detect, decode, groupCat, clean, decide, after, cell, csvNew, csvPrice, exVat, nextCode, parts, sv, eqS, ctOf, ctSplit, CT_SEP, decideF, afterF };
 // שרת (Node) – module.exports; דפדפן – window.CaspitCore. אותו קובץ בדיוק: app-source/www/caspit-core.js
 if (typeof module === 'object' && module.exports) module.exports = api; else root.CaspitCore = api;
 })(typeof self !== 'undefined' ? self : this);

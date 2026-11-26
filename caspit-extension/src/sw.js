@@ -52,9 +52,10 @@ chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === 'daily') { setupAlarms(); trigger('daily'); }
   // 0.1.15: בשעה עגולה שני ה-alarms (מכירות היום ושעות העובדים) באים יחד – כל אחד מריץ את שלו ואחריו את השני. הנעילה busy מונעת ריצה כפולה,
   // והמשבצת שנלקחה (todaySt / hrsSt) מונעת חזרה – כך השנייה רצה מיד אחרי הראשונה ולא מחכה ל-tick
-  else if (a.name === 'hour') { chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); todayTick().then(() => hoursTick()).catch(() => {}); }
-  else if (a.name === 'hrs') { chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); hoursTick().then(() => todayTick()).catch(() => {}); }
-  else if (a.name === 'tick') tick().then(() => todayTick()).then(() => hoursTick()).catch(() => {}); // השלמה: שעה / חצי שעה שה-alarm שלה הוחמץ (מחשב ישן או ריצה אחרת) – פעם אחת
+  // 0.1.23: מוצרים כל 30 דקות (prodTick) – אחרי מכירות היום ושעות העובדים באותה חצי שעה
+  else if (a.name === 'hour') { chrome.alarms.create('hour', { when: D.nextHour(Date.now()) + 5e3 }); todayTick().then(() => hoursTick()).then(() => prodTick()).catch(() => {}); }
+  else if (a.name === 'hrs') { chrome.alarms.create('hrs', { when: D.nextHalf(Date.now()) + 10e3 }); hoursTick().then(() => todayTick()).then(() => prodTick()).catch(() => {}); }
+  else if (a.name === 'tick') tick().then(() => todayTick()).then(() => hoursTick()).then(() => prodTick()).catch(() => {}); // השלמה: שעה / חצי שעה שה-alarm שלה הוחמץ (מחשב ישן או ריצה אחרת) – פעם אחת
   else if (a.name === 'start') startAuto().catch(() => {});
   else if (a.name === 'retry') resume().catch(() => {});
   else if (a.name === 'poll') pollOnce().catch(() => {});
@@ -136,8 +137,8 @@ async function pollOnce() {
   const cl = Array.isArray(r.caps) ? r.caps : [];
   // 0.1.15: hours2 = השרת מקבל empty (עובדים שכל השעות שלהם בחודש נמחקו בכספית). שרת בלי hours2 – לא שולחים empty (שדה לא מוכר נדחה)
   // 0.1.19: tf = השרת מקבל ב-poll את העדכון השעתי שנכשל
-  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf') };
-  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf) await set({ caps });
+  const caps = { today: cl.includes('today'), uq: cl.includes('uq'), hours: cl.includes('hours'), hours2: cl.includes('hours2'), tf: cl.includes('tf'), prod30: cl.includes('prod30') }; // 0.1.23: prod30 = מוצרים כל 30 דקות
+  if (caps.today !== !!caps0.today || caps.uq !== !!caps0.uq || caps.hours !== !!caps0.hours || caps.hours2 !== !!caps0.hours2 || caps.tf !== !!caps0.tf || caps.prod30 !== !!caps0.prod30) await set({ caps });
   if (caps.uq && typeof r.uq === 'string' && P.REQ_RE.test(r.uq) && r.uq !== (await get('lastUq'))) { await updReq(r.uq).catch(() => {}); return null; }
   const [run, lastReq] = await Promise.all([get('run'), get('lastReq')]);
   const id = P.wantRemote(r, { busy, run, lastReq, now: Date.now() });
@@ -188,9 +189,9 @@ async function runToday(slot, now, tz) {
     if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
     // 0.1.13 (תיקון בודק): נחל לכיש נכשל – לא מעלים בכלל. השרת מחליף את כל מסמכי היום (cxDayP), והעלאה של יהודה הנשיא בלבד
     // הייתה מוחקת את נחל לכיש מהשעה הקודמת. התמונה הקודמת נשארת; השעה הבאה תנסה שוב
-    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br });
+    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br, back: A.back });
     if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
-    out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {});
+    out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {}, A.back ? { back: A.back } : {});
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
     // 0.1.13: לא הצלחנו להחזיר ליהודה הנשיא – מדווחים לשרת מיד (כמו ריצה שנכשלה), אלא אם סנכרון לילי ממתין (הוא יחזיר בתחילתו וידווח אם ייכשל)
@@ -199,7 +200,7 @@ async function runToday(slot, now, tz) {
       if (P.isTerminal(run)) await (await api()).call('report', { run: U.rid('ct'), kind: 'run', st: 'fail', err: { code, msg: String(e.message || '').slice(0, 300), step: 'today' }, steps: [], info: { today: day } }).catch(() => {});
     }
     // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
-    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {});
+    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {}, e && e.back ? { back: e.back } : {});
     // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
     if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }
@@ -232,7 +233,7 @@ async function runHours(slot, months) {
     await STEP.login(r0);
     const A = await hoursAll(r0.tab, months);
     await hoursSend(A.list, months, U.rid('ch'));
-    out = Object.assign({ slot, st: A.br ? 'fail' : 'ok', at: Date.now() }, hoursInfo(A, months), A.br ? { code: A.br.code, msg: A.br.msg } : {});
+    out = Object.assign({ slot, st: A.br ? 'fail' : 'ok', at: Date.now() }, hoursInfo(A, months), A.br ? { code: A.br.code, msg: A.br.msg } : {}, A.back ? { back: A.back } : {});
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
     if (code === 'branch-restore') {
@@ -243,6 +244,63 @@ async function runHours(slot, months) {
     if (code === 'bad-field' || code === 'bad-kind') await set({ caps: Object.assign((await get('caps')) || {}, { hours: false }) }); // שרת שלא מכיר – עד ה-poll הבא
   } finally { keepAlive(false); busy = false; }
   await set({ hrsSt: out });
+  return out;
+}
+// ---------- מוצרים כל 30 דקות (0.1.23, 26.11.2026) ----------
+// 07:00–23:00 לפי שעון העסק, לא בשבת וחג (days.js quiet), בכל חצי שעה פעם אחת (prodSt.slot), לא כשריצה אחרת פעילה, רק מול שרת עם caps.prod30.
+// cfg (מגבלות) → קטלוג → upload → preview → apply → exportNew → exportPrice → exportUpd. בלי מכירות, שעות, הקפה, hello ו-report מלא;
+// בסוף report { kind:'prod' } קצר (השרת שומר p30 ומשחרר את המנעול). בלי שום בדיקה או החלפה של סניף – בסניף שמוצג.
+async function prodTick(o) {
+  const now = (o && o.now) || Date.now(); // now – לבדיקות בלבד
+  if (busy || !navigator.onLine || !(await get('token'))) return null;
+  if (!((await get('caps')) || {}).prod30) return null;
+  const s = await sched();
+  const slot = D.halfSlot(now, s.tz, HRS_FROM, HRS_TO);
+  if (!slot || ((await get('prodSt')) || {}).slot === slot) return null;
+  const run = await get('run');
+  if (run && run.st === 'run' && Date.now() - (run.touchedAt || 0) < P.STALE_MS) return null;
+  return runProd(slot);
+}
+async function runProd(slot) {
+  if (busy) return null;
+  busy = true;
+  keepAlive(true);
+  const r0 = { id: U.rid('cp'), flags: {}, info: {} };
+  r0.srv = r0.id;
+  const n = {};
+  let out;
+  try {
+    await set({ prodSt: { slot, st: 'run', at: Date.now() } }); // חצי השעה נלקחה – גם אם ה-service worker נסגר באמצע
+    const c = await (await api()).call('cfg', {});
+    const L = (c && c.limits) || {};
+    const lim = (v, cap, d) => Math.min(cap, Number.isFinite(+v) && v != null ? Math.max(0, +v) : d);
+    r0.limits = { price: Math.min(U.LIMITS.price, +L.price > 0 ? +L.price : U.LIMITS.price), newMax: lim(L.newMax, U.LIMITS.newMax, U.LIMITS.newMax), updMax: lim(L.updMax, U.LIMITS.updMax, 1) };
+    await STEP.login(r0);
+    r0.info.catalog = await STEP.catalog(r0);
+    n.cat = +r0.info.catalog.codes || 0;
+    await STEP.catPreview(r0);
+    r0.info.catApply = await STEP.catApply(r0);
+    if (r0.flags.noCat) out = { slot, st: 'skip', code: 'first-manual' }; // הסנכרון הראשון של הקטלוג – רק באפליקציה
+    else {
+      if ((await sel()).importEnabled === true) {
+        const a = await STEP.exportNew(r0), b = await STEP.exportPrice(r0), u = await STEP.exportUpd(r0);
+        n.nw = +a.n || 0; n.pr = +b.n || 0; n.up = +u.n || 0;
+      }
+      const soft = r0.flags.nw || r0.flags.up;
+      out = Object.assign({ slot, st: soft ? 'fail' : 'ok', n }, soft ? { code: soft.code, msg: String(soft.msg || '').slice(0, 200) } : {});
+    }
+  } catch (e) {
+    const code = e && typeof e.code === 'string' ? e.code : 'tab';
+    out = { slot, st: 'fail', n, code, msg: String((e && e.message) || '').slice(0, 200) };
+    if (code === 'bad-kind' || code === 'bad-field') await set({ caps: Object.assign((await get('caps')) || {}, { prod30: false }) }); // שרת שלא מכיר – עד ה-poll הבא
+  } finally { keepAlive(false); busy = false; }
+  out.at = Date.now();
+  await set({ prodSt: out });
+  if (out.st === 'ok') { const st = (await get('st')) || {}; st.prodAt = out.at; await set({ st }); }
+  if (out.code !== 'auth') {
+    const c = /^[a-z0-9-]{1,30}$/.test(out.code || '') ? out.code : out.code ? 'fail' : undefined;
+    await (await api()).call('report', Object.assign({ run: r0.srv, kind: 'prod', st: out.st, n }, c ? { c } : {})).catch(() => {});
+  }
   return out;
 }
 // בדיקה: צריך להריץ? אם כן – מתחילים בעוד 2 דקות (alarm 'start')
@@ -582,6 +640,7 @@ async function brCfg() {
   return Object.assign({ names: b.names, home: b.home, also: Array.isArray(b.also) ? b.also : [] }, b.switch);
 }
 const brCurIn = (cfg, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return X.branchCur(document, cfg); };
+const brDiagIn = (cfg, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return null; return X.branchDiag(document, cfg, window); };
 const brPickIn = (cfg, name, guard) => { const X = self.CxSel; if (!X.onPath(window, guard)) return { wrong: true }; return X.branchPick(document, cfg, name, { win: window, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }); };
 // מצב הלשונית בזמן החלפה (כספית עשויה לטעון את הדף מחדש): bo / loading (טעינה בתוך /bo) / off (מחוץ למשרד האחורי → wrong-page)
 async function boState(tab) {
@@ -612,19 +671,27 @@ async function brSame(tab, tok) { try { return !!(await inIso(tab, brMarkIn, [to
 // 0.1.22 (תקלה 25.11: הדוח של נחל לכיש יצא של יהודה הנשיא): כספית מציגה את השם החדש בפקד מיד, אבל הבחירה נשמרת רק כשכספית
 // טוענת את הדף מחדש בעצמה. לכן: מחכים לטעינה מחדש של כספית (עד reloadMs); אם לא הגיעה – טוענים מחדש בעצמנו.
 // רק אחרי טעינה מחדש בודקים שהשם נשאר. לא נשאר → בוחרים שוב (עד 2 ניסיונות), ואחר כך code.
+// 0.1.23: בכישלון – brd (אבחון מסונן, selectors.js branchDiag): לפני הבחירה, אחרי הבחירה, אחרי הטעינה מחדש; האירועים שנשלחו; האם השם הופיע; מי טען מחדש
 async function brSet(tab, name, code) {
   const cfg = await brCfg();
   if (!cfg) throw P.err(code, 'אין הגדרה לפקד הסניף');
   let r = await brRead(tab, cfg, 15e3);
   if (!r || !r.found) throw P.err(code, `לא נמצא פקד הסניף במסך (רצינו "${name}")`);
   if (r.cur === name) return { same: true };
+  const dg = () => inIso(tab, brDiagIn, [cfg, GUARD]).catch(() => null);
+  const brd = { want: name, tries: [] };
   for (let k = 0; k < 2; k++) {
     if ((await boState(tab)) === 'off') throw wrongPage();
+    const tr = { pre: await dg() };
+    brd.tries.push(tr);
     const tok = U.rid('b');
     await inIso(tab, brMarkIn, [tok, true]).catch(() => null);
     const p = await inIso(tab, brPickIn, [cfg, name, GUARD]).catch(() => null);
     if (p && p.wrong) throw wrongPage();
     if (p && p.why === 'no-opt') throw P.err(code, `האפשרות "${name}" לא נמצאה בפקד הסניף`);
+    tr.ev = (p && p.ev) || (p ? [] : ['err']);
+    await sleep(1500);
+    tr.post = await dg();
     // 1) השם מופיע בפקד
     const end = Date.now() + (+cfg.ms || 30e3);
     let shown = false;
@@ -633,6 +700,7 @@ async function brSet(tab, name, code) {
       r = await brRead(tab, cfg, 0);
       if (r && r.cur === name) { shown = true; break; }
     }
+    tr.shown = shown;
     if (!shown) continue;
     // 2) כספית טוענת את הדף מחדש (הסימון נעלם)
     const rEnd = Date.now() + (+cfg.reloadMs || 20e3);
@@ -643,14 +711,36 @@ async function brSet(tab, name, code) {
       if (st === 'bo' && (await brSame(tab, tok)) === false) { reloaded = true; break; }
       await sleep(700);
     }
+    tr.rel = reloaded ? 'cx' : 'own';
     if (!reloaded) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); }
     if ((await boState(tab)) === 'off') throw wrongPage();
     // 3) אחרי הטעינה מחדש – השם עדיין נבחר
     await sleep(+cfg.settle || 2000);
     r = await brRead(tab, cfg, 15e3);
+    tr.after = await dg();
     if (r && r.cur === name && (await boState(tab)) === 'bo') return { ok: true, reloaded };
   }
-  throw P.err(code, `הבחירה בסניף "${name}" לא נקלטה בכספית (מוצג: ${(r && r.cur) || 'לא ידוע'})`);
+  throw P.err(code, `הבחירה בסניף "${name}" לא נקלטה בכספית (מוצג: ${(r && r.cur) || 'לא ידוע'})`, { brd: brdCap(brd) });
+}
+const brdCap = (x) => (JSON.stringify(x).length <= 3000 ? x : { want: x.want, n: x.tries.length, big: true, last: x.tries[x.tries.length - 1] && { ev: x.tries[x.tries.length - 1].ev, rel: x.tries[x.tries.length - 1].rel } });
+// 0.1.23 (בעל העסק, 26.11): אין "סניף בית" קבוע – לפעמים עובדים בכוונה בנחל לכיש. הסניף שמוצג עכשיו (שם מתוך names), או '' (לא זוהה / אין הגדרה)
+async function brNow(tab) {
+  const B = await brCfg();
+  if (!B) return '';
+  const r = await brRead(tab, B, 15e3);
+  return r && r.found && B.names.includes(r.cur) ? r.cur : '';
+}
+// fn בסניף name, ואחר כך חזרה לסניף back (שהיה מוצג בתחילת הריצה). לא זורק על כישלון בחזרה: { res, err, back:{ code:'branch-back', br, msg, brd? } }
+async function inBranchBack(tab, name, back, fn) {
+  let res, err = null, bk = null;
+  try { await brSet(tab, name, 'branch-switch'); res = await fn(); } catch (e) { err = e; }
+  if (!(err && err.code === 'wrong-page')) {
+    try { await brSet(tab, back, 'branch-back'); } catch (e) {
+      if (e.code === 'wrong-page') throw e;
+      bk = Object.assign({ code: 'branch-back', br: back, msg: String((e && e.message) || P.msgOf('branch-back')).slice(0, 200) }, e && e.brd ? { brd: e.brd } : {});
+    }
+  }
+  return { res, err, back: bk };
 }
 // לוודא שכספית בסניף הבית (תחילת ריצה / שלב). בלי הגדרת סניפים – כלום
 async function brHome(tab) {
@@ -674,19 +764,22 @@ async function inBranch(tab, name, fn) {
   return res;
 }
 // אימות הסניף הנוסף: בכל השורות "שם סניף" ו"מספר סניף" קיימים ושונים מאלה של הבית (ref). דוח ריק – תקין
-function brCheck(ref, lines, name) {
+function brCheck(ref, lines, name, hn0) {
+  const hn = hn0 || 'יהודה הנשיא';
   if (!lines.length) return null;
   const vals = (L) => ({ bn: [...new Set(L.map((l) => l.bn || '').slice(0, 2000))].slice(0, 3), bk: [...new Set(L.map((l) => (l.bkn ? '' : l.bk || '')))].slice(0, 3) });
   const v = vals(lines), vs = (x) => `שם: ${x.bn.map((t) => t || 'ריק').join('/') || '—'}, מספר: ${x.bk.map((t) => t || 'ריק').join('/') || '—'}`;
-  if (!ref.bn.length && !ref.bk.length) return P.err('branch-same', `${name}: אין נתוני סניף של יהודה הנשיא להשוואה (${vs(v)}) – לא נשלח`, { vals: { [name]: v } });
+  if (!ref.bn.length && !ref.bk.length) return P.err('branch-same', `${name}: אין נתוני סניף של ${hn} להשוואה (${vs(v)}) – לא נשלח`, { vals: { [name]: v } });
   const bad = lines.some((l) => !l.bn || l.bkn || !/^\d+$/.test(String(l.bk || '')) || ref.bn.includes(l.bn) || ref.bk.includes(l.bk));
-  return bad ? P.err('branch-same', `${name}: "שם סניף" / "מספר סניף" לא שונים מיהודה הנשיא או ריקים (${name} – ${vs(v)}; יהודה הנשיא – ${vs(ref)}) – לא נשלח`, { vals: { [name]: v, home: ref } }) : null;
+  return bad ? P.err('branch-same', `${name}: "שם סניף" / "מספר סניף" לא שונים מ${hn} או ריקים (${name} – ${vs(v)}; ${hn} – ${vs(ref)}) – לא נשלח`, { vals: { [name]: v, home: ref } }) : null;
 }
 // הסניף של הבית לפי הדוח (שם + מספר), עם מה שנשמר מריצות קודמות (יום בלי מכירות ביהודה הנשיא)
-async function brRef(lines) {
-  const old = (await get('brRef')) || { bn: [], bk: [] };
+// 0.1.23: לכל סניף בנפרד (brRefs[שם]) – הסניף שמתחילים ממנו משתנה. brRef הישן (של יהודה הנשיא) – חלופה רק ל-home
+async function brRef(lines, name) {
+  const all0 = (await get('brRefs')) || {}, B = await brCfg();
+  const old = all0[name] || (B && name === B.home ? await get('brRef') : null) || { bn: [], bk: [] };
   const bn = [...new Set(lines.map((l) => l.bn).filter(Boolean))], bk = [...new Set(lines.filter((l) => !l.bkn).map((l) => l.bk).filter(Boolean))];
-  if (bn.length || bk.length) { await set({ brRef: { bn: bn.slice(0, 5), bk: bk.slice(0, 5) } }); return { bn, bk }; }
+  if (bn.length || bk.length) { all0[name] = { bn: bn.slice(0, 5), bk: bk.slice(0, 5) }; await set({ brRefs: all0 }); return { bn, bk }; }
   return { bn: (old.bn || []).slice(0, 5), bk: (old.bk || []).slice(0, 5) };
 }
 const salesOf = (f) => { const rows = rowsOf(f), det = C.detect(rows); if (det.kind !== 'sales') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "דוח מכירות לפריטים"'); return C.parseSales(rows, det); };
@@ -694,29 +787,36 @@ const salesOf = (f) => { const rows = rowsOf(f), det = C.detect(rows); if (det.k
 // כישלון בסניף נוסף (מעבר, דוח, branch-same) – הבית נשלח בכל זאת, והשגיאה ב-br (מדווחת בסוף הריצה). retry: שגיאה זמנית בסניף הנוסף
 // נזרקת (ניסיון חוזר של כל היום) כל עוד נשאר ניסיון. wrong-page / needs-login / branch-restore – תמיד נזרקות.
 // → { list: [{ br, f, p }], br: null | { code, msg, vals? } }
+// 0.1.23 (בעל העסק, 26.11): אין סניף בית קבוע. קודם הסניף שמוצג עכשיו (start), ואחר כך כל סניף אחר מ-names, וחזרה ל-start.
+// השיוך לסניף (bk) – לפי "מספר סניף" שבדוח עצמו. הסניף המוצג לא זוהה → רק הדוח שלו, בלי מעבר (br: branch-unknown).
+// החזרה ל-start נכשלה → back (לא עוצר; לא ממשיכים לעבור סניפים), והריצה הבאה מתחילה מהסניף שמוצג אז.
+// → { list: [{ br, f, p }], br: null | { code, msg, vals?, brd? }, back: null | { code:'branch-back', br, msg, brd? }, start }
 async function salesAll(tab, vars, ms, o) {
   const B = await brCfg();
-  if (B) await brHome(tab);
+  const start = B ? await brNow(tab) : '';
   const f0 = await capture(tab, 'sales', vars, ms);
   const p0 = salesOf(f0);
-  const out = { list: [{ br: B ? B.home : '', f: f0, p: p0 }], br: null };
-  if (!B || !B.also.length) return out;
-  const ref = await brRef(p0.lines);
-  for (const name of B.also) {
-    try {
-      const x = await inBranch(tab, name, async () => { const f = await capture(tab, 'sales', vars, ms); return { f, p: salesOf(f) }; });
-      const bad = brCheck(ref, x.p.lines, name);
-      if (bad) throw bad;
-      out.list.push({ br: name, f: x.f, p: x.p });
-    } catch (e) {
+  const out = { list: [{ br: start, f: f0, p: p0 }], br: null, back: null, start };
+  if (!B) return out;
+  if (!start) { out.br = { code: 'branch-unknown', msg: P.msgOf('branch-unknown') }; return out; }
+  const others = B.names.filter((n) => n !== start);
+  if (!others.length) return out;
+  const ref = await brRef(p0.lines, start);
+  for (const name of others) {
+    const x = await inBranchBack(tab, name, start, async () => { const f = await capture(tab, 'sales', vars, ms); return { f, p: salesOf(f) }; });
+    if (x.back) out.back = x.back;
+    let e = x.err;
+    if (!e) { const bad = brCheck(ref, x.res.p.lines, name, start); if (bad) e = bad; else out.list.push({ br: name, f: x.res.f, p: x.res.p }); }
+    if (e) {
       const code = e && typeof e.code === 'string' ? e.code : 'tab';
-      if (['wrong-page', 'needs-login', 'branch-restore'].includes(code)) throw e;
-      if (o && o.retry && P.RETRY.has(code)) throw e;
+      if (['wrong-page', 'needs-login'].includes(code)) throw e;
+      if (o && o.retry && P.RETRY.has(code) && !x.back) throw e;
       if (!out.br) {
         const c = code === 'branch-same' || code === 'branch-switch' ? code : 'branch-sales';
-        out.br = Object.assign({ code: c, msg: (c === 'branch-sales' ? name + ': ' : '') + String((e && e.message) || P.msgOf(c)).slice(0, 260) }, e.vals ? { vals: e.vals } : {});
+        out.br = Object.assign({ code: c, msg: (c === 'branch-sales' ? name + ': ' : '') + String((e && e.message) || P.msgOf(c)).slice(0, 260) }, e.vals ? { vals: e.vals } : {}, e.brd ? { brd: e.brd } : {});
       }
     }
+    if (x.back) break;
   }
   return out;
 }
@@ -934,17 +1034,23 @@ async function hoursBr(tab, months) {
 }
 // כל הסניפים: הבית, ואחר כך כל סניף נוסף (inBranch – חזרה לבית תמיד). כישלון בסניף נוסף – הבית נשלח בכל זאת, השגיאה ב-br.
 // wrong-page / needs-login / branch-restore – תמיד נזרקות. → { list:[{ br, r }], br: null | { code, msg, fmt? } }
+// 0.1.23: כמו המכירות – קודם הסניף שמוצג (start), אחר כך האחרים, וחזרה ל-start (כישלון בחזרה → back, לא עוצר).
+// הסניף המוצג לא זוהה → לא שולחים שעות בכלל (אחרת השעות היו נרשמות לסניף הלא נכון): br hours-branch.
 async function hoursAll(tab, months) {
   const B = await brCfg();
-  if (B) await brHome(tab);
-  const out = { list: [{ br: B ? B.home : 'main', r: await hoursBr(tab, months) }], br: null };
-  if (!B || !B.also.length) return out;
-  for (const name of B.also) {
-    try { out.list.push({ br: name, r: await inBranch(tab, name, () => hoursBr(tab, months)) }); } catch (e) {
-      const code = e && typeof e.code === 'string' ? e.code : 'tab';
-      if (['wrong-page', 'needs-login', 'branch-restore'].includes(code)) throw e;
+  if (!B) return { list: [{ br: 'main', r: await hoursBr(tab, months) }], br: null, back: null };
+  const start = await brNow(tab);
+  if (!start) return { list: [], br: { code: 'hours-branch', msg: 'לא זיהינו איזה סניף מוצג בכספית – השעות לא נשלחו' }, back: null };
+  const out = { list: [{ br: start, r: await hoursBr(tab, months) }], br: null, back: null };
+  for (const name of B.names.filter((n) => n !== start)) {
+    const x = await inBranchBack(tab, name, start, () => hoursBr(tab, months));
+    if (x.back) out.back = x.back;
+    if (x.err) {
+      const e = x.err, code = e && typeof e.code === 'string' ? e.code : 'tab';
+      if (['wrong-page', 'needs-login'].includes(code)) throw e;
       if (!out.br) out.br = Object.assign({ code: code === 'hours-format' ? code : 'hours-branch', msg: (name + ': ' + String((e && e.message) || P.msgOf(code))).slice(0, 260) }, e.fmt ? { fmt: e.fmt } : {});
-    }
+    } else out.list.push({ br: name, r: x.res });
+    if (x.back) break;
   }
   return out;
 }
@@ -997,7 +1103,7 @@ async function hkStep(run) {
   const tab = await ownTab(false);
   let stage = 'get';
   try {
-    await brHome(tab);
+    // 0.1.23: בסניף שמוצג (הרשימה זהה בשני הסניפים), בלי החלפה
     const f = await capture(tab, 'hkSnap', {}, 120e3);
     stage = 'parse';
     let R;
@@ -1048,7 +1154,8 @@ const STEP = {
     const s = await sched(), today = D.dayStr(Date.now(), s.tz);
     run.days = D.safeDays(Array.isArray(r.days) ? r.days : D.daysToFetch(r.lastSales, today), today);
     const L = r.limits || {};
-    run.limits = { price: Math.min(U.LIMITS.price, +L.price > 0 ? +L.price : U.LIMITS.price), newMax: Math.min(U.LIMITS.newMax, Number.isFinite(+L.newMax) && L.newMax != null ? Math.max(0, +L.newMax) : U.LIMITS.newMax) };
+    run.limits = { price: Math.min(U.LIMITS.price, +L.price > 0 ? +L.price : U.LIMITS.price), newMax: Math.min(U.LIMITS.newMax, Number.isFinite(+L.newMax) && L.newMax != null ? Math.max(0, +L.newMax) : U.LIMITS.newMax),
+      updMax: Math.min(U.LIMITS.updMax, Number.isFinite(+L.updMax) && L.updMax != null ? Math.max(0, +L.updMax) : 1) }; // 0.1.23: עדכוני פריטים (שרת ישן – 1; בלאו הכי exportUpd רק עם caps.prod30)
     run.srv = typeof r.runId === 'string' && /^[A-Za-z0-9_-]{6,40}$/.test(r.runId) ? r.runId : run.id;
     await set({ biz: { name: String((r.biz && r.biz.name) || '').slice(0, 60) } });
     return { days: run.days.length };
@@ -1063,13 +1170,12 @@ const STEP = {
     // דף התחברות או לשונית בלי הגשר → טוענים מחדש פעם אחת (אולי בעל העסק כבר התחבר בלשונית אחרת).
     // מחכים שהמסך יצויר (loginState) – בדיקה מיידית במחשב איטי ראתה דף ריק והמשיכה כאילו מחוברים
     if (!ok || (await loginState(tab)).login) { await chrome.tabs.reload(tab); await waitLoaded(tab); await ensurePage(tab); if ((await loginState(tab)).login) throw P.err('needs-login'); await guardBo(tab); }
-    await brHome(tab); // 0.1.13: אם כספית נשארה בסניף אחר (למשל ריצה שנקטעה) – מחזירים ליהודה הנשיא לפני כל דבר אחר
+    // 0.1.23: אין החלפת סניף בתחילת ריצה (אין סניף בית קבוע) – שלבי המוצרים רצים בסניף שמוצג; המכירות מתחילות ממנו
     run.tab = tab;
     return {};
   },
   async catalog(run) {
-    const tab = await ownTab(false);
-    await brHome(tab); // קטלוג – רק בסניף הבית
+    const tab = await ownTab(false); // 0.1.23: בסניף שמוצג, בלי החלפה (הקטלוג משותף לסניפים – לא מאומת)
     const f = await capture(tab, 'catalog', {}, 600e3); // כספית מפיקה את הקובץ כ"משימה" (job) – בקטלוג גדול זה לוקח זמן
     const rows = rowsOf(f), det = C.detect(rows);
     if (det.kind !== 'cat') throw P.err('endpoint-changed', 'הקובץ שהתקבל אינו "קטלוג פריטים"');
@@ -1097,6 +1203,7 @@ const STEP = {
     // 0.1.13: יהודה הנשיא ואחר כך נחל לכיש (אותו יום), חזרה ליהודה הנשיא; העלאה אחת משולבת לשני הסניפים (השרת מפריד לפי מספר סניף)
     const A = await salesAll(tab, { day, dmy: `${d}/${m}/${y}` }, 300e3, { retry: (run.attempt || 0) < P.BACKOFF.length });
     if (A.br) { run.flags.br = run.flags.br || Object.assign({ day }, A.br); }
+    if (A.back) run.flags.back = Object.assign({ day }, A.back); // 0.1.23: החזרה לסניף שהיה מוצג נכשלה – לא עוצר
     const lines = [], hs = [];
     let bad = 0, other = 0;
     for (const x of A.list) {
@@ -1131,12 +1238,13 @@ const STEP = {
       const A = await hoursAll(tab, months);
       await hoursSend(A.list, months, U.rid('ch'), run.srv);
       const info = hoursInfo(A, months);
+      if (A.back) run.flags.back = run.flags.back || A.back;
       if (A.br) run.flags.hrs = A.br;
       else if (info.pm && info.pm.bad && !info.pm.ok) run.flags.hrs = { code: 'hours-month', msg: P.msgOf('hours-month') };
       return info;
     } catch (e) {
       const code = e && typeof e.code === 'string' ? e.code : 'tab';
-      if (['wrong-page', 'needs-login', 'branch-restore'].includes(code)) throw e;
+      if (['wrong-page', 'needs-login'].includes(code)) throw e;
       run.flags.hrs = Object.assign({ code: /^hours-/.test(code) ? code : 'hours-fail', msg: String((e && e.message) || P.msgOf(code)).slice(0, 260) }, e && e.fmt ? { fmt: e.fmt } : {});
       return { err: run.flags.hrs.code };
     }
@@ -1153,11 +1261,23 @@ const STEP = {
     }
   },
   exportPrice: (run) => exportImport(run, 'price'),
+  // 0.1.23: עדכוני שם / ברקוד / קטגוריה לכספית (תבנית "פריטים חדשים" עם הקוד הקיים) – רק מול שרת עם caps.prod30. תקלה לא עוצרת: flags.up
+  async exportUpd(run) {
+    if (!((await get('caps')) || {}).prod30) return { skip: 'caps' };
+    try { return await exportImport(run, 'upd'); } catch (e) {
+      const code = e && typeof e.code === 'string' ? e.code : 'tab';
+      if (!NW_SOFT.has(code)) throw e;
+      run.flags.up = Object.assign({ code, msg: String((e && e.message) || P.msgOf(code)).slice(0, 290) }, e && e.scr ? { scr: e.scr } : {});
+      return { err: code };
+    }
+  },
   async report(run) {
     // 0.1.13: הסניף הנוסף נכשל (מעבר / דוח / branch-same) – הכול נשלח כרגיל, והריצה מסתיימת "נכשלה" עם הקוד (דיווח ב-finalize, בלי ניסיון חוזר)
     if (run.flags && run.flags.br) throw P.err(run.flags.br.code, run.flags.br.msg);
     if (run.flags && run.flags.hrs) throw P.err(run.flags.hrs.code, run.flags.hrs.msg); // 0.1.14: שעות העובדים נכשלו – כל השאר נשלח
     if (run.flags && run.flags.nw) throw P.err(run.flags.nw.code, run.flags.nw.msg, run.flags.nw.scr ? { scr: run.flags.nw.scr } : undefined); // 0.1.22: הפריטים החדשים נכשלו – המחירים נשלחו
+    if (run.flags && run.flags.up) throw P.err(run.flags.up.code, run.flags.up.msg, run.flags.up.scr ? { scr: run.flags.up.scr } : undefined); // 0.1.23: עדכוני הפריטים נכשלו
+    // 0.1.23: flags.back (החזרה לסניף שהיה מוצג נכשלה) – לא מכשיל; נשלח ב-info.flags והשרת מציג אזהרה
     await (await api()).call('report', { run: run.srv, kind: 'run', st: 'ok', steps: run.log, info: summary(run) });
     return {};
   },
@@ -1180,34 +1300,34 @@ async function applyLoop(sub, log) {
 const NW_SOFT = new Set(['limit', 'import-errors', 'import-timeout']); // 0.1.22: תקלות בפריטים חדשים שלא עוצרות את עדכון המחירים
 async function exportImport(run, kind) {
   const L = run.limits || U.LIMITS;
-  const max = kind === 'new' ? Math.min(L.newMax, U.LIMITS.newMax) : Math.min(L.price, U.LIMITS.price);
+  const max = kind === 'new' ? Math.min(L.newMax, U.LIMITS.newMax) : kind === 'upd' ? Math.min(L.updMax == null ? 1 : L.updMax, U.LIMITS.updMax) : Math.min(L.price, U.LIMITS.price);
+  const what = kind === 'new' ? 'טעינת פריטים חדשים' : kind === 'upd' ? 'עדכון פריטים' : 'עדכון מחירים', flow = kind === 'price' ? 'importPrice' : 'importNew'; // upd – אותה תבנית ("פריטים חדשים")
   const cl = await api();
   const r = await cl.call('export', { kind, max, log: run.srv });
   const n = +r.n || 0;
   if (!n) return { n: 0 };
-  if (n > max || (Array.isArray(r.rows) && r.rows.length > max)) throw P.err('limit', `${n} שורות ${kind === 'new' ? 'פריטים חדשים' : 'מחירים'} – מעל המגבלה (${max}). לא נשלח לכספית.`);
+  if (n > max || (Array.isArray(r.rows) && r.rows.length > max)) throw P.err('limit', `${n} שורות ${kind === 'new' ? 'פריטים חדשים' : kind === 'upd' ? 'עדכוני פריטים' : 'מחירים'} – מעל המגבלה (${max}). לא נשלח לכספית.`);
   if (typeof r.csv !== 'string' || !r.csv || r.csv.length > 5e6) throw P.err('fail', 'קובץ לא תקין מהשרת');
   const bytes = new TextEncoder().encode(r.csv), hash = await U.sha256(bytes);
   const today = D.dayStr(Date.now(), (await sched()).tz);
   const done = (await get('impHash')) || {};
   if (done[hash] === today) return { n, skip: 'same' };
-  const tab = await ownTab(false);
-  await brHome(tab); // העלאה לכספית – רק בסניף הבית
+  const tab = await ownTab(false); // 0.1.23: בסניף שמוצג, בלי החלפה
   // שם ייחודי לריצה – כך מוצאים את השורה שלנו בטבלת "טעינות קודמות" (וניסיון חוזר של אותה ריצה לא מעלה פעמיים)
   const name = 'lp-' + kind + '-' + String(run.srv || run.id).replace(/[^\w-]/g, '').slice(0, 40) + '.csv';
-  const res = await runFlow(tab, kind === 'new' ? 'importNew' : 'importPrice', { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
+  const res = await runFlow(tab, flow, { fname: name }, { csv: { name, mime: 'text/csv', b64: U.toB64(bytes) } }, false);
   // 0.1.16: עם פירוט התור (מסונן) – ההחלטה לא משתנה
   // 0.1.17: ועם "פירוט מסך הייבוא" (info.scr) – רק אבחון
   if (res && res.code === 'import-queue-not-empty') {
-    const scr = await scrOf(tab, kind === 'new' ? 'importNew' : 'importPrice', res);
+    const scr = await scrOf(tab, flow, res);
     throw P.err('import-queue-not-empty', res.qd ? (P.msgOf('import-queue-not-empty') + ' · ' + S.scrub(res.qd)).slice(0, 290) : undefined, scr ? { scr } : undefined);
   }
   if (!res || (!res.ok && !res.already)) {
     if (await isLoginTab(tab).catch(() => false)) throw P.err('needs-login');
-    const scr = await scrOf(tab, kind === 'new' ? 'importNew' : 'importPrice', res); // 0.1.12: רק אבחון – ההחלטה (selector-miss) לא משתנה
+    const scr = await scrOf(tab, flow, res); // 0.1.12: רק אבחון – ההחלטה (selector-miss) לא משתנה
     const x = scr ? { scr } : undefined;
-    if (res && res.diag) throw P.err('selector-miss', ((kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים') + ': ' + res.diag).slice(0, 290), x);
-    throw Object.assign(missErr(kind === 'new' ? 'טעינת פריטים חדשים' : 'עדכון מחירים', res || {}), x || {});
+    if (res && res.diag) throw P.err('selector-miss', (what + ': ' + res.diag).slice(0, 290), x);
+    throw Object.assign(missErr(what, res || {}), x || {});
   }
   // אחרי "העלה קבצים והרץ טעינה": שורה חדשה (מזהה גדול מהקודם) עם השם שלנו, עד סטטוס סופי. קריאה בלבד, כל 3 שניות
   const r2 = await waitImport(tab, name, res.already ? res.already - 1 : res.hmax || 0, (await sel()).importWaitMs || 600e3);
@@ -1242,7 +1362,9 @@ async function waitImport(tab, name, after, ms) {
 }
 function summary(run) {
   const i = run.info || {};
-  return { days: run.days, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, hrs: i.hours || null, hk: i.hk || null, nw: i.exportNew || null, price: i.exportPrice || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
+  // 0.1.23: prod = שלבי המוצרים הסתיימו (קטלוג אושר + הקבצים לכספית) – גם אם המכירות של סניף נכשלו אחר כך
+  const prod = !!(i.catApply && !i.catApply.first && (run.flags && (run.flags.noImp || run.flags.noCat) || 'exportUpd' in i));
+  return { days: run.days, prod, cat: i.catalog ? { codes: i.catalog.codes } : null, first: i.catApply && i.catApply.first, sales: i.sales || {}, hrs: i.hours || null, hk: i.hk || null, nw: i.exportNew || null, price: i.exportPrice || null, upd: i.exportUpd || null, imp: run.flags && run.flags.noImp ? 'off' : 'on', flags: run.flags, ...(i.scr ? { scr: i.scr } : {}) };
 }
 
 // ---------- ריצה ----------
@@ -1298,6 +1420,7 @@ async function finalize(run) {
   const code = run.err && run.err.code;
   st.lastRun = { id: run.id, at: Date.now(), st: run.st, manual: run.manual, req: !!run.req, code, msg: run.err && run.err.msg, step: run.err && run.err.step, sum: summary(run) };
   if (run.st === 'ok') { if (!st.lastOkDay || run.slot > st.lastOkDay) st.lastOkDay = run.slot; st.loginDay = null; st.failSlot = null; }
+  if (st.lastRun.sum && st.lastRun.sum.prod) st.prodAt = Date.now(); // 0.1.23: המוצרים סונכרנו – גם אם המכירות של סניף נכשלו
   else if (run.st === 'fail' && code !== 'req-gone') st.failSlot = run.slot; // בקשה מהטלפון שכבר טופלה – לא חוסמת את הסנכרון האוטומטי
   await set({ st });
   if (run.st === 'ok') return;
@@ -1657,7 +1780,7 @@ async function handle(m) {
     const [token, st, run, biz, disc, discSt, d] = await Promise.all([get('token'), get('st'), get('run'), get('biz'), get('disc'), get('discSt'), chrome.alarms.get('daily')]);
     return { ok: true, connected: !!token, backend: self.CX_CFG.backend, ver: VER, biz: biz || null, st: st || {}, sched: await sched(), next: d ? d.scheduledTime : null, busy,
       run: run ? { st: run.st, step: run.step, day: run.days && run.days[run.day], days: (run.days || []).length, err: run.err, retryAt: run.retryAt, manual: run.manual, req: !!run.req } : null,
-      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null, capsToday: !!((await get('caps')) || {}).today, hrs: (await get('hrsSt')) || null };
+      disc: disc ? { at: disc.at, size: disc.size, ok: !!(disc.rep && disc.rep.ok), login: !!(disc.rep && disc.rep.login) } : null, discSt: discSt || null, imp: (await sel()).importEnabled === true, upd: (await get('upd')) || null, today: (await get('todaySt')) || null, capsToday: !!((await get('caps')) || {}).today, hrs: (await get('hrsSt')) || null, prod: (await get('prodSt')) || null };
   }
   if (m.t === 'syncNow') { if (busy) return { ok: false, code: 'busy' }; startRun({ manual: true }).catch(() => {}); return { ok: true }; }
   if (m.t === 'disc') { if (busy) return { ok: false, code: 'busy' }; runDisc().catch(() => {}); return { ok: true }; }
@@ -1688,4 +1811,4 @@ async function handle(m) {
 const discBrTest = async () => { const tab = await ownTab(false); const out = await discBranch(tab, await sel(), D.addDays(D.dayStr(Date.now(), (await sched()).tz), -1)); const r = await brRead(tab, await brCfg(), 5e3); return { out, cur: r && r.cur }; };
 // hrsRun (0.1.14): שעות העובדים מיד, בלי חלון הבוקר – full: גם החודש הקודם אם now בימים 1–5 (כמו בלילה)
 const hrsRunTest = async (o) => { const x = o || {}, now = x.now || Date.now(); return runHours('t' + Date.now(), HR.monthsFor(D.dayStr(now, (await sched()).tz), !x.full)); };
-self.__cxTest = { discBr: discBrTest, sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, hoursTick, hrsRun: hrsRunTest, updReq, reload: null, isBusy: () => busy };
+self.__cxTest = { discBr: discBrTest, sel, trigger, tick, startAuto, resume, setupAlarms, startRun, pollOnce, updInfo, updTick, todayTick, hoursTick, prodTick, hrsRun: hrsRunTest, updReq, reload: null, isBusy: () => busy };
