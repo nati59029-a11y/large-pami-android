@@ -1452,6 +1452,10 @@ service cloud.firestore {
     match /sec_cmtq/{id} {
       allow read, create, update, delete: if false;
     }
+    // הרשאות גיטי לכל מנהל (24.11.2026, סבב 4 חלק א): רק דרך השרת (lib/sec-perm.js, secState / secPrefs op:'perm') – אף אחד מהאפליקציה, גם לא מנהל אחר
+    match /sec_perm/{uid} {
+      allow read, create, update, delete: if false;
+    }
 
     // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
     function s3Uid(v) { return v is string && v.matches('^[A-Za-z0-9_-]{6,128}$'); }
@@ -2761,6 +2765,10 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
       match /sec_cmtq/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // הרשאות גיטי לכל מנהל (24.11.2026): רק דרך השרת – גם לא מנהל אחר
+      match /sec_perm/{uid} {
         allow read, create, update, delete: if false;
       }
 

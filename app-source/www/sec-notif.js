@@ -14,13 +14,16 @@
 const MAXI=300,LOGN=50,AUTO_RUN=10,AUTO_DAY=30,MAXM=600;
 /* שולח להשוואה: אותיות קטנות, בלי "(3 הודעות)" בסוף, רווחים אחידים – אותו כלל כמו senderKey ב-LpNotifListen.java */
 const senderKey=s=>String(s==null?'':s).replace(/\s*\(\d+[^)]*\)\s*$/,'').replace(/\s+/g,' ').trim().toLowerCase();
+/* 24.11.2026 (גיטי, סבב 4 חלק א): קודי אימות / סיסמאות (OTP) – לא נשמרים, לא מוצגים ולא נשלחים ל-AI. אותו כלל כמו isOtp ב-firebase/functions/lib/sec-perm.js וב-LpNotifListen.java */
+const OTP_KW=/(קוד\s*(ה)?(אימות|זיהוי|כניסה|חד[\s-]?פעמי|סודי|גישה)|סיסמ[אה]\s*(חד[\s-]?פעמית|זמנית)?|סיסמתך|קוד\s*ה?OTP|\bOTP\b|verification\s*code|security\s*code|one[\s-]?time\s*(pass(word|code)?|code|pin)|\bpasscode\b|\bpassword\b|login\s*code|auth(entication)?\s*code|\b2FA\b|confirmation\s*code|your\s*code\s*is|is\s+your\s+(\w+\s+)?code|\bcode\s*[:：]|הקוד\s*(שלך|שלכם|הוא)|קוד\s*[:：]|\bPIN\b|\bG-\d{6}\b)/i,OTP_NUM=/(^|[^\d])\d{4,8}([^\d]|$)|\b[A-Z0-9]{3,4}-[A-Z0-9]{3,4}\b/;
+const isOtp=(x,s)=>{const t=String(s||'')+' '+String(x||'');return OTP_KW.test(t)&&(OTP_NUM.test(t)||/סיסמ|password|passcode/i.test(t))};
 const isSkipped=(skip,s)=>{const k=senderKey(s);return !!k&&(Array.isArray(skip)?skip:[]).some(x=>senderKey(x)===k)};
 const STOP=new Set(['של','את','על','עם','זה','זו','זאת','אני','אתה','את','הוא','היא','אנחנו','הם','יש','אין','לא','כן','מה','מי','איך','למה','מתי','איפה','גם','רק','כבר','עוד','אבל','או','אם','כי','שלום','היי','בוקר','טוב','ערב','תודה','בבקשה','אפשר','צריך','רוצה','לך','לי','לו','לה','לנו','שלי','שלך','הזה','הזאת','היום','מחר','עכשיו','the','and','for','you','hi','ok']);
 /* מילת המפתח העיקרית (אופציונלית): המילה הראשונה בת 3 אותיות לפחות שאינה מילת קישור */
 function kwOf(t){const w=String(t||'').toLowerCase().replace(/[^א-תa-z0-9\s]/g,' ').split(/\s+/).filter(Boolean);for(const x of w){const y=x.replace(/^[ו]/,'');if(y.length>=3&&!STOP.has(x)&&!STOP.has(y)&&!/^\d+$/.test(y))return y.slice(0,30)}return ''}
 /* מיזוג התראות חדשות מהתוסף לרשימה: מפתח שכבר קיים לא נכנס שוב; שולח מוחרג לא נכנס; עד max (קודם נמחקות הישנות שטופלו) */
 function merge(list,items,skip,max){const L=Array.isArray(list)?list.slice():[],seen=new Set(L.map(x=>x.k)),added=[];max=max||MAXI;
- (Array.isArray(items)?items:[]).forEach(o=>{if(!o||typeof o.k!=='string'||!o.k||seen.has(o.k))return;if(isSkipped(skip,o.s))return;seen.add(o.k);
+ (Array.isArray(items)?items:[]).forEach(o=>{if(!o||typeof o.k!=='string'||!o.k||seen.has(o.k))return;if(isSkipped(skip,o.s)||isOtp(o.x,o.s))return;seen.add(o.k);
   const it={k:o.k.slice(0,200),p:String(o.p||'').slice(0,150),a:String(o.a||o.p||'').slice(0,80),s:String(o.s||'').slice(0,200),x:String(o.x||'').slice(0,1000),t:+o.t||0,st:'new'};L.push(it);added.push(it)});
  L.sort((a,b)=>a.t-b.t);while(L.length>max){const i=L.findIndex(x=>x.st!=='new');L.splice(i>=0?i:0,1)}
  return {list:L,added:added.filter(x=>L.includes(x))}}
@@ -33,7 +36,9 @@ function record(Lr,it,act,to,now){const rk=ruleKey(it),uid=to&&to.uid||'',k=rk+'
 function suggest(Lr,R){const best={};Object.keys(Lr||{}).forEach(k=>{const e=Lr[k];if(!e)return;const b=best[e.rk];if(!b||e.t>b.t)best[e.rk]=e});
  return Object.values(best).filter(e=>e.n>=2&&AUTO.has(e.act)&&(e.act!=='task'||!!e.uid)&&!(R&&R[e.rk])).sort((a,b)=>b.t-a.t)}
 const ruleFor=(R,it)=>{const r=R&&R[ruleKey(it)];return r&&r.on===true&&AUTO.has(r.act)?r:null};
-function setRule(R,e,on,now){R[e.rk]={p:e.p,a:e.a,s:e.s,act:e.act,uid:e.uid||'',un:e.un||'',on:!!on,t:now||Date.now()};return R[e.rk]}
+/* v:2 – כלל שאושר אחרי מסך ההרשאות (24.11.2026). כלל פעיל בלי v = אושר "לבד" לפני הפריסה (החלטת המשתמש 3 – מיגרציה עצלה, legacyRules) */
+function setRule(R,e,on,now){R[e.rk]={p:e.p,a:e.a,s:e.s,act:e.act,uid:e.uid||'',un:e.un||'',on:!!on,t:now||Date.now(),v:2};return R[e.rk]}
+const legacyRules=R=>Object.values(R||{}).some(r=>r&&r.on===true&&AUTO.has(r.act)&&r.v!==2);
 /* מחיקת כלל – גם הספירה של אותו שולח מתאפסת (אחרת ההצעה הייתה חוזרת מיד) */
 function delRule(R,Lr,rk){delete R[rk];Object.keys(Lr||{}).forEach(k=>{if(Lr[k]&&Lr[k].rk===rk)delete Lr[k]})}
 /* מזהה קבוע מהמפתח של ההתראה (משימה ממנה = 'sec'+id): פתיחה חוזרת, ידנית או אוטומטית, מזוהה בשרת (409) ולא יוצרת כפילות */
@@ -51,7 +56,13 @@ function stTrim(M,keys,max){let ch=false;max=max||MAXM;if(keys)Object.keys(M).fo
    C = {d:<יום>, n:{<מפתח כלל>: מספר}} – מתאפס ביום חדש. why: 'run' (תקרת עיבוד) / 'day' (תקרה יומית של הכלל) */
 function capTake(C,rk,day,used){if(!C||typeof C!=='object'||C.d!==day)C={d:day,n:{}};if(!C.n||typeof C.n!=='object')C.n={};
  if((used|0)>=AUTO_RUN)return{ok:false,C,why:'run'};if((+C.n[rk]||0)>=AUTO_DAY)return{ok:false,C,why:'day'};C.n[rk]=(+C.n[rk]||0)+1;return{ok:true,C}}
-const Core={MAXI,LOGN,AUTO_RUN,AUTO_DAY,MAXM,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd,stPut,applySt,stTrim,capTake};
+/* 24.11.2026 (סבב 4 חלק א): הרשאת "פעולה על הודעה מאפליקציה / SMS" של המנהל (X.st.perm.m.app) ו"עצור הכל" (X.st.stop).
+   מחזיר 'auto' (מותר לבצע כלל לבד) / 'approve' / 'deny' / 'ask' (טרם הוגדר – לשאול את המנהל, ובינתיים לא לבד). בלי מידע מהשרת – לא לבד.
+   act – הפעולה שהכלל מבצע (תיקון סבב 1, ליקוי 2): 'task' – גם "יצירת משימה" לא מוגדרת "אסור" (task:deny → deny, גם כשההתראות "לבד") */
+function appPerm(st,act){const p=st&&st.perm;if(!p||!p.m||typeof p.m!=='object')return 'approve';
+ if(act==='task'&&p.m.task&&p.m.task.m==='deny')return 'deny';
+ const e=p.m.app;if(!e)return 'ask';if(e.m==='deny')return 'deny';if(e.m!=='auto')return 'approve';return st.stop===true?'approve':'auto'}
+const Core={MAXI,LOGN,AUTO_RUN,AUTO_DAY,MAXM,isOtp,appPerm,legacyRules,senderKey,isSkipped,kwOf,merge,record,suggest,ruleFor,ruleKey,setRule,delRule,tidOf,logAdd,stPut,applySt,stTrim,capTake};
 if(typeof module==='object'&&module&&module.exports){module.exports=Core;return}
 root.SecNotifCore=Core;
 
@@ -66,6 +77,7 @@ const SUG=DEF.concat(['com.google.android.gm','org.telegram.messenger','com.micr
 const DEFN={'com.whatsapp':'WhatsApp','com.whatsapp.w4b':'WhatsApp Business','com.google.android.apps.messaging':'הודעות (Google)','com.samsung.android.messaging':'הודעות (Samsung)','com.android.mms':'הודעות','com.android.messaging':'הודעות'};
 const N={cfg:null,en:null,apps:null,v:'list',cards:{},busy:0,tk:0,lis:0,remK:'',ld:0,wr:0,lastN:-1,q:null,qU:'',lg:''};
 const cap=()=>window.Capacitor||null;
+const fnCallSec=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const native=()=>{try{const C=cap();return !!(C&&C.isNativePlatform&&C.isNativePlatform())}catch(e){return false}};
 const plug=()=>{const C=cap();return native()&&C.Plugins&&C.Plugins.LpNotif||null};
 const adm=()=>{try{return typeof isA==='function'&&isA()}catch(e){return false}};
@@ -99,12 +111,12 @@ const STL={task:'נפתחה משימה',rem:'נקבעה תזכורת',ask:'נש�
 
 /* ---------- מצב התוסף ---------- */
 async function loadCfg(){const P=plug();if(!P)return;N.ld=1;
- try{const c=await P.getConfig();N.cfg={on:!!(c&&c.on),pkgs:Array.isArray(c&&c.pkgs)?c.pkgs:[],skip:Array.isArray(c&&c.skip)?c.skip:[],u:String(c&&c.u||'')}}catch(e){N.cfg={on:false,pkgs:[],skip:[],u:''}}
+ try{const c=await P.getConfig();N.cfg={on:!!(c&&c.on),all:!!(c&&c.all),pkgs:Array.isArray(c&&c.pkgs)?c.pkgs:[],skip:Array.isArray(c&&c.skip)?c.skip:[],u:String(c&&c.u||'')}}catch(e){N.cfg={on:false,all:false,pkgs:[],skip:[],u:''}}
  try{N.en=!!(await P.isEnabled()).on}catch(e){N.en=false}
  N.ld=2}
 async function loadApps(){const P=plug();if(!P||N.apps)return;try{const r=await P.getApps();N.apps=Array.isArray(r&&r.apps)?r.apps.filter(a=>a&&a.p):[]}catch(e){N.apps=[]}if(onTab())re()}
 const mine=()=>!!(N.cfg&&N.cfg.on&&N.cfg.u===uid());
-async function saveCfg(o){const P=plug();if(!P)throw new Error('no plugin');const c=Object.assign({},N.cfg||{},o,{u:uid()});await P.setConfig({on:!!c.on,pkgs:c.pkgs||[],skip:c.skip||[],u:c.u});N.cfg=c}
+async function saveCfg(o){const P=plug();if(!P)throw new Error('no plugin');const c=Object.assign({},N.cfg||{},o,{u:uid()});await P.setConfig({on:!!c.on,all:!!c.all,pkgs:c.pkgs||[],skip:c.skip||[],u:c.u});N.cfg=c}
 
 /* ---------- קליטה: משיכה מהתוסף, מיזוג, וביצוע כללים שאושרו ---------- */
 async function tick(){const P=plug();if(!P||!adm()||!uid()||N.tk)return;N.tk=1;
@@ -123,9 +135,20 @@ async function tick(){const P=plug();if(!P||!adm()||!uid()||N.tk)return;N.tk=1;
 /* תקרה: עד AUTO_RUN משימות בכל עיבוד ועד AUTO_DAY ביום לכל כלל. מעבר לתקרה – ההתראה נשארת "ממתינה להחלטה" (cap), ושורה אחת ביומן לכל כלל */
 const CAPM={day:'הגעתי לתקרה היומית של הכלל – ממתין לאישורך',run:'הגעתי לתקרה של '+AUTO_RUN+' משימות אוטומטיות בבת אחת – ממתין לאישורך'};
 const dayK=t=>{try{return new Date(t).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'})}catch(e){return new Date(t).toISOString().slice(0,10)}};
-async function autoRun(added){const S=st();if(S.off)return;let ch=0,used=0;const day=dayK(Date.now()),capd={};
+async function autoRun(added,once){const S=st();if(S.off)return;
+ /* 24.11.2026 (סבב 4 חלק א): כלל "לבד" רץ רק אם מסך ההרשאות של המנהל מתיר "פעולה על הודעה מאפליקציה / SMS" ו"עצור הכל" כבוי. אחרת ההתראה נשארת "מה לעשות?".
+    once – תשובה "לבד" לשאלה הראשונה שחלה גם על ההתראות שעוררו אותה (החלטה 1), גם ב"רק הפעם". "עצור הכל" ו"משימה אסורה" – נבדקים תמיד */
+ const X0=window.__sec&&window.__sec.st,pm=once&&X0&&X0.stop!==true?'auto':appPerm(X0);
+ if(pm!=='auto'){
+  if(pm==='ask'&&!N.pa&&added.some(it=>ruleFor(S.R,it))){N.pa=1;
+   /* החלטה 3: כלל שאושר "לבד" לפני הפריסה – "לבד, תמיד" לסוג הזה (השרת: רק אם עוד לא הוגדר, ביומן). אחרת – שאלה בפעם הראשונה */
+   try{const leg=legacyRules(S.R),r=await fnCallSec('secPrefs',leg?{op:'permAsk',type:'app',mig:true}:{op:'permAsk',type:'app'});
+    if(leg&&r&&r.mig&&X0&&X0.perm&&X0.perm.m){X0.perm.m.app={m:'auto',mig:1};return autoRun(added)}}catch(e){N.pa=0}}
+  return}
+ let ch=0,used=0;const day=dayK(Date.now()),capd={};
  for(const it of added){const r=ruleFor(S.R,it);if(!r)continue;
   if(r.act==='ign'){setSt(it.k,{st:'ign',by:'auto'});S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'ign',ok:1});ch=1;continue}
+  if(r.act==='task'&&appPerm(window.__sec&&window.__sec.st,'task')==='deny'){S.G=logAdd(S.G,{t:Date.now(),k:it.k,s:it.s,a:it.a,act:'task',un:r.un||'',ok:0,why:'לפי מסך ההרשאות שלך "יצירת משימה" אסורה'});ch=1;continue}
   if(r.act==='task'){const cp=capTake(S.C,ruleKey(it),day,used);S.C=cp.C;ch=1;
    if(!cp.ok){setSt(it.k,{cap:cp.why});const ck=ruleKey(it)+'|'+cp.why,g=capd[ck]||(capd[ck]={t:Date.now(),k:it.k,s:it.s,a:it.a,act:'cap',why:cp.why,n:0});g.n++;continue}
    used++;let res;try{res=await autoTask(it,r)}catch(e){res={ok:0,why:e&&e.cx||'פתיחת המשימה נכשלה'}}
@@ -165,12 +188,13 @@ function setH(){const c=N.cfg,P=new Set(c.pkgs&&c.pkgs.length?c.pkgs:[]),A=N.app
  const top=SUG.filter(p=>(inst?inst.has(p):DEF.includes(p))||P.has(p));
  const rest=A?A.map(a=>a.p).filter(p=>!top.includes(p)):[];
  return `<div class="card"><b>${TL}</b>
- <p class="note" style="margin:6px 0">המזכירה תראה את ההתראות שמגיעות לטלפון <b>רק מהאפליקציות שתבחרו כאן</b>, ותשאל מה לעשות עם כל אחת.</p>
- <ul class="note" style="margin:0 0 8px;padding-inline-start:18px"><li>נקלט רק מה שמופיע בהתראה עצמה (שם השולח והטקסט) – לא כל השיחה.</li><li>ההתראות נשמרות רק בטלפון. כשפותחים מהן משימה (ידנית או בכלל אוטומטי), השולח וטקסט ההודעה נכנסים למשימה ונראים לעובד שמקבל אותה. 'שאלי את המזכירה' שולח את הטקסט לבינה המלאכותית.</li><li>אפשר לכבות בכל רגע.</li></ul>
+ <p class="note" style="margin:6px 0">המזכירה תראה את ההתראות שמגיעות לטלפון <b>רק מהאפליקציות שתבחרו כאן</b> (או מכולן, אם תסמנו "כל האפליקציות וה-SMS"), ותשאל מה לעשות עם כל אחת. ביצוע לבד של כלל – רק אם במסך ההרשאות "פעולה על הודעה מאפליקציה / SMS" מוגדרת "לבד".</p>
+ <ul class="note" style="margin:0 0 8px;padding-inline-start:18px"><li>נקלט רק מה שמופיע בהתראה עצמה (שם השולח והטקסט) – לא כל השיחה.</li><li>קודי אימות וסיסמאות (OTP) לא נקלטים ולא נשלחים לבינה המלאכותית.</li><li>ההתראות נשמרות רק בטלפון. כשפותחים מהן משימה (ידנית או בכלל אוטומטי), השולח וטקסט ההודעה נכנסים למשימה ונראים לעובד שמקבל אותה. 'שאלי את המזכירה' שולח את הטקסט לבינה המלאכותית.</li><li>אפשר לכבות בכל רגע.</li></ul>
  <p style="margin:6px 0"><b>גישה להתראות:</b> ${N.en?'✓ ניתנה':'עוד לא ניתנה'}</p>
  <div class="secrow">${N.en?'':B('secNfOpen','תן גישה להתראות')}${B('secNfRe','בדוק שוב')}</div>
  ${N.en?'':'<p class="note" style="margin:4px 0">בחלון שייפתח: מוצאים את האפליקציה ברשימה "גישה להתראות" ומפעילים. אחר כך חוזרים לכאן.</p><p class="note" style="margin:4px 0">אם אנדרואיד כותב "הגדרה מוגבלת": בהגדרות הטלפון ← אפליקציות ← האפליקציה הזו ← ⋮ (שלוש נקודות למעלה) ← "התרת הגדרות מוגבלות", ואז שוב "תן גישה להתראות".</p>'}</div>
  <form class="card" data-f="secNfSave"><b>מאילו אפליקציות לקלוט?</b>
+ <label class="chip" style="min-height:44px;justify-content:flex-start;gap:8px;margin-top:8px"><input type="checkbox" name="all" value="1"${c.all?' checked':''}> <span><b>כל האפליקציות וה-SMS</b><br><small class="note">כל התראה שמגיעה לטלפון (חוץ מהתראות קבועות ושל האפליקציה הזו). קודי אימות וסיסמאות לא נקלטים לעולם.</small></span></label>
  <div style="display:grid;gap:6px;margin:8px 0">${top.map(box).join('')||'<p class="note">טוען את רשימת האפליקציות…</p>'}</div>
  ${rest.length?`<details><summary style="cursor:pointer;min-height:44px;display:flex;align-items:center">כל האפליקציות בטלפון (${rest.length})</summary><div style="display:grid;gap:6px;margin:8px 0">${rest.map(box).join('')}</div></details>`:''}
  <label class="f"><span>שולחים שלא נקלטים (שורה לכל שולח, בדיוק כמו שהשם מופיע בהתראה)</span><textarea name="skip" rows="3" maxlength="5000">${esc((c.skip||[]).join('\n'))}</textarea></label>
@@ -197,6 +221,8 @@ window.__secNotifH=()=>{try{return notifH()}catch(e){return '<p class="note">ל�
 /* 23.11.2026 (גיטי, סבב 3): ללשונית "תקשורת" (sec-comm.js) – ההתראות שבזיכרון של הדף, לקריאה בלבד ורק במכשיר הזה (לא נשלחות לשרת). null = הקליטה לא פעילה כאן */
 window.__secNfList=()=>{try{return native()&&adm()&&plug()&&uid()&&N.cfg&&mine()?inbox().map(x=>({k:x.k,a:x.a,s:x.s,x:x.x,t:x.t,st:x.st})):null}catch(e){return null}};
 window.__secNfTick=()=>{try{tick()}catch(e){}};
+/* מ-sec-perm.js (החלטה 1): תשובה לשאלה הראשונה על 'app' – "לבד" מבצע עכשיו את הכללים על ההתראות שממתינות; "אסור" – הן נשארות "מה לעשות?" */
+window.__secNfAutoNow=m=>{try{if(m!=='auto'||!uid())return;const L=inbox().filter(x=>x.st==='new');if(L.length)autoRun(L,true).then(()=>{if(onTab())re()})}catch(e){}};
 
 /* ---------- פעולות ---------- */
 const pick=el=>{const it=itemOf(el.dataset.k);if(!it){toast('ההתראה כבר לא ברשימה');re(1)}return it};
@@ -205,9 +231,9 @@ ACT.secNfV=el=>{N.v=el.dataset.v||'list';if(N.v==='set')loadApps();re(1)};
 ACT.secNfOpen=async()=>{const P=plug();if(!P)return;try{await P.openSettings()}catch(e){toast('לא הצלחתי לפתוח את ההגדרות. פתחו בהגדרות הטלפון: התראות ← גישה להתראות')}};
 ACT.secNfRe=async()=>{await loadCfg();re(1);if(N.en)tick()};
 ACT.secNfTake=()=>ask('להפעיל את קליטת ההתראות לחשבון שלך? ההתראות שנקלטו עד עכשיו בטלפון הזה יימחקו.',async()=>{const P=plug(),u0=N.cfg&&N.cfg.u||'';try{await P.clear();if(u0&&u0!==uid())wipe(u0);N.q=null;N.qU='';await saveCfg({on:true});toast('✓ הופעל לחשבון שלך')}catch(e){toast('הפעולה נכשלה')}re(1);setTimeout(tick,300)},'הפעל');
-FRM.secNfSave=async f=>{const pk=[...f.querySelectorAll('input[name=p]:checked')].map(i=>i.value);if(!pk.length)return toast('בחרו לפחות אפליקציה אחת');
+FRM.secNfSave=async f=>{const pk=[...f.querySelectorAll('input[name=p]:checked')].map(i=>i.value),all=!!f.querySelector('input[name=all]:checked');if(!pk.length&&!all)return toast('בחרו לפחות אפליקציה אחת, או "כל האפליקציות"');
  const skip=String(fd(f).skip||'').split('\n').map(s=>s.trim()).filter(Boolean).slice(0,200);const was=!!(N.cfg&&N.cfg.on);
- try{await saveCfg({on:true,pkgs:pk,skip})}catch(e){return toast('השמירה נכשלה')}
+ try{await saveCfg({on:true,all,pkgs:pk,skip})}catch(e){return toast('השמירה נכשלה')}
  toast(was?'✓ נשמר':'✓ הקליטה הופעלה');N.v='list';re(1);if(!N.en)setTimeout(()=>ask('כדי שההתראות ייקלטו, צריך לתת לאפליקציה "גישה להתראות" בהגדרות של אנדרואיד. לפתוח את ההגדרות עכשיו?',ACT.secNfOpen,'פתח הגדרות'),300)};
 ACT.secNfOff=()=>ask('לכבות את קליטת ההתראות? מה שכבר נקלט יישאר כאן. אפשר גם לבטל את "גישה להתראות" בהגדרות של אנדרואיד.',async()=>{try{await saveCfg({on:false});toast('הקליטה כובתה')}catch(e){toast('הפעולה נכשלה')}N.v='list';re(1)},'כבה');
 /* פתח משימה: פענוח בעזרת sec-cmd.js. יש עובד/יעד – כרטיס אישור; אחרת כרטיס עם "<שולח>: <טקסט>" ובחירת עובד */
@@ -247,7 +273,7 @@ CHG.secNfStop=el=>{const S=st();S.off=!!el.checked;stW(S);toast(S.off?'הביצ�
 
 /* ---------- יציאה מהחשבון (נקרא מ-tasks-wc.js W.out, לפני ש-SY מתאפס): אם הקליטה שייכת למשתמש שיוצא (או לאף אחד) – מכבים, מוחקים את התור והתצורה בתוסף. ובכל מקרה מוחקים את המפתחות המקומיים שלו. לא זורק ---------- */
 window.__secNfOut=u=>{u=u||uid();
- try{const P=plug();if(P)Promise.resolve(P.getConfig()).then(c=>{const cu=String(c&&c.u||'');if(cu&&cu!==u)return;return Promise.resolve(P.setConfig({on:false,pkgs:[],skip:[],u:''})).then(()=>P.clear())}).catch(()=>{})}catch(e){}
+ try{const P=plug();if(P)Promise.resolve(P.getConfig()).then(c=>{const cu=String(c&&c.u||'');if(cu&&cu!==u)return;return Promise.resolve(P.setConfig({on:false,all:false,pkgs:[],skip:[],u:''})).then(()=>P.clear())}).catch(()=>{})}catch(e){}
  wipe(u);N.q=null;N.qU='';N.lg='';N.cfg=null;N.ld=0;N.cards={};N.lastN=-1};
 
 /* ---------- חיבור: מונה בלשונית, הסתרה ממי שאינו מנהל, קליטה בפתיחה / חזרה לאפליקציה / אירוע מהתוסף ---------- */

@@ -13,6 +13,7 @@ const { onCall } = require('./lib/region');
 const { inputObject } = require('./lib/roles');
 const K = require('./lib/sec-know');
 const SENS = require('./lib/sec-sens');
+const PERM = require('./lib/sec-perm'); // 24.11.2026 (גיטי, סבב 4 חלק א): הרשאות לכל מנהל
 const C = require('./secretary')._core;
 const { gate, logData, hourKey, bad, deny, pre, wrap } = C;
 
@@ -278,7 +279,7 @@ async function secCal(request) {
     if (k && (we === 'warn' || isRem) && input.force !== true) return { ok: false, warn: { kind: k, d, next: K.nextBizDay(d), rem: !!isRem } };
     return k ? { keepOff: true } : {};
   };
-  let id;
+  let id, moved = null;
   if (op === 'add') {
     const ev = K.cleanEvent(input);
     if (!ev) throw bad('bad-event', 'כותרת (עד ' + K.CAL_TITLE + ' תווים), תאריך ושעה תקינים');
@@ -286,16 +287,33 @@ async function secCal(request) {
     // תיקון סבב 2 (ליקוי 4): תזכורת מכרטיס בשיחה (cid = מזהה הכרטיס) – מזהה קבוע sec<cid>. אישור חוזר (למשל אחרי שהסימון נכשל) מחזיר את הקיימת ולא יוצר שנייה
     const cid = input.cid === undefined ? null : typeof input.cid === 'string' && /^(tp|cm)[0-9a-f]{16}$/.test(input.cid) && rem ? input.cid : false; // cm – התחייבות שאושרה (lib/sec-cmt.js, 24.11.2026)
     if (cid === false) throw bad('bad-cid', 'מזהה כרטיס לא תקין');
+    // 24.11.2026 (גיטי, סבב 4 חלק א; תיקון סבב 1, ליקוי 3): תזכורת מכרטיס (בשיחה / מהתחייבות) – "תזכורת" אסורה במסך ההרשאות של המנהל → לא נוצרת, שורה ביומן
+    if (cid && PERM.decide(await PERM.readRec(db, who.uid), 'rem').d === 'deny') {
+      await db.collection('sec_log').doc().set(C.logData(who.uid, 'mgr', 'permBlock', { tgt: 'rem', note: 'secCal:add' }));
+      throw new HttpsError('permission-denied', 'לפי מסך ההרשאות שלך גיטי לא רשאית לקבוע תזכורות. לא נוצר כלום. אפשר לשנות בהגדרות המזכירה ← הרשאות.', { reason: 'perm-deny' });
+    }
+    // תיקון בדיקה (ליקוי 1): תזכורת שנקבעת לבד (auto:true – כרטיס "לבד" או התחייבות "לבד") נעצרת ב"עצור הכל" בשרת. לחיצה ידנית – לא
+    if (cid && input.auto === true) {
+      if (PERM.stopBlocks(input, await db.doc('sec_cfg/wa').get())) {
+        await db.collection('sec_log').doc().set(C.logData(who.uid, 'auto', 'autoStopped', { tgt: 'rem', note: 'secCal:add' }));
+        throw pre('stopped', '"עצור הכל" פעיל – גיטי לא קובעת תזכורות לבד. אפשר לאשר בלחיצה.');
+      }
+    }
     if (cid) {
       const ex = await col.doc('sec' + cid).get();
       if (ex.exists) { if (ex.get('by') === who.uid && ex.get('rem') === true) return { ok: true, id: ex.id, already: true }; throw pre('exists', 'התזכורת כבר קיימת'); }
     }
-    const w = offCheck(ev.d, rem); if (w.ok === false) return w;
+    // 24.11.2026 (גיטי סבב 4ג): תזכורת "לבד" (auto:true) בשבת/יום טוב (או בערב שבת/חג מ-16:00) – עוברת למוצאי שבת/חג 21:00, בלי שאלה ובלי force.
+    // keepOff – כדי שתצא בזמן שנקבע (ולא ביום העסקים הבא, calAt ב-lib/sec-remind.js)
+    const mv = cid && input.auto === true ? K.restMove(ev.d, ev.tm) : null;
+    if (mv) { ev.d = mv.d; ev.tm = mv.tm; }
+    const w = mv ? { keepOff: true } : offCheck(ev.d, rem); if (w.ok === false) return w;
     if ((await col.select().limit(K.CAL_MAX).get()).size >= K.CAL_MAX) throw pre('too-many', 'היומן מלא (' + K.CAL_MAX + ' אירועים)');
     id = cid ? 'sec' + cid : col.doc().id;
     const evDoc = Object.assign({ uid: input.biz === true ? '' : who.uid, st: 'ok', src: 'mgr', by: who.uid, t: now }, ev, w.keepOff ? { keepOff: true } : {}, rem ? { rem: true } : {});
     if (cid) b.create(col.doc(id), evDoc); else b.set(col.doc(id), evDoc); // create – שתי לחיצות בו-זמנית: השנייה נכשלת ולא יוצרת כפילות
-    log(b, db, who.uid, 'calAdd', { tgt: id, note: input.biz === true ? 'biz' : 'me' });
+    log(b, db, who.uid, 'calAdd', { tgt: id, note: (input.biz === true ? 'biz' : 'me') + (mv ? ':rest' : '') });
+    if (mv) moved = { d: mv.d, tm: mv.tm };
   } else {
     id = idOf(input.id);
     const s = await col.doc(id).get();
@@ -328,7 +346,7 @@ async function secCal(request) {
     }
   }
   await b.commit();
-  return { ok: true, id };
+  return moved ? { ok: true, id, moved } : { ok: true, id };
 }
 
 // ===================================================================================

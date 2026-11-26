@@ -381,10 +381,21 @@ async function remindBiz(opts) {
       if ((await db.doc(`sec_note/${m.uid}/n/${nid(m.uid, key)}`).get()).exists) continue;
       const S = await sumGet();
       const mine = (e) => e.st === 'ok' && (!e.uid || e.uid === m.uid);
+      // 24.11.2026 (גיטי סבב 4 חלק ב): חריגות שכבר הופיעו בסיכום בוקר קודם של המנהל – sec_note/{uid}.an (השרת בלבד, לפי החוקים). נשמר 120 יום
+      const anRef = db.doc(`sec_note/${m.uid}`);
+      let anSeen = {};
+      if (kind === 'am' && S.F) { const a = (await anRef.get()).get('an'); if (a && typeof a === 'object') anSeen = a; }
       const sm = R.daySum({ kind, today, now, dayStart: S.dayStart, fin: S.F && S.F.fin, tasks: S.tasks,
         cal: S.cal.filter(mine), calNext: S.calNext.filter(mine).length,
-        wait: { tk: S.tasks.filter((t) => t.st === 'wait').length, inv: S.inv, draft: S.draft, prop: S.facts + S.prop.filter((e) => e.uid === m.uid).length }, acts: S.acts });
-      if (await addNote(db, m, { k: 'dig', typ: kind, key, title: sm.title, body: sm.body }, now, true)) logs.push(logData('', 'auto', 'daySum', { tgt: m.uid, note: kind + ' ' + today }));
+        wait: { tk: S.tasks.filter((t) => t.st === 'wait').length, inv: S.inv, draft: S.draft, prop: S.facts + S.prop.filter((e) => e.uid === m.uid).length }, acts: S.acts, anSeen });
+      if (await addNote(db, m, { k: 'dig', typ: kind, key, title: sm.title, body: sm.body }, now, true)) {
+        logs.push(logData('', 'auto', 'daySum', { tgt: m.uid, note: kind + ' ' + today }));
+        if (sm.an && sm.an.length) {
+          const keep = {}; for (const [k, t] of Object.entries(anSeen)) if (Number.isFinite(t) && now - t < 120 * 864e5) keep[k] = t;
+          sm.an.forEach((k) => { keep[k] = now; });
+          await anRef.set({ an: keep }, { mergeFields: ['an'] }).catch((e) => logger.warn('secretary: anSeen save failed', { code: e && e.code }));
+        }
+      }
     }
   }
 

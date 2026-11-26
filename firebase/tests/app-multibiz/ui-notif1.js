@@ -19,7 +19,8 @@ async function open(browser, www) {
   const cfg = { mode: 'new', users: { [who]: BIZ }, sa: {}, biz: { [BIZ]: { dataRoot: 'b', features: FEAT, name: 'עסק בדיקה' } },
     admins: { [`b/${BIZ}/|${who}`]: 1 }, staff: { [`b/${BIZ}/|${who}`]: 1 }, ctx: { hasTouch: true, isMobile: true, viewport: { width: 360, height: 740 } } };
   const bodies = [], tasks = {};
-  const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: false, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: {}, types: {}, unseen: 0 };
+  const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: false, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: {}, types: {}, unseen: 0,
+    stop: false, perm: { edit: true, m: { app: { m: 'auto' } }, q: {}, types: [] } }; // 24.11.2026 (סבב 4 חלק א): כלל "לבד" רץ רק עם הרשאת app=לבד
   const { ctx, page } = await H.newPage(browser, www, cfg, [], who);
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop();
@@ -111,15 +112,17 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
 
   // --- קליטה ---
   await push(page, { s: 'דני ספק', x: 'תני למרים לסדר את המחסן עד מחר' });
-  await push(page, { s: 'בנק', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b1', x: 'קוד אימות 1234' });
+  await push(page, { s: 'בנק', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b1', x: 'יתרה בחשבון 1234' });
+  await push(page, { s: 'Google', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|otp1', x: 'G-482913 is your Google verification code' }); // 24.11.2026: OTP – לא נקלט
   await H.settle(page, 900);
   let t2 = await txt(page);
-  check('אירוע notif: ההתראות נמשכו ומוצגות עם שולח, אפליקציה וטקסט', /דני ספק/.test(t2) && /תני למרים לסדר את המחסן/.test(t2) && /Messages/.test(t2) && /קוד אימות 1234/.test(t2), t2.slice(0, 400));
+  check('OTP: הודעה עם קוד אימות לא מוצגת ולא נשמרת', !/482913/.test(t2) && (await lsHas(page, ['482913'])).length === 0);
+  check('אירוע notif: ההתראות נמשכו ומוצגות עם שולח, אפליקציה וטקסט', /דני ספק/.test(t2) && /תני למרים לסדר את המחסן/.test(t2) && /Messages/.test(t2) && /יתרה בחשבון 1234/.test(t2), t2.slice(0, 400));
   { const nb = await page.evaluate(() => ['secNfTask', 'secNfRem', 'secNfAsk', 'secNfDone', 'secNfIgn', 'secNfBlock'].map((a) => document.querySelectorAll('#main [data-a=' + a + ']').length));
     check('"מה לעשות?" עם כל ששת הכפתורים בכל כרטיס', /מה לעשות\?/.test(t2) && nb.every((n) => n === 2), nb); }
   check('מונה לא-טופלו על הלשונית (2)', /התראות מהטלפון\s*2/.test(await txt(page, '#secTabs')), await txt(page, '#secTabs'));
-  check('שום תוכן התראה לא נשלח לשרת בלי לחיצה', !o.bodies.some((b) => JSON.stringify(b).includes('קוד אימות')));
-  { const h = await lsHas(page, ['קוד אימות', 'תני למרים', 'דני ספק', 'סוד ישן']);
+  check('שום תוכן התראה לא נשלח לשרת בלי לחיצה', !o.bodies.some((b) => JSON.stringify(b).includes('יתרה בחשבון')));
+  { const h = await lsHas(page, ['יתרה בחשבון', 'תני למרים', 'דני ספק', 'סוד ישן']);
     check('פרטיות: אחרי קליטה אין ב-localStorage טקסט הודעה או שולח (גם העותק הישן נמחק)', h.length === 0 && !(await page.evaluate(() => localStorage.getItem('lp-ntf-in-m'))), h); }
   check('קליטה ראשונה: נטען כל התור מהתוסף (pull all)', await page.evaluate(() => window.__nf.calls.some((c) => c[0] === 'pull' && c[1] === true)));
   if (shots) await page.screenshot({ path: path.join(shots, 'notif-list-360.png'), fullPage: true });
@@ -136,15 +139,15 @@ const push = (page, o) => page.evaluate((x) => { window.__nf.q.push(x); window._
   check('ההתראה עברה ל"טופלו לאחרונה" והמונה ירד ל-1', /טופלו לאחרונה \(1\)/.test(await txt(page)) && /התראות מהטלפון\s*1/.test(await txt(page, '#secTabs')), await txt(page, '#secTabs'));
 
   // התעלם ×2 מאותו שולח → הצעה ללמוד
-  await cardBtn(page, 'קוד אימות', 'secNfIgn'); await H.settle(page, 300);
+  await cardBtn(page, 'יתרה בחשבון', 'secNfIgn'); await H.settle(page, 300);
   check('אחרי פעם אחת "התעלם" – אין עדיין הצעה', !/ללמוד\?/.test(await txt(page)));
-  await push(page, { s: 'בנק', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b2', x: 'קוד אימות 5678' }); await H.settle(page, 800);
-  await cardBtn(page, 'קוד אימות 5678', 'secNfIgn'); await H.settle(page, 300);
+  await push(page, { s: 'בנק', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b2', x: 'יתרה בחשבון 5678' }); await H.settle(page, 800);
+  await cardBtn(page, 'יתרה בחשבון 5678', 'secNfIgn'); await H.settle(page, 300);
   const t4 = await txt(page);
   check('אחרי פעמיים: "ללמוד? מעכשיו כשמגיעה הודעה מבנק – לסמן התעלם"', /ללמוד\?/.test(t4) && /מעכשיו כשמגיעה הודעה מבנק/.test(t4) && /התעלם/.test(t4) && /כן, לבצע לבד/.test(t4) && /תמיד לשאול/.test(t4), t4.slice(0, 400));
   if (shots) await page.screenshot({ path: path.join(shots, 'notif-learn-360.png'), fullPage: true });
   await page.click('[data-a=secNfRuleOk]'); await H.settle(page, 300);
-  await push(page, { s: 'בנק (2 הודעות)', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b3', x: 'קוד אימות 9999' }); await H.settle(page, 900);
+  await push(page, { s: 'בנק (2 הודעות)', a: 'Messages', p: 'com.google.android.apps.messaging', k: 'sms|b3', x: 'יתרה בחשבון 9999' }); await H.settle(page, 900);
   const inb = (await stM(page))['sms|b3'];
   check('כלל שאושר: ההתראה הבאה מהבנק סומנה "התעלם" לבד (המצב נשמר לפי מפתח בלבד)', inb && inb.st === 'ign' && inb.by === 'auto' && !('x' in inb) && !('s' in inb), inb);
 

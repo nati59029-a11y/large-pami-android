@@ -84,7 +84,7 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  factAdd:'נשמרה עובדה',factOk:'אושרה עובדה שהמזכירה הציעה',factNo:'בוטלה הצעה לעובדה',factEdit:'עובדה נערכה',factDel:'עובדה נמחקה',fixed:'עודכנו פרטים קבועים',price:'הועלה מחירון',priceDel:'המחירון נמחק',
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
- grpOn:'קבוצה פנימית נפתחה לקריאה של גיטי',cmtNew:'זוהתה התחייבות בהודעה (הצעה לאישור)',cmtOk:'אושרה התחייבות – נפתחה משימה / נקבעה תזכורת',cmtNo:'נדחתה הצעת התחייבות',cmtOn:'זיהוי התחייבויות הופעל',cmtOff:'זיהוי התחייבויות כובה',cmtCap:'זיהוי התחייבויות הגיע לתקרה היומית',grpOff:'קבוצה פנימית נסגרה לגיטי',tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
+ permSet:'שונתה הרשאה של גיטי (מסך הרשאות)',permOnce:'נענתה שאלת הרשאה – רק הפעם',permUnset:'הרשאה של גיטי חזרה ל"טרם הוגדר"',permAsk:'גיטי שאלה על הרשאה לסוג פעולה חדש',permBlock:'פעולה נחסמה לפי מסך ההרשאות (לא נוצר כלום)', grpOn:'קבוצה פנימית נפתחה לקריאה של גיטי',cmtNew:'זוהתה התחייבות בהודעה (הצעה לאישור)',cmtOk:'אושרה התחייבות – נפתחה משימה / נקבעה תזכורת',cmtNo:'נדחתה הצעת התחייבות',cmtOn:'זיהוי התחייבויות הופעל',cmtOff:'זיהוי התחייבויות כובה',cmtCap:'זיהוי התחייבויות הגיע לתקרה היומית',grpOff:'קבוצה פנימית נסגרה לגיטי',tkpOk:'נפתחה משימה / נקבעה תזכורת מהצעה בשיחה',tkpNo:'בוטלה הצעה למשימה / תזכורת',calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
  notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',remSnooze:'נקבע "תזכירי לי שוב" להתראה',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
@@ -189,6 +189,19 @@ function secFin(o){o=o||{};
   if(o.notes&&Array.isArray(S.enotes)){const nm=id=>{const s=typeof subById==='function'?subById(id):null;return s?String(s.name||'').slice(0,60).trim():''};
    f.notes=S.enotes.filter(n=>n&&typeof n.t==='string'&&n.t.trim()&&nm(n.sub)).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||''))||String(b.at||'').localeCompare(String(a.at||''))).slice(0,60)
     .map(n=>[nm(n.sub),/^\d{4}-\d{2}-\d{2}$/.test(String(n.d||''))?n.d:'',n.t.trim().slice(0,500)])}
+  /* 24.11.2026 (גיטי סבב 4 חלק ב – ניתוחים, sec-trend.js): סכום חודשי לכל כרטיס (ספק/מקור הכנסה) ומועדי החשבוניות של ספקי סחורה.
+     אותו סכום כמו catTotal/monthExpense: t.amt (זיכוי בשלילה, החזר כספי 0) לפי t.date, בלי ownOut. בלי כרטיסי עובדים (שכר – רק במתג השכר, f.pay).
+     spn=[שם, i/e, קטגוריה]; months[m].sp=[מספר ב-spn, סכום]; ord=[מספר ב-spn, [ימים מ-1970]] – isSupT בלי זיכוי, 400 יום אחורה, עד 60 */
+  {const lo=addMon(m0,-MONTHS),G=new Map(),tot=new Map(),dn=d=>Math.round(Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10))/864e5),d0=dn(td)-400,OD=new Map();
+   L.forEach(t=>{if(!t||!t.sub||(t.t!=='exp'&&t.t!=='inc')||ownOut(t)||typeof t.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(t.date))return;const c=cat(t.cat)||{};if(c.beh==='emp')return;
+    const m=t.date.slice(0,7);if(m<lo||m>m0)return;const k=t.sub+'|'+t.t,a=num(t.amt);let g=G.get(k);if(!g){g={sub:t.sub,k:t.t==='inc'?'i':'e',c:String(c.name||'').slice(0,40),m:{}};G.set(k,g)}g.m[m]=(g.m[m]||0)+a;tot.set(k,(tot.get(k)||0)+Math.abs(a));
+    if(t.t==='exp'&&isSupT(t)&&t.kind!=='credit'&&a>0){const d=dn(t.date);if(d>=d0){let o=OD.get(k);if(!o)OD.set(k,o=new Set());o.add(d)}}});
+   const keys=[...G.keys()].filter(k=>tot.get(k)>0.004).sort((a,b)=>tot.get(b)-tot.get(a)).slice(0,300);
+   if(keys.length){f.spn=keys.map(k=>{const g=G.get(k);return [String((subById(g.sub)||{}).name||'—').slice(0,60),g.k,g.c]});
+    keys.forEach((k,i)=>{const g=G.get(k);Object.keys(g.m).forEach(m=>{const v=rnd(g.m[m]);if(Math.abs(v)>0.004&&f.months[m]){(f.months[m].sp=f.months[m].sp||[]).push([i,v])}})});
+    f.ord=keys.map((k,i)=>OD.has(k)?[i,[...OD.get(k)].sort((a,b)=>a-b).slice(-60)]:null).filter(Boolean)}}
+  /* גבול הגודל בשרת (FIN_MAX 400KB): אם מתקרבים – מוותרים קודם על מועדי החשבוניות ואחר כך על הפירוט לפי ספק, ולא על שאר הנתונים */
+  try{const sz=()=>new TextEncoder().encode(JSON.stringify(f)).length;if(f.spn&&sz()>360000){delete f.ord;if(sz()>360000){delete f.spn;Object.values(f.months).forEach(x=>{delete x.sp})}}}catch(e){}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
  finally{BRSEL=sB;P=sP}}
@@ -222,7 +235,7 @@ document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
 /* 22.11.2026: קיצורי משימות (מנהל, תוספת משימות פעילה) – מטופלים בתוך האפליקציה (cxTry), בלי AI */
 const QT=['משימה חדשה לעובד','מה באיחור?','ממתין לאישור'];const qsL=()=>{try{return cxOn()?QS.concat(QT):QS}catch(e){return QS}};
-const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',rq:'rq',mq:'mq',facts:'@facts',cal:'@cal',bank:'@bank',gr:'gr'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
+const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',rq:'rq',mq:'mq',facts:'@facts',cal:'@cal',bank:'@bank',gr:'gr',trend:'@trend'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 /* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
 const mdLite=t=>t.split('\n').map(l=>{if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))return null;const h=/^\s*#{1,6}\s+(.*)$/.exec(l);if(h)return '<b>'+h[1].replace(/\*\*/g,'')+'</b>';return l.replace(/^(\s*)[-*•]\s+/,'$1• ')}).filter(l=>l!==null).join('\n').replace(/\*\*([^*\n]+?)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+?)__/g,'<b>$1</b>').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'');
@@ -257,6 +270,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  ${gSetH()}
  ${typeof window.__secGrpSetH==='function'?window.__secGrpSetH():''/* 23.11.2026: קבוצות פנימיות שגיטי רשאית לקרוא – sec-comm.js */}
  ${typeof window.__secCmtSetH==='function'?window.__secCmtSetH():''/* 24.11.2026: זיהוי התחייבויות – sec-cmt.js */}
+ ${typeof window.__secPermSetH==='function'?window.__secPermSetH():''/* 24.11.2026 (סבב 4 חלק א): הרשאות לכל מנהל – sec-perm.js */}
  ${ntH(S)}
  <button class="btn g w" data-a="secEdit" style="margin-top:10px">שינוי שם ואופן פנייה</button><button class="btn g w" data-a="secSetX" style="margin-top:8px">חזרה לשיחה</button>
  <div class="sec"><h3>יומן פעולות</h3></div><div class="card"><p class="note" style="margin:0 0 8px">היומן המלא: חיפוש, סינון לפי סוג ותאריך, ופירוט לכל פעולה.</p><button class="btn w" data-a="hubLog" style="min-height:44px">פתיחת יומן הפעולות המלא</button></div>`}
@@ -282,6 +296,8 @@ async function ask2(q,deep,via){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)r
  try{const fin=secFin({pay:!!X.st.pay,rec:true,notes:X.st.sens===true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
+  /* 24.11.2026 (גיטי סבב 4, החלטה 2): כרטיס משימה / תזכורת שהשרת סימן auto ("לבד" במסך ההרשאות) – מאושר מיד באותה זרימה */
+  (r.cards||[]).filter(c=>c&&c.k==='tkp'&&c.auto===true).forEach(c=>setTimeout(()=>window.__secTpAuto(c.id),300));
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
  catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
@@ -1224,7 +1240,7 @@ const lidOf=id=>'s'+id;
 const secL=()=>{if(!S.secL||typeof S.secL!=='object'||Array.isArray(S.secL))S.secL={};return S.secL};
 const txOfLid=lid=>S.tx.find(t=>t.src===lid||(Array.isArray(t.srcs)&&t.srcs.includes(lid)));
 const IVK={inv:'חשבונית',cr:'הודעת זיכוי',rcpt:'קבלה',dn:'תעודת משלוח',chk:'צ׳ק',unk:'מסמך שלא זוהה',bad:'התקבל קובץ שלא נקלט',long:'קובץ ארוך – לבדיקה ידנית',q:'בזיהוי…'};
-const IVW={type:'לא חשבונית רגילה',neg:'סכום שלילי או אפס',sup:'ספק לא מוכר',fields:'לא כל השדות זוהו בוודאות',cap:'בגובה התקרה או מעליה',br:'סניף לא ידוע',off:'"נכנס ישר" כבוי',stop:'"עצור הכל" פעיל',dup:'חשד לכפילות',hold:'עוכב לבדיקה',sus:'נשלח עם תוכן חשוד',el:'לא סומנה כזכאית',auth:'שולח לא מאומת',long:'קובץ ארוך',act:'PDF עם פקודות משולח מאושר'};
+const IVW={pmAsk:'טרם הוגדרה הרשאה ל"רישום הוצאה" – גיטי שאלה, ובינתיים באישור',pmApr:'לפי מסך ההרשאות – באישור',pmDeny:'לפי מסך ההרשאות – אסור לבד',pmCap:'מעל תקרת הסכום שבמסך ההרשאות',pmOwner:'לא ידוע מנהל להרשאה',type:'לא חשבונית רגילה',neg:'סכום שלילי או אפס',sup:'ספק לא מוכר',fields:'לא כל השדות זוהו בוודאות',cap:'בגובה התקרה או מעליה',br:'סניף לא ידוע',off:'"נכנס ישר" כבוי',stop:'"עצור הכל" פעיל',dup:'חשד לכפילות',hold:'עוכב לבדיקה',sus:'נשלח עם תוכן חשוד',el:'לא סומנה כזכאית',auth:'שולח לא מאומת',long:'קובץ ארוך',act:'PDF עם פקודות משולח מאושר'};
 const IVB={zip:'קובץ מכווץ (zip)',office:'קובץ Office',exe:'קובץ הפעלה',type:'סוג קובץ שלא נתמך',enc:'PDF מוצפן בסיסמה',active:'PDF עם פקודות',big:'גדול מ-10MB',empty:'קובץ ריק',unv:'PDF שלא ניתן לבדוק (מבנה דחוס לא מוכר)',dl:'תקלה בהורדת הקובץ – לבדוק את הקובץ בווצאפ או במייל'};
 const IVE={quota:'נגמרה מכסת הזיהוי של העסק – אפשר להזין ידנית',ai:'הזיהוי לא הצליח – אפשר להזין ידנית',file:'הקובץ לא נקרא'};
 const ivAmt=x=>x.k==='chk'?x.f.amt:x.f.total;
@@ -2016,13 +2032,13 @@ function tpSync(c,box){const v=f=>box.querySelector(`[data-c=secTpF][data-f=${f}
  if((e=v('tm')))c.tm=/^([01]\d|2[0-3]):[0-5]\d$/.test(e.value)?e.value:'';
  if((e=v('pri')))c.pri=e.checked?'h':''}
 async function tpRem(c,mid,force){c.busy=1;cxRe();
- try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true,cid:c.id};if(c.tm)d.tm=c.tm;/* cid – מזהה קבוע (sec<cid>): אישור חוזר לא יוצר תזכורת שנייה */if(force)d.force=true;
+ try{if(!c.ref){const d={op:'add',title:c.txt,d:c.d,rem:true,cid:c.id};if(c.au)d.auto=true;/* auto – אישור "לבד": השרת עוצר אותו ב"עצור הכל" */if(c.tm)d.tm=c.tm;/* cid – מזהה קבוע (sec<cid>): אישור חוזר לא יוצר תזכורת שנייה */if(force)d.force=true;
    const r=await fnCall('secCal',d);
    if(r&&r.ok===false&&r.warn){const w=r.warn;c.busy=0;cxRe();return ask('התאריך נופל ב'+w.kind+'. לקבוע את התזכורת בכל זאת? (אפשר גם לבחור בכרטיס תאריך אחר, למשל '+dShort(w.next)+')',()=>tpRem(c,mid,true),'כן, לקבוע')}
-   c.ref=r&&r.id||''}
+   c.ref=r&&r.id||'';if(r&&r.moved)c.mv=r.moved/* "לבד" בשבת/חג – השרת העביר למוצאי שבת/חג */}
   await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'rem',ref:c.ref});
-  c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה')}
- catch(e){if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
+  c.busy=0;doneSt(c.id,'ok');toast('✓ התזכורת נקבעה'+(c.mv?' – הועברה למוצאי שבת/חג ('+dShort(c.mv.d)+' '+c.mv.tm+')':''))}
+ catch(e){if(e&&(e.reason==='perm-deny'||e.reason==='stopped'))toast(e.message);else if(c.ref)toast('התזכורת נקבעה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב');else err(e)}
  finally{c.busy=0;cxRe()}}
 ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const box=el.closest('[data-card]');if(box)tpSync(c,box);
  const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';if(!mid)return toast('הכרטיס לא נמצא. פתחו את השיחה מחדש');
@@ -2032,12 +2048,21 @@ ACT.secTpOk=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;con
  if(!c.all&&!(c.to||[]).length)return toast('סמנו למי המשימה, או "כל העובדים"');
  c.busy=1;cxRe();let x=null;
  try{const rv=X.tpRv===false?false:await cxRvNow();x={id:c.id,txt:c.txt,all:!!c.all,to:c.to||[],due:tpDue(c),pri:c.pri==='h'?'h':'',rv};
+  /* 24.11.2026 (סבב 4 חלק א): בדיקה מקדימה בשרת – "יצירת משימה" אסורה במסך ההרשאות → לא נוצרת (השרת רושם ביומן ומחזיר הסבר) */
+  await fnCall('secPrefs',Object.assign({op:'tkCard',mid,cid:c.id,st:'chk',kind:'task'},c.au?{auto:true}:{}));
   const r=await cxCreate(x);
   let ok=1;try{await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'ok',kind:'task'})}catch(e){ok=0}
   c.busy=0;if(!ok){toast('המשימה נפתחה, אבל הסימון ביומן נכשל. לחצו "אישור" שוב (לא תיפתח משימה נוספת)');return}
   doneSt(c.id,'ok');toast(r.dup?'✓ המשימה כבר נפתחה':'✓ המשימה נפתחה ל'+cxNames(x)+', יעד: '+r.dlL);try{await tkLoad()}catch(e){}}
- catch(e){if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
+ catch(e){if(e&&(e.reason==='perm-deny'||e.reason==='stopped')){toast(e.message);return}if(x&&x.old)X.tpRv=false;toast(e&&e.cx||(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה'))}
  finally{c.busy=0;cxRe()}};
+/* 24.11.2026 (גיטי סבב 4, החלטות 1–2): אישור / ביטול של כרטיס בלי לחיצה – כרטיס "לבד", או תשובה לשאלה הראשונה שחלה מיד על הכרטיס שעורר אותה.
+   אישור רק כשיש את כל הפרטים (למשימה – למי; לתזכורת – תאריך); אחרת הכרטיס נשאר לאישור. השרת בודק את ההרשאות שוב (tkCard chk / secCal) */
+window.__secTpAuto=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||!c.txt)return false;if(X.st&&X.st.stop===true)return false;/* "עצור הכל" – לא לבד (גם השרת בודק: auto:true) */
+ const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;
+ if(c.kind==='rem'?!c.d:(!cxOn()||(!c.all&&!(c.to||[]).length)))return false;
+ c.au=1;Promise.resolve(ACT.secTpOk({dataset:{id:cid,mid},closest:()=>null})).finally(()=>{c.au=0});return true}catch(e){return false}};
+window.__secTpCancel=cid=>{try{const c=tpC(cid);if(!c||c.st||c.busy||c.ref)return false;const mid=(cardMsg(cid)||{}).id||'';if(!mid)return false;ACT.secTpNo({dataset:{id:cid,mid}});return true}catch(e){return false}};
 ACT.secTpNo=async el=>{const c=tpC(el.dataset.id);if(!c||c.st||c.busy)return;const mid=el.dataset.mid||(cardMsg(c.id)||{}).id||'';
  if(c.ref)return toast('התזכורת כבר נקבעה. לחצו "אישור" כדי לסיים');
  c.busy=1;cxRe();try{if(mid)await fnCall('secPrefs',{op:'tkCard',mid,cid:c.id,st:'no'});c.busy=0;doneSt(c.id,'no')}catch(e){if(e&&e.reason==='not-found'){c.busy=0;doneSt(c.id,'gone')}else err(e)}finally{c.busy=0;cxRe()}};

@@ -113,7 +113,7 @@ async function seed(o) {
     b.set(d.doc(`b/${A}/staff/${E1}`), { name: 'דנה לוי', role: 'employee', active: true });
     b.set(d.doc(`b/${B}/admins/${MB}`), { email: 'mb@x.invalid' });
     for (const [u, biz, role] of [[M1, A, 'admin'], [M2, A, 'admin'], [E1, A, 'worker'], [MB, B, 'admin']]) b.set(d.doc('users/' + u), { bizId: biz, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
-    const mgr = {}; for (const u of opt.consent) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f' };
+    const mgr = {}; for (const u of opt.consent) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f', perm: { mail: { m: 'auto' }, wa: { m: 'auto' }, fin: { m: 'auto', cap: 10000000 }, app: { m: 'auto' } } }; // 24.11.2026 (סבב 4 חלק א): בלי הגדרה – אין ביצוע לבד; כאן "לבד" כדי לבדוק את שאר התנאים כמו קודם (במיקום הישן mgr.<uid>.perm – נקרא כגיבוי כשאין sec_perm/{uid})
     b.set(d.doc(`b/${A}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: true, pay: {}, mgr });
     b.set(d.doc(`b/${B}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: true, pay: {}, mgr: { [MB]: { cv: ver, ca: 1 } } });
     b.set(d.doc(`b/${A}/sec_cfg/wa`), Object.assign({ pnid: PN_A, num: '97230000000', link: 'coexist', mgr: { [M1]: NUM_M1 }, tpls: [{ name: 'follow_up', lang: 'he', label: 'מעקב' }] }, opt.wa));

@@ -8,6 +8,7 @@
 const T = require('./tenant');
 const { guideFor } = require('./sec-methods');
 const KT = require('./sec-know-tools'); // שלב 3: מידע על העסק, מידע רגיש, יומן
+const TR = require('./sec-trend');      // 24.11.2026 (סבב 4 חלק ב): מגמות, הוצאה חריגה, הצעות הזמנה – אותו קובץ כמו במסך "ניתוחים" במכשיר
 const BT = require('./sec-biz-tools');  // 23.11.2026: בקשות עובדים, ממתין לטיפול, משמרות, מלאי + הצעת משימה/תזכורת (כרטיס)
 const TKT = require('./tk-time');        // tkDl / tkLateAt – היעד בפועל של משימה, כמו באפליקציה (22.11.2026)
 const fs = require('fs');
@@ -49,7 +50,7 @@ const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f
 const N = (v) => (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e10 ? rnd(v) : null);
 
 // ---------- בדיקת המבנה של נתוני הכספים (מהמכשיר או למראה). מה שלא מוכר – נזרק ----------
-const LIM = { months: 26, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120, rec: 80, notes: 60, noteT: 500 };
+const LIM = { months: 26, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120, rec: 80, notes: 60, noteT: 500, spn: 300, ordD: 60 };
 // o.notes === true – רק בצ'אט, כשלמנהל יש הרשאה למידע רגיש (sensOn ב-secretary.js). אחרת הערות העובדים נזרקות (גם במראה ובתזכורות)
 function cleanFin(x, o) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || x.v !== 1 || !Number.isInteger(x.at)) return null;
@@ -59,6 +60,19 @@ function cleanFin(x, o) {
     const m = x.months[k] || {};
     const cats = (Array.isArray(m.cats) ? m.cats : []).filter((c) => Array.isArray(c) && N(c[2]) !== null && ['i', 'e'].includes(c[1])).slice(0, LIM.cats).map((c) => [clean(c[0], 40), c[1], N(c[2])]);
     f.months[k] = { inc: N(m.inc) || 0, exp: N(m.exp) || 0, own: N(m.own) || 0, cats };
+  }
+  // 24.11.2026 (גיטי סבב 4 חלק ב – ניתוחים, lib/sec-trend.js): spn – [ספק, i/e, קטגוריה]; months[m].sp – [מספר ב-spn, סכום]; ord – [מספר ב-spn, [ימי חשבונית]].
+  //   שדות חדשים ולא חובה (מכשיר ישן – בלי). מה שלא תקין – נזרק
+  if (Array.isArray(x.spn)) {
+    f.spn = x.spn.slice(0, LIM.spn).map((r) => (Array.isArray(r) && ['i', 'e'].includes(r[1]) && clean(r[0], 60) ? [clean(r[0], 60), r[1], clean(r[2], 40)] : null));
+    const ix = (v) => Number.isInteger(v) && v >= 0 && v < f.spn.length && !!f.spn[v];
+    for (const k of mk) {
+      const sp = x.months[k] && x.months[k].sp;
+      if (Array.isArray(sp)) f.months[k].sp = sp.filter((r) => Array.isArray(r) && ix(r[0]) && N(r[1]) !== null).slice(0, LIM.spn).map((r) => [r[0], N(r[1])]);
+    }
+    if (Array.isArray(x.ord)) f.ord = x.ord.filter((r) => Array.isArray(r) && ix(r[0]) && Array.isArray(r[1])).slice(0, LIM.spn)
+      .map((r) => [r[0], r[1].filter((d) => Number.isInteger(d) && d > 0 && d < 100000).slice(-LIM.ordD)]);
+    f.spn = f.spn.map((r) => r || ['', 'e', '']); // שמירה על המספור; שורה לא תקינה – בלי שם (לא מוצגת)
   }
   f.open = (Array.isArray(x.open) ? x.open : []).filter((r) => Array.isArray(r) && N(r[5]) !== null).slice(0, LIM.open)
     .map((r) => [clean(r[0], 60), clean(r[1], 30), DAY_RE.test(r[2]) ? r[2] : '', DAY_RE.test(r[3]) ? r[3] : '', N(r[4]) || 0, N(r[5])]);
@@ -105,6 +119,8 @@ const DECL = {
   getCashflowForecast: { description: 'צפי תזרים ל-13 שבועות: יציאות צפויות (צ\'קים, חשבוניות, אשראי, הלוואות) וטווח הכנסות לפי העבר. עם יתרת פתיחה – יתרה צפויה לכל שבוע וסף התראה.', parameters: S({ startBalance: numP('יתרת הבנק היום, אם המנהל מסר') }) },
   simulateScenario: { description: 'תרחיש "מה אם": מוסיף הוצאה או הכנסה חד־פעמית בשבוע מסוים ומחשב מחדש את הצפי. לא נשמר.', parameters: S({ amount: numP('סכום בש"ח'), week: numP('מספר שבוע 1 עד 13'), direction: { type: 'string', enum: ['out', 'in'], description: 'out = הוצאה, in = הכנסה' }, startBalance: numP('יתרת פתיחה, אם ידועה') }, ['amount', 'week', 'direction']) },
   loanCalc: { description: 'חישוב הלוואה משוער: החזר חודשי וסך הריבית לפי ההנחות. לא ייעוץ פיננסי.', parameters: S({ principal: numP('סכום ההלוואה'), annualRatePct: numP('ריבית שנתית באחוזים'), months: numP('מספר חודשים'), type: { type: 'string', enum: ['spitzer', 'equal'], description: 'שפיצר או קרן שווה' } }, ['principal', 'annualRatePct', 'months']) },
+  getTrends: { description: 'מגמות הוצאות והכנסות לפי קטגוריה ולפי ספק: החודש מול החודש הקודם ומול אותו חודש אשתקד, 12 חודשים אחורה, וגם הוצאות חריגות (30% ומעלה מעל ממוצע 3 החודשים הקודמים של אותו ספק/קטגוריה וגם מעל 200 ₪). כמו במסך "ניתוחים".', parameters: S({ month: str('חודש YYYY-MM (ברירת מחדל: החודש הנוכחי)'), by: { type: 'string', enum: ['category', 'supplier', 'all'], description: 'לפי קטגוריה, לפי ספק, או הכול (ברירת מחדל)' }, kind: { type: 'string', enum: ['exp', 'inc', 'all'], description: 'exp = הוצאות (ברירת מחדל), inc = הכנסות, all = הכול' }, name: str('שם ספק או קטגוריה, או חלק ממנו (לא חובה)') }) },
+  getOrderSuggestions: { description: 'הצעות הזמנה מספקים לפי קצב החשבוניות הקודמות: "בדרך כלל כל N ימים, האחרונה לפני M ימים". הצעה בלבד – אף פעם לא שולחים הזמנה; הזמנה מספק תמיד באישור המנהל.', parameters: S({ supplier: str('שם ספק (לא חובה)') }) },
   getImprovementIdeas: { description: 'רעיונות לשיפור מבוססי נתונים (קטגוריה שעלתה, חשבוניות באיחור, חודש הפסדי), בלי רעיונות שסומנו "לא רלוונטי".', parameters: S({}) },
   getTasks: { description: 'משימות עובדים מהענף: כמה פתוחות, בוצעו, באיחור, לפי עובד.', parameters: S({ employee: str('שם עובד (לא חובה)'), status: { type: 'string', enum: ['open', 'done', 'late', 'all'] }, days: numP('כמה ימים אחורה, ברירת מחדל 30') }) },
   getCashClosings: { description: 'סגירות קופה בטווח תאריכים.', parameters: S({ from: str('מתאריך YYYY-MM-DD'), to: str('עד תאריך YYYY-MM-DD') }) },
@@ -117,7 +133,7 @@ const DECL = {
   getAppHelp: { description: 'מדריך העזרה של האפליקציה: איך עושים פעולה, איפה נמצא מסך או כפתור, מה המשמעות של שדה, ופתרון תקלות (סנכרון, עדכון, סריקה, כניסה, התראות, גיבוי ועוד). להפעיל בכל שאלה על השימוש באפליקציה או על תקלה בה.', parameters: S({ question: str('השאלה או הנושא, במילים של המנהל') }, ['question']) },
   refuseOffTopic: { description: 'להפעיל רק כשהשאלה אינה קשורה בשום צורה לעסק או לאפליקציה (למשל נושא אישי, בידור או פוליטיקה).', parameters: S({}) },
 };
-const FIN_TOOLS = ['getMonthSummary', 'getRecentEntries', 'getOpenInvoices', 'getSupplierBalance', 'getCashflowForecast', 'simulateScenario', 'getImprovementIdeas'];
+const FIN_TOOLS = ['getMonthSummary', 'getRecentEntries', 'getOpenInvoices', 'getSupplierBalance', 'getCashflowForecast', 'simulateScenario', 'getImprovementIdeas', 'getTrends', 'getOrderSuggestions'];
 
 // ---------- אילו כלים בכל ערוץ (5.5) – נקבע כאן בלבד, לא לפי בקשת המודל ----------
 // app = צ'אט באפליקציה (מנהל מחובר); wa = ווצאפ ממספר המנהל (שלב 5: רק יומן/תזכורות – כאן ריק); in = הודעה נכנסת מבחוץ (בלי כלי קריאה)
@@ -143,12 +159,12 @@ function toolsFor(ch, o) {
 const declsOf = (names) => names.map((n) => Object.assign({ name: n }, DECL[n]));
 
 // ---------- ביצוע ----------
-const SCREEN = { ...KT.SCREEN, ...BT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
+const SCREEN = { ...KT.SCREEN, ...BT.SCREEN, getMonthSummary: 'home', getRecentEntries: '', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTrends: 'trend', getOrderSuggestions: 'trend', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', getEmployeeNotes: '', loanCalc: '', getAppHelp: '' };
 const LABEL = {
   ...KT.LABEL,
   ...BT.LABEL,
   getMonthSummary: (a) => 'סיכום חודש ' + (a.month || ''), getRecentEntries: () => 'פעולות אחרונות שנרשמו', getOpenInvoices: () => 'חשבוניות לתשלום', getSupplierBalance: (a) => 'כרטיס ספק – ' + (a.supplier || ''),
-  getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים',
+  getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים', getTrends: (a) => 'מגמות והוצאות חריגות' + (MON_RE.test(a.month) ? ' ' + a.month : ''), getOrderSuggestions: () => 'הצעות הזמנה לפי קצב קודם (הצעה בלבד)',
   getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (MON_RE.test(a.from) || MON_RE.test(a.to) ? ' ' + (a.from || '') + '–' + (a.to || '') : a.month ? ' ' + a.month : ''),
   getEmployeeActivity: (a) => 'נתוני עובד – ' + (a.employee || ''), loanCalc: () => 'חישוב הלוואה (לפי ההנחות)', getAppHelp: () => 'מדריך העזרה של האפליקציה',
   getEmployeeNotes: () => 'הערות על עובדים (מוצפן)',
@@ -301,6 +317,34 @@ async function runTool(name, args, ctx) {
       return { scenario: { amount: rnd(amt), week: Math.round(wk), direction: a.direction === 'in' ? 'הכנסה' : 'הוצאה' }, saved: false, base: { lowest: base.lowest || null, belowThreshold: base.belowThreshold || null }, withScenario: alt };
     }
     case 'loanCalc': return Object.assign(loanCalc(a), { note: 'חישוב לפי ההנחות בלבד. לא כולל עמלות וביטוחים.' });
+    // 24.11.2026 (גיטי סבב 4 חלק ב): ניתוחים – אותם חישובים כמו במסך "ניתוחים" (lib/sec-trend.js), מאותם נתוני כספים (מכשיר / מראה)
+    case 'getTrends': {
+      if (!fin) return noFin(ctx);
+      const today = dayOf(fin.at);
+      const by = a.by === 'category' ? 'cat' : a.by === 'supplier' ? 'sup' : 'all', kind = a.kind === 'inc' ? 'i' : a.kind === 'all' ? 'all' : 'e';
+      const r = TR.trends(fin, { month: a.month, today, by, kind, q: typeof a.name === 'string' ? clean(a.name, 60) : '', limit: 25 });
+      if (r.error) return noFin(ctx);
+      const out = { month: r.month, comparedTo: { prevMonth: r.prevMonth, lastYearMonth: r.lastYearMonth }, totals: r.totals,
+        rows: r.rows.map((x) => Object.assign({ type: x.by === 'sup' ? 'ספק' : 'קטגוריה', name: x.name, kind: x.kind === 'i' ? 'הכנסה' : 'הוצאה', thisMonth: x.month, prevMonth: x.prevMonth, lastYear: x.lastYear, vsPrevPct: x.vsPrevPct, vsLastYearPct: x.vsLastYearPct, avg12: x.avg12 }, x.cat ? { category: x.cat } : {})), more: r.more };
+      out.anomalies = TR.anomalies(fin, { today }).map((x) => Object.assign({ type: x.by === 'sup' ? 'ספק' : 'קטגוריה', name: x.name, month: x.month, amount: x.amount, avg3: x.avg3, overPct: x.overPct, over: x.over }, x.cat ? { category: x.cat } : {}));
+      const miss = [];
+      if (!r.hasSup) miss.push('פירוט לפי ספק מגיע רק מגרסה חדשה של האפליקציה במכשיר שבו נשמרים הנתונים (או ממראה שעודכן ממנה).');
+      if (!r.hasLastYear) miss.push('אין נתונים לאותו חודש אשתקד (' + r.lastYearMonth + ').');
+      if (r.firstMonth && TR.addMon(r.month, -3) < r.firstMonth) miss.push('יש פחות מ-3 חודשים של נתונים – אי אפשר לזהות חריגות בחודש הזה.');
+      if (miss.length) out.missing = miss.join(' ');
+      out.note = 'אחוז = שינוי מול הבסיס (null = אין בסיס להשוואה). חריגה = 30% ומעלה מעל ממוצע 3 החודשים הקודמים (של החודשים שהיו בהם הוצאות, לפחות 2) וגם מעל 200 ₪; זיכויים מורידים את הסכום. ספק או קטגוריה בלי היסטוריה – לא חריגים.';
+      return out;
+    }
+    case 'getOrderSuggestions': {
+      if (!fin) return noFin(ctx);
+      if (!Array.isArray(fin.ord)) return { error: 'no-data', note: 'אין נתוני חשבוניות ספקים לחישוב קצב. צריך גרסה חדשה של האפליקציה במכשיר שבו נשמרים הנתונים.' };
+      // הימים נספרים מתאריך הנתונים (fin.at), לא מהיום – חשבונית שנרשמה אחרי עדכון המראה לא ידועה כאן (הערת בדיקה סבב 1)
+      const asOf = dayOf(fin.at);
+      let L = TR.orderTips(fin, { today: asOf, all: !!a.supplier });
+      if (a.supplier) L = L.filter((x) => match(x.name, a.supplier));
+      return { asOf, count: L.length, items: L.slice(0, 15).map((x) => ({ supplier: x.name, everyDays: x.every, lastInvoice: x.lastDate, daysSinceLast: x.daysSince, invoicesInYear: x.orders, suggestNow: x.due })),
+        note: 'הצעה בלבד לפי קצב החשבוניות ב-365 הימים האחרונים (לפחות 3). "ימים מאז" נספר עד תאריך הנתונים (asOf). המנהל יכול ללחוץ "הכן הזמנה" בלשונית "ניתוחים" – נוצרת טיוטה לאישור ומשימה, בלי שליחה. שום הזמנה לא נשלחה ולא תישלח בלי אישור המנהל. לא ידוע: מלאי בפועל, הזמנות שלא נרשמו כחשבונית, ושינויים בעונה.' };
+    }
     case 'getImprovementIdeas': {
       if (!fin) return noFin(ctx);
       const L = ideas(fin, ctx.nr, now);

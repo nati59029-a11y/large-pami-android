@@ -13,6 +13,7 @@
 // כל כלי מחזיר _at (נכון ל-) למקור, וכל מספר בתשובה עובר את בדיקת המספרים של sec-tools (verify).
 
 const crypto = require('node:crypto');
+const PERM = require('./sec-perm'); // 24.11.2026 (סבב 4 חלק א): הרשאות לפי סוג פעולה
 const T = require('./tenant');
 const SC = require('./shifts-core');
 const GRP = require('./sec-grp'); // 23.11.2026 (סבב 3): הרשאת קריאה לכל קבוצה פנימית
@@ -210,6 +211,11 @@ async function run(name, a, ctx) {
     }
     case 'proposeTask': {
       const kind = a.kind === 'reminder' ? 'rem' : 'task';
+      // 24.11.2026 (גיטי, סבב 4 חלק א): ההרשאות של המנהל ששואל. "אסור" – לא נוצר כרטיס. "טרם הוגדר" – שאלה בפעם הראשונה (מרכז האישורים שלו); הכרטיס עצמו – לאישור כרגיל
+      // 24.11.2026 (החלטות המשתמש 1–2): "לבד" – הכרטיס מסומן auto והאפליקציה מאשרת אותו מיד (אותה זרימה, השרת בודק שוב). "עצור הכל" – לאישור
+      const ws = await db.doc('sec_cfg/wa').get();
+      const pd = PERM.decide(await PERM.readRec(db, ctx.uid), kind, { stop: !!(ws.exists && ws.get('stop') && ws.get('stop').on === true) });
+      if (pd.d === 'deny') return { error: 'not-allowed', note: 'לפי מסך ההרשאות גיטי לא רשאית ליצור ' + (kind === 'rem' ? 'תזכורות' : 'משימות') + '. אמרי למנהל שאפשר לשנות זאת בהגדרות המזכירה ← הרשאות.' };
       if ((ctx.cards || []).filter((c) => c && c.k === 'tkp').length >= CARDS_MAX) return { error: 'too-many', note: 'כבר הוצעו כמה כרטיסים בתשובה הזו. בקשי מהמנהל לאשר אותם קודם.' };
       const max = kind === 'rem' ? REM_MAX : TXT_MAX;
       const txt = clean(a.text, max + 1);
@@ -225,6 +231,8 @@ async function run(name, a, ctx) {
       if (kind === 'task' && !(ctx.feat && ctx.feat.tasks === true)) return { error: 'not-available', note: 'תוספת המשימות לא פעילה בעסק הזה. אפשר להציע תזכורת למנהל.' };
       const card = { k: 'tkp', id: 'tp' + crypto.randomBytes(8).toString('hex'), kind, txt, d, tm, pri: kind === 'task' && a.urgent === true ? 'h' : '', all: false, to: [] };
       const out = { proposed: true, needsApproval: true, kind: kind === 'rem' ? 'תזכורת' : 'משימה' };
+      if (pd.d === 'ask') await PERM.ask(db, ctx.uid, kind, 'הצעה בשיחה', { k: 'tkp', cid: card.id }); // התשובה תחול מיד גם על הכרטיס הזה
+      if (pd.d === 'auto') card.auto = true;
       if (kind === 'task') {
         if (a.allEmployees === true) card.all = true;
         else {
@@ -240,7 +248,8 @@ async function run(name, a, ctx) {
       }
       if (past) out.dateNote = 'התאריך שהוזכר כבר עבר – בכרטיס אין תאריך, והמנהל יבחר.';
       ctx.cards.push(card);
-      out.note = 'נוצר כרטיס לעריכה ולאישור. שום דבר לא נוצר עד שהמנהל יאשר.';
+      out.note = card.auto ? 'לפי ההרשאות של המנהל ("לבד") האפליקציה תיצור את זה מיד, אם יש את כל הפרטים (למשימה – למי; לתזכורת – תאריך). אחרת – כרטיס לאישור.' : 'נוצר כרטיס לעריכה ולאישור. שום דבר לא נוצר עד שהמנהל יאשר.';
+      if (card.auto) out.needsApproval = false;
       return out;
     }
     default: return { error: 'unknown-tool' };

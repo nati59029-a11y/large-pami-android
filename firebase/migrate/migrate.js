@@ -62,7 +62,7 @@ const COPY = [
   'impJobs', 'push_tokens', 'fn_rate', 'lineplan', 'lineLog', 'wv',
   // המזכירה העסקית: SEC_COLLS ב-functions/secretary.js + sec_ord (הזמנות מהמייל, secretary-google.js)
   'sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log',
-  'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq', // sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה
+  'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', 'sec_cmt', 'sec_cmtq', 'sec_perm', // sec_perm: הרשאות גיטי לכל מנהל (24.11.2026, סבב 4); sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה
   // קופה – pos (גל 2, 18.11.2026): קיימת רק במבנה b/{bizId} (השרת דוחה עסק legacy), ולכן אין לה מקור בשורש וההעתקה לא עושה בהם דבר.
   // נוספו כמו rv – כדי שהרשימה תכסה כל כלל ב-b/{bizId} וכל אוסף שהשרת כותב דרך T.tdb() (posalert, poslbl, poscnt, posbc, posbr – בלי כלל).
   // תתי-אוספים (prod/{id}/ph) מועתקים עם ההורה. postpl ו-posbug הם טבלאות שרת משותפות לכל העסקים – ב-SHARED.
@@ -72,6 +72,7 @@ const COPY = [
   'dr', 'drcfg', // main (#186–188, 23.11.2026): כללים רק תחת b/{bizId}, נוספו אחרי ההעברה – אין להם עותק בשורש
   'lblp', // מוצרים שהוקלדו ידנית במסך הדפסת המדבקות (main, 1d5a0bc): כלל ב-b/{bizId} וגם בשורש – נוסף 23.11.2026 כדי שבדיקה 13 תכסה אותו
   'lblt', 'lbls', // תבניות והגדרות מדבקות (24.11.2026): כלל ב-b/{bizId} וגם בשורש – כדי שבדיקה 13 תכסה אותם
+  'qt', // הצעות מחיר (24.11.2026, functions/quotes.js): כלל ב-b/{bizId} וגם בשורש; תת-האוסף log מועתק עם ההורה – כדי שבדיקה 13 תכסה אותו
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [

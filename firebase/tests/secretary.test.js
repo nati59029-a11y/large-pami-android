@@ -31,7 +31,7 @@ const MGR_FNS = ['secState', 'secConsent', 'secSetup'];
 const SA_FNS = ['secAdminGet', 'secAdminSetCfg', 'secAdminReadChat'];
 const ALL_FNS = MGR_FNS.concat(SA_FNS);
 // כל אוספי sec_* (מסמך לדוגמה בכל אחד) – לבדיקת חסימה ברמת החוקים
-const SAMPLE = ['sec_cfg/main', 'sec_cfg/cap', 'sec_chat/' + M1 + '/m/x1', 'sec_in/i1', 'sec_draft/d1', 'sec_inv/v1', 'sec_inv/v1/p/0', 'sec_facts/f1', 'sec_rules/r1', 'sec_cal/c1', 'sec_mirror/m', 'sec_rep/r1', 'sec_log/l1', 'sec_usage/2026-11', 'sec_facts_sensitive/s1', 'sec_note/' + M1 + '/n/x1', 'sec_snd/972500000001', 'sec_clean/c1', 'sec_gcal/' + M1 + '__c1', 'sec_learn/l1', 'sec_mrule/x1', 'sec_mlog/x1', 'sec_cmt/x1', 'sec_cmtq/x1'];  // sec_mrule, sec_mlog – "תגובה למזכירה" (15.11.2026; שרת בלבד) // sec_learn – מענה אוטומטי למייל (שרת בלבד); sec_snd – שלב 5 (כרטיס שולח בווצאפ; שרת בלבד); sec_clean, sec_gcal – שלב 6 (רשימות ניקוי ומיפוי יומן Google; שרת בלבד)
+const SAMPLE = ['sec_cfg/main', 'sec_cfg/cap', 'sec_chat/' + M1 + '/m/x1', 'sec_in/i1', 'sec_draft/d1', 'sec_inv/v1', 'sec_inv/v1/p/0', 'sec_facts/f1', 'sec_rules/r1', 'sec_cal/c1', 'sec_mirror/m', 'sec_rep/r1', 'sec_log/l1', 'sec_usage/2026-11', 'sec_facts_sensitive/s1', 'sec_note/' + M1 + '/n/x1', 'sec_snd/972500000001', 'sec_clean/c1', 'sec_gcal/' + M1 + '__c1', 'sec_learn/l1', 'sec_mrule/x1', 'sec_mlog/x1', 'sec_cmt/x1', 'sec_cmtq/x1', 'sec_perm/' + M1];  // sec_mrule, sec_mlog – "תגובה למזכירה" (15.11.2026; שרת בלבד) // sec_learn – מענה אוטומטי למייל (שרת בלבד); sec_snd – שלב 5 (כרטיס שולח בווצאפ; שרת בלבד); sec_clean, sec_gcal – שלב 6 (רשימות ניקוי ומיפוי יומן Google; שרת בלבד)
 const CONSENTED = (ver) => ({ cv: ver, ca: 1 });
 
 async function seed(o) {
@@ -145,6 +145,13 @@ describe('עובד ועסק אחר – נחסמים בכל פונקציה ובכ
       await assertFails(db(u).doc(`b/${A}/${p}`).set({ t: 2 }));
       await assertFails(db(u).doc(`b/${A}/${p}`).delete());
     }
+  });
+  it('הרשאות גיטי (sec_perm/{uid}, סבב 4 חלק א): מנהל לא קורא את של מנהל אחר, וגם לא את שלו ישירות – רק דרך השרת', async () => {
+    await assertFails(db(M2).doc(`b/${A}/sec_perm/${M1}`).get());
+    await assertFails(db(M1).doc(`b/${A}/sec_perm/${M1}`).get());
+    await assertFails(db(M1).collection(`b/${A}/sec_perm`).get());
+    await assertFails(db(M1).doc(`b/${A}/sec_perm/${M1}`).set({ perm: { mail: { m: 'auto' } } }));
+    await assertFails(db(SUPER).doc(`b/${A}/sec_perm/${M1}`).get());
   });
   it('מנהל: קורא את האוספים המשותפים; sec_mirror, sec_facts_sensitive ו-sec_cfg/cap – לא', async () => {
     for (const p of ['sec_cfg/main', 'sec_in/i1', 'sec_draft/d1', 'sec_inv/v1', 'sec_inv/v1/p/0', 'sec_facts/f1', 'sec_rules/r1', 'sec_cal/c1', 'sec_rep/r1', 'sec_log/l1', 'sec_usage/2026-11']) await assertSucceeds(db(M1).doc(`b/${A}/${p}`).get());

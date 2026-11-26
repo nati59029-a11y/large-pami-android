@@ -446,7 +446,7 @@ describe('החלטה: ח.פ מוכר מספיק ל"נכנס ישר" גם משו�
       return Object.assign({ id: x.id }, (await db.doc('sec_inv/' + x.id).get()).data());
     });
   }
-  it('מייל לא מאומת: ח.פ מוכר – נכנס ישר (+התראה "לא מאומת", התפיסה האוטומטית בשרת מצליחה); ח.פ לא מוכר – ממתין; תקרה, זיכוי וכפילות – עדיין ממתינים; ווצאפ משולח חדש / מספר המנהל עם ח.פ מוכר – נכנס ישר עם "שולח חדש"', async () => {
+  it('מייל לא מאומת: ח.פ מוכר – נכנס ישר (+התראה "לא מאומת", התפיסה האוטומטית בשרת מצליחה עם הרשאת "רישום הוצאה" של המנהל, ובלעדיה ממתינה); ח.פ לא מוכר – ממתין; תקרה, זיכוי וכפילות – עדיין ממתינים; ווצאפ משולח חדש / מספר המנהל עם ח.פ מוכר – נכנס ישר עם "שולח חדש"', async () => {
     await seed();
     await bizzes();
     await prep(async (d) => {
@@ -470,7 +470,13 @@ describe('החלטה: ח.פ מוכר מספיק ל"נכנס ישר" גם משו�
     assert.deepEqual([wa.match, wa.el, wa.ns], ['hp', true, 'wa:972527654321'], 'שולח חדש עם ח.פ מוכר – נכנס ישר, מסומן "שולח חדש"');
     // תפיסה אוטומטית בשרת – בודקת שוב: הלא מאומת עם ח.פ מוכר עובר, עם ח.פ לא מוכר נדחה
     await prep((d) => d.doc('b/' + A).update({ 'features.secretary': true }));
-    assert.equal((await callFn('secDecide', M1, { op: 'claim', id: ok.id, mode: 'auto', dev: 'devA0001' })).code, 'ok');
+    // 24.11.2026 (גיטי סבב 4, החלטת המשתמש 3): "נכנס ישר" לבדו לא מעניק "לבד" – בלי הרשאת "רישום הוצאה" של המנהל החשבונית ממתינה ונשאלת שאלה
+    const noPerm = await callFn('secDecide', M1, { op: 'claim', id: ok.id, mode: 'auto', dev: 'devA0001' });
+    assert.deepEqual([noPerm.code, noPerm.reason], ['failed-precondition', 'not-eligible'], 'בלי הרשאה – ממתין לאישור');
+    assert.equal((await get(`b/${A}/sec_inv/${ok.id}`)).el, true, 'הסיבה היחידה "טרם הוגדר" – החשבונית נשארת זכאית');
+    assert.ok((await get(`b/${A}/sec_perm/${M1}`)).pq.fin, 'נשאלה שאלה למנהל על "רישום הוצאה"');
+    await prep((d) => d.doc(`b/${A}/sec_perm/${M1}`).set({ perm: { fin: { m: 'auto', cap: 10000, t: 1 } } }, { merge: true }));
+    assert.equal((await callFn('secDecide', M1, { op: 'claim', id: ok.id, mode: 'auto', dev: 'devA0001' })).code, 'ok', 'עם הרשאת "לבד" – נכנס ישר');
     assert.equal((await callFn('secDecide', M1, { op: 'claim', id: bad.id, mode: 'auto', dev: 'devA0001' })).reason, 'not-eligible');
     assert.equal((await callFn('secDecide', M1, { op: 'claim', id: cap.id, mode: 'auto', dev: 'devA0001' })).reason, 'not-eligible');
   });

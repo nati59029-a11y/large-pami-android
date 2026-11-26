@@ -162,6 +162,21 @@ function bizDay(day) {
 }
 const addDays = (d, k) => { const [y, m, x] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, x + k)).toISOString().slice(0, 10); };
 function nextBizDay(day) { let d = day; for (let i = 0; i < 30; i++) { d = addDays(d, 1); if (bizDay(d)) return d; } return d; }
+// 24.11.2026 (גיטי סבב 4ג, החלטת המשתמש): תזכורת שגיטי קובעת לבד (auto) ונופלת בשבת או ביום טוב – או בערב שבת/חג משעה EREV_TM –
+// עוברת למוצאי שבת/חג בשעה MOTZ_TM (אחרי רצף ימי מנוחה – ליום האחרון שלו). הלוח: TK.isRest (lib/tk-time.js – שבת + יום טוב לפי הלוח העברי,
+// אותו לוח של חלון השקט בהתראות). חול המועד וערב חג בבוקר – לא מנוחה, לא זז. מחזיר null כשאין צורך להזיז, אחרת { d, tm }
+const TKT = require('./tk-time');
+const EREV_TM = '16:00', MOTZ_TM = '21:00';
+const restDay = (s) => { const [y, m, x] = s.split('-').map(Number); return TKT.isRest({ y, m: m - 1, d: x }); };
+function restMove(d, tm) {
+  if (!validDay(d)) return null;
+  tm = typeof tm === 'string' && TIME_RE.test(tm) ? tm : '';
+  let D = d;
+  if (!restDay(D)) { if (!(tm && tm >= EREV_TM && restDay(addDays(D, 1)))) return null; D = addDays(D, 1); }
+  for (let i = 0; i < 10 && restDay(addDays(D, 1)); i++) D = addDays(D, 1);
+  if (D === d && tm >= MOTZ_TM) return null; // כבר במוצאי שבת/חג
+  return { d: D, tm: MOTZ_TM };
+}
 function offKind(day) {
   const wd = new Date(day + 'T12:00:00Z').getUTCDay();
   return wd === 5 ? 'שישי' : wd === 6 ? 'שבת' : bizDay(day) ? '' : 'חג או ערב חג';
@@ -230,6 +245,6 @@ module.exports = {
   TOPICS, FIXED, FACT_MAX, FACTS_MAX, PROP_MAX, PRICE_ROWS, normHe, tokens, variants, tokMatch, conflictsOf, overlap, factOut, expired, cleanPrice, validDay,
   RULE_Q_MAX, RULE_A_MAX, RULE_COND_MAX, RULES_MAX, BANK_CTX, ruleHits, bankMatch, cleanRule,
   TPL_RE, FACT_KEY_RE, factMap, tplKeys, hasTpl, fillTpl, tplOf, factsOverlap, cleanQk,
-  TK_OFF, bizDay, nextBizDay, offKind, addDays, CAL_TITLE, CAL_NOTE, CAL_MAX, CAL_PROP_MAX, cleanEvent, calOut,
+  TK_OFF, bizDay, nextBizDay, offKind, restMove, EREV_TM, MOTZ_TM, addDays, CAL_TITLE, CAL_NOTE, CAL_MAX, CAL_PROP_MAX, cleanEvent, calOut,
   IMPORT_MAX, IMPORT_ITEMS, parseImport, clean, line, dayOf, DAY_RE, TIME_RE,
 };
