@@ -187,11 +187,11 @@ async function runToday(slot, now, tz) {
     hm = D.hmOf(now + (Date.now() - t0), tz); // "עד השעה" = מתי הדוח הורד מכספית
     const lines = A.list.flatMap((x) => x.p.lines.filter((l) => l.d === day));
     if (lines.length > 30000) throw P.err('limit', 'יותר מדי שורות מכירה היום לשליחה אחת');
-    // 0.1.13 (תיקון בודק): נחל לכיש נכשל – לא מעלים בכלל. השרת מחליף את כל מסמכי היום (cxDayP), והעלאה של יהודה הנשיא בלבד
-    // הייתה מוחקת את נחל לכיש מהשעה הקודמת. התמונה הקודמת נשארת; השעה הבאה תנסה שוב
     if (A.unsure) throw P.err(A.unsure.code, A.unsure.msg, { br: A.unsure, back: A.back }); // ליקוי 7: בלי בסיס להשוואה – לא מעלים
-    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br, back: A.back });
+    // 0.1.24 (תקלה 26.11): הסניף השני נכשל (A.br) – מעלים את מה שיש (הסניף המוצג; השיוך לסניף לפי מספר הסניף שבדוח), ורק אחר כך זורקים
+    // את שגיאת הסניף (todaySt / tf). השרת מחליף רק את מסמכי הסניפים שנשלחו – הסניף השני נשאר מההעלאה הקודמת
     if (lines.length) await (await api()).call('upload', { run: U.rid('ct'), kind: 'sales', partial: true, day, hm, part: 0, parts: 1, lines });
+    if (A.br) throw P.err(A.br.code, A.br.msg, { br: A.br, back: A.back, n: lines.length });
     out = Object.assign({ slot, st: 'ok', at: Date.now(), day, hm, n: lines.length }, A.list.length > 1 ? { brs: A.list.map((x) => [x.br, x.p.lines.filter((l) => l.d === day).length]) } : {}, A.br ? { br: A.br } : {}, A.back ? { back: A.back } : {});
   } catch (e) {
     const code = e && typeof e.code === 'string' ? e.code : 'tab';
@@ -201,7 +201,7 @@ async function runToday(slot, now, tz) {
       if (P.isTerminal(run)) await (await api()).call('report', { run: U.rid('ct'), kind: 'run', st: 'fail', err: { code, msg: String(e.message || '').slice(0, 300), step: 'today' }, steps: [], info: { today: day } }).catch(() => {});
     }
     // השרת דחה כי לפי השעון שלו זה עוד לא החלון (today-off) – השעה לא נחשבת "נלקחה", הבדיקה הבאה (tick) תנסה שוב
-    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {}, e && e.back ? { back: e.back } : {});
+    out = Object.assign({ slot: code === 'today-off' ? null : slot, st: 'fail', at: Date.now(), day, hm, code, msg: String((e && e.message) || '').slice(0, 200) }, e && e.br ? { br: e.br } : {}, e && Number.isInteger(e.n) ? { n: e.n } : {}, e && e.back ? { back: e.back } : {});
     // השרת לא מכיר את השדה – מכבים עד ה-poll הבא, שקובע את caps מחדש לפי מה שהשרת מודיע (שרת ישן לא מודיע today → נשאר כבוי)
     if (code === 'bad-field' || code === 'bad-op') await set({ caps: Object.assign((await get('caps')) || {}, { today: false }) });
   } finally { keepAlive(false); busy = false; }

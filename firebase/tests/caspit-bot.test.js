@@ -694,10 +694,10 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     assert.equal(s1.days.length, 2); assert.ok(s1.days.every((x) => x.pt && x.pt.hm === '10:05'));
     assert.equal(CC.aggDays(CC.unpackDays(s1)).net, 42);
     assert.equal((await call('cxSales', MGR, { from: DAY, to: DAY, pt: 1 })).reason, 'bad-field');
-    // שעה אחר כך: רק סניף א (סניף ב נעלם → נמחק), סכום חדש
+    // שעה אחר כך: רק סניף א (26.11.2026: המעבר לסניף השני נכשל – סניף ב נשאר מההעלאה הקודמת, לא נמחק), סכום חדש
     const L2 = lines(DAY, [['כוס נייר', '400001', '9101', 'סניף א', '6200', '', '0.0', '24'], ['כוס נייר', '400001', '9103', 'סניף א', '6200', '', '0.0', '12']]);
     assert.equal((await part({ day: DAY, hm: '11:05', lines: L2 }, at(DAY, '11:05'))).code, 200);
-    assert.equal((await PD('7700_20261202').get()).exists, false);
+    assert.equal((await PD('7700_20261202').get()).get('pt.hm'), '10:05', 'סניף שלא נשלח – נשאר כמו שהיה');
     const a2 = (await PD('6200_20261202').get()).data();
     assert.equal(a2.gross, 36); assert.equal(a2.ntx, 2); assert.equal(a2.pt.hm, '11:05'); assert.equal(a2.it['400001'].q, 3);
     // שעון מחשב שמקדים – "עד השעה" לא בעתיד
@@ -708,6 +708,13 @@ describe('רובוט כספית – מכירות היום (חלקי) ו"עדכו
     assert.equal(rr.code, 429); assert.equal(rr.body.reason, 'rate');
     assert.equal((await PD('6200_20261202').get()).get('pt.hm'), '12:01', 'לא נשמר');
     assert.equal((await part({ day: DAY, hm: '12:22', lines: L2 }, at(DAY, '12:22'))).code, 200, 'אחרי 20 דקות – מותר');
+    // שני סניפים בהעלאות נפרדות – שניהם נשארים, וכל אחד מתעדכן רק בהעלאה שלו
+    const L3 = lines(DAY, [['כוס נייר', '400001', '9201', 'סניף ב', '7700', '', '0.0', '30']]);
+    assert.equal((await part({ day: DAY, hm: '13:05', lines: L3 }, at(DAY, '13:05'))).code, 200);
+    const a3 = (await PD('6200_20261202').get()).data(), b3 = (await PD('7700_20261202').get()).data();
+    assert.deepEqual([a3.pt.hm, a3.gross], ['12:22', 36], 'סניף א מההעלאה שלו');
+    assert.deepEqual([b3.pt.hm, b3.gross, b3.ntx], ['13:05', 30, 1], 'סניף ב – רק מההעלאה החדשה');
+    assert.equal((await ok('cxSales', MGR, { from: DAY, to: DAY, pt: true })).days.length, 2);
   });
 
   it('upload חלקי נדחה: לא היום, לפני 07:00, שישי מ-14:00 / שבת, כמה חלקים, שורות מיום אחר, שעה / שדה לא תקינים', async () => {

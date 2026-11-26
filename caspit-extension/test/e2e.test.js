@@ -1166,17 +1166,27 @@ test('0.1.19 poll: עדכון שעתי שנכשל → tf פעם אחת; שינו
   srv.caps = null;
 });
 
-test('0.1.13 (תיקון בודק) שעתי: נחל לכיש נכשל → בלי העלאה חלקית בכלל (התמונה הקודמת של נחל לכיש לא נמחקת), רישום ב-todaySt', async () => {
+test('0.1.24 (תקלה 26.11) שעתי: הסניף השני נכשל (branch-same / branch-switch) → מעלים את הסניף המוצג בלבד, ואז הכשל נרשם ב-todaySt', async () => {
   const TZ = 'Asia/Jerusalem', W = D.zonedToUtc('2026-11-18', '16:05', TZ);
   await sw.evaluate(async () => { await chrome.alarms.clear('tick'); await chrome.alarms.clear('hour'); await chrome.storage.local.set({ caps: { today: true, uq: false } }); return chrome.storage.local.remove('todaySt'); });
   nlMode = 'same';
   try {
-    const n0 = srv.ops('upload').filter((c) => c.partial).length;
+    const parts = () => srv.ops('upload').filter((c) => c.partial);
+    const n0 = parts().length;
     const r = await sw.evaluate((n) => self.__cxTest.todayTick({ now: n }), W);
     assert.equal(r.st, 'fail', JSON.stringify(r)); assert.equal(r.code, 'branch-same'); assert.equal(r.br.code, 'branch-same');
-    assert.equal(srv.ops('upload').filter((c) => c.partial).length, n0, 'לא הועלה כלום');
+    assert.equal(parts().length, n0 + 1, 'הסניף המוצג הועלה');
+    const up = parts().at(-1);
+    assert.ok(up.lines.length > 0 && up.lines.every((l) => l.bk === '1'), 'רק הסניף המוצג (לפי מספר הסניף בדוח)');
+    assert.equal(r.n, up.lines.length);
     assert.equal(await store0(), 'יהודה הנשיא');
-  } finally { nlMode = 'rows'; await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); }); }
+    // המעבר לנחל לכיש לא נקלט (התקלה בחנות) – אותו דבר
+    nlMode = 'rows'; await ls({ brFail: 'switch', brPicks: null });
+    const r2 = await sw.evaluate((n) => self.__cxTest.todayTick({ now: n }), W + 3600e3);
+    assert.equal(r2.st, 'fail', JSON.stringify(r2)); assert.equal(r2.code, 'branch-switch');
+    assert.equal(parts().length, n0 + 2);
+    assert.ok(parts().at(-1).lines.every((l) => l.bk === '1'));
+  } finally { nlMode = 'rows'; await ls({ brFail: null, store: 'יהודה הנשיא' }); await sw.evaluate(async () => { await chrome.storage.local.remove(['caps', 'todaySt']); await self.__cxTest.setupAlarms(); }); }
 });
 test('0.1.13 (תיקון בודק) היכרות שמתחילה כשכספית בנחל לכיש: קודם חזרה ליהודה הנשיא; לא מצליח → branch-restore, בלי לקרוא אף מסך', async () => {
   await ls({ store: 'נחל לכיש', brFail: 'restore', brPicks: null });
