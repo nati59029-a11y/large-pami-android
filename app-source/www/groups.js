@@ -497,8 +497,16 @@ ACT.grMenu=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x
  const r=c.rx&&c.rx.get(id),mine=r&&r.get(SY.uid)?r.get(SY.uid).e:'',I=`data-id="${esc(id)}"`,B=(a,t,cl)=>`<button class="btn ${cl||'g'} w" data-a="${a}" ${I} style="margin-bottom:8px">${t}</button>`;
  const media=m.k==='img'||(m.k==='vid'&&!m.gone&&Date.now()-m.t<=90*DAY);
  dlg(`<h3>אפשרויות הודעה</h3>${c.xoff?'':`<div class="gr-emo">${EMO.map(e=>`<button class="${e===mine?'on':''}" data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`}`
-  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+B('grShare','📤 שיתוף')+(media?B('grSelOn','☑ בחירת כמה תמונות וסרטונים'):'')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):(m.k==='file'||m.k==='aud')&&!fGone(m)?B('grGal','⬇ שמור במכשיר'):'')
+  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+(mTxt(m)?B('grCopy','📋 העתקת טקסט'):'')+B('grShare','📤 שיתוף')+(media?B('grSelOn','☑ בחירת כמה תמונות וסרטונים'):'')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):(m.k==='file'||m.k==='aud')&&!fGone(m)?B('grGal','⬇ שמור במכשיר'):'')
   +(adm?B('grPin',pd?'בטל הצמדה':'📌 הצמד')+B('grDel','🗑 מחק הודעה','r'):'')+'<button class="btn g w" data-a="closeDlg">ביטול</button>')};
+/* העתקת טקסט: חלון עם הטקסט שאפשר לסמן בו חלק (לחיצה ארוכה), וכפתור "העתק הכל" */
+const mTxt=m=>String(m.k==='aud'?(m.tr||''):(m.txt||''));
+async function cpTxt(t){try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(t);return true}}catch(e){}
+ const a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.cssText='position:fixed;top:0;left:0;opacity:0';(document.getElementById('dlg')||document.body).append(a);a.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}a.remove();return ok}
+ACT.grCopy=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id),t=m?mTxt(m):'';if(!t)return toast('אין טקסט להעתקה');
+ dlg(`<h3>העתקת טקסט</h3><p style="color:var(--mut);font-size:.85rem;margin:0 0 6px">להעתקת חלק: לחיצה ארוכה על מילה, גוררים את הסימון ובוחרים "העתק". להעתקת הכל: הכפתור למטה.</p><div dir="auto" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;background:var(--bg);-webkit-user-select:text;user-select:text;-webkit-touch-callout:default">${esc(t)}</div><button class="btn w" data-a="grCopyAll" data-id="${esc(id)}" style="margin-bottom:8px">📋 העתק הכל</button><button class="btn g w" data-a="closeDlg">סגירה</button>`)};
+ACT.grCopyAll=async el=>{const c=GR.c,m=c&&c.msgs.find(x=>x.id===el.dataset.id),t=m?mTxt(m):'';if(!t)return;
+ if(await cpTxt(t)){closeDlg();toast('הטקסט הועתק')}else toast('ההעתקה לא הצליחה. סמנו את הטקסט בלחיצה ארוכה ובחרו "העתק"')};
 /* הצמדה: עדכון חלקי של השדה pin בלבד; שרת ישן (403) = הודעה ברורה */
 ACT.grPin=async el=>{const c=GR.c;if(!c||!fbAdmin())return;closeDlg();const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
  const un=c.g.pin&&c.g.pin.mid===id,q='/grp/'+c.gid+'?updateMask.fieldPaths=pin';
