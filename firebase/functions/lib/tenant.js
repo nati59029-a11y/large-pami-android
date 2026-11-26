@@ -16,7 +16,7 @@ const { getFirestore } = require('firebase-admin/firestore');
 const BIZ0 = 'largpeami';
 const BIZ_RE = /^[a-z0-9-]{3,30}$/;
 // מפתחות התוספות (חוזה, סעיף ו)
-const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular', 'ordCard', 'secretary', 'store3d', 'dailyRep', 'groups', 'pos', 'cxSales'];  // groups – קבוצות התכתבות (17.11.2026, סבב 3)
+const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular', 'ordCard', 'secretary', 'store3d', 'dailyRep', 'groups', 'pos', 'cxSales', 'bake'];  // groups – קבוצות התכתבות (17.11.2026, סבב 3)
 // ordCard (2026-11-10 11:50): הזנת כרטיס אשראי בטופס ההזמנה – ברירת מחדל פעיל (גם כשהמפתח חסר במסמך); רק מנהל־על מכבה (false)
 // cellular (00:24, ניודים בלקוח) – ברירת מחדל כבוי גם בעסק הישן; רק מנהל־על מפעיל
 // secretary (המזכירה העסקית, שלב 1, 11.11.2026) – כמו cellular: כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל
@@ -24,7 +24,8 @@ const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests',
 // dailyRep (דיווח יומי, 16.11.2026) – כמו store3d: כבוי כברירת מחדל בכל עסק; רק מנהל־על מפעיל. השרת דוחה עסק legacy (daily-rep.js)
 // pos (קופה, שלב 0, 17.11.2026) – כמו dailyRep: כבוי כברירת מחדל בכל עסק; רק מנהל־על מפעיל. השרת דוחה עסק legacy (pos.js)
 // cxSales (מכירות כספית, 19.11.2026) – כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל. caspit.js דוחה cxSales/cxLines/cxFix וקליטת דוח מכירות מהטלפון
-const OFF_IN_LEGACY = ['cellular', 'secretary', 'store3d', 'dailyRep', 'pos', 'cxSales'];
+// bake (עלות מוצרי אפייה, 26.11.2026) – כבוי כברירת מחדל בכל עסק; רק מנהל־על מפעיל. לא קיים ב-legacy (חוקי bk רק בתוך b/{bizId})
+const OFF_IN_LEGACY = ['cellular', 'secretary', 'store3d', 'dailyRep', 'pos', 'cxSales', 'bake'];
 const ALL_ON = Object.freeze(Object.fromEntries(FEATURES.map((k) => [k, !OFF_IN_LEGACY.includes(k)])));
 
 const als = new AsyncLocalStorage();

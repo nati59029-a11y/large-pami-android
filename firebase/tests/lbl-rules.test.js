@@ -7,7 +7,7 @@ const H = require('./helpers');
 
 const A = 'biz-lbl', OFF = 'biz-lbl-off';
 const MGR = 'l_mgr', LBL = 'l_lbl', NOL = 'l_nol', OLD = 'l_old', OUT = 'l_out', RMGR = 'r_mgr', RLBL = 'r_lbl', ROLD = 'r_old';
-const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false };
+const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, bake: false };
 
 let env;
 const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
