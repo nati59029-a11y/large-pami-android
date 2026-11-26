@@ -228,13 +228,14 @@ service firebase.storage {
 
     // הדפסת דף אכיל (26.11.2026, סבב 2): תמונות עמוד בדרך לתחנת ההדפסה – edb_tmp/{jobId}/p{i}.png (לארג' פעמי ב-legacy) ו-b/{bizId}/edb_tmp/{jobId}/p{i}.png.
     // ההרשאה עוברת דרך מסמך העבודה edbq/{jobId} ב-Firestore (שם נאכף המתג edb): 2 קריאות – users/{uid} ו-edbq/{jobId}.
-    //   create: חבר פעיל בעסק (מנהל / עובד), השולח של העבודה (by), העבודה במצב 'up' (לפני שליחה), i < n, PNG בלבד, עד 30MB, בלי דריסה.
+    //   create: חבר פעיל בעסק (מנהל / עובד), השולח של העבודה (by), העבודה במצב 'up' (לפני שליחה) וטרייה (at לפני פחות משעה), i < n, PNG בלבד, עד 30MB, בלי דריסה.
+    //     at נבדק מול השעון כבר ביצירת העבודה (nowOk ב-firestore.rules), ולכן עובד שהמתג edb שלו בוטל יכול להעלות רק לעבודה שיצר בשעה האחרונה, לפני הביטול.
     //   get: רק מי שתפס את העבודה (tk) כשהיא 'taken' – התחנה. list, update: אסורים.
     //   delete: מנהל העסק, השולח או התחנה. נמחק גם אוטומטית אחרי יום (lifecycle edb_tmp/ – storage-tmp-lifecycle.yml).
     function edbPng(f, j) {
       return request.resource.size <= 30 * 1024 * 1024 && request.resource.contentType == 'image/png'
         && f.matches('^p[0-9][.]png$') && int(f.replace('[^0-9]', '')) < j.get('n', 0)
-        && j.get('by', '') == request.auth.uid && j.get('st', '') == 'up';
+        && j.get('by', '') == request.auth.uid && j.get('st', '') == 'up' && j.get('at', 0) is int && j.get('at', 0) > request.time.toMillis() - 3600000;
     }
     function edbIn(biz) { return uIn(biz, 'admin') || uIn(biz, 'worker'); }
     function edbTaken(j) { return j.get('st', '') == 'taken' && j.get('tk', '') == request.auth.uid; }

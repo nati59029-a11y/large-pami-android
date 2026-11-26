@@ -14,7 +14,17 @@
     GET  /status[?p=<name part>]   -> {ok, v, printers[], chosen, saved, port}
     POST /print?p=<name part>&s=<size1,size2,...>&name=<job name>
          body = the PNG files one after another (Content-Type: application/octet-stream), sizes in "s"
-         -> {ok, printer, pages} or {ok:false, err:'no-printer'|'bad-request'|'too-big'|'bad-png'|'print-failed', msg}
+         -> {ok, job, printer, pages} immediately (asynchronous), or {ok:false, err:'no-printer'|'bad-request'|'too-big'|'bad-png', msg}
+         The pages are then spooled to the Windows print queue. The job is NEVER cancelled because of paper-out or a printer
+         error: it stays in the Windows queue and continues by itself when the problem is fixed.
+    GET  /job/<id>                 -> {ok, id, state, code, raw, printer, pages, age, wait}
+         state: 'printing' | 'waiting' (printer problem - see code) | 'done' | 'err'
+         code : spool, printing, paper-out, jam, door, ink, offline, paused, error, done, cancelled, timeout, print-failed
+         raw  : the Windows status text (job status + printer status numbers), for the 'error' message
+         done = the job left the Windows print queue without an error (or is marked Printed/Complete).
+         Timeout: waiting for a printer problem (paper-out...) for more than 2 hours, or 3 hours in total -> the job is
+         removed from the queue and reported as err/timeout.
+         The app translates code -> Hebrew text and instructions (this script stays ASCII only).
     OPTIONS *                      CORS / Private Network Access preflight
   Files next to this script: devmode.bin (saved printer settings), edb-helper.log (small log).
   This file is intentionally ASCII only (Windows PowerShell 5.1 reads BOM-less scripts in the ANSI code page).
@@ -30,13 +40,15 @@ $DevFile = Join-Path $Dir 'devmode.bin'
 $LogFile = Join-Path $Dir 'edb-helper.log'
 $MaxBody = 120MB
 $MaxPages = 10
-# The app's origins: desktop site (Firebase Hosting) and the Android app (Capacitor WebView).
+# The app's origins on the labels PC: the desktop site (Firebase Hosting) only. The phone app cannot reach this PC's
+# 127.0.0.1 at all (phones send through the cloud queue), so no localhost / WebView origins are accepted.
 $Allowed = @(
   'https://businessmanagement-app.web.app',
-  'https://businessmanagement-app.firebaseapp.com',
-  'https://localhost',
-  'http://localhost'
+  'https://businessmanagement-app.firebaseapp.com'
 )
+$Jobs = @{}                                  # helper job id -> state (in memory only)
+$WaitMax = [TimeSpan]::FromHours(2)          # max wait while the printer reports a problem (paper-out, jam...)
+$JobMax = [TimeSpan]::FromHours(3)           # max total time of one job
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
@@ -175,6 +187,78 @@ function Print-Pages([string]$name, [object[]]$images, [string]$job) {
   try { $doc.Print() } finally { $doc.Dispose() }
 }
 
+# ---------------- job tracking (Windows print queue + printer state, via WMI / CIM) ----------------
+function New-JobId {
+  $b = New-Object byte[] 9
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $rng.GetBytes($b); $rng.Dispose()
+  return (($b | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
+function Set-JobEnd($j, [string]$state, [string]$code) { $j.state = $state; $j.code = $code; $j.end = Get-Date; Log "job $($j.id): $state/$code $($j.raw)" }
+
+# Win32_PrintJob.StatusMask: 1 Paused, 2 Error, 4 Deleting, 8 Spooling, 16 Printing, 32 Offline, 64 PaperOut, 128 Printed,
+#   256 Deleted, 512 BlockedDevQ, 1024 UserInterventionRequired, 2048 Restart, 4096 Complete.
+# Win32_Printer: PrinterStatus (7 Offline), DetectedErrorState / ExtendedDetectedErrorState (4 No Paper, 6 No Toner/ink,
+#   7 Door Open, 8 Jammed, 9 Offline/Service...), ExtendedPrinterStatus (7 Offline, 8 Paused, 9 Error), WorkOffline.
+# What the Epson L130 driver really reports here is NOT verified (it may only report a generic error / user intervention).
+function Get-Code($pj, $pr) {
+  $m = 0; if ($pj) { $m = [int]$pj.StatusMask }
+  $det = 0; $xe = 0; $ps = 0; $ext = 0; $off = $false; $pst = 0L
+  if ($pr) { $det = [int]$pr.DetectedErrorState; $xe = [int]$pr.ExtendedDetectedErrorState; $ps = [int]$pr.PrinterStatus; $ext = [int]$pr.ExtendedPrinterStatus; $off = [bool]$pr.WorkOffline; $pst = [long]$pr.PrinterState }
+  $js = ''; if ($pj -and $pj.JobStatus) { $js = [string]$pj.JobStatus }
+  $raw = ("job: $js (mask $m); printer: status $ps, ext $ext, error $det/$xe, state $pst" + $(if ($off) { ', work offline' } else { '' })) -replace '[\x00-\x1f]', ' '
+  if ($raw.Length -gt 160) { $raw = $raw.Substring(0, 160) }
+  $code = 'printing'
+  if (($m -band 64) -or $det -eq 4 -or $xe -eq 4) { $code = 'paper-out' }
+  elseif ($det -eq 8 -or $xe -eq 8) { $code = 'jam' }
+  elseif ($det -eq 7 -or $xe -eq 7) { $code = 'door' }
+  elseif ($det -eq 6 -or $xe -eq 6) { $code = 'ink' }
+  elseif (($m -band 32) -or $det -eq 9 -or $ps -eq 7 -or $ext -eq 7 -or $off) { $code = 'offline' }
+  elseif (($m -band 1) -or $ext -eq 8) { $code = 'paused' }
+  elseif (($m -band 1026) -or $det -eq 10 -or $det -eq 11 -or $ext -eq 9 -or ($xe -ge 9 -and $xe -le 14)) { $code = 'error' }
+  return @{ code = $code; raw = $raw; mask = $m }
+}
+
+# Called on every GET /job/<id> (the station polls every few seconds while it waits).
+function Update-Job($j) {
+  if ($j.state -eq 'done' -or $j.state -eq 'err' -or $j.code -eq 'spool') { return }
+  $now = Get-Date
+  $pj = $null
+  try { $pj = @(Get-CimInstance -ClassName Win32_PrintJob -Filter "Document='$($j.doc)'" -ErrorAction Stop) | Select-Object -First 1 }
+  catch { $j.raw = 'WMI: ' + $_.Exception.Message; return }   # cannot read the queue now: keep the last state, try again
+  if (-not $pj) {
+    if ($j.mask -band 260) { Set-JobEnd $j 'err' 'cancelled' } else { Set-JobEnd $j 'done' 'done' }   # 4 Deleting / 256 Deleted
+    return
+  }
+  $m = [int]$pj.StatusMask
+  if ($m -band 260) { $j.mask = $m; Set-JobEnd $j 'err' 'cancelled'; return }
+  if ($m -band 4224) { $j.mask = $m; Set-JobEnd $j 'done' 'done'; return }   # 128 Printed / 4096 Complete (kept in the queue)
+  $pr = $null
+  try { $pr = Get-CimInstance -ClassName Win32_Printer -ErrorAction Stop | Where-Object { $_.Name -eq $j.printer } | Select-Object -First 1 } catch { }
+  $c = Get-Code $pj $pr
+  $j.mask = $m; $j.raw = $c.raw
+  if ($c.code -ne $j.code) { Log "job $($j.id): $($c.code) $($c.raw)" }
+  $j.code = $c.code
+  if ($c.code -eq 'printing') { $j.state = 'printing'; $j.waitSince = $null }
+  else { $j.state = 'waiting'; if (-not $j.waitSince) { $j.waitSince = $now } }
+  if (($j.waitSince -and ($now - $j.waitSince) -gt $WaitMax) -or (($now - $j.t0) -gt $JobMax)) {
+    try { Remove-CimInstance -InputObject $pj -ErrorAction Stop; $j.raw += '; removed from the queue' } catch { $j.raw += '; could not remove from the queue' }
+    Set-JobEnd $j 'err' 'timeout'
+  }
+}
+
+function Job-Json($j) {
+  $age = [int]((Get-Date) - $j.t0).TotalSeconds
+  $wait = 0; if ($j.waitSince) { $wait = [int]((Get-Date) - $j.waitSince).TotalSeconds }
+  return @{ ok = $true; id = $j.id; state = $j.state; code = $j.code; raw = [string]$j.raw; printer = $j.printer; pages = $j.pages; age = $age; wait = $wait }
+}
+
+function Prune-Jobs {
+  $old = (Get-Date).AddHours(-6)
+  foreach ($k in @($Jobs.Keys)) { $j = $Jobs[$k]; if ($j.end -and $j.end -lt $old) { $Jobs.Remove($k) } }
+  if ($Jobs.Count -gt 50) { foreach ($k in @($Jobs.Keys | Sort-Object { $Jobs[$_].t0 } | Select-Object -First ($Jobs.Count - 50))) { $Jobs.Remove($k) } }
+}
+
 # ---------------- minimal HTTP over TcpListener (loopback only) ----------------
 $CRLF = [byte[]](13, 10, 13, 10)
 function Send-Resp($stream, [int]$code, $obj, [string]$origin, [bool]$pna) {
@@ -236,6 +320,14 @@ function Handle($client) {
 
   if ($method -eq 'OPTIONS') { Send-Resp $stream 204 $null $ao $pna; return }
 
+  if ($method -eq 'GET' -and $path -match '^/job/([0-9a-f]{18})$') {
+    $j = $Jobs[$Matches[1]]
+    if (-not $j) { Send-Resp $stream 404 @{ ok = $false; err = 'no-job' } $ao $false; return }
+    Update-Job $j
+    Send-Resp $stream 200 (Job-Json $j) $ao $false
+    return
+  }
+
   if ($method -eq 'GET' -and $path -eq '/status') {
     $want = if ($Q.ContainsKey('p') -and $Q['p']) { $Q['p'] } else { $Printer }
     $ch = Find-Printer $want
@@ -261,21 +353,33 @@ function Handle($client) {
     $streams = @(); $images = @()
     try {
       $off = 0
-      foreach ($n in $sizes) {
-        for ($k = 0; $k -lt 8; $k++) { if ($body[$off + $k] -ne $sig[$k]) { Send-Resp $stream 400 @{ ok = $false; err = 'bad-png' } $ao $false; return } }
-        $ms = [System.IO.MemoryStream]::new($body, $off, [int]$n, $false)
-        $streams += $ms
-        $images += [System.Drawing.Image]::FromStream($ms)
-        $off += [int]$n
-      }
+      try {
+        foreach ($n in $sizes) {
+          for ($k = 0; $k -lt 8; $k++) { if ($body[$off + $k] -ne $sig[$k]) { Send-Resp $stream 400 @{ ok = $false; err = 'bad-png' } $ao $false; return } }
+          $ms = [System.IO.MemoryStream]::new($body, $off, [int]$n, $false)
+          $streams += $ms
+          $images += [System.Drawing.Image]::FromStream($ms)
+          $off += [int]$n
+        }
+      } catch { Send-Resp $stream 400 @{ ok = $false; err = 'bad-png' } $ao $false; return }
       $job = ([string]$Q['name']) -replace '[^A-Za-z0-9_.-]', ''
+      if ($job.Length -gt 40) { $job = $job.Substring(0, 40) }
       if (-not $job) { $job = 'edible' }
-      Print-Pages $name $images $job
-      Log "printed $($images.Count) page(s) on '$name' ($job)"
-      Send-Resp $stream 200 @{ ok = $true; printer = $name; pages = $images.Count } $ao $false
-    } catch {
-      Log "print failed: $($_.Exception.Message)"
-      Send-Resp $stream 500 @{ ok = $false; err = 'print-failed'; msg = [string]$_.Exception.Message } $ao $false
+      # asynchronous: answer with the job id now, then spool (the station polls GET /job/<id>)
+      Prune-Jobs
+      $hid = New-JobId
+      $j = @{ id = $hid; state = 'printing'; code = 'spool'; raw = ''; printer = $name; pages = $images.Count; doc = "$job-$hid"; t0 = (Get-Date); waitSince = $null; end = $null; mask = 0 }
+      $Jobs[$hid] = $j
+      Send-Resp $stream 200 @{ ok = $true; job = $hid; printer = $name; pages = $images.Count } $ao $false
+      try { $client.Close() } catch { }
+      try {
+        Print-Pages $name $images $j.doc
+        $j.code = 'printing'
+        Log "spooled $($images.Count) page(s) on '$name' ($($j.doc))"
+      } catch {
+        $j.raw = [string]$_.Exception.Message
+        Set-JobEnd $j 'err' 'print-failed'
+      }
     } finally {
       foreach ($im in $images) { try { $im.Dispose() } catch { } }
       foreach ($ms in $streams) { try { $ms.Dispose() } catch { } }
@@ -283,7 +387,7 @@ function Handle($client) {
     return
   }
 
-  if ($path -eq '/status' -or $path -eq '/print') { Send-Resp $stream 405 @{ ok = $false; err = 'bad-request' } $ao $false; return }
+  if ($path -eq '/status' -or $path -eq '/print' -or $path.StartsWith('/job/')) { Send-Resp $stream 405 @{ ok = $false; err = 'bad-request' } $ao $false; return }
   Send-Resp $stream 404 @{ ok = $false; err = 'bad-request' } $ao $false
 }
 

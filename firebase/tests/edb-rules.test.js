@@ -65,7 +65,7 @@ for (const E of ENVS) {
       await assertFails(env.unauthenticatedContext().firestore().doc(R('edbq/job_anon_001')).set(job('x')));
     });
     it('יצירת עבודה: שדות לא תקינים נחסמים', async () => {
-      const bad = [{ st: 'new' }, { st: 'taken' }, { n: 0 }, { n: 11 }, { n: 1.5 }, { n: '1' }, { at: 'now' }, { at: 0 }, { by: E.edb2 }, { msg: 'x'.repeat(201) }, { msg: 5 }, { tk: E.edb }, { extra: 1 }];
+      const bad = [{ st: 'new' }, { st: 'taken' }, { n: 0 }, { n: 11 }, { n: 1.5 }, { n: '1' }, { at: 'now' }, { at: 0 }, { at: 1 }, { at: Date.now() - 10 * 60000 }, { at: Date.now() + 10 * 60000 }, { by: E.edb2 }, { msg: 'x'.repeat(201) }, { msg: 5 }, { tk: E.edb }, { extra: 1 }, { code: 'paper-out' }, { ts: 1 }, { ackA: true }, { ackS: true }];
       for (const x of bad) await assertFails(db(E.edb).doc(R('edbq/job_bad_0001')).set(job(E.edb, x)), JSON.stringify(x).slice(0, 40));
       await assertFails(db(E.edb).doc(R('edbq/short')).set(job(E.edb)), 'מזהה קצר');
       await assertFails(db(E.edb).doc(R('edbq/job_bad_0002')).set({ by: E.edb, at: Date.now(), st: 'up' }), 'חסר n');
@@ -91,6 +91,44 @@ for (const E of ENVS) {
       await assertFails(db(E.edb).doc(R('edbq/j1')).update({ st: 'new' }), 'done סופי – גם לשולח');
       await put('j2', job(E.edb, { st: 'taken', tk: E.edb2 }));
       await assertSucceeds(db(E.edb2).doc(R('edbq/j2')).update({ st: 'err', msg: 'המדפסת לא נמצאה' }));
+    });
+    it('סבב 3 – דיווח מצב בזמן ההדפסה: רק התחנה שתפסה, taken→taken, רק msg/code/ts עם מגבלות', async () => {
+      await put('p1', job(E.edb, { st: 'taken', tk: E.edb2 }));
+      const rep = (x) => Object.assign({ msg: 'חסר נייר במדפסת', code: 'paper-out', ts: Date.now() }, x || {});
+      await assertSucceeds(db(E.edb2).doc(R('edbq/p1')).update(rep()));
+      await assertSucceeds(db(E.edb2).doc(R('edbq/p1')).update(rep({ code: 'printing', msg: 'מדפיס' })), 'דיווח נוסף');
+      for (const u of [E.edb, E.mgr, E.noe, E.oth]) await assertFails(db(u).doc(R('edbq/p1')).update(rep()), 'לא התחנה שתפסה: ' + u);
+      const bad = [{ code: 'Paper Out' }, { code: 'x'.repeat(25) }, { code: 5 }, { code: '' }, { ts: 'now' }, { ts: 0 }, { ts: 1.5 }, { msg: 'x'.repeat(201) }, { n: 2 }, { tk: E.edb }, { by: E.edb2 }, { at: 1 }, { st: 'new' }, { extra: 1 }, { ackS: true }, { ackA: true }];
+      for (const x of bad) await assertFails(db(E.edb2).doc(R('edbq/p1')).update(rep(x)), JSON.stringify(x).slice(0, 40));
+      await assertSucceeds(db(E.edb2).doc(R('edbq/p1')).update({ st: 'done', msg: 'הודפס', code: 'done', ts: Date.now() }), 'סיום עם code/ts');
+      await assertFails(db(E.edb2).doc(R('edbq/p1')).update(rep()), 'אחרי done – אין דיווח');
+      await put('p2', job(E.edb, { st: 'new' }));
+      await assertFails(db(E.edb2).doc(R('edbq/p2')).update(rep()), 'עבודה new – אין דיווח');
+      await assertFails(db(E.edb2).doc(R('edbq/p2')).update({ st: 'taken', tk: E.edb2, code: 'printing' }), 'תפיסה עם code – לא');
+      await put('p3', job(E.edb, { st: 'taken', tk: E.edb2 }));
+      await assertSucceeds(db(E.edb2).doc(R('edbq/p3')).update({ st: 'err', msg: 'נייר תקוע', code: 'jam', ts: Date.now() }), 'כישלון עם code');
+    });
+    it('סבב 3 – אישור ההודעה: השולח ackA, התחנה ackS; רק true, רק אחרי done/err, כל צד רק את השדה שלו', async () => {
+      await put('a1', job(E.edb, { st: 'done', tk: E.edb2, msg: 'הודפס' }));
+      await assertFails(db(E.edb2).doc(R('edbq/a1')).update({ ackA: true }), 'התחנה לא מאשרת בשם השולח');
+      await assertFails(db(E.edb).doc(R('edbq/a1')).update({ ackS: true }), 'השולח לא מאשר בשם התחנה');
+      await assertFails(db(E.mgr).doc(R('edbq/a1')).update({ ackA: true }), 'מנהל שאינו צד');
+      await assertFails(db(E.edb).doc(R('edbq/a1')).update({ ackA: false }), 'רק true');
+      await assertFails(db(E.edb).doc(R('edbq/a1')).update({ ackA: true, msg: 'x' }), 'עם שדה נוסף');
+      await assertFails(db(E.edb).doc(R('edbq/a1')).update({ ackA: true, ackS: true }), 'שני הצדדים יחד');
+      await assertSucceeds(db(E.edb).doc(R('edbq/a1')).update({ ackA: true }));
+      await assertSucceeds(db(E.edb2).doc(R('edbq/a1')).update({ ackS: true }));
+      await assertFails(db(E.edb2).doc(R('edbq/a1')).update({ ackS: false }), 'אין ביטול אישור');
+      await assertFails(db(E.edb).doc(R('edbq/a1')).update({ st: 'err' }), 'done עדיין סופי');
+      await put('a2', job(E.edb, { st: 'err', tk: E.edb2, msg: 'נייר תקוע', code: 'jam' }));
+      await assertSucceeds(db(E.edb2).doc(R('edbq/a2')).update({ ackS: true }), 'ackS אחרי err');
+      await assertSucceeds(db(E.edb).doc(R('edbq/a2')).update({ ackA: true }), 'ackA אחרי err');
+      await put('a3', job(E.edb, { st: 'taken', tk: E.edb2 }));
+      await assertFails(db(E.edb).doc(R('edbq/a3')).update({ ackA: true }), 'לפני סיום – השולח');
+      await assertFails(db(E.edb2).doc(R('edbq/a3')).update({ ackS: true }), 'לפני סיום – התחנה');
+      await put('a4', job(E.edb, { st: 'err', msg: 'בוטל' }));
+      await assertSucceeds(db(E.edb).doc(R('edbq/a4')).update({ ackA: true }), 'ביטול בלי תחנה – השולח מאשר');
+      await assertFails(db(E.edb2).doc(R('edbq/a4')).update({ ackS: true }), 'אין tk – אין ackS');
     });
     it('ביטול: השולח up→err ו-new→err; אחר – רק עבודה new ישנה מ-24 שעות', async () => {
       await put('c1', job(E.edb)); await put('c2', job(E.edb, { st: 'new' }));
@@ -150,11 +188,24 @@ for (const E of ENVS) {
       await assertFails(up(st(E.mgr).ref(F('s_up2', 2)), new Uint8Array([1]), PNG), 'לא השולח – גם מנהל');
       await assertFails(up(st(E.edb).ref(F('s_new', 1)), new Uint8Array([1]), PNG), 'העבודה כבר new');
       await assertFails(up(st(E.edb).ref(F('nojob', 0)), new Uint8Array([1]), PNG), 'אין עבודה');
+      await put('s_old', job(E.edb, { n: 2, at: Date.now() - 2 * 3600000 }));
+      await assertFails(up(st(E.edb).ref(F('s_old', 0)), new Uint8Array([1]), PNG), 'עבודה up ישנה (שעתיים) – נחסם');
+      await put('s_old2', job(E.edb, { n: 2, at: Date.now() - 50 * 60000 }));
+      await assertSucceeds(up(st(E.edb).ref(F('s_old2', 0)), new Uint8Array([1]), PNG), 'עבודה up בת 50 דקות – מותר');
+      await put('s_noat', { by: E.edb, st: 'up', n: 1 });
+      await assertFails(up(st(E.edb).ref(F('s_noat', 0)), new Uint8Array([1]), PNG), 'עבודה בלי at');
       await assertFails(up(st(E.out).ref(F('s_up2', 2)), new Uint8Array([1]), PNG), 'מושבת');
       await assertFails(up(st(E.oth).ref(F('s_up2', 2)), new Uint8Array([1]), PNG), 'עסק אחר');
       await assertFails(up(env.unauthenticatedContext().storage().ref(F('s_up2', 2)), new Uint8Array([1]), PNG));
       if (E.P) await assertFails(up(st(E.edb).ref('edb_tmp/s_up2/p2.png'), new Uint8Array([1]), PNG), 'עובד עסק בנתיב legacy');
       else await assertFails(up(st(E.edb).ref('b/bz/edb_tmp/s_up2/p2.png'), new Uint8Array([1]), PNG), 'עובד legacy בנתיב של עסק');
+    });
+    it('עובד שהמתג edb שלו בוטל: אין עבודה חדשה, ואין העלאה לעבודה up ישנה (ליקוי 1 בבדיקת סבב 1)', async () => {
+      await put('s_rv', job(E.edb, { n: 2, at: Date.now() - 2 * 3600000 }));
+      await prep((d) => d.doc(R('staff/' + E.edb)).set({ perms: Object.assign({}, NONE) }, { merge: true }));
+      await assertFails(db(E.edb).doc(R('edbq/job_rev_0001')).set(job(E.edb)), 'עבודה חדשה');
+      await assertFails(up(st(E.edb).ref(F('s_rv', 0)), new Uint8Array([1]), PNG), 'העלאה לעבודה ישנה');
+      await assertFails(up(st(E.edb).ref(F('s_rv', 1)), new Uint8Array([1]), PNG), 'העלאה שנייה לעבודה ישנה');
     });
     it('get: רק התחנה שתפסה (tk) כשהעבודה taken; השולח, מנהל, אחרי done – נחסם; list – לכולם נחסם', async () => {
       await assertSucceeds(st(E.edb2).ref(F('s_tk')).getMetadata());

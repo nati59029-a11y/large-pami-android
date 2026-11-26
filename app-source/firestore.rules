@@ -1269,15 +1269,23 @@ service cloud.firestore {
     function edbMsg(d) { return !('msg' in d) || (d.msg is string && d.msg.size() <= 200); }
     function edbqNew(id, d) {
       return id.matches('^[A-Za-z0-9_-]{8,40}$') && d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg']) && d.keys().hasAll(['by', 'at', 'st', 'n'])
-        && d.by == request.auth.uid && d.st == 'up' && d.n is int && d.n >= 1 && d.n <= 10 && d.at is int && d.at > 0 && edbMsg(d);
+        && d.by == request.auth.uid && d.st == 'up' && d.n is int && d.n >= 1 && d.n <= 10 && nowOk(d.at) && edbMsg(d);
+    }
+    // סבב 3: code (קוד מצב המדפסת, למשל paper-out), ts (זמן הדיווח) – רק התחנה שתפסה, taken→taken / done / err.
+    //   ackA (השולח אישר) / ackS (התחנה אישרה) – true בלבד, אחרי done/err, כל צד רק את השדה שלו.
+    function edbX(d) {
+      return (!('code' in d) || (d.code is string && d.code.matches('^[a-z-]{1,24}$'))) && (!('ts' in d) || (d.ts is int && d.ts > 0))
+        && (!('ackA' in d) || d.ackA == true) && (!('ackS' in d) || d.ackS == true);
     }
     function edbqUpd(o, d) {
-      return d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'tk']) && edbMsg(d) && (
+      return d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'tk', 'code', 'ts', 'ackA', 'ackS']) && edbMsg(d) && edbX(d) && (
         (d.diff(o).affectedKeys().hasOnly(['st', 'msg']) && (
           (o.st == 'up' && o.by == request.auth.uid && d.st in ['new', 'err'])
-          || (o.st == 'new' && d.st == 'err' && (o.by == request.auth.uid || o.at < request.time.toMillis() - 86400000))
-          || (o.st == 'taken' && o.get('tk', '') == request.auth.uid && d.st in ['done', 'err'])))
-        || (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'tk']) && o.st == 'new' && d.st == 'taken' && d.get('tk', '') == request.auth.uid));
+          || (o.st == 'new' && d.st == 'err' && (o.by == request.auth.uid || o.at < request.time.toMillis() - 86400000))))
+        || (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'code', 'ts']) && o.st == 'taken' && o.get('tk', '') == request.auth.uid && d.st in ['taken', 'done', 'err'])
+        || (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'tk']) && o.st == 'new' && d.st == 'taken' && d.get('tk', '') == request.auth.uid)
+        || (o.st in ['done', 'err'] && d.diff(o).affectedKeys().hasOnly(['ackA']) && o.by == request.auth.uid)
+        || (o.st in ['done', 'err'] && d.diff(o).affectedKeys().hasOnly(['ackS']) && o.get('tk', '') == request.auth.uid));
     }
     function edbsOk(d) {
       return d.keys().hasOnly(['by', 'at', 'on', 'pr', 'hp']) && d.keys().hasAll(['by', 'at', 'on'])

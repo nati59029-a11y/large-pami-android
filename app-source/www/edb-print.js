@@ -228,7 +228,8 @@ ${X?`<details class="card"${p.on?' open':''}><summary>תחנת הדפסה (המ�
 ${S.stn?`<p class="note">${esc(X.stnTxt(S.stn)||'אין תחנה פעילה בעסק')}</p>`:'<p class="note">אין עדיין תחנת הדפסה בעסק.</p>'}
 ${nat?'<p class="note">ההגדרה נעשית במחשב שמחוברת אליו מדפסת הדף האכיל, לא בטלפון.</p>':`<p class="note">מסמנים רק במחשב שמחוברת אליו מדפסת הדף האכיל ושעוזר ההדפסה (edb-helper) פועל בו. הדפסות מהטלפונים יודפסו בו לבד, גם כשמסך אחר פתוח (למשל מדבקות). נקודה קטנה בפינה השמאלית התחתונה: ירוק – פעילה, צהוב – מדפיסה, אדום – תקלה.</p>
 <form data-f="edbPrn"><label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="on"${p.on?' checked':''} style="width:24px;height:24px"> המחשב הזה = תחנת הדפסה לדף אכיל</label>
-<div class="edR"><label class="f"><span>שם המדפסת (או חלק ממנו)</span><input name="name" maxlength="80" dir="ltr" value="${esc(p.name)}"></label><label class="f"><span>פורט</span><input name="port" inputmode="numeric" maxlength="5" dir="ltr" value="${esc(p.port)}"></label></div>
+<div class="edR"><label class="f"><span>שם המדפסת (או חלק ממנו)</span><input name="name" maxlength="80" dir="ltr" value="${esc(p.name)}"></label><label class="f"><span>פורט (קבוע)</span><input name="port" dir="ltr" value="${esc(X.DEF.port)}" readonly disabled></label></div>
+<small class="note" style="display:block">הפורט קבוע: 17891. הגדרות האבטחה של האתר מתירות פנייה רק אליו – פורט אחר דורש שינוי גם בקובץ firebase.json (CSP) ופרסום מחדש של האתר.</small>
 <button class="btn g w" type="submit">שמירה</button></form>
 <button class="btn g w" data-a="edbHlp" style="margin-top:8px">בדיקת עוזר ההדפסה</button><div id="edbHlpR" class="note" style="margin-top:6px"></div>`}</details>`:''}`;
  return h+nav(1,0)}
@@ -307,21 +308,25 @@ ACT.edbCopyAll=()=>{const i=S.selS;lay();if(i<0||!S.slots[i]||S.slots[i].d===0)r
 
 /* =================== סבב 2ב: פרויקטים במכשיר (IndexedDB) ===================
    מסד lp-edb: proj = רשומה לכל פרויקט (שם, פריסה, משבצות עם פרמטרים, רשימת תמונות, תמונה ממוזערת), img = קובצי התמונות (Blob) לפי מפתח "<פרויקט>|<תמונה>".
-   העבודה הנוכחית נשמרת לבד (1.5 שניות אחרי שינוי, ביציאה מהמסך ובמעבר לרקע) ונפתחת מחדש בכניסה. הכול בתוך try/catch; חריגת מכסה – הודעה בעברית */
-const LSK='lp-edb-cur',lsCur=()=>{try{return localStorage.getItem(LSK)||''}catch(e){return ''}},lsSet=v=>{try{if(v)localStorage.setItem(LSK,v);else localStorage.removeItem(LSK)}catch(e){}};
+   העבודה הנוכחית נשמרת לבד (1.5 שניות אחרי שינוי, ביציאה מהמסך ובמעבר לרקע) ונפתחת מחדש בכניסה. הכול בתוך try/catch; חריגת מכסה – הודעה בעברית
+   סבב 3: הפרדה לפי עסק + משתמש באותו מכשיר – לכל פרויקט שדה ow = "<עסק>|<משתמש>"; רואים ופותחים רק את שלכם. פרויקטים ישנים (בלי ow, מסבב 2ב שלא פורסם)
+   לא נמחקים ולא משתנים – פשוט לא מוצגים. תמונות שנוצרו בקנבס (עמוד PDF, תמונה מוקטנת למשבצת) נשמרות PNG – בלי איבוד איכות */
+const own=()=>String(SY&&SY.bizId||'')+'|'+String(SY&&SY.uid||'');
+const LSK=()=>'lp-edb-cur|'+own(),lsCur=()=>{try{return localStorage.getItem(LSK())||''}catch(e){return ''}},lsSet=v=>{try{if(v)localStorage.setItem(LSK(),v);else localStorage.removeItem(LSK())}catch(e){}};
+const mineP=r=>!!r&&r.ow===own()&&!!SY&&!!SY.uid;
 let DBP=null;const db=()=>DBP||(DBP=new Promise((res,rej)=>{try{const r=indexedDB.open('lp-edb',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('proj',{keyPath:'id'});d.createObjectStore('img')};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('idb'));r.onblocked=()=>rej(new Error('idb'))}catch(e){rej(e)}}).catch(e=>{DBP=null;throw e}));
 const dbTx=(stores,mode,fn)=>db().then(d=>new Promise((res,rej)=>{let out;const t=d.transaction(stores,mode);t.oncomplete=()=>res(out&&out.result!==undefined?out.result:out);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error||new Error('abort'));try{out=fn(t)}catch(e){try{t.abort()}catch(x){}rej(e)}}));
 const dbGet=(st,k)=>dbTx(st,'readonly',t=>t.objectStore(st).get(k)),dbAll=st=>dbTx(st,'readonly',t=>t.objectStore(st).getAll()),keysOf=pid=>dbTx('img','readonly',t=>t.objectStore('img').getAllKeys(IDBKeyRange.bound(pid+'|',pid+'|￿')));
 const quotaErr=e=>!!e&&(e.name==='QuotaExceededError'||/quota/i.test(String(e.message||'')));
-const tb=c=>new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('התמונה לא נשמרה')),'image/jpeg',0.92));
+const tb=c=>new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('התמונה לא נשמרה')),'image/png')); // PNG – איכות מלאה (בעל העסק, סבב 3)
 const autoName=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return `דף אכיל ${p(d.getDate())}.${p(d.getMonth()+1)} ${p(d.getHours())}:${p(d.getMinutes())}`};
 function thumbURL(){let c=null;try{c=document.createElement('canvas');c.width=120;c.height=170;pgPaint(c,false);return c.toDataURL('image/jpeg',0.6)}catch(e){return ''}finally{freeCv(c)}}
-function initProj(){if(!S.pid){S.pid='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);S.pname=autoName();lsSet(S.pid);H=mkHist(30);H.init(snap());asv()}else mark()}
+function initProj(){if(!S.pid){S.ow=own();S.pid='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);S.pname=autoName();lsSet(S.pid);H=mkHist(30);H.init(snap());asv()}else mark()}
 const asv=()=>{clearTimeout(AT);AT=setTimeout(()=>{save()},1500)};
 let SQ=Promise.resolve();
 // החלק הסינכרוני (הקלטת הפרמטרים, התחלת קידוד התמונות והתמונה הממוזערת) קורה מיד – אפשר לשחרר את הקנבסים מיד אחרי הקריאה
 function save(){if(!S.pid||!S.img)return SQ;const pid=S.pid,ims=S.imgs.slice(),need=ims.filter(m=>m&&!m.stored&&m.c&&m.c.width>0);
- let bl,rec;try{bl=need.map(m=>m.blob?Promise.resolve(m.blob):tb(m.c));rec=root.EdbCore.projPack({name:S.pname||autoName(),k:S.k,cu:S.cu,cut:S.cut,ds:S.ds,slots:S.slots,gi:S.gi,imgs:ims});rec.id=pid;rec.at=Date.now();rec.th=thumbURL()}catch(e){return SQ}
+ let bl,rec;try{bl=need.map(m=>m.blob?Promise.resolve(m.blob):tb(m.c));rec=root.EdbCore.projPack({name:S.pname||autoName(),k:S.k,cu:S.cu,cut:S.cut,ds:S.ds,slots:S.slots,gi:S.gi,imgs:ims});rec.id=pid;rec.ow=S.ow||own();rec.at=Date.now();rec.th=thumbURL()}catch(e){return SQ}
  const job=async()=>{try{const bs=await Promise.all(bl);
    await dbTx(['proj','img'],'readwrite',t=>{need.forEach((m,i)=>t.objectStore('img').put(bs[i],pid+'|'+m.id));t.objectStore('proj').put(rec)});
    need.forEach(m=>{m.stored=true;m.blob=null});
@@ -330,19 +335,19 @@ function save(){if(!S.pid||!S.img)return SQ;const pid=S.pid,ims=S.imgs.slice(),n
    S.saveErr=''}
   catch(e){const m=quotaErr(e)?'אין מספיק מקום פנוי במכשיר לשמירת הפרויקט. מוחקים פרויקטים ישנים (📁 פרויקטים) או מפנים מקום. העבודה הנוכחית עדיין פתוחה, אבל לא נשמרת.':'שמירת הפרויקט במכשיר נכשלה. העבודה הנוכחית עדיין פתוחה.';if(S.saveErr!==m){S.saveErr=m;try{toast(m)}catch(x){}}}};
  return SQ=SQ.then(job,job)}
-function resetWork(){if(root.EdbEdit)root.EdbEdit.unmount();clearTimeout(MT);MT=0;clearTimeout(AT);freeAll();relPdf();S.pid=null;S.pname='';S.st=1;S.ds=[newD(0)];S.slots=[];S.selS=-1;S.sel=-1;S.mode='all';S.L=null;S.ptg=-1;PEND=null}
+function resetWork(){if(root.EdbEdit)root.EdbEdit.unmount();clearTimeout(MT);MT=0;clearTimeout(AT);freeAll();relPdf();S.pid=null;S.ow="";S.pname='';S.st=1;S.ds=[newD(0)];S.slots=[];S.selS=-1;S.sel=-1;S.mode='all';S.L=null;S.ptg=-1;PEND=null}
 async function openProj(id,silent){if(S.busy)return;S.busy=1;redraw();
  try{if(S.pid&&S.img&&S.pid!==id){commit();await save()}
-  const rec=await dbGet('proj',id),st=root.EdbCore.projUnpack(rec);if(!st)throw new Error('missing');
+  const rec=await dbGet('proj',id);if(!mineP(rec))throw new Error('missing');const st=root.EdbCore.projUnpack(rec);if(!st)throw new Error('missing');
   resetWork();const L=[];
   for(const m of st.imgs){if(!m){L.push(null);continue}const b=await dbGet('img',id+'|'+m.id);if(!b){L.push(null);continue}
    const im=await loadImg(b);try{const o=mkImg(im,im.naturalWidth,im.naturalHeight,m.name,m.cap,null);o.id=m.id;o.stored=true;L.push(o)}finally{im.src=''}}
   st.ds.forEach(d=>{if(d.im!=null&&!L[d.im])delete d.im});if(!L[st.gi])st.gi=L.findIndex(Boolean);if(st.gi<0)throw new Error('noimg');
-  S.imgs=L;S.gi=st.gi;S.img=L[st.gi];S.k=st.k;S.cu=st.cu;S.cut=st.cut;S.ds=st.ds;S.slots=st.slots;S.L=null;S.pid=id;S.pname=st.name||autoName();lsSet(id);
+  S.imgs=L;S.gi=st.gi;S.img=L[st.gi];S.k=st.k;S.cu=st.cu;S.cut=st.cut;S.ds=st.ds;S.slots=st.slots;S.L=null;S.pid=id;S.ow=rec.ow;S.pname=st.name||autoName();lsSet(id);
   lay();H=mkHist(30);H.init(snap());S.st=2;S.saveErr='';if(!silent)closeDlg();toast(silent?'ממשיכים מהעבודה האחרונה (פרויקט חדש: בצעד 1)':'הפרויקט נפתח')}
  catch(e){resetWork();if(silent)lsSet('');else toast('הפרויקט לא נפתח')}
  finally{S.busy=0;redraw()}}
-async function projDlg(){try{if(S.pid&&S.img){commit();await save()}const R=(await dbAll('proj')).sort((a,b)=>(b.at||0)-(a.at||0)),dt=t=>{try{return new Date(t).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
+async function projDlg(){try{if(S.pid&&S.img){commit();await save()}const R=(await dbAll('proj')).filter(mineP).sort((a,b)=>(b.at||0)-(a.at||0)),dt=t=>{try{return new Date(t).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
  dlg(`<h3>הפרויקטים שלי</h3><p class="note">הפרויקטים נשמרים במכשיר הזה בלבד (לא בענן). העבודה הנוכחית נשמרת לבד.</p><div style="max-height:55vh;overflow:auto">${R.length?R.map(r=>{let lt='';try{lt=layTxt(layout(r.k,r.cu))}catch(e){}
   return `<div style="display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:6px;margin-bottom:6px${r.id===S.pid?';border-color:var(--acc)':''}"><button data-a="edbPOpen" data-v="${esc(r.id)}" style="flex:1;min-width:0;display:flex;gap:8px;align-items:center;background:none;border:0;color:inherit;text-align:start;min-height:64px;font:inherit"><img src="${esc(r.th||'')}" alt="" style="width:42px;height:60px;object-fit:contain;background:#fff;border-radius:4px;flex:none"><span style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis">${esc(r.name||'פרויקט')}${r.id===S.pid?' (פתוח)':''}</b><small class="note" style="display:block">${esc(dt(r.at))} · ${esc(lt)}</small></span></button><button class="btn g s" data-a="edbPRen" data-v="${esc(r.id)}" style="flex:none">שם</button><button class="btn r s" data-a="edbPDel" data-v="${esc(r.id)}" style="flex:none">מחיקה</button></div>`}).join(''):'<p class="note">אין עדיין פרויקטים שמורים.</p>'}</div>
 <div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" data-a="edbNew">פרויקט חדש</button><button class="btn g w" data-a="closeDlg">סגירה</button></div>`)}
@@ -350,11 +355,11 @@ async function projDlg(){try{if(S.pid&&S.img){commit();await save()}const R=(awa
 ACT.edbProjs=()=>{projDlg()};
 ACT.edbPOpen=el=>{openProj(el.dataset.v)};
 ACT.edbNew=async()=>{if(S.busy)return;try{if(S.pid&&S.img){commit();await save()}}catch(e){}resetWork();lsSet('');closeDlg();rerender()};
-ACT.edbPRen=async el=>{try{const r=await dbGet('proj',el.dataset.v);if(!r)return;dlg(`<h3>שינוי שם</h3><form data-f="edbPRen"><input type="hidden" name="id" value="${esc(r.id)}"><label class="f"><span>שם הפרויקט</span><input name="n" maxlength="60" value="${esc(r.name||'')}" required></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" type="submit">שמירה</button><button class="btn g w" type="button" data-a="edbProjs">ביטול</button></div></form>`)}catch(e){toast('לא ניתן לפתוח את הפרויקט')}};
+ACT.edbPRen=async el=>{try{const r=await dbGet('proj',el.dataset.v);if(!mineP(r))return;dlg(`<h3>שינוי שם</h3><form data-f="edbPRen"><input type="hidden" name="id" value="${esc(r.id)}"><label class="f"><span>שם הפרויקט</span><input name="n" maxlength="60" value="${esc(r.name||'')}" required></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" type="submit">שמירה</button><button class="btn g w" type="button" data-a="edbProjs">ביטול</button></div></form>`)}catch(e){toast('לא ניתן לפתוח את הפרויקט')}};
 FRM.edbPRen=async f=>{const id=(f.querySelector('[name=id]')||{}).value,n=String((f.querySelector('[name=n]')||{}).value||'').trim().slice(0,60);if(!id||!n){toast('הקלידו שם');return}
- try{const r=await dbGet('proj',id);if(!r)return;if(id===S.pid)S.pname=n;r.name=n;await dbTx('proj','readwrite',t=>t.objectStore('proj').put(r));projDlg()}catch(e){toast(quotaErr(e)?'אין מספיק מקום פנוי במכשיר':'שינוי השם נכשל')}};
-ACT.edbPDel=async el=>{try{const r=await dbGet('proj',el.dataset.v);if(!r)return;dlg(`<h3>מחיקת פרויקט</h3><p>למחוק את "${esc(r.name||'פרויקט')}"? אי אפשר לשחזר אותו.</p><div style="display:flex;gap:8px"><button class="btn r w" data-a="edbPDel2" data-v="${esc(r.id)}">מחיקה</button><button class="btn g w" data-a="edbProjs">ביטול</button></div>`)}catch(e){toast('לא ניתן לפתוח את הפרויקט')}};
-ACT.edbPDel2=async el=>{const id=el.dataset.v;try{const ks=await keysOf(id);await dbTx(['proj','img'],'readwrite',t=>{ks.forEach(k=>t.objectStore('img').delete(k));t.objectStore('proj').delete(id)});
+ try{const r=await dbGet('proj',id);if(!mineP(r))return;if(id===S.pid)S.pname=n;r.name=n;await dbTx('proj','readwrite',t=>t.objectStore('proj').put(r));projDlg()}catch(e){toast(quotaErr(e)?'אין מספיק מקום פנוי במכשיר':'שינוי השם נכשל')}};
+ACT.edbPDel=async el=>{try{const r=await dbGet('proj',el.dataset.v);if(!mineP(r))return;dlg(`<h3>מחיקת פרויקט</h3><p>למחוק את "${esc(r.name||'פרויקט')}"? אי אפשר לשחזר אותו.</p><div style="display:flex;gap:8px"><button class="btn r w" data-a="edbPDel2" data-v="${esc(r.id)}">מחיקה</button><button class="btn g w" data-a="edbProjs">ביטול</button></div>`)}catch(e){toast('לא ניתן לפתוח את הפרויקט')}};
+ACT.edbPDel2=async el=>{const id=el.dataset.v;try{if(!mineP(await dbGet('proj',id)))return;const ks=await keysOf(id);await dbTx(['proj','img'],'readwrite',t=>{ks.forEach(k=>t.objectStore('img').delete(k));t.objectStore('proj').delete(id)});
   if(id===S.pid){resetWork();lsSet('');rerender()}projDlg()}catch(e){toast('המחיקה נכשלה')}};
 
 /* =================== הדפסה =================== */
@@ -391,7 +396,7 @@ async function viaWeb(o){const U=(await pagesOf(o)).map(b=>URL.createObjectURL(b
  f.contentWindow.focus();f.contentWindow.print();
  setTimeout(()=>{if(document.getElementById('edbPf')===f)f.remove();U.forEach(u=>{try{URL.revokeObjectURL(u)}catch(e){}})},120000);return true}
 async function send(o){const X=St(),c=X?X.cfg():null;
- if(c&&c.on){const r=await X.hPrint(c,await pagesOf(o),o.name);if(!r.ok)throw new Error(r.msg);return 'helper'}
+ if(c&&c.on){await X.local(await pagesOf(o),o.name);return 'helper'} // המצב (חסר נייר / הודפס) – בחלון ההודעות של התחנה
  if(o.how==='station'&&X){await X.send(await pagesOf(o),o.title);return 'station'}
  const C=typeof shNat==='function'?shNat():null;
  if(C&&C.Plugins&&C.Plugins.PdfPrint){await C.Plugins.PdfPrint.print({name:o.name||'edible',data:o.pdfB64||shB64(o.pdf)});return 'native'}
@@ -434,14 +439,15 @@ FRM.edbCal=f=>{const v=n=>{const x=f.querySelector('[name='+n+']');return x?x.va
  calSet({sx:h?n.sx:o.sx,sy:vv?n.sy:o.sy,ox:dl?n.ox:o.ox,oy:dt?n.oy:o.oy});toast('הכיול נשמר');redraw()};
 ACT.edbCal0=()=>{calSet(CAL0);toast('הכיול אופס');redraw()};
 // הגדרת התחנה (רק במכשיר הזה). שם ריק = L130; פורט – מספר בלבד
-FRM.edbPrn=f=>{const X=St();if(!X)return;const q=n=>f.querySelector('[name='+n+']')||{},on=!!q('on').checked,n=String(q('name').value||'').trim().slice(0,80)||X.DEF.name,p=String(q('port').value||'').trim()||X.DEF.port;
- if(!/^\d{2,5}$/.test(p)||+p<1024||+p>65535){toast('פורט – מספר בין 1024 ל-65535');return}X.setCfg({on,name:n,port:p});toast(on?'נשמר – המחשב הזה הוא תחנת ההדפסה':'נשמר – המחשב הזה אינו תחנת הדפסה');redraw()};
+FRM.edbPrn=f=>{const X=St();if(!X)return;const q=n=>f.querySelector('[name='+n+']')||{},on=!!q('on').checked,n=String(q('name').value||'').trim().slice(0,80)||X.DEF.name,p=X.DEF.port; // פורט קבוע (CSP)
+ X.setCfg({on,name:n,port:p});toast(on?'נשמר – המחשב הזה הוא תחנת ההדפסה':'נשמר – המחשב הזה אינו תחנת הדפסה');redraw()};
 ACT.edbHlp=async()=>{const X=St(),o=document.getElementById('edbHlpR');if(!X||!o)return;o.textContent='בודק…';const c=X.cfg(),r=await X.hStatus(c),e=document.getElementById('edbHlpR');if(!e)return;
  if(!r.ok){e.textContent='עוזר ההדפסה לא עונה בכתובת http://127.0.0.1:'+c.port+' – בודקים שהוא הופעל במחשב הזה (edb-helper.bat).';return}
  const P=Array.isArray(r.j.printers)?r.j.printers:[];
  e.innerHTML=`<b>העוזר עונה.</b> ${r.j.chosen?'מדפסת: <span dir="ltr">'+esc(r.j.chosen)+'</span>':'<b style="color:#e0483e">לא נמצאה מדפסת שמכילה "'+esc(c.name)+'"</b>'} · הגדרות איכות שמורות: ${r.j.saved?'כן':'לא (להריץ edb-helper-setup.bat)'}${P.length?'<br>מדפסות במחשב: <span dir="ltr">'+P.map(esc).join(' · ')+'</span>':''}`};
 // ביציאה מהמסך – משחררים את התמונה ואת קובץ ה-PDF (זיכרון). בדיקה כל 2 שניות כשיש תמונה
-setInterval(()=>{if(!S.img&&!S.pdf)return;let on=false;try{on=cur().v==='edb'}catch(e){}if(!on){commit();save();resetWork();S.rst=0}},2000); // יציאה מהמסך: שמירה אוטומטית (הפרמטרים והתמונות נשמרים במכשיר) ואז שחרור הזיכרון; בכניסה הבאה העבודה נפתחת מחדש
+setInterval(()=>{if(S.img&&S.ow&&S.ow!==own()){resetWork();S.rst=0;return} // משתמש / עסק אחר במכשיר – לא שומרים בשמו ולא משאירים בזיכרון
+ if(!S.img&&!S.pdf)return;let on=false;try{on=cur().v==='edb'}catch(e){}if(!on){commit();save();resetWork();S.rst=0}},2000); // יציאה מהמסך: שמירה אוטומטית (הפרמטרים והתמונות נשמרים במכשיר) ואז שחרור הזיכרון; בכניסה הבאה העבודה נפתחת מחדש
 try{document.addEventListener('visibilitychange',()=>{if(document.hidden&&S.pid&&S.img){commit();save()}})}catch(e){}
 root.EdbPrint={S,pvSoon,pvDraw,send,go,build,pageImg,pageBlob,calGet,setImg,ok,redraw,lay,mark,imgOfD,cd:curD,ci:()=>imgOfD(curD()),commit,save,hstep,openProj};
 })(typeof window!=='undefined'?window:globalThis);
