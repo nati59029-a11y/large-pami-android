@@ -498,29 +498,31 @@ if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(thi
 /* ===== החלטה 8 (הורחב 19.11.2026, הכרעת בעל העסק): מסך "הרשאות עובדים: תמחור ושלוחות" (V.piStf) – עד שני מתגים לכל עובד =====
    "עדכון מחירים ומלאי" (prc) – רק כשתוספת מדף או הזמנות פעילה; "שלוחות הקו" (yl) – רק כשתוספת yemot פעילה (מנהל־על מפעיל את התוספות).
    מנהל העסק (או מנהל־על בתוך העסק) בלבד, בכל עסק: legacy (כניסה ממסך העובדים V.sync) ומבנה b (כניסה ממסך "עובדים" V.staff).
-   השרת (setStaffPrc עם key) משנה רק את המתג שנשלח ובודק שהתוספת פעילה. שאר ההרשאות – בלי שינוי */
-const SK=[['prc','עדכון מחירים ומלאי',()=>bzF('shelf')||bzF('orders')],['yl','שלוחות הקו',()=>bzF('yemot')]];
+   השרת (setStaffPrc עם key) משנה רק את המתג שנשלח ובודק שהתוספת פעילה. שאר ההרשאות – בלי שינוי
+   26.11.2026: מתג שלישי "עלות מוצרי אפייה" (bake) – רק כשתוספת bake פעילה ורק במבנה b */
+const SK=[['prc','עדכון מחירים ומלאי',()=>bzF('shelf')||bzF('orders')],['yl','שלוחות הקו',()=>bzF('yemot')],['bake','עלות מוצרי אפייה',()=>bzF('bake')&&bzB()]];
+const lgT=()=>{try{return'הרשאות עובדים: '+(bzF('bake')&&bzB()?'תמחור, שלוחות ואפייה':'תמחור ושלוחות')}catch(e){return'הרשאות עובדים: תמחור ושלוחות'}};
 const lgKeys=()=>{try{return SK.filter(x=>x[2]())}catch(e){return[]}};
 const lgOn=()=>{try{return isA()&&lgKeys().length>0}catch(e){return false}};
 const LG={L:null,b:0,err:''},UID_OK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(v);
 async function lgLoad(){if(LG.b)return;LG.b=1;LG.err='';
  try{const j=await fsx('/staff?pageSize=300');LG.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d})||{},p=f.perms,P=!!(p&&typeof p==='object'&&!Array.isArray(p));
-   return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true,prc:P&&p.prc===true,yl:P&&p.yl===true}})
+   return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true,prc:P&&p.prc===true,yl:P&&p.yl===true,bake:P&&p.bake===true}})
   .filter(u=>UID_OK(u.uid)&&u.role!=='manager'&&u.uid!==SY.uid).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email,'he'))}
  catch(e){LG.err=e&&e.offline?e.message:'טעינת רשימת העובדים נכשלה'}
  finally{LG.b=0;try{if(cur().v==='piStf')rerender()}catch(e){}}}
-V.piStf=()=>{const T='הרשאות עובדים: תמחור ושלוחות';if(!lgOn())return{t:T,h:'<div class="empty">המסך הזה למנהל העסק בלבד, כשתוספת מדף, הזמנות או קו טלפוני פעילה</div>'};
+V.piStf=()=>{const T=lgT();if(!lgOn())return{t:T,h:'<div class="empty">המסך הזה למנהל העסק בלבד, כשתוספת מדף, הזמנות, קו טלפוני או עלות מוצרי אפייה פעילה</div>'};
  if(!LG.L&&!LG.err&&!LG.b)lgLoad();
  const K=lgKeys(),row=u=>`<div class="card" style="padding:10px 12px;margin:0 0 8px"><b>${esc(u.name||u.email||u.uid)}</b>${u.active?'':' <span class="tag t4">מושבת</span>'}${u.email&&u.name?`<small style="display:block;color:var(--mut)"><bdi dir="ltr">${esc(u.email)}</bdi></small>`:''}`
   +K.map(([k,t])=>`<label class="cb" style="margin:6px 0 0"><input type="checkbox" data-c="piPrc" data-k="${k}" data-uid="${esc(u.uid)}"${u[k]?' checked':''}> ${t}</label>`).join('')+'</div>';
- const N=K.map(([k])=>k==='prc'?'"עדכון מחירים ומלאי" – העובד רואה את "חשבוניות לתמחור", כולל עלות ומחיר סיטונאי של מוצרי החשבונית, ומעדכן מחירים ומלאי.':'"שלוחות הקו" – העובד רואה את המשבצת "שלוחות הקו" ושולח לשלוחות המתכונים, המבצעים והעדכונים (שעות, הודעת פתיחה והגדרות הקו – למנהל בלבד).').join(' ');
+ const N=K.map(([k])=>k==='prc'?'"עדכון מחירים ומלאי" – העובד רואה את "חשבוניות לתמחור", כולל עלות ומחיר סיטונאי של מוצרי החשבונית, ומעדכן מחירים ומלאי.':k==='bake'?'"עלות מוצרי אפייה" – העובד רואה ועורך פריטי קנייה, רכיבים ומוצרים, כולל עלויות ומחירי קנייה של חומרי האפייה (מחיקה – למנהל בלבד).':'"שלוחות הקו" – העובד רואה את המשבצת "שלוחות הקו" ושולח לשלוחות המתכונים, המבצעים והעדכונים (שעות, הודעת פתיחה והגדרות הקו – למנהל בלבד).').join(' ');
  return{t:T,s:'מי רואה מה',h:`<p class="note">${N} כל המתגים כבויים כברירת מחדל. שאר ההרשאות לא משתנות.</p>`
   +(LG.err?`<div class="card"><p>${esc(LG.err)}</p><button class="btn g" data-a="piLgRe">נסה שוב</button></div>`:LG.L?(LG.L.length?LG.L.map(row).join(''):'<div class="empty">אין עובדים</div>'):'<div class="empty">טוען…</div>')}};
 ACT.piLgRe=()=>{LG.L=null;LG.err='';rerender()};
-if(typeof CHG!=='undefined')CHG.piPrc=async el=>{const uid=el.dataset.uid,key=el.dataset.k==='yl'?'yl':'prc',u=(LG.L||[]).find(x=>x.uid===uid);if(!u||!lgOn()||!lgKeys().some(x=>x[0]===key))return;const on=!!el.checked,nm=u.name||u.email||'העובד';el.disabled=true;
- try{await fnc('setStaffPrc',{uid,on,key});u[key]=on;toast(on?'✓ '+nm+(key==='yl'?' רואה את שלוחות הקו':' יכול לעדכן מחירים ומלאי'):'המתג כובה ל'+nm)}
+if(typeof CHG!=='undefined')CHG.piPrc=async el=>{const uid=el.dataset.uid,key=['yl','bake'].includes(el.dataset.k)?el.dataset.k:'prc',u=(LG.L||[]).find(x=>x.uid===uid);if(!u||!lgOn()||!lgKeys().some(x=>x[0]===key))return;const on=!!el.checked,nm=u.name||u.email||'העובד';el.disabled=true;
+ try{await fnc('setStaffPrc',{uid,on,key});u[key]=on;toast(on?'✓ '+nm+(key==='yl'?' רואה את שלוחות הקו':key==='bake'?' רואה ועורך את עלות מוצרי האפייה':' יכול לעדכן מחירים ומלאי'):'המתג כובה ל'+nm)}
  catch(e){el.checked=!on;toast(e&&e.offline?'אין חיבור לאינטרנט':(e&&e.message)||'השמירה נכשלה')}finally{el.disabled=false}};
-const lgIt=()=>`<button class="opt" data-a="go" data-v="piStf" style="margin-top:8px"><span>הרשאות עובדים: תמחור ושלוחות<small>מתג לכל עובד: ${lgKeys().map(x=>x[1]).join(' · ')}</small></span>${ico('chev')}</button>`;
+const lgIt=()=>`<button class="opt" data-a="go" data-v="piStf" style="margin-top:8px"><span>${lgT()}<small>מתג לכל עובד: ${lgKeys().map(x=>x[1]).join(' · ')}</small></span>${ico('chev')}</button>`;
 /* הכניסה: במסך העובדים של לארג' פעמי (V.sync של המנהל, legacy) */
 {const o=V.sync;if(typeof o==='function')V.sync=function(){const r=o.apply(this,arguments);
  try{if(lgOn()&&!bzB()&&r&&typeof r.h==='string'){const m='<button class="btn grow" style="width:100%;margin-top:8px" data-a="syPull">',it=lgIt();

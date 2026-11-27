@@ -24,6 +24,20 @@ describe('dailyRep – tenant', () => {
   });
 });
 
+// עלות מוצרי אפייה (26.11.2026, שלב א'): התוספת bake וההרשאה bake
+describe('bake – tenant / roles', () => {
+  it('bake ב-FEATURES, כבוי בעסק legacy (OFF_IN_LEGACY); המתג bake כבוי כברירת מחדל', () => {
+    assert.ok(T.FEATURES.includes('bake'));
+    assert.equal(T.ALL_ON.bake, false);
+    const R = require(path.join(FN, 'lib', 'roles.js'));
+    assert.ok(R.PERM_KEYS.includes('bake'));
+    assert.equal(R.DEFAULT_PERMS.bake, false);
+    assert.equal(R.hasPerm({ role: 'worker', staff: { get: () => undefined } }, 'bake'), false, 'עובד ישן בלי perms');
+    assert.equal(R.hasPerm({ role: 'worker', staff: { get: () => ({ bake: true }) } }, 'bake'), true);
+    assert.equal(R.hasPerm({ role: 'manager' }, 'bake'), true);
+  });
+});
+
 describe('dailyRep – יום דיווח ושעון ישראל', () => {
   it('dayInfo לפי שעון ישראל גם כשב-UTC עוד היום הקודם', () => {
     const t = Date.UTC(2026, 10, 15, 22, 30); // 00:30 בישראל, יום שני 16.11

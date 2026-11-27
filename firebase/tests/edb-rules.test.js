@@ -5,7 +5,7 @@ const { describe, it, before, after, beforeEach } = require('node:test');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
-const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false };
+const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false, bake: false };
 const PNG = { contentType: 'image/png' };
 const MB30 = 30 * 1024 * 1024;
 const DAY = 864e5;

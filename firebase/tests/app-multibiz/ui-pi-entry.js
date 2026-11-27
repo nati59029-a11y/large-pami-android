@@ -173,6 +173,18 @@ async function show(page, v) { await page.evaluate((v) => { if (v === 'wk') { WS
   check('6ה PMK כולל את prc ("עדכון מחירים ומלאי") ואת yl ("שלוחות הקו") – שמירת הרשאות מהמסך לא מכבה אותם', pm.includes('prc') && pm.includes('yl') && (await B.page.evaluate(() => PMK.find((x) => x[0] === 'prc')[1])) === 'עדכון מחירים ומלאי' && (await B.page.evaluate(() => PMK.find((x) => x[0] === 'yl')[1])) === 'שלוחות הקו', pm);
   check('6ו אין שגיאות JavaScript (עסק b)', !B.page.__errors.length, B.page.__errors);
   await B.ctx.close();
+  // 26.11.2026 (עלות מוצרי אפייה, שלב א'): תוספת bake דלוקה בעסק b → מתג שלישי "עלות מוצרי אפייה" → setStaffPrc({key:'bake'}); PMK כולל bake
+  S.staff = [{ uid: 'm', name: 'המנהל', role: 'manager', active: true }, { uid: 'w', name: 'דני', role: 'employee', active: true, perms: { ord: true, bake: true } }];
+  const K = await open(browser, www, Object.assign({}, cA, { biz: { 'biz-o': { dataRoot: 'b', features: Object.assign({}, ALL, { bake: true }), name: 'עסק בדיקה' } } }), 'm@x.co');
+  await K.page.evaluate(() => go('piStf')); await sleep(600);
+  const k7 = await K.page.evaluate(() => ({ t: (document.querySelector('header h1, #hdr h1, h1') || {}).innerText || document.title, f: [...document.querySelectorAll('#main input[data-c="piPrc"]')].map((c) => c.dataset.k + ':' + c.dataset.uid + ':' + c.checked), note: /עלות מוצרי אפייה/.test(document.querySelector('#main').innerText), pmk: PMK.some((x) => x[0] === 'bake' && x[1] === 'עלות מוצרי אפייה') }));
+  o = await noOverflow(K.page);
+  check('7 תוספת bake דלוקה (עסק b): שלושה מתגים לעובד, "עלות מוצרי אפייה" דולק לדני, הסבר במסך, PMK כולל bake; בלי גלישה', JSON.stringify(k7.f) === JSON.stringify(['prc:w:false', 'yl:w:false', 'bake:w:true']) && k7.note && k7.pmk && o.sw <= o.W && !o.bad.length, { k7, o });
+  await K.page.click('#main input[data-c="piPrc"][data-k="bake"][data-uid="w"]'); await sleep(400);
+  const c7 = S.calls.filter((c) => c.fn === 'setStaffPrc').pop();
+  check('7א כיבוי "עלות מוצרי אפייה" → setStaffPrc({uid:"w", on:false, key:"bake"})', JSON.stringify(c7.b) === JSON.stringify({ uid: 'w', on: false, key: 'bake' }), c7);
+  check('7ב אין שגיאות JavaScript (bake)', !K.page.__errors.length, K.page.__errors);
+  await K.ctx.close();
 
   await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
