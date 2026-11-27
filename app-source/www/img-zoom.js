@@ -77,10 +77,27 @@ ACT.vwShare=el=>busy(el,async()=>{if(!VW)return;
   if(P.length===1){const b=du2b(P[0]);await share({b,name:base()+ext(b.type),mime:b.type||'image/jpeg'})}
   else await share({b:new Blob([await mkScanPdf(P)],{type:'application/pdf'}),name:base()+'.pdf',mime:'application/pdf'})}
  catch(e){toast('השיתוף נכשל: '+(e&&e.message||e))}});
+/* 27.11.2026: סוג הקובץ נקבע לפי התוכן עצמו (ולא לפי הכותרת של ה-data:), והתמונה נבדקת שהיא נפתחת – כך שלא נשמר בגלריה קובץ שלא נפתח.
+   מחזיר {b,mime,ext} או null אם התמונה פגומה */
+const SNF=[[[0xFF,0xD8,0xFF],'image/jpeg','.jpg'],[[0x89,0x50,0x4E,0x47],'image/png','.png'],[[0x47,0x49,0x46,0x38],'image/gif','.gif'],[[0x42,0x4D],'image/bmp','.bmp']];
+async function imgReal(du){if(!imgOk(du))return null;let b;try{b=du2b(du)}catch(e){return null}if(!b.size)return null;
+ const h=new Uint8Array(await b.slice(0,16).arrayBuffer()),at=(a,o)=>a.every((v,i)=>h[o+i]===v),tx=(t,o)=>at([...t].map(c=>c.charCodeAt(0)),o);
+ let m=SNF.find(x=>at(x[0],0));if(!m&&tx('RIFF',0)&&tx('WEBP',8))m=[0,'image/webp','.webp'];
+ if(!m&&tx('ftyp',4)){const t=String.fromCharCode(...h.slice(8,12));m=/avif|avis/.test(t)?[0,'image/avif','.avif']:[0,'image/heic','.heic'];return{b:new Blob([b],{type:m[1]}),mime:m[1],ext:m[2]}}
+ if(!m)return null;
+ if(typeof createImageBitmap==='function'){try{const bm=await createImageBitmap(b);const ok=bm.width>0&&bm.height>0;if(bm.close)bm.close();if(!ok)return null}catch(e){return null}}
+ return{b:new Blob([b],{type:m[1]}),mime:m[1],ext:m[2]}}
+async function galOne(du,nm){const r=await imgReal(du);if(!r)return false;await gal({b:r.b,name:nm+r.ext,mime:r.mime});return true}
 /* שמירה בגלריה (Pictures/LargePami); כמה עמודים – כל עמוד כתמונה נפרדת */
 ACT.vwGal=el=>busy(el,async()=>{if(!VW||VW.pdf)return;const P=(VW.pgs||[]).filter(imgOk);if(!P.length)return toast('התמונה לא תקינה ולא תישמר');
- try{const b0=base()+'_'+Date.now().toString(36);for(let i=0;i<P.length;i++){const b=du2b(P[i]);await gal({b,name:b0+(P.length>1?'_'+(i+1):'')+ext(b.type),mime:b.type||'image/jpeg'})}}
+ try{const b0=base()+'_'+Date.now().toString(36);let bad=0;for(let i=0;i<P.length;i++){if(!await galOne(P[i],b0+(P.length>1?'_'+(i+1):'')))bad++}
+  if(bad)toast(bad===P.length?'התמונה פגומה ולא נשמרה':bad+' תמונות פגומות לא נשמרו')}
  catch(e){toast('השמירה נכשלה: '+(e&&e.message||e))}});
+/* תמונה בבקשה של עובד (שרשור "בקשות מעובדים"): כפתור "שמירה בגלריה" מתחת לכל תמונה */
+ACT.rqImGal=el=>busy(el,async()=>{const w=el.closest('.rqim'),im=w&&w.querySelector('img'),u=im&&im.getAttribute('src');
+ try{if(!await galOne(u,'LargePami_request_'+Date.now().toString(36)))toast('התמונה פגומה ולא נשמרה')}catch(e){toast('השמירה נכשלה: '+(e&&e.message||e))}});
+/* לחיצה ארוכה על תמונה בבקשה: לא פותחים את תפריט המערכת (שמירה משם יוצרת קובץ שלא נפתח). נגיעה רגילה – מסך הצפייה */
+document.addEventListener('contextmenu',e=>{const t=e.target;if(t&&t.tagName==='IMG'&&t.closest&&t.closest('.rqim'))e.preventDefault()},true);
 /* PDF: שמירה במכשיר (חלון "שמירה בשם" בטלפון, הורדה בדפדפן) */
 ACT.vwSave=el=>busy(el,async()=>{if(!VW||!VW.pdf)return;if(!pdfDU(VW.du))return toast('הקובץ לא תקין ולא יישמר');
  try{await outSave({name:base()+'.pdf',data:new Uint8Array(await du2b(VW.du).arrayBuffer()),mime:'application/pdf'},'dl')}catch(e){toast('השמירה נכשלה: '+(e&&e.message||e))}});
