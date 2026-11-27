@@ -7,7 +7,10 @@
    הרשאה: מנהל / מנהל־על, או עובד עם המתג edb ("הדפסת דף אכיל", כבוי כברירת מחדל).
    מבנה הנתונים מוכן לסבב 2 (תמונה שונה לכל משבצת): imgs[] · ds[] (עיצוב: תמונה, מיקום, זום, סיבוב, התאמות, כיתובים) · slots[] = {d: אינדקס עיצוב}.
    כל ההדפסה עוברת דרך פונקציה אחת: EdbPrint.send – עוזר ההדפסה המקומי (בתחנה) / שליחה לתחנה / טלפון (PdfPrint) / דפדפן (iframe A4 בלי שוליים).
-   החלק הטהור (EdbCore) מיוצא גם ל-Node – firebase/tests/edb-print.unit.test.js. */
+   החלק הטהור (EdbCore) מיוצא גם ל-Node – firebase/tests/edb-print.unit.test.js.
+   סבב 5 (27.11.2026, אחרי הבדיקה בטלפון): כניסה למסך תמיד מצעד 1; אם העבודה האחרונה במכשיר לא הודפסה (pr ברשומת הפרויקט) – פס למטה
+     10 שניות "להמשיך את העבודה הקודמת?". אלבום דפים מוכנים בענן (edba + edb_album/{id}/page.png, thumb.jpg) – משותף לכל המכשירים בעסק:
+     "שמור לאלבום" בצעד 3 (רק בלחיצה – תמונות מהגלריה לא עולות לענן), "אלבום" בצעד 1: הדפסה מיד (לתחנה – הפניה alb, בלי העלאה) או פתיחה לעריכה. */
 (function(root){
 'use strict';
 /* =================== החלק הטהור =================== */
@@ -115,14 +118,27 @@ function projUnpack(rec){if(!rec||typeof rec!=='object'||!Array.isArray(rec.imgs
  const n=layout(k,cu).n,slots=(Array.isArray(rec.slots)?rec.slots:[]).slice(0,n).map(s=>({d:s&&Number.isInteger(+s.d)&&+s.d>=0&&+s.d<ds.length?+s.d:0}));
  let gi=ok(rec.gi)?rec.gi:imgs.findIndex(Boolean);
  return{name:String(rec.name||'').slice(0,60),k,cu,cut:rec.cut!==false,ds,slots,gi,imgs}}
-const API={PG,K,PT,DPI,CAP,LAYS,fitGrid,place,layout,layTxt,laySz,cm,dpi,grade,CAL0,calNorm,calFrom,calMap,calXf,pdfScale,fitCap,levels,luts,adjust,adjNeeded,visual,mkPdf,newD,mkHist,hexRgb,keyColor,normD,imgCap,projPack,projUnpack};
+/* ---------- סבב 5: אלבום דפים מוכנים ---------- */
+// מסמך edba מהענן (אחרי פענוח) → אובייקט נקי, או null. שם עד 60 תווים, פריסה מוכרת (אחרת 'cu'), מידות בטווח, st: ok | up
+function albNorm(o){if(!o||typeof o!=='object')return null;const id=String(o.id||'');if(!/^[A-Za-z0-9_-]{8,40}$/.test(id))return null;
+ const w=Math.trunc(+o.w)||0,h=Math.trunc(+o.h)||0;
+ return{id,nm:String(o.nm==null?'':o.nm).slice(0,60)||'דף',k:o.k==='cu'||LAYS.some(x=>x[0]===o.k)?o.k:'cu',by:String(o.by||''),at:+o.at>0?+o.at:0,w:w>0&&w<=4000?w:0,h:h>0&&h<=4000?h:0,st:o.st==='ok'?'ok':'up'}}
+// חיפוש לפי שם: בלי הבדל בין אותיות גדולות / קטנות ובלי רווחים כפולים; ריק = הכול
+const albQ=q=>String(q||'').trim().toLowerCase().replace(/\s+/g,' ');
+const albFind=(L,q)=>{q=albQ(q);return(L||[]).filter(a=>a&&(!q||albQ(a.nm).includes(q)))};
+const albLay=a=>a&&a.k&&a.k!=='cu'?layTxt(layout(a.k)):'גודל חופשי';
+// כיול ברירת מחדל = מדפיסים את תמונת הדף כמו שהיא (בלי ציור מחדש, ולתחנה – הפניה לאלבום בלי העלאה)
+const calId=c=>{c=calNorm(c);return c.sx===1&&c.sy===1&&c.ox===0&&c.oy===0};
+// "פתח לעריכה": החלק של הדף שבתוך השוליים (5 מ"מ מכל צד) – בפריסת "A4 מלא" הוא חוזר לאותו מקום ובאותו גודל
+function albCrop(w,h){const x=Math.round(w*PG.m/PG.w),y=Math.round(h*PG.m/PG.h);return{x,y,w:Math.max(1,w-2*x),h:Math.max(1,h-2*y)}}
+const API={PG,K,PT,DPI,CAP,LAYS,albNorm,albQ,albFind,albLay,calId,albCrop,fitGrid,place,layout,layTxt,laySz,cm,dpi,grade,CAL0,calNorm,calFrom,calMap,calXf,pdfScale,fitCap,levels,luts,adjust,adjNeeded,visual,mkPdf,newD,mkHist,hexRgb,keyColor,normD,imgCap,projPack,projUnpack};
 root.EdbCore=API;
 if(typeof module!=='undefined'&&module.exports)module.exports=API;
 if(typeof window==='undefined'||typeof ACT==='undefined'||typeof V==='undefined')return;
 
 /* =================== המסך =================== */
 const CALK='lp-edb-cal',T='הדפסת דף אכיל';
-const S={st:1,k:'c12',cu:{sh:'c',w:50,h:50},L:null,img:null,imgs:[],gi:-1,ds:[newD(0)],slots:[],selS:-1,mode:'all',pvBig:false,cut:true,pdf:null,ptg:-1,busy:0,sel:-1,pid:null,pname:'',saveErr:'',rst:0};
+const S={pr:0,alb:null,st:1,k:'c12',cu:{sh:'c',w:50,h:50},L:null,img:null,imgs:[],gi:-1,ds:[newD(0)],slots:[],selS:-1,mode:'all',pvBig:false,cut:true,pdf:null,ptg:-1,busy:0,sel:-1,pid:null,pname:'',saveErr:'',rst:0};
 const mgr=()=>(typeof isA==='function'&&isA())||!!(SY&&SY.sa);
 const ok=()=>!!SY&&!SY.mg&&(mgr()||(typeof isW==='function'&&isW()&&!!(SY.perms&&SY.perms.edb===true)));
 const lay=()=>{if(!S.L||S.L.k!==S.k||S.k==='cu')S.L=layout(S.k,S.cu);if(S.slots.length!==S.L.n){S.slots=S.L.slots.map((_,i)=>S.slots[i]||{d:0});if(S.selS>=S.slots.length)S.selS=-1}return S.L};
@@ -147,6 +163,7 @@ const css=`<style>#edbW .edSt{display:flex;gap:6px;margin-bottom:10px}#edbW .edS
 #edbW .edO.on{border-color:var(--acc);color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 30%,transparent)}#edbW .edO.w2{grid-column:span 2}
 #edbW .edH{margin:14px 0 6px;font-weight:700}#edbW .edNav{display:flex;gap:8px;margin-top:14px}#edbW .edNav .btn{flex:1}
 #edbW .edBig{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}#edbW .edBig label{min-height:84px;flex-direction:column;font-size:1rem;cursor:pointer}
+#edbW .edAlb{grid-column:1/-1;min-height:64px;border-color:var(--acc);color:var(--acc);gap:10px;cursor:pointer}#edbW .edAlb span{display:flex;flex-direction:column;align-items:flex-start;gap:2px}#edbW .edAlb small{font-size:.75rem;font-weight:400;color:var(--mut)}
 #edbW .edTh{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}#edbW .edTh button{border:2px solid var(--line);border-radius:8px;background:#fff;padding:3px;min-height:60px}#edbW .edTh button.on{border-color:var(--acc)}
 #edbW .edTh img{width:100%;display:block}#edbW .edTh small{display:block;color:#333}
 #edbW .edQ{display:inline-flex;align-items:center;gap:6px;font-weight:700}#edbW .edQ i{width:12px;height:12px;border-radius:50%;display:inline-block}
@@ -201,7 +218,8 @@ function pgTap(e){const L=lay(),r=e.currentTarget.getBoundingClientRect(),x=(e.c
 function stepImg(){const I=S.img,P=S.pdf;
  let h=`<div class="edBig"><label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>מצלמה</span><input type="file" accept="image/*" capture="environment" data-c="edbImg" hidden></label>
 <label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg><span>גלריה</span><input type="file" accept="image/*" data-c="edbImg" hidden></label>
-<label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v4h4"/><path d="M9.5 13h5M9.5 17h5"/></svg><span>PDF</span><input type="file" accept="application/pdf,.pdf" data-c="edbPdf" hidden></label></div>`;
+<label class="edO"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v4h4"/><path d="M9.5 13h5M9.5 17h5"/></svg><span>PDF</span><input type="file" accept="application/pdf,.pdf" data-c="edbPdf" hidden></label>
+<button class="edO edAlb" data-a="edbAlb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="9" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>אלבום דפים מוכנים<small>הדפסה מיד, משותף לכל המכשירים בעסק</small></span></button></div>`;
  if(S.busy)h+=`<p class="note" style="margin-top:12px">טוען…</p>`;
  if(P&&P.th&&S.ptg<0)h+=`<div class="edH">בחרו עמוד מתוך הקובץ (${P.n} עמודים${P.n>P.th.length?', מוצגים '+P.th.length+' ראשונים':''})</div><div class="edTh">${P.th.map((u,i)=>`<button data-a="edbPg" data-v="${i+1}" class="${P.sel===i+1?'on':''}"><img src="${u}" alt=""><small>עמוד ${i+1}</small></button>`).join('')}</div>`;
  if(I)h+=`<div class="card" style="margin-top:12px;display:flex;gap:10px;align-items:center"><canvas id="edbTh" width="96" height="96" style="width:72px;height:72px;border-radius:8px;background:#fff;flex:none"></canvas><div><b>${esc(I.name)}</b><small class="note" style="display:block"><span dir="ltr">${I.w}×${I.h}</span> פיקסלים</small></div></div>`;
@@ -209,14 +227,19 @@ function stepImg(){const I=S.img,P=S.pdf;
  h+=`<div class="edR" style="margin-top:12px"><button class="btn g s" data-a="edbProjs">📁 הפרויקטים שלי</button>${S.pid?'<button class="btn g s" data-a="edbNew">פרויקט חדש</button>':''}</div>${S.saveErr?`<div class="edWarn">${esc(S.saveErr)}</div>`:''}`;
  return h+nav(0,1,'הבא – עריכה ופריסה',!I)}
 const worstQ=E=>{let w=null;new Set(S.slots.map(s=>s.d)).forEach(di=>{const v=S.ds[di]?E.quality(S.ds[di]):null;if(v&&(!w||v.d<w.d))w=v});return w};
+// סבב 5: דף מהאלבום בצעד ההדפסה (S.alb) – תמונה ממוזערת, שם, הדפסה ופתיחה לעריכה
+const albCard=a=>`<div class="card"><div style="display:flex;gap:10px;align-items:center"><img data-th="${esc(a.id)}" alt="" style="width:84px;height:119px;object-fit:contain;background:#fff;border-radius:4px;flex:none"><div style="min-width:0"><b style="display:block;overflow-wrap:anywhere">${esc(a.nm)}</b><small class="note" style="display:block">דף מוכן מהאלבום · ${esc(albLay(a))}</small></div></div>
+<button class="btn w" data-a="edbAlbPrint" style="margin-top:10px">הדפסה</button><button class="btn g w" data-a="edbAlbEdit" data-v="${esc(a.id)}" style="margin-top:8px">פתח לעריכה</button></div>`;
 function step4(){const L=lay(),c=calGet(),X=St(),p=X?X.cfg():{on:false,name:'',port:''},E=root.EdbEdit,q=S.img&&E?worstQ(E):null,nat=isNatv(),sOn=X&&X.stnOn(S.stn);
  stnLoad();
  let h=p.on?`<div class="edWarn">המחשב הזה הוא תחנת ההדפסה: ההדפסה נשלחת ישר למדפסת "${esc(p.name)}" דרך עוזר ההדפסה</div>`
   :`${sOn?`<div class="card" style="font-weight:700">יש תחנת הדפסה במחשב – בלחיצה על "הדפסה" אפשר לבחור: שליחה למחשב או ${nat?'הדפסה מהטלפון':'הדפסה מהמכשיר הזה'}</div>`:''}<div class="edWarn">${sOn?'בהדפסה מהמכשיר הזה: ':''}בחלון ההדפסה בחרו גודל 100% (לא 'התאם לדף')</div>`;
- h+=`
+ h+=S.alb?albCard(S.alb):`
 <div class="card"><b>${esc(layTxt(L))}</b>${q?`<div style="margin-top:6px"><span class="edQ ${q.c}"><i></i>איכות: ${q.d} DPI – ${q.t}</span></div>`:''}
 <label class="row" style="gap:8px;align-items:center;margin-top:10px;min-height:44px"><input type="checkbox" data-c="edbCut"${S.cut?' checked':''} style="width:24px;height:24px"> קווי חיתוך אפורים</label>
-<button class="btn w" data-a="edbPrint" style="margin-top:8px"${S.img?'':' disabled'}>הדפסה</button></div>
+<button class="btn w" data-a="edbPrint" style="margin-top:8px"${S.img?'':' disabled'}>הדפסה</button>
+<button class="btn g w" data-a="edbAlbSave" style="margin-top:8px"${S.img?'':' disabled'}>שמור לאלבום</button><small class="note" style="display:block;margin-top:4px">שומר את הדף כמו שהוא בענן של העסק, להדפסה מיד מכל טלפון ומחשב בעסק.</small></div>`;
+ h+=`
 <details class="card"${c.sx!==1||c.sy!==1||c.ox||c.oy?'':''}><summary>כיול מדפסת</summary>
 <p class="note">מדפיסים דף כיול על נייר רגיל, מודדים בסרגל ומקלידים. הכיול נשמר במכשיר ומוחל על כל ההדפסות.</p>
 <button class="btn g w" data-a="edbCal">הדפסת דף כיול</button>
@@ -232,19 +255,20 @@ ${nat?'<p class="note">ההגדרה נעשית במחשב שמחוברת אלי�
 <small class="note" style="display:block">הפורט קבוע: 17891. הגדרות האבטחה של האתר מתירות פנייה רק אליו – פורט אחר דורש שינוי גם בקובץ firebase.json (CSP) ופרסום מחדש של האתר.</small>
 <button class="btn g w" type="submit">שמירה</button></form>
 <button class="btn g w" data-a="edbHlp" style="margin-top:8px">בדיקת עוזר ההדפסה</button><div id="edbHlpR" class="note" style="margin-top:6px"></div>`}</details>`:''}`;
- return h+nav(1,0)}
+ return h+(S.alb?`<div class="edNav"><button class="btn g" data-a="edbAlb">חזרה לאלבום</button></div>`:nav(1,0))}
 // מצב התחנה בעסק (edbs/main) – נטען פעם בדקה כשמסך ההדפסה פתוח
 let stnB=0;const stnLoad=()=>{const X=St();if(!X||stnB)return;stnB=1;const f=S.stnF;S.stnF=0;X.stn(f).then(v=>{stnB=0;const a=JSON.stringify(S.stn||null),b=JSON.stringify(v||null);S.stn=v;if(a!==b&&S.st===3)redraw()},()=>{stnB=0})};
 V.edb=()=>{if(!ok())return{t:T,h:'<div class="empty">אין לך הרשאה להדפסת דף אכיל</div>'};
- if(!S.img&&!S.busy&&!S.rst){S.rst=1;const id=lsCur();if(id)setTimeout(()=>openProj(id,true),0)}
- if(!S.img&&S.st>1)S.st=1;lay();const E=root.EdbEdit;
+ // סבב 5: מתחילים תמיד מצעד 1. העבודה האחרונה לא הודפסה – פס "להמשיך את העבודה הקודמת?" ל-10 שניות (resumeAsk)
+ if(!S.img&&!S.busy&&!S.rst&&!S.alb){S.rst=1;const id=lsCur();if(id)setTimeout(()=>resumeAsk(id),0)}
+ if(S.alb&&S.st!==3)S.alb=null;if(!S.img&&!S.alb&&S.st>1)S.st=1;lay();const E=root.EdbEdit;
  const body=S.st===1?stepImg():S.st===2?stepEdit():step4();
- setTimeout(()=>{try{if(cur().v!=='edb')return;if(S.st===2){if(E&&lay().n)E.mount(S);pvDraw();const pc=document.getElementById('edbPg');if(pc&&!pc.dataset.on){pc.dataset.on='1';pc.addEventListener('click',pgTap)}}if(S.st===1&&S.img)thumb()}catch(e){}},0);
+ setTimeout(()=>{try{if(cur().v!=='edb')return;if(S.st===2){if(E&&lay().n)E.mount(S);pvDraw();const pc=document.getElementById('edbPg');if(pc&&!pc.dataset.on){pc.dataset.on='1';pc.addEventListener('click',pgTap)}}if(S.st===1&&S.img)thumb();if(S.st===3&&S.alb)albThAll()}catch(e){}},0);
  return{t:T,h:css+`<div id="edbW">${steps()}${body}</div>`}};
 const thumb=()=>{const c=document.getElementById('edbTh');if(!c||!S.img)return;const g=c.getContext('2d'),s=S.img.p,k=Math.min(96/s.width,96/s.height);g.fillStyle='#fff';g.fillRect(0,0,96,96);g.drawImage(s,(96-s.width*k)/2,(96-s.height*k)/2,s.width*k,s.height*k)};
 window.edbTile=k=>ok()?(k==='add'?`<button class="tile" data-a="addGo" data-v="edb" style="font-size:1rem">${ico('doc')}הדפסת דף אכיל</button>`:`<button class="tile" data-a="go" data-v="edb" style="font-size:1.15rem;text-align:center;border-color:var(--acc);color:var(--acc)">${ico('doc')}הדפסת דף אכיל</button>`):'';
 
-ACT.edbSt=el=>{const v=+el.dataset.v;if(!(v>=1&&v<=3))return;if(v>=2&&!S.img){toast('קודם בוחרים תמונה');return}if(v>=3&&!lay().n)return;if(S.st===2&&root.EdbEdit)root.EdbEdit.unmount();S.st=v;if(v===3)S.stnF=1;rerender()};
+ACT.edbSt=el=>{const v=+el.dataset.v;if(!(v>=1&&v<=3))return;if(S.alb){S.alb=null;if(!S.img){S.st=1;rerender();return}}if(v>=2&&!S.img){toast('קודם בוחרים תמונה');return}if(v>=3&&!lay().n)return;if(S.st===2&&root.EdbEdit)root.EdbEdit.unmount();S.st=v;if(v===3)S.stnF=1;rerender()};
 // החלפת פריסה שומרת את התמונה והעריכה: מיקום וזום יחסיים למשבצת (מתאימים לבד); גודל הכיתוב (מ"מ) – לפי היחס בין הגדלים
 function relay(fn){const a=S.L&&S.L.n?Math.min(S.L.w,S.L.h):0;fn();S.L=null;const L=lay(),b=L.n?Math.min(L.w,L.h):0;
  if(a&&b&&a!==b)S.ds.forEach(d=>(d.tx||[]).forEach(x=>{x.sz=Math.round(clamp(x.sz*b/a,3,60)*2)/2}));mark();if(root.EdbEdit)root.EdbEdit.unmount();rerender()}
@@ -293,7 +317,7 @@ let MT=0,AT=0;
 function prune(){if(!S.slots.length)return;const used=new Set([0]);S.slots.forEach(s=>used.add(s.d));if(used.size===S.ds.length)return;const map={},nd=[];S.ds.forEach((d,i)=>{if(used.has(i)){map[i]=nd.length;nd.push(d)}});S.ds=nd;S.slots.forEach(s=>{s.d=map[s.d]})}
 function gc(){const ref=new Set(),add=o=>{ref.add(o.gi);(o.ds||[]).forEach(d=>{if(d&&d.im!=null)ref.add(d.im)})};add({ds:S.ds,gi:S.gi});H.all().forEach(x=>{try{add(JSON.parse(x))}catch(e){}});S.imgs.forEach((m,i)=>{if(m&&!ref.has(i)){freeImg(m);S.imgs[i]=null}})}
 const updUR=()=>{const a=document.getElementById('edbUn'),b=document.getElementById('edbRe');if(a)a.disabled=!H.canUndo();if(b)b.disabled=!H.canRedo()};
-function commit(){if(MT){clearTimeout(MT);MT=0}if(!S.pid||!S.img)return;prune();if(H.commit(snap())){gc();updUR();asv()}}
+function commit(){if(MT){clearTimeout(MT);MT=0}if(!S.pid||!S.img)return;prune();if(H.commit(snap())){S.pr=0;gc();updUR();asv()}} // סבב 5: שינוי אחרי הדפסה – שוב "לא הודפס"
 function mark(){if(!S.pid)return;clearTimeout(MT);MT=setTimeout(()=>{MT=0;commit()},400)}
 function hstep(dir){commit();const s=dir<0?H.undo():H.redo();if(!s)return;let o;try{o=JSON.parse(s)}catch(e){return}
  S.k=o.k;S.cu=o.cu;S.ds=o.ds;S.slots=o.slots;S.gi=o.gi;S.img=S.imgs[S.gi]||S.img;S.L=null;S.sel=-1;lay();S.mode=S.selS>=0&&S.slots[S.selS]&&S.slots[S.selS].d!==0?'one':'all';
@@ -326,7 +350,7 @@ const asv=()=>{clearTimeout(AT);AT=setTimeout(()=>{save()},1500)};
 let SQ=Promise.resolve();
 // החלק הסינכרוני (הקלטת הפרמטרים, התחלת קידוד התמונות והתמונה הממוזערת) קורה מיד – אפשר לשחרר את הקנבסים מיד אחרי הקריאה
 function save(){if(!S.pid||!S.img)return SQ;const pid=S.pid,ims=S.imgs.slice(),need=ims.filter(m=>m&&!m.stored&&m.c&&m.c.width>0);
- let bl,rec;try{bl=need.map(m=>m.blob?Promise.resolve(m.blob):tb(m.c));rec=root.EdbCore.projPack({name:S.pname||autoName(),k:S.k,cu:S.cu,cut:S.cut,ds:S.ds,slots:S.slots,gi:S.gi,imgs:ims});rec.id=pid;rec.ow=S.ow||own();rec.at=Date.now();rec.th=thumbURL()}catch(e){return SQ}
+ let bl,rec;try{bl=need.map(m=>m.blob?Promise.resolve(m.blob):tb(m.c));rec=root.EdbCore.projPack({name:S.pname||autoName(),k:S.k,cu:S.cu,cut:S.cut,ds:S.ds,slots:S.slots,gi:S.gi,imgs:ims});rec.id=pid;rec.ow=S.ow||own();rec.at=Date.now();rec.th=thumbURL();if(S.pr)rec.pr=1}catch(e){return SQ}
  const job=async()=>{try{const bs=await Promise.all(bl);
    await dbTx(['proj','img'],'readwrite',t=>{need.forEach((m,i)=>t.objectStore('img').put(bs[i],pid+'|'+m.id));t.objectStore('proj').put(rec)});
    need.forEach(m=>{m.stored=true;m.blob=null});
@@ -335,7 +359,7 @@ function save(){if(!S.pid||!S.img)return SQ;const pid=S.pid,ims=S.imgs.slice(),n
    S.saveErr=''}
   catch(e){const m=quotaErr(e)?'אין מספיק מקום פנוי במכשיר לשמירת הפרויקט. מוחקים פרויקטים ישנים (📁 פרויקטים) או מפנים מקום. העבודה הנוכחית עדיין פתוחה, אבל לא נשמרת.':'שמירת הפרויקט במכשיר נכשלה. העבודה הנוכחית עדיין פתוחה.';if(S.saveErr!==m){S.saveErr=m;try{toast(m)}catch(x){}}}};
  return SQ=SQ.then(job,job)}
-function resetWork(){if(root.EdbEdit)root.EdbEdit.unmount();clearTimeout(MT);MT=0;clearTimeout(AT);freeAll();relPdf();S.pid=null;S.ow="";S.pname='';S.st=1;S.ds=[newD(0)];S.slots=[];S.selS=-1;S.sel=-1;S.mode='all';S.L=null;S.ptg=-1;PEND=null}
+function resetWork(){if(root.EdbEdit)root.EdbEdit.unmount();clearTimeout(MT);MT=0;clearTimeout(AT);freeAll();relPdf();S.pr=0;S.alb=null;S.pid=null;S.ow="";S.pname='';S.st=1;S.ds=[newD(0)];S.slots=[];S.selS=-1;S.sel=-1;S.mode='all';S.L=null;S.ptg=-1;PEND=null}
 async function openProj(id,silent){if(S.busy)return;S.busy=1;redraw();
  try{if(S.pid&&S.img&&S.pid!==id){commit();await save()}
   const rec=await dbGet('proj',id);if(!mineP(rec))throw new Error('missing');const st=root.EdbCore.projUnpack(rec);if(!st)throw new Error('missing');
@@ -343,7 +367,7 @@ async function openProj(id,silent){if(S.busy)return;S.busy=1;redraw();
   for(const m of st.imgs){if(!m){L.push(null);continue}const b=await dbGet('img',id+'|'+m.id);if(!b){L.push(null);continue}
    const im=await loadImg(b);try{const o=mkImg(im,im.naturalWidth,im.naturalHeight,m.name,m.cap,null);o.id=m.id;o.stored=true;L.push(o)}finally{im.src=''}}
   st.ds.forEach(d=>{if(d.im!=null&&!L[d.im])delete d.im});if(!L[st.gi])st.gi=L.findIndex(Boolean);if(st.gi<0)throw new Error('noimg');
-  S.imgs=L;S.gi=st.gi;S.img=L[st.gi];S.k=st.k;S.cu=st.cu;S.cut=st.cut;S.ds=st.ds;S.slots=st.slots;S.L=null;S.pid=id;S.ow=rec.ow;S.pname=st.name||autoName();lsSet(id);
+  S.imgs=L;S.gi=st.gi;S.img=L[st.gi];S.k=st.k;S.cu=st.cu;S.cut=st.cut;S.ds=st.ds;S.slots=st.slots;S.L=null;S.pid=id;S.ow=rec.ow;S.pr=rec.pr===1?1:0;S.pname=st.name||autoName();lsSet(id);
   lay();H=mkHist(30);H.init(snap());S.st=2;S.saveErr='';if(!silent)closeDlg();toast(silent?'ממשיכים מהעבודה האחרונה (פרויקט חדש: בצעד 1)':'הפרויקט נפתח')}
  catch(e){resetWork();if(silent)lsSet('');else toast('הפרויקט לא נפתח')}
  finally{S.busy=0;redraw()}}
@@ -395,17 +419,19 @@ async function viaWeb(o){const U=(await pagesOf(o)).map(b=>URL.createObjectURL(b
  await Promise.all(Array.from(D.images).map(im=>im.complete?0:new Promise(r=>{im.onload=im.onerror=r})));
  f.contentWindow.focus();f.contentWindow.print();
  setTimeout(()=>{if(document.getElementById('edbPf')===f)f.remove();U.forEach(u=>{try{URL.revokeObjectURL(u)}catch(e){}})},120000);return true}
-async function send(o){const X=St(),c=X?X.cfg():null;
+// סבב 5: o.alb – דף מהאלבום (לתחנה: הפניה בלי העלאה); o.pdfF – יצירת ה-PDF רק כשצריך (טלפון); o.onSent – אחרי שליחה מוצלחת (סימון "הודפס")
+async function send(o){const how=await send0(o);if(o.onSent&&['helper','station','native','web'].includes(how)){try{o.onSent(how)}catch(e){}}return how}
+async function send0(o){const X=St(),c=X?X.cfg():null;
  if(c&&c.on){await X.local(await pagesOf(o),o.name);return 'helper'} // המצב (חסר נייר / הודפס) – בחלון ההודעות של התחנה
- if(o.how==='station'&&X){await X.send(await pagesOf(o),o.title);return 'station'}
+ if(o.how==='station'&&X){const r=o.alb?await X.sendAlb(o.alb,o.title):await X.send(await pagesOf(o),o.title);return r===false?'station-fail':'station'}
  const C=typeof shNat==='function'?shNat():null;
- if(C&&C.Plugins&&C.Plugins.PdfPrint){await C.Plugins.PdfPrint.print({name:o.name||'edible',data:o.pdfB64||shB64(o.pdf)});return 'native'}
+ if(C&&C.Plugins&&C.Plugins.PdfPrint){await C.Plugins.PdfPrint.print({name:o.name||'edible',data:o.pdfB64||shB64(o.pdf||await o.pdfF())});return 'native'}
  await viaWeb(o);return 'web'}
 // לפני שליחה: יש תחנה פעילה בעסק והמכשיר הזה אינו התחנה – חלון בחירה (ברירת המחדל, הכפתור הראשון: שליחה למחשב).
 // תמונות העמוד נוצרות לפני החלון (הקנבסים משתחררים מיד), ונשמרות ב-PEND עד הבחירה
 let PEND=null;
 async function go(o){const X=St(),c=X?X.cfg():null;
- if(X&&!(c&&c.on)&&X.ok()){const s=await X.stn(true);if(X.stnOn(s)){o.pages=await pagesOf(o);PEND=o;
+ if(X&&!(c&&c.on)&&X.ok()){const s=await X.stn(true);if(X.stnOn(s)){if(!o.alb)o.pages=await pagesOf(o);PEND=o;
   dlg(`<h3>לאן להדפיס?</h3><p class="note">${esc(X.stnTxt(s))}</p><div style="display:flex;flex-direction:column;gap:8px"><button class="btn w" data-a="edbHow" data-v="station">שליחה למחשב (מדפסת דף אכיל)</button><button class="btn g w" data-a="edbHow" data-v="here">${isNatv()?'הדפסה מהטלפון':'הדפסה מהמכשיר הזה'}</button><button class="btn g w" data-a="closeDlg">ביטול</button></div>`);return 'ask'}}
  return send(o)}
 const doneMsg=how=>{if(how==='helper')toast('נשלח למדפסת הדף האכיל');else if(how==='native'||how==='web')toast('נשלח להדפסה')};
@@ -420,8 +446,8 @@ async function build(){const L=lay(),E=root.EdbEdit,bl=PG.bl,used=[...new Set(S.
  E.freeKey();return{pg,cvs}}
 let pBusy=0;
 ACT.edbPrint=async el=>{if(pBusy||!S.img)return;pBusy=1;if(el)el.disabled=true;toast('מכין להדפסה…');let cvs=[];
- try{const r=await build();cvs=r.cvs;const pdf=mkPdf(r.pg);API.last={pg:r.pg,size:pdf.length};
-  doneMsg(await go({pdf,name:'edible',title:'דף אכיל',pages:async()=>[await pageBlob(r.pg,cvs)]}))}
+ try{const r=await build();cvs=r.cvs;const pdf=mkPdf(r.pg);API.last={pg:r.pg,size:pdf.length};const pid=S.pid;
+  doneMsg(await go({pdf,name:'edible',title:'דף אכיל',pages:async()=>[await pageBlob(r.pg,cvs)],onSent:()=>{if(S.pid===pid&&S.img){S.pr=1;save()}}}))}
  catch(e){toast('ההדפסה נכשלה: '+(e&&e.message||e))}finally{cvs.forEach(freeCv);pBusy=0;if(el)el.disabled=false}};
 // דף כיול: קו אופקי וקו אנכי של 100 מ"מ עם שנתות כל 10 מ"מ, וצלב 20 מ"מ מהקצה השמאלי והעליון. בלי כיול (גולמי)
 function calPage(){const lines=[],H=[55,60],Vx=30,V0=80;lines.push([H[0],H[1],H[0]+100,H[1],0.3]);for(let i=0;i<=10;i++)lines.push([H[0]+i*10,H[1]-(i%5?2:4),H[0]+i*10,H[1],0.2]);
@@ -445,9 +471,110 @@ ACT.edbHlp=async()=>{const X=St(),o=document.getElementById('edbHlpR');if(!X||!o
  if(!r.ok){e.textContent='עוזר ההדפסה לא עונה בכתובת http://127.0.0.1:'+c.port+' – בודקים שהוא הופעל במחשב הזה (edb-helper.bat).';return}
  const P=Array.isArray(r.j.printers)?r.j.printers:[];
  e.innerHTML=`<b>העוזר עונה.</b> ${r.j.chosen?'מדפסת: <span dir="ltr">'+esc(r.j.chosen)+'</span>':'<b style="color:#e0483e">לא נמצאה מדפסת שמכילה "'+esc(c.name)+'"</b>'} · הגדרות איכות שמורות: ${r.j.saved?'כן':'לא (להריץ edb-helper-setup.bat)'}${P.length?'<br>מדפסות במחשב: <span dir="ltr">'+P.map(esc).join(' · ')+'</span>':''}`};
+
+/* =================== סבב 5: "להמשיך את העבודה הקודמת?" =================== */
+// בכניסה למסך: אם הפרויקט האחרון במכשיר (של המשתמש הזה) לא הודפס – פס למטה ל-10 שניות. לחיצה = פתיחה בצעד 2. אחרי 10 שניות הפס נעלם (הפרויקט נשאר ב"פרויקטים")
+let RB=null;
+const rbOff=()=>{if(RB){clearInterval(RB.t);try{RB.e.remove()}catch(e){}RB=null}};
+const onEdb=()=>{try{return cur().v==='edb'}catch(e){return false}};
+async function resumeAsk(id){let r=null;try{r=await dbGet('proj',id)}catch(e){return}
+ if(!mineP(r)){lsSet('');return}if(r.pr===1||S.img||S.alb||S.busy||!onEdb())return;
+ rbOff();const e=document.createElement('div');e.id='edbRb';e.setAttribute('role','status');e.dir='rtl';
+ e.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:2147482000;width:min(560px,94vw);box-sizing:border-box;background:var(--card,#222);color:var(--ink,#fff);border:2px solid var(--acc,#e7b84d);border-radius:14px;box-shadow:0 6px 24px #000a;padding:10px 12px;display:flex;gap:8px;align-items:center';
+ let n=10;const paint=()=>{e.innerHTML=`<div style="flex:1;min-width:0"><b style="display:block">להמשיך את העבודה הקודמת?</b><small class="note" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name||'פרויקט')}</small></div><button class="btn" data-a="edbResume" data-v="${esc(id)}" style="flex:none;min-height:44px;width:auto;padding:0 14px">המשך <small style="opacity:.8">(${n})</small></button><button class="btn g" data-a="edbRbX" aria-label="סגירה" style="flex:none;min-height:44px;min-width:44px;width:auto;padding:0 10px">✕</button>`};
+ paint();document.body.appendChild(e);RB={e,t:setInterval(()=>{n--;if(n<=0||!onEdb()||S.img||S.alb){rbOff();return}paint()},1000)}}
+ACT.edbResume=el=>{const id=el&&el.dataset.v;rbOff();if(id)openProj(id)};
+ACT.edbRbX=()=>rbOff();
+
+/* =================== סבב 5: אלבום דפים מוכנים (בענן, משותף לכל המכשירים בעסק) ===================
+   Firestore edba/{id}: nm, k, by, at, w, h, st ('up' → 'ok'). Storage: edb_album/{id}/page.png (העמוד המוכן, PNG 300 DPI, בלי כיול) + thumb.jpg (עד 300KB).
+   בעסק b – תחת b/{bizId}/. ברשימה נטענות רק התמונות הממוזערות, ורק כשהן נראות; הדף המלא יורד רק בהדפסה / פתיחה לעריכה.
+   יצירה – מנהל ועובד עם edb; שינוי שם – היוצר או מנהל; מחיקה – מנהל בלבד (גם בחוקים) */
+const AL={L:null,t:0,q:'',th:new Map(),io:null,qn:0,wait:[]};
+const albF=(id,f)=>(typeof bzB==='function'&&bzB()?'b/'+SY.bizId+'/':'')+'edb_album/'+id+'/'+f;
+const albRid=()=>{const a='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',b=new Uint8Array(20);crypto.getRandomValues(b);return Array.from(b,x=>a[x%62]).join('')};
+const fldA=o=>{const f={};for(const k in o){const v=o[k];f[k]=typeof v==='number'?{integerValue:String(Math.round(v))}:{stringValue:String(v)}}return f};
+const albDt=t=>{try{return t?new Date(t).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}catch(e){return ''}};
+const albOf=id=>(AL.L||[]).find(x=>x.id===id)||(S.alb&&S.alb.id===id?S.alb:null);
+async function albLoad(force){if(!force&&AL.L&&Date.now()-AL.t<60000)return AL.L;
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'edba'}],orderBy:[{field:{fieldPath:'at'},direction:'DESCENDING'}],limit:300}})});
+ AL.L=(r||[]).filter(x=>x&&x.document).map(x=>albNorm(Object.assign({},Object.fromEntries(Object.entries(x.document.fields||{}).map(([k,v])=>[k,fvj(v)])),{id:idOf(x.document)}))).filter(Boolean);AL.t=Date.now();return AL.L}
+// קובץ מהאלבום (Storage, עם ההרשאה של המשתמש). 403/404 – הדף נמחק או שאין הרשאה
+async function albGet(id,f){let r;try{r=await fetch(STB()+'/'+encodeURIComponent(albF(id,f))+'?alt=media',{headers:{Authorization:'Firebase '+await tok()}})}catch(e){throw new Error('אין חיבור לאינטרנט')}
+ if(!r.ok)throw new Error(r.status===403||r.status===404?'הדף לא נמצא באלבום (אולי נמחק)':'ההורדה נכשלה ('+r.status+')');return r.blob()}
+// תמונה ממוזערת: עד 4 הורדות במקביל, נשמרת בזיכרון עד היציאה מהמסך
+function albTh(id){if(AL.th.has(id))return Promise.resolve(AL.th.get(id));
+ return new Promise(res=>{const run=async()=>{AL.qn++;let u='';try{u=URL.createObjectURL(await albGet(id,'thumb.jpg'));AL.th.set(id,u)}catch(e){}AL.qn--;const nx=AL.wait.shift();if(nx)nx();res(u)};if(AL.qn<4)run();else AL.wait.push(run)})}
+const albThSet=im=>{if(!im||im.dataset.ld)return;const id=im.dataset.th,a=albOf(id);if(!a||a.st!=='ok')return;im.dataset.ld='1';albTh(id).then(u=>{if(u&&im.isConnected)im.src=u})};
+const albThAll=()=>document.querySelectorAll('#edbW img[data-th],#dlg img[data-th]').forEach(im=>{if(!im.closest('#edbAlbG'))albThSet(im)});
+function albFree(){try{if(AL.io)AL.io.disconnect()}catch(e){}AL.io=null;AL.th.forEach(u=>{try{URL.revokeObjectURL(u)}catch(e){}});AL.th.clear()}
+// רשת הדפים: רק הנראים נטענים (IntersectionObserver); חיפוש לפי שם – הסתרה בלי ציור מחדש
+const albCell=a=>`<button data-a="edbAlbOpen" data-v="${esc(a.id)}" data-n="${esc(albQ(a.nm))}" style="border:2px solid var(--line);border-radius:10px;background:var(--card);color:inherit;padding:4px;min-height:44px;font:inherit;text-align:center;min-width:0"><img data-th="${esc(a.id)}" alt="" style="width:100%;aspect-ratio:210/297;object-fit:contain;background:#fff;border-radius:4px;display:block"><small style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px">${esc(a.nm)}</small>${a.st!=='ok'?'<small style="display:block;color:#e0483e">השמירה לא הושלמה</small>':''}</button>`;
+function albFilter(){const g=document.getElementById('edbAlbG'),q=albQ(AL.q);if(!g)return;let n=0;g.querySelectorAll('[data-n]').forEach(b=>{const v=!q||b.dataset.n.includes(q);b.style.display=v?'':'none';if(v)n++});const e=document.getElementById('edbAlbE');if(e)e.textContent=n?'':q?'לא נמצאו דפים בשם הזה':'אין עדיין דפים באלבום. שומרים דף בצעד 3 (הדפסה) – "שמור לאלבום".'}
+async function albDlg(){const H3='<h3>אלבום דפים מוכנים</h3>';dlg(H3+'<p class="note">טוען…</p>');let L;
+ try{L=await albLoad(true)}catch(e){dlg(H3+`<p class="note">${e&&e.offline?'אין חיבור לאינטרנט – האלבום נמצא בענן.':'האלבום לא נטען.'}</p><button class="btn g w" data-a="closeDlg">סגירה</button>`);return}
+ const V=L.filter(a=>a.st==='ok'||mgr());
+ dlg(H3+`<p class="note" style="margin:0 0 6px">משותף לכל הטלפונים והמחשבים בעסק. לחיצה על דף – הדפסה מיד או פתיחה לעריכה.</p>
+<input type="search" data-i="edbAlbQ" placeholder="חיפוש לפי שם" aria-label="חיפוש לפי שם" value="${esc(AL.q)}" style="width:100%;min-height:44px;margin-bottom:8px;box-sizing:border-box">
+<div id="edbAlbG" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-height:56vh;overflow:auto">${V.map(albCell).join('')}</div><p class="note" id="edbAlbE" style="margin:6px 0 0"></p>
+<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`);
+ albFilter();const g=document.getElementById('edbAlbG');if(!g)return;try{if(AL.io)AL.io.disconnect()}catch(e){}
+ if(typeof IntersectionObserver==='function'){AL.io=new IntersectionObserver(es=>es.forEach(x=>{if(x.isIntersecting){AL.io.unobserve(x.target);albThSet(x.target)}}),{root:g,rootMargin:'200px 0px'});g.querySelectorAll('img[data-th]').forEach(im=>AL.io.observe(im))}
+ else g.querySelectorAll('img[data-th]').forEach(albThSet)}
+ACT.edbAlb=()=>{albDlg()};
+INP.edbAlbQ=el=>{AL.q=String(el.value||'').slice(0,60);albFilter()};
+// תצוגה מקדימה: הדפסה מיד / פתיחה לעריכה; שינוי שם – היוצר או מנהל; מחיקה – מנהל
+ACT.edbAlbOpen=el=>{const a=albOf(el&&el.dataset.v);if(!a)return;const M=mgr(),me=a.by===(SY&&SY.uid);
+ dlg(`<h3 style="overflow-wrap:anywhere">${esc(a.nm)}</h3><div style="text-align:center"><img data-th="${esc(a.id)}" alt="" style="width:min(62vw,240px);aspect-ratio:210/297;object-fit:contain;background:#fff;border-radius:6px;box-shadow:0 1px 6px #0008"></div><p class="note" style="text-align:center;margin:6px 0 10px">${esc(albLay(a))}${a.at?' · נשמר '+esc(albDt(a.at)):''}</p>
+${a.st==='ok'?`<div style="display:flex;flex-direction:column;gap:8px"><button class="btn w" data-a="edbAlbGo" data-v="${esc(a.id)}">הדפס עכשיו</button><button class="btn g w" data-a="edbAlbEdit" data-v="${esc(a.id)}">פתח לעריכה</button></div>`:'<p class="note" style="color:#e0483e">השמירה של הדף הזה לא הושלמה (הקבצים לא עלו). אפשר למחוק אותו.</p>'}
+${(M||me)&&a.st==='ok'||M?`<div style="display:flex;gap:8px;margin-top:8px">${(M||me)&&a.st==='ok'?`<button class="btn g w" data-a="edbAlbRen" data-v="${esc(a.id)}">שינוי שם</button>`:''}${M?`<button class="btn r w" data-a="edbAlbDel" data-v="${esc(a.id)}">מחיקה</button>`:''}</div>`:''}<button class="btn g w" data-a="edbAlb" style="margin-top:8px">חזרה לאלבום</button>`);
+ albThSet(document.querySelector('#dlg img[data-th]'))};
+// "הדפס עכשיו" – צעד ההדפסה עם הדף מהאלבום (העבודה הפתוחה נשמרת קודם)
+ACT.edbAlbGo=async el=>{const a=albOf(el&&el.dataset.v);if(!a||a.st!=='ok'||S.busy)return;closeDlg();try{if(S.pid&&S.img){commit();await save()}}catch(e){}
+ if(root.EdbEdit)root.EdbEdit.unmount();S.alb=Object.assign({},a);S.st=3;S.stnF=1;rbOff();rerender()};
+ACT.edbAlbPrint=async el=>{const a=S.alb;if(pBusy||!a)return;pBusy=1;if(el)el.disabled=true;toast('מכין להדפסה…');
+ try{const cal=calGet(),raw=calId(cal),blob=async()=>a.blob||(a.blob=await albGet(a.id,'page.png'));
+  // כיול לא ברירת מחדל – הדף מצויר מחדש עם הכיול של המכשיר הזה (ולתחנה – מועלה כמו עבודה רגילה, כי הכיול שייך לשולח)
+  const pages=async()=>{const b=await blob();if(raw)return[b];const im=await loadImg(b);try{return[await pageBlob({draws:[{i:0,x:0,y:0,w:PG.w,h:PG.h}],cal},[im])]}finally{im.src=''}};
+  const pdfF=async()=>{const im=await loadImg(await blob()),c=document.createElement('canvas');try{c.width=im.naturalWidth;c.height=im.naturalHeight;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(im,0,0);return mkPdf({imgs:[await imgOf(c)],draws:[{i:0,x:0,y:0,w:PG.w,h:PG.h}],cal})}finally{im.src='';freeCv(c)}};
+  doneMsg(await go({alb:raw?a.id:'',pdfF,pages,name:'edible',title:a.nm}))}
+ catch(e){toast('ההדפסה נכשלה: '+(e&&e.message||e))}finally{pBusy=0;if(el)el.disabled=false}};
+// "פתח לעריכה": הדף נטען כתמונה אחת בפריסת "A4 מלא" (רק החלק שבתוך השוליים), כפרויקט חדש במכשיר. קווי החיתוך כבויים – הם כבר בתמונה
+ACT.edbAlbEdit=async el=>{const a=albOf(el&&el.dataset.v);if(!a||a.st!=='ok'||S.busy)return;closeDlg();S.busy=1;redraw();
+ try{const b=a.blob||await albGet(a.id,'page.png'),im=await loadImg(b);let c=null;
+  try{if(S.pid&&S.img){commit();await save()}resetWork();const r=albCrop(im.naturalWidth,im.naturalHeight);c=document.createElement('canvas');c.width=r.w;c.height=r.h;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,r.w,r.h);g.drawImage(im,r.x,r.y,r.w,r.h,0,0,r.w,r.h);
+   S.k='full';S.L=null;S.cut=false;setImg(c,r.w,r.h,a.nm,null);S.pname=a.nm}finally{im.src='';freeCv(c)}
+  S.st=2;S.busy=0;rbOff();redraw();toast('הדף נפתח לעריכה (פרויקט חדש במכשיר)')}
+ catch(e){S.busy=0;toast(e&&e.message||'הדף לא נפתח');redraw()}};
+ACT.edbAlbRen=el=>{const a=albOf(el&&el.dataset.v);if(!a)return;dlg(`<h3>שינוי שם</h3><form data-f="edbAlbRen"><input type="hidden" name="id" value="${esc(a.id)}"><label class="f" style="display:block"><span>שם הדף</span><input name="n" maxlength="60" required value="${esc(a.nm)}" style="width:100%;min-height:44px;box-sizing:border-box"></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" type="submit">שמירה</button><button class="btn g w" type="button" data-a="edbAlbOpen" data-v="${esc(a.id)}">ביטול</button></div></form>`)};
+FRM.edbAlbRen=async f=>{const id=(f.querySelector('[name=id]')||{}).value,n=String((f.querySelector('[name=n]')||{}).value||'').trim().slice(0,60),a=albOf(id);if(!a)return;if(!n){toast('הקלידו שם');return}
+ try{await fsx('/edba/'+id+'?updateMask.fieldPaths=nm&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:fldA({nm:n})})});a.nm=n;if(S.alb&&S.alb.id===id){S.alb.nm=n;redraw()}toast('השם עודכן');ACT.edbAlbOpen({dataset:{v:id}})}
+ catch(e){toast(e&&e.code===403?'אין הרשאה לשנות את השם':'שינוי השם נכשל')}};
+ACT.edbAlbDel=el=>{const a=albOf(el&&el.dataset.v);if(!a||!mgr())return;dlg(`<h3>מחיקה מהאלבום</h3><p>למחוק את "${esc(a.nm)}"? הדף יימחק מהאלבום בכל הטלפונים והמחשבים בעסק, ואי אפשר לשחזר אותו.</p><div style="display:flex;gap:8px"><button class="btn r w" data-a="edbAlbDel2" data-v="${esc(a.id)}">מחיקה</button><button class="btn g w" data-a="edbAlbOpen" data-v="${esc(a.id)}">ביטול</button></div>`)};
+ACT.edbAlbDel2=async el=>{const id=el&&el.dataset.v;if(!id||!mgr())return;
+ try{const t=await tok();for(const f of ['page.png','thumb.jpg']){const r=await fetch(STB()+'/'+encodeURIComponent(albF(id,f)),{method:'DELETE',headers:{Authorization:'Firebase '+t}});if(!r.ok&&r.status!==404)throw new Error('del '+r.status)}
+  await fsx('/edba/'+id,{method:'DELETE'});AL.L=(AL.L||[]).filter(x=>x.id!==id);const u=AL.th.get(id);if(u){URL.revokeObjectURL(u);AL.th.delete(id)}if(S.alb&&S.alb.id===id){S.alb=null;S.st=1;redraw()}toast('נמחק מהאלבום');albDlg()}
+ catch(e){toast('המחיקה נכשלה')}};
+// "שמור לאלבום" (צעד 3): הדף כמו שהוא עכשיו – PNG בגודל A4 ב-300 DPI, בלי כיול (הכיול מוחל בכל מכשיר בהדפסה), ותמונה ממוזערת
+ACT.edbAlbSave=()=>{if(!S.img)return;dlg(`<h3>שמירה לאלבום</h3><p class="note">הדף נשמר בענן של העסק כמו שהוא עכשיו${S.cut?' (עם קווי החיתוך)':''}. כל הטלפונים והמחשבים בעסק יוכלו להדפיס אותו מיד. התמונות המקוריות לא עולות לענן – רק הדף המוכן.</p><form data-f="edbAlbSave"><label class="f" style="display:block"><span>שם הדף</span><input name="n" maxlength="60" required value="${esc(S.pname||'')}" style="width:100%;min-height:44px;box-sizing:border-box"></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn w" type="submit">שמירה</button><button class="btn g w" type="button" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.edbAlbSave=async f=>{const n=String((f.querySelector('[name=n]')||{}).value||'').trim().slice(0,60);if(!n){toast('הקלידו שם');return}closeDlg();albSave(n)};
+const stUp=async(path,b,ct)=>{let r;try{r=await fetch(STB()+'?uploadType=media&name='+encodeURIComponent(path),{method:'POST',headers:{Authorization:'Firebase '+await tok(),'Content-Type':ct},body:b})}catch(e){throw new Error('אין חיבור לאינטרנט')}if(!r.ok)throw new Error(r.status===403?'אין הרשאה לשמור באלבום':'ההעלאה נכשלה ('+r.status+')')};
+async function albThumb(page){const im=await loadImg(page),c=document.createElement('canvas');try{c.width=300;c.height=424;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,300,424);g.imageSmoothingQuality='high';g.drawImage(im,0,0,300,424);
+ for(const q of [0.85,0.6,0.4]){const b=await new Promise(r=>c.toBlob(r,'image/jpeg',q));if(b&&b.size<=300*1024)return b}throw new Error('התמונה הממוזערת גדולה מדי')}finally{im.src='';freeCv(c)}}
+async function albSave(nm){if(pBusy||!S.img)return;pBusy=1;toast('שומר לאלבום…');let cvs=[];
+ try{const r=await build();cvs=r.cvs;const page=await pageBlob(Object.assign({},r.pg,{cal:CAL0}),cvs);cvs.forEach(freeCv);cvs=[];
+  if(page.size>30*1024*1024)throw new Error('הדף גדול מדי לשמירה');const th=await albThumb(page),id=albRid();
+  await fsx('/edba?documentId='+id,{method:'POST',body:JSON.stringify({fields:fldA({nm,k:S.k==='cu'?'cu':S.k,by:SY.uid,at:Date.now(),w:px(PG.w),h:px(PG.h),st:'up'})})});
+  await stUp(albF(id,'page.png'),page,'image/png');await stUp(albF(id,'thumb.jpg'),th,'image/jpeg');
+  await fsx('/edba/'+id+'?updateMask.fieldPaths=st&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:fldA({st:'ok'})})});
+  AL.t=0;toast('נשמר לאלבום: '+nm)}
+ catch(e){toast('השמירה לאלבום נכשלה: '+(e&&e.offline?'אין חיבור לאינטרנט':e&&e.message||e))}
+ finally{cvs.forEach(freeCv);pBusy=0}}
 // ביציאה מהמסך – משחררים את התמונה ואת קובץ ה-PDF (זיכרון). בדיקה כל 2 שניות כשיש תמונה
 setInterval(()=>{if(S.img&&S.ow&&S.ow!==own()){resetWork();S.rst=0;return} // משתמש / עסק אחר במכשיר – לא שומרים בשמו ולא משאירים בזיכרון
- if(!S.img&&!S.pdf)return;let on=false;try{on=cur().v==='edb'}catch(e){}if(!on){commit();save();resetWork();S.rst=0}},2000); // יציאה מהמסך: שמירה אוטומטית (הפרמטרים והתמונות נשמרים במכשיר) ואז שחרור הזיכרון; בכניסה הבאה העבודה נפתחת מחדש
+ if(onEdb())return;if(RB)rbOff();if(AL.th.size)albFree(); // סבב 5: יציאה מהמסך – הפס נעלם, התמונות הממוזערות של האלבום משתחררות
+ if(!S.img&&!S.pdf&&!S.alb){S.rst=0;return} // הכניסה הבאה – שוב מצעד 1, עם השאלה על העבודה הקודמת
+ commit();save();resetWork();S.rst=0},2000); // יציאה מהמסך: שמירה אוטומטית (הפרמטרים והתמונות נשמרים במכשיר) ואז שחרור הזיכרון; בכניסה הבאה העבודה נפתחת מחדש
 try{document.addEventListener('visibilitychange',()=>{if(document.hidden&&S.pid&&S.img){commit();save()}})}catch(e){}
-root.EdbPrint={S,pvSoon,pvDraw,send,go,build,pageImg,pageBlob,calGet,setImg,ok,redraw,lay,mark,imgOfD,cd:curD,ci:()=>imgOfD(curD()),commit,save,hstep,openProj};
+root.EdbPrint={S,AL,pvSoon,pvDraw,send,go,build,pageImg,pageBlob,calGet,setImg,ok,redraw,lay,mark,imgOfD,cd:curD,ci:()=>imgOfD(curD()),commit,save,hstep,openProj,albLoad};
 })(typeof window!=='undefined'?window:globalThis);

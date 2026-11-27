@@ -1267,9 +1267,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('edb', false) == true);
     }
     function edbMsg(d) { return !('msg' in d) || (d.msg is string && d.msg.size() <= 200); }
+    // סבב 5: at – עד 10 דקות הפרש משעון השרת (edbNow; שעון טלפון לא מדויק). alb – הדפסה מהאלבום: בלי העלאה, ישר ל-'new', עמוד אחד
+    function edbNow(t) { return t is int && math.abs(t - request.time.toMillis()) < 600000; }
+    function edbId(x) { return x is string && x.matches('^[A-Za-z0-9_-]{8,40}$'); }
     function edbqNew(id, d) {
-      return id.matches('^[A-Za-z0-9_-]{8,40}$') && d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg']) && d.keys().hasAll(['by', 'at', 'st', 'n'])
-        && d.by == request.auth.uid && d.st == 'up' && d.n is int && d.n >= 1 && d.n <= 10 && nowOk(d.at) && edbMsg(d);
+      return edbId(id) && d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'alb']) && d.keys().hasAll(['by', 'at', 'st', 'n'])
+        && d.by == request.auth.uid && d.n is int && d.n >= 1 && d.n <= 10 && edbNow(d.at) && edbMsg(d)
+        && (('alb' in d) ? (edbId(d.alb) && d.st == 'new' && d.n == 1) : d.st == 'up');
     }
     // סבב 3: code (קוד מצב המדפסת, למשל paper-out), ts (זמן הדיווח) – רק התחנה שתפסה, taken→taken / done / err.
     //   ackA (השולח אישר) / ackS (התחנה אישרה) – true בלבד, אחרי done/err, כל צד רק את השדה שלו.
@@ -1277,8 +1281,12 @@ service cloud.firestore {
       return (!('code' in d) || (d.code is string && d.code.matches('^[a-z-]{1,24}$'))) && (!('ts' in d) || (d.ts is int && d.ts > 0))
         && (!('ackA' in d) || d.ackA == true) && (!('ackS' in d) || d.ackS == true);
     }
-    function edbqUpd(o, d) {
-      return d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'tk', 'code', 'ts', 'ackA', 'ackS']) && edbMsg(d) && edbX(d) && (
+    // סבב 5: ביטול (code 'canceled') מכל מצב שאינו סופי (up / new / taken) – השולח, התחנה שתפסה (tk) או מנהל (m)
+    function edbqUpd(o, d, m) {
+      return d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'alb', 'tk', 'code', 'ts', 'ackA', 'ackS']) && edbMsg(d) && edbX(d) && (
+        (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'code', 'ts']) && o.st in ['up', 'new', 'taken'] && d.st == 'err' && d.get('code', '') == 'canceled'
+          && (o.by == request.auth.uid || o.get('tk', '') == request.auth.uid || m))
+        ||
         (d.diff(o).affectedKeys().hasOnly(['st', 'msg']) && (
           (o.st == 'up' && o.by == request.auth.uid && d.st in ['new', 'err'])
           || (o.st == 'new' && d.st == 'err' && (o.by == request.auth.uid || o.at < request.time.toMillis() - 86400000))))
@@ -1292,10 +1300,30 @@ service cloud.firestore {
         && d.by == request.auth.uid && d.at is int && d.at > 0 && d.on is bool
         && (!('pr' in d) || (d.pr is string && d.pr.size() <= 80)) && (!('hp' in d) || d.hp is bool);
     }
+    // סבב 5 – אלבום דפים מוכנים (edba/{id}): nm (שם), k (פריסה), by, at, w/h (פיקסלים), st ('up' → 'ok' אחרי העלאת הקבצים).
+    //   הקבצים ב-Storage: edb_album/{id}/page.png + thumb.jpg. יצירה – מנהל / עובד עם edb; שם – היוצר או מנהל; מחיקה – מנהל.
+    function edbaNm(n) { return n is string && n.size() >= 1 && n.size() <= 60; }
+    function edbaNew(id, d) {
+      return edbId(id) && d.keys().hasOnly(['nm', 'k', 'by', 'at', 'w', 'h', 'st']) && d.keys().hasAll(['nm', 'k', 'by', 'at', 'w', 'h', 'st'])
+        && edbaNm(d.nm) && d.k is string && d.k.matches('^(full|a5|[cs](6|12|24|36)|cu)$') && d.by == request.auth.uid && edbNow(d.at)
+        && d.w is int && d.w > 0 && d.w <= 4000 && d.h is int && d.h > 0 && d.h <= 4000 && d.st == 'up';
+    }
+    function edbaUpd(o, d, m) {
+      return d.keys().hasOnly(['nm', 'k', 'by', 'at', 'w', 'h', 'st']) && (
+        (d.diff(o).affectedKeys().hasOnly(['st']) && o.st == 'up' && d.st == 'ok' && o.by == request.auth.uid)
+        || (d.diff(o).affectedKeys().hasOnly(['nm']) && edbaNm(d.nm) && (o.by == request.auth.uid || m)));
+    }
     match /edbq/{id} {
       allow read: if rEdb();
-      allow create: if lpW() && rEdb() && edbqNew(id, request.resource.data);
-      allow update: if lpW() && rEdb() && edbqUpd(resource.data, request.resource.data);
+      allow create: if lpW() && rEdb() && edbqNew(id, request.resource.data)
+        && (!('alb' in request.resource.data) || exists(/databases/$(database)/documents/edba/$(request.resource.data.alb)));
+      allow update: if lpW() && rEdb() && edbqUpd(resource.data, request.resource.data, rMgr());
+      allow delete: if lpW() && rMgr();
+    }
+    match /edba/{id} {
+      allow read: if rEdb();
+      allow create: if lpW() && rEdb() && edbaNew(id, request.resource.data);
+      allow update: if lpW() && rEdb() && edbaUpd(resource.data, request.resource.data, rMgr());
       allow delete: if lpW() && rMgr();
     }
     match /edbs/{id} {
@@ -2613,8 +2641,16 @@ service cloud.firestore {
       // הדפסת דף אכיל (סבב 2): edbq (תור) ו-edbs/main (התחנה) – מנהל או עובד עם edb; מחיקה – מנהל. edbqNew / edbqUpd / edbsOk – בשורש.
       match /edbq/{id} {
         allow read: if perm('edb');
-        allow create: if perm('edb') && edbqNew(id, request.resource.data);
-        allow update: if perm('edb') && edbqUpd(resource.data, request.resource.data);
+        allow create: if perm('edb') && edbqNew(id, request.resource.data)
+          && (!('alb' in request.resource.data) || exists(/databases/$(database)/documents/b/$(bizId)/edba/$(request.resource.data.alb)));
+        allow update: if perm('edb') && edbqUpd(resource.data, request.resource.data, bMgr());
+        allow delete: if bMgr();
+      }
+      // סבב 5: אלבום דפים מוכנים – edbaNew / edbaUpd בשורש
+      match /edba/{id} {
+        allow read: if perm('edb');
+        allow create: if perm('edb') && edbaNew(id, request.resource.data);
+        allow update: if perm('edb') && edbaUpd(resource.data, request.resource.data, bMgr());
         allow delete: if bMgr();
       }
       match /edbs/{id} {
