@@ -288,4 +288,33 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.equal(v2.cxv, undefined); assert.ok(/^9\d{5}$/.test(v2.cx), 'חזר להיות מועמד רגיל וקיבל קוד: ' + v2.cx);
     assert.ok(e2.csv.includes('מחק זהב'));
   });
+  it('וריאנט (27.11): מוצר שכבר קיבל קוד ממתין (nw) לפני הגנת הברקוד, והברקוד שלו בכספית תחת קוד אחר → cxv + cxItem.var, לא נשלח ולא "כפול"; קוד ממתין שהופיע בקטלוג – לא; "לא וריאנט" מנקה את שניהם', async () => {
+    // הקטלוג האחרון (סבב קודם): 7100000000999 תחת 300031
+    const XI = (c, pid) => adm().doc(`b/${A}/cxItem/${c}`).set({ c, pid, st: 'link', nw: true, src: 'app', n: 'x', pr: { fb: null, ab: 7, pd: 7 }, co: { fb: null, ab: null, pd: null }, at: 1 });
+    await P('pz').set({ name: 'בליסטר ירוק', price: 7, barcode: '7100000000999', on: true, q: { _: 2 }, cx: '900777', sku: '900777', at: 1 });
+    await XI('900777', 'pz');
+    await P('py').set({ name: 'בליסטר כחול', price: 7, barcode: '', bcx: ['7100000000999'], on: true, q: {}, cx: '900778', at: 1 });
+    await XI('900778', 'py');
+    const seenRef = adm().doc(`b/${A}/cxcfg/seen`), codes0 = (await seenRef.get()).get('codes');
+    await seenRef.set({ codes: codes0.concat(['900778']) }); // 900778 כבר הופיע בקטלוג – לא נוגעים
+    const e = await ok('cxExport', MGR, { kind: 'new' });
+    const z = (await P('pz').get()).data();
+    assert.deepEqual([z.cxv, z.cx, z.price, z.name, z.q._], ['300031', '900777', 7, 'בליסטר ירוק', 2], 'רק cxv');
+    assert.equal((await X('900777')).var, '300031'); assert.equal((await X('900777')).nw, true, 'לא נמחק');
+    assert.ok(!e.csv.includes('900777'), 'לא נשלח');
+    assert.ok(!e.dup.some((d) => d.pid === 'pz'), 'לא "כפול"');
+    assert.ok(e.vars.some((v) => v.pid === 'pz' && v.cx === '300031'));
+    assert.ok(e.dup.some((d) => d.pid === 'py' && d.c === '900778'), 'קוד ממתין שהופיע בקטלוג – נשאר "כפול"');
+    assert.equal((await P('py').get()).get('cxv'), undefined);
+    assert.equal((await X('900778')).var, undefined);
+    const e2 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.ok(!e2.dup.some((d) => d.pid === 'pz') && !e2.csv.includes('900777'), 'יציב בריצה נוספת');
+    // "לא וריאנט" – מנקה את cxv ואת var; מאז – "כפול", לא נשלח, לא מסומן שוב
+    await ok('cxDnOk', MGR, { pid: 'pz', v: true });
+    assert.deepEqual([(await P('pz').get()).get('cxv'), (await P('pz').get()).get('cxvNo'), (await X('900777')).var], [undefined, true, undefined]);
+    const e3 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.ok(e3.dup.some((d) => d.pid === 'pz' && d.c === '900777')); assert.ok(!e3.csv.includes('900777'));
+    assert.equal((await P('pz').get()).get('cxv'), undefined, 'לא סומן שוב');
+    await seenRef.set({ codes: codes0 });
+  });
 });
