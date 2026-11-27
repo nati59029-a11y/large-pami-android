@@ -17,13 +17,18 @@
          -> {ok, job, printer, pages} immediately (asynchronous), or {ok:false, err:'no-printer'|'bad-request'|'too-big'|'bad-png', msg}
          The pages are then spooled to the Windows print queue. The job is NEVER cancelled because of paper-out or a printer
          error: it stays in the Windows queue and continues by itself when the problem is fixed.
-    GET  /job/<id>                 -> {ok, id, state, code, raw, printer, pages, age, wait}
+    GET  /job/<id>                 -> {ok, id, state, code, raw, printer, pages, age, wait, why}
          state: 'printing' | 'waiting' (printer problem - see code) | 'done' | 'err'
-         code : spool, printing, paper-out, jam, door, ink, offline, paused, error, done, cancelled, timeout, print-failed
+         code : spool, printing, paper-out, jam, door, ink, offline, paused, error, done, cancelled (in the Windows queue),
+                canceled (POST /job/<id>/cancel), timeout, print-failed
          raw  : the Windows status text (job status + printer status numbers), for the 'error' message
          done = the job left the Windows print queue without an error (or is marked Printed/Complete).
          Timeout: waiting for a printer problem (paper-out...) for more than 2 hours, or 3 hours in total -> the job is
          removed from the queue and reported as err/timeout.
+         why  : on timeout - the printer problem that was waiting (paper-out, jam...) or 'total' (3 hours in total).
+    POST /job/<id>/cancel          (round 5) cancel the job: it is removed from the Windows print queue (Win32_PrintJob)
+         and reported as err/canceled. Same origin check as /print, no body. -> {ok, ..., removed: true|false}
+         A job that already finished (done / err) is not changed.
          The app translates code -> Hebrew text and instructions (this script stays ASCII only).
     OPTIONS *                      CORS / Private Network Access preflight
   Files next to this script: devmode.bin (saved printer settings), edb-helper.log (small log).
@@ -242,6 +247,7 @@ function Update-Job($j) {
   if ($c.code -eq 'printing') { $j.state = 'printing'; $j.waitSince = $null }
   else { $j.state = 'waiting'; if (-not $j.waitSince) { $j.waitSince = $now } }
   if (($j.waitSince -and ($now - $j.waitSince) -gt $WaitMax) -or (($now - $j.t0) -gt $JobMax)) {
+    $j.why = if ($j.waitSince) { $c.code } else { 'total' }
     try { Remove-CimInstance -InputObject $pj -ErrorAction Stop; $j.raw += '; removed from the queue' } catch { $j.raw += '; could not remove from the queue' }
     Set-JobEnd $j 'err' 'timeout'
   }
@@ -250,7 +256,19 @@ function Update-Job($j) {
 function Job-Json($j) {
   $age = [int]((Get-Date) - $j.t0).TotalSeconds
   $wait = 0; if ($j.waitSince) { $wait = [int]((Get-Date) - $j.waitSince).TotalSeconds }
-  return @{ ok = $true; id = $j.id; state = $j.state; code = $j.code; raw = [string]$j.raw; printer = $j.printer; pages = $j.pages; age = $age; wait = $wait }
+  return @{ ok = $true; id = $j.id; state = $j.state; code = $j.code; raw = [string]$j.raw; printer = $j.printer; pages = $j.pages; age = $age; wait = $wait; why = [string]$j.why; removed = [bool]$j.removed }
+}
+
+# Round 5: cancel by the user (phone or station). Removes every queue entry of this job (the Document name is ours:
+# "<name>-<hex id>", only [A-Za-z0-9_.-], so the WMI filter cannot be injected). A finished job is left as it is.
+function Cancel-Job($j) {
+  if ($j.state -eq 'done' -or $j.state -eq 'err') { return }
+  $j.removed = $false
+  try {
+    foreach ($pj in @(Get-CimInstance -ClassName Win32_PrintJob -Filter "Document='$($j.doc)'" -ErrorAction Stop)) { Remove-CimInstance -InputObject $pj -ErrorAction Stop; $j.removed = $true }
+    $j.raw = if ($j.removed) { 'cancelled by the user: removed from the queue' } else { 'cancelled by the user: not in the queue' }
+  } catch { $j.raw = 'cancelled by the user: could not remove from the queue - ' + $_.Exception.Message }
+  Set-JobEnd $j 'err' 'canceled'
 }
 
 function Prune-Jobs {
@@ -328,6 +346,18 @@ function Handle($client) {
     return
   }
 
+  if ($method -eq 'POST' -and $path -match '^/job/([0-9a-f]{18})/cancel$') {
+    $hid = $Matches[1]
+    if (-not $okOrigin) { Send-Resp $stream 403 @{ ok = $false; err = 'origin' } $null $false; return }  # browsers always send Origin here
+    $cl = [string]$H['content-length']
+    if ($H.ContainsKey('transfer-encoding') -or ($cl -and $cl -ne '0')) { Send-Resp $stream 400 @{ ok = $false; err = 'bad-request' } $ao $false; return }  # no body
+    $j = $Jobs[$hid]
+    if (-not $j) { Send-Resp $stream 404 @{ ok = $false; err = 'no-job' } $ao $false; return }
+    Cancel-Job $j
+    Send-Resp $stream 200 (Job-Json $j) $ao $false
+    return
+  }
+
   if ($method -eq 'GET' -and $path -eq '/status') {
     $want = if ($Q.ContainsKey('p') -and $Q['p']) { $Q['p'] } else { $Printer }
     $ch = Find-Printer $want
@@ -368,7 +398,7 @@ function Handle($client) {
       # asynchronous: answer with the job id now, then spool (the station polls GET /job/<id>)
       Prune-Jobs
       $hid = New-JobId
-      $j = @{ id = $hid; state = 'printing'; code = 'spool'; raw = ''; printer = $name; pages = $images.Count; doc = "$job-$hid"; t0 = (Get-Date); waitSince = $null; end = $null; mask = 0 }
+      $j = @{ id = $hid; state = 'printing'; code = 'spool'; raw = ''; printer = $name; pages = $images.Count; doc = "$job-$hid"; t0 = (Get-Date); waitSince = $null; end = $null; mask = 0; why = ''; removed = $false }
       $Jobs[$hid] = $j
       Send-Resp $stream 200 @{ ok = $true; job = $hid; printer = $name; pages = $images.Count } $ao $false
       try { $client.Close() } catch { }

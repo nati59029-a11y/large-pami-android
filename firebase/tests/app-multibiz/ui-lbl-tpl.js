@@ -1,7 +1,7 @@
 'use strict';
 // מדבקות שלב 2 (24.11.2026, lbl-tpl.js + lbl-print.js) – מול רשת מדומה. נתונים מומצאים (דוגמה).
 // z: זהות בייטים – PDF מ-6 סלים קבועים × 3 מצבי לוגו (בלי / פס עליון / פינות), הקוד הנוכחי מול עותק קפוא של שלב 1
-//    (fixtures/lbl-print-stage1.js), באותו דפדפן. בנוסף: SHA-256 מול fixtures/lbl-baseline.json כשגרסת הדפדפן זהה (אחרת – מידע בלבד).
+//    (fixtures/lbl-print-stage1.js), באותו דפדפן. בנוסף: SHA-256 מול fixtures/lbl-baseline.json כשגרסת הדפדפן וטביעת סביבת הציור זהות (אחרת – מידע בלבד).
 // שימוש: node ui-lbl-tpl.js <www-dir> [out.json] [shots-dir]   (LBL_BASELINE_WRITE=1 – כתיבת קובץ הבסיס מחדש)
 const fs = require('fs');
 const path = require('path');
@@ -77,6 +77,12 @@ const PAGE_LIB = () => {
   window.__lbt = {
     brands: { none: null, top: { lay: 'top', logo, stamp }, bot: { lay: 'bot', logo, stamp } },
     frozen(src) { const fw = { PosBarcode: window.PosBarcode }; new Function('window', 'ACT', 'V', 'INP', 'CHG', 'FRM', 'module', src)(fw, {}, {}, {}, {}, {}, undefined); return fw.LblPrint; },
+    // טביעת סביבת הציור: אותו טקסט (בגופן של המדבקות) וקשת – אותה גרסת Chrome על מערכת אחרת (גופנים, החלקת קצוות) מציירת פיקסלים אחרים
+    async env() { await document.fonts.ready; const c = document.createElement('canvas'); c.width = 600; c.height = 120; const g = c.getContext('2d', { willReadFrequently: true });
+      g.fillStyle = '#fff'; g.fillRect(0, 0, 600, 120); g.fillStyle = '#000'; g.direction = 'rtl'; g.textAlign = 'right';
+      for (const [w, s, y] of [[700, 40, 45], [400, 22, 80]]) { g.font = w + ' ' + s + 'px Rubik,"IBM Plex Sans Hebrew",Assistant,Arial,sans-serif'; g.fillText('צלחות 12.90 ש"ח Aa', 590, y); }
+      g.lineWidth = 3; g.beginPath(); g.arc(60, 90, 22, 0, 7); g.stroke();
+      return navigator.platform + ':' + (await window.__lbt.sha(new Uint8Array(g.getImageData(0, 0, 600, 120).data.buffer))).slice(0, 16); },
     async sha(u8) { const d = new Uint8Array(await crypto.subtle.digest('SHA-256', u8)); return [...d].map((x) => x.toString(16).padStart(2, '0')).join(''); },
   };
 };
@@ -111,10 +117,11 @@ const PAGE_LIB = () => {
     const zEq = Object.values(z).every((x) => x.now === x.old), zDiff = new Set(Object.values(z).map((x) => x.now)).size;
     check('z 1 PDF זהה בבייטים לשלב 1 (עם קופסאות הפינות הרחבות): 6 סלים × 3 מצבי לוגו (18 קבצים, כולם שונים זה מזה)', zEq && zDiff === 18, Object.fromEntries(Object.entries(z).map(([k, x]) => [k, x.now === x.old ? x.len : 'שונה'])));
     const H0 = Object.fromEntries(Object.entries(z).map(([k, x]) => [k, x.now]));
-    if (process.env.LBL_BASELINE_WRITE) fs.writeFileSync(BASE_F, JSON.stringify({ about: 'SHA-256 של PDF מ-6 סלים קבועים × 3 מצבי לוגו (ui-lbl-tpl.js, z). נבדק רק כשגרסת הדפדפן זהה.', chrome: ver, h: H0 }, null, 1) + '\n');
+    const env = await page.evaluate(() => window.__lbt.env());
+    if (process.env.LBL_BASELINE_WRITE) fs.writeFileSync(BASE_F, JSON.stringify({ about: 'SHA-256 של PDF מ-6 סלים קבועים × 3 מצבי לוגו (ui-lbl-tpl.js, z). נבדק רק כשגרסת הדפדפן וטביעת סביבת הציור (env) זהות.', chrome: ver, env, h: H0 }, null, 1) + '\n');
     let base = null; try { base = JSON.parse(fs.readFileSync(BASE_F, 'utf8')); } catch (e) { /* */ }
-    if (base && base.chrome === ver) check('z 2 SHA-256 זהה לקובץ הבסיס (lbl-baseline.json)', Object.keys(base.h).every((k) => base.h[k] === H0[k]), { chrome: ver });
-    else console.log('מידע  z 2 קובץ הבסיס נוצר בדפדפן אחר (' + (base && base.chrome) + ' / ' + ver + ') – ההשוואה מול העותק הקפוא (z 1) היא הקובעת');
+    if (base && base.chrome === ver && base.env === env) check('z 2 SHA-256 זהה לקובץ הבסיס (lbl-baseline.json)', Object.keys(base.h).every((k) => base.h[k] === H0[k]), { chrome: ver, env, diff: Object.keys(base.h).filter((k) => base.h[k] !== H0[k]) });
+    else console.log('מידע  z 2 קובץ הבסיס נוצר בדפדפן או בסביבת ציור אחרת (' + (base && base.chrome) + ' ' + (base && base.env) + ' / ' + ver + ' ' + env + ') – ההשוואה מול העותק הקפוא (z 1) היא הקובעת');
     // ---------- d: drawT(BUILTIN[1..5]) מול draw() – שוויון פיקסלים (RGBA), סיביות (toBits) ומלבני ברקוד ----------
     const d = await page.evaluate(async (IT) => {
       const T = window.__lbt, LP = LblPrint, LT = LblTpl, W = LP.W, H = LP.H;

@@ -689,8 +689,9 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     const paths = [...block.matchAll(/firestore\.(?:get|exists)\(\/databases\/\(default\)\/documents\/([a-z_]+)\//g)].map((m) => m[1]);
     /* סבב 3 (17.11.2026): סרטוני קבוצות (grpv) קוראים גם את מסמך הקבוצה – grp/{gid} ב-legacy ו-b/{bizId}/grp/{gid} בעסק – עדיין לכל היותר 2 קריאות (users + grp) */
     /* הדפסת דף אכיל (26.11.2026): תמונות העמוד (edb_tmp) קוראות את מסמך העבודה – edbq/{jobId} ב-legacy ו-b/{bizId}/edbq/{jobId} בעסק – עדיין 2 קריאות (users + edbq) */
-    assert.deepEqual([...new Set(paths)].sort(), ['b', 'edbq', 'grp', 'superadmins', 'users']);
-    assert.ok(!/documents\/b\/(?!\$\(bizId\)\/(?:grp\/\$\(gid\)|edbq\/\$\(jobId\))\))/.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק (רק b/{bizId}/grp/{gid} של סרטוני הקבוצות ו-b/{bizId}/edbq/{jobId} של הדף האכיל)');
+    /* סבב 5 (27.11.2026): אלבום הדף האכיל (edb_album) קורא את מסמך האלבום – edba/{albId} ב-legacy ו-b/{bizId}/edba/{albId} בעסק – עדיין 2 קריאות (users + edba) */
+    assert.deepEqual([...new Set(paths)].sort(), ['b', 'edba', 'edbq', 'grp', 'superadmins', 'users']);
+    assert.ok(!/documents\/b\/(?!\$\(bizId\)\/(?:grp\/\$\(gid\)|edbq\/\$\(jobId\)|edba\/\$\(albId\))\))/.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק (רק b/{bizId}/grp/{gid} של סרטוני הקבוצות, b/{bizId}/edbq/{jobId} ו-b/{bizId}/edba/{albId} של הדף האכיל)');
   });
 });
 

@@ -12,7 +12,13 @@
      התחנה מדווחת למסמך העבודה (taken → taken: msg, code, ts), ומציגה חלון בולט מעל כל מסך (גם מסך המדבקות; לא מודפס).
      בטלפון: חלון המצב, ואם יצאו ממנו – פס בראש האפליקציה. "הודפס בהצלחה" / כישלון נשארים עד "אישור"; האישור נפרד לכל צד
      (ackA – השולח, ackS – התחנה). הודעה אחת בכל רגע – החדשה ביותר. מפתחות במכשיר: lp-edb-cur-job (העבודה שבהדפסה, לחידוש אחרי רענון),
-     lp-edb-ov (הודעות התחנה שלא אושרו), lp-edb-mine|<עסק>|<משתמש> (העבודות ששלחתי ועוד לא אישרתי). */
+     lp-edb-ov (הודעות התחנה שלא אושרו), lp-edb-mine|<עסק>|<משתמש> (העבודות ששלחתי ועוד לא אישרתי).
+   סבב 5 (27.11.2026): "ביטול הדפסה" בכל מצב שאינו סופי – בטלפון (חלון המצב והפס) ובתחנה (החלון הבולט). שתי לחיצות (אישור הביטול).
+     הביטול: מסמך העבודה → err עם code 'canceled' (השולח, התחנה שתפסה או מנהל), והתחנה מוחקת את העבודה מתור ההדפסה של Windows
+     (POST /job/<id>/cancel בעוזר). ביטול מהטלפון כשהמחשב מדפיס – התחנה בודקת את המסמך כל 15 שניות בזמן ההדפסה ומבטלת אצלה.
+     ביטול אוטומטי אחרי שעתיים (העוזר) – ההודעה אומרת במפורש "ההדפסה בוטלה – עברו שעתיים בלי שהמדפסת הדפיסה (סיבה: …)".
+     בשני המקרים ההודעה נשארת עד "אישור" בכל צד (ackA / ackS). הדפסה מהאלבום (sendAlb): עבודה עם alb – בלי העלאת עמודים;
+     התחנה מורידה את הדף מ-edb_album/{alb}/page.png ולא מוחקת אותו. */
 (function(root){
 'use strict';
 if(typeof window==='undefined'||typeof ACT==='undefined')return;
@@ -46,6 +52,8 @@ async function hPrint(p,pages,name){const q='/print?p='+encodeURIComponent(p.nam
  if(r.ok)return{ok:false,msg:'עוזר ההדפסה במחשב ישן – מעתיקים את הגרסה החדשה של edb-helper.ps1'};
  return{ok:false,msg:r.down?'עוזר ההדפסה לא עונה במחשב':(HE[r.j.err]||'שגיאה בעוזר ההדפסה')+(r.j.err==='no-printer'&&p.name?' (מחפש "'+p.name+'")':'')}}
 const hJob=(p,id)=>hFetch(hUrl(p,'/job/'+id),{method:'GET'},20000);
+// סבב 5: ביטול אצל העוזר – מוחק את העבודה מתור ההדפסה של Windows. עוזר ישן (בלי הכתובת הזו) עונה 404/405
+const hCancel=(p,id)=>hFetch(hUrl(p,'/job/'+id+'/cancel'),{method:'POST'},15000);
 /* מצבי המדפסת: כותרת (t) ומה לעשות (d). ההתנהגות של כפתור הנייר ב-L130 – לפי ההוראות הכלליות של Epson (לא נבדק במדפסת עצמה) */
 const PS={spool:{t:'שולח למדפסת…'},printing:{t:'מדפיס עכשיו…',d:'אפשר להמשיך לעבוד כרגיל.'},
  'paper-out':{t:'חסר נייר במדפסת',d:'הכניסו דף אכיל למדפסת – ההדפסה תמשיך לבד. אם היא לא ממשיכה תוך כמה שניות: לחצו על כפתור הנייר במדפסת (הכפתור עם סמל הדף).'},
@@ -56,7 +64,8 @@ const PS={spool:{t:'שולח למדפסת…'},printing:{t:'מדפיס עכשי�
  paused:{t:'ההדפסה מושהית במחשב',d:'בתור ההדפסה של Windows לחצו "המשך" (Resume).'},
  error:{t:'תקלה במדפסת',d:'בדקו את המדפסת ואת חלון ההודעות של Epson במחשב. ההדפסה תמשיך לבד כשהתקלה תתוקן.'},
  done:{t:'הודפס בהצלחה'},cancelled:{t:'ההדפסה בוטלה בתור ההדפסה של Windows',d:'אם צריך – שלחו שוב.'},
- timeout:{t:'ההדפסה בוטלה: התקלה לא תוקנה במשך שעתיים',d:'תקנו את המדפסת ושלחו שוב.'},
+ canceled:{t:'ההדפסה בוטלה',d:'אם צריך – שלחו שוב.'},
+ timeout:{t:'ההדפסה בוטלה – עברו שעתיים בלי שהמדפסת הדפיסה',d:'תקנו את המדפסת ושלחו שוב.'},
  'print-failed':{t:'ההדפסה נכשלה במחשב',d:'שלחו שוב. אם זה חוזר – בדקו את המדפסת.'},
  lost:{t:'עוזר ההדפסה הפסיק לענות באמצע ההדפסה',d:'בדקו במדפסת אם הדף יצא. אם לא – הפעילו את edb-helper.bat ושלחו שוב.'}};
 const WAITC=['paper-out','jam','door','ink','offline','paused','error'];
@@ -78,15 +87,23 @@ const ST={up:'שולח למחשב…',new:'נשלח – ממתין למחשב',t
 const fin_=st=>st==='done'||st==='err';
 // מצב לתצוגה (טלפון ותחנה): {lv: ok|run|warn|bad, t: כותרת, m: הודעה, d: מה לעשות}
 function view(j){const c=String(j.code||''),P=PS[c];
+ if(j.st==='err'&&(c==='canceled'||c==='timeout'))return{lv:'bad',t:'ההדפסה בוטלה',m:j.msg&&j.msg!=='ההדפסה בוטלה'?j.msg:'',d:P.d}; // סבב 5: ביטול ידני / אוטומטי – עד "אישור"
  if(j.st==='done')return{lv:'ok',t:'הודפס בהצלחה',m:j.msg&&!/^הודפס/.test(j.msg)?j.msg:'',d:''};
  if(j.st==='err')return{lv:'bad',t:'ההדפסה נכשלה',m:j.msg||'',d:P&&P.d||''};
  if(j.st==='taken'&&WAITC.includes(c))return{lv:'warn',t:j.msg||(P||PS.error).t,m:'',d:(P||PS.error).d};
  return{lv:'run',t:ST[j.st]||j.st,m:j.st==='taken'&&c==='spool'?PS.spool.t:'',d:''}}
 const LVC={ok:'#2fae5b',run:'var(--acc)',warn:'#e6a21a',bad:'#e0483e'};
+// טקסט ההודעה בביטול האוטומטי של העוזר (code 'timeout'): why = התקלה שחיכתה (paper-out…) או 'total' (3 שעות בסך הכול)
+const toMsg=why=>why==='total'?'ההדפסה בוטלה – עברו 3 שעות וההדפסה לא הסתיימה':'ההדפסה בוטלה – עברו שעתיים בלי שהמדפסת הדפיסה (סיבה: '+(PS[why]&&WAITC.includes(why)?PS[why]:PS.error).t+')';
+// סבב 5: "ביטול הדפסה" – לחיצה ראשונה מבקשת אישור (4 שניות), השנייה מבטלת. re = ציור מחדש של המקום שבו הכפתור מופיע
+let ARM={k:'',t:0};
+const armed=k=>ARM.k===k&&Date.now()-ARM.t<4000;
+const cxBtn=(a,k)=>`<button class="btn r grow" data-a="${a}" data-v="${esc(k)}">${armed(a+'|'+k)?'לחצו שוב לאישור הביטול':'ביטול הדפסה'}</button>`;
+function arm(a,k,re){const x=a+'|'+k;if(armed(x)){ARM={k:'',t:0};return true}ARM={k:x,t:Date.now()};re();setTimeout(re,4100);return false}
 let JB=null;
 const jHtml=()=>{const j=JB;if(!j)return'';const v=view(j);
  return `<p style="font-size:1.25rem;font-weight:800;color:${LVC[v.lv]}">${esc(v.t)}</p>${v.m?`<p>${esc(v.m)}</p>`:''}${v.d?`<p class="note" style="font-size:1rem">${esc(v.d)}</p>`:''}${j.st==='up'&&j.pg?`<p class="note">עמוד ${j.pg} מתוך ${j.n}</p>`:''}${j.st==='new'&&j.hint?`<p class="note">${esc(j.hint)}</p>`:''}
-<div class="row" style="gap:8px">${j.st==='up'||j.st==='new'?'<button class="btn g grow" data-a="edbQx">ביטול השליחה</button>':''}${fin_(j.st)?`<button class="btn grow" data-a="edbAckA" data-v="${esc(j.id)}">אישור</button>`:'<button class="btn grow" data-a="closeDlg">סגירה</button>'}</div>`};
+<div class="row" style="gap:8px">${fin_(j.st)?`<button class="btn grow" data-a="edbAckA" data-v="${esc(j.id)}">אישור</button>`:cxBtn('edbQx',j.id)+'<button class="btn g grow" data-a="closeDlg">סגירה</button>'}</div>`};
 // חלון המצב פתוח? (#edbJs נשאר בתוך החלון גם אחרי שנסגר)
 const jsOpen=()=>{const e=document.getElementById('edbJs'),d=e&&e.closest('dialog');return!!e&&(!d||d.open)};
 const jShow=()=>{const e=document.getElementById('edbJs');if(e)e.innerHTML=jHtml();bn();return jsOpen()};
@@ -115,7 +132,7 @@ function bn(){if(typeof document==='undefined'||!SY||!SY.uid){box('edbBn','');re
  const L=mine().sort((a,b)=>(b.t||0)-(a.t||0)),open=jsOpen()&&JB?JB.id:'';
  const j=L.find(x=>x.id!==open);if(!j){box('edbBn','');return}
  const v=view(j),more=L.filter(x=>x.id!==open).length-1;
- box('edbBn',boxHtml(v,j.name||'',(fin_(j.st)?`<button class="btn grow" data-a="edbAckA" data-v="${esc(j.id)}">אישור</button>`:`<button class="btn g grow" data-a="edbJOpen" data-v="${esc(j.id)}">פרטים</button>`)+(more>0?`<span class="note" style="align-self:center">ועוד ${more}</span>`:'')),'top:calc(env(safe-area-inset-top,0px) + 8px);width:min(560px,96vw);')}
+ box('edbBn',boxHtml(v,j.name||'',(fin_(j.st)?`<button class="btn grow" data-a="edbAckA" data-v="${esc(j.id)}">אישור</button>`:`<button class="btn g grow" data-a="edbJOpen" data-v="${esc(j.id)}">פרטים</button>`+cxBtn('edbQx',j.id))+(more>0?`<span class="note" style="align-self:center">ועוד ${more}</span>`:'')),'top:calc(env(safe-area-inset-top,0px) + 8px);width:min(560px,96vw);')}
 ACT.edbAckA=async el=>{const id=el&&el.dataset.v;if(!id)return;const L=mine().filter(x=>x.id!==id);mineW(L);
  if(JB&&JB.id===id){JB=null;if(jsOpen())closeDlg()}bn();try{await jAck(id,'ackA')}catch(e){}};
 ACT.edbJOpen=el=>{const j=mine().find(x=>x.id===(el&&el.dataset.v));if(!j)return;JB=Object.assign({},j);dlg(`<h3>שליחה למחשב – ${esc(j.name||'דף אכיל')}</h3><div id="edbJs">${jHtml()}</div>`);bn()};
@@ -134,23 +151,36 @@ setTimeout(mineTick,5000);
 // סגירת חלון המצב → הפס מופיע מיד
 setTimeout(()=>{const d=document.getElementById('dlg');if(d&&d.addEventListener)d.addEventListener('close',()=>setTimeout(bn,0))},0);
 async function stDel(id,n){const t=await tok();for(let i=0;i<n;i++){try{await fetch(STB()+'/'+encodeURIComponent(fp(id,i)),{method:'DELETE',headers:{Authorization:'Firebase '+t}})}catch(e){}}}
-// pages: Blob[] (PNG). מחזיר מיד אחרי שהחלון נפתח; המצב מתעדכן בחלון
+// pages: Blob[] (PNG). מחזיר אחרי שהעבודה נשלחה (true) או נכשלה / בוטלה (false); המצב מתעדכן בחלון
+const jOpen=(name,s,o)=>{JB=Object.assign({name:String(name||'דף אכיל').slice(0,40),hint:s&&s.hp===false?'עוזר ההדפסה במחשב לא ענה לאחרונה – כדאי לבדוק שהמחשב פועל':''},o);dlg(`<h3>שליחה למחשב – ${esc(JB.name)}</h3><div id="edbJs">${jHtml()}</div>`)};
+const cxd=id=>{const x=mine().find(y=>y.id===id);return!!(x&&x.code==='canceled')||!!(JB&&JB.id===id&&JB.code==='canceled')}; // בוטל בטלפון בזמן ההעלאה
 async function send(pages,name){if(!ok())throw new Error('אין הרשאה');if(!pages||!pages.length||pages.length>10)throw new Error('אין עמודים');
  if(pages.some(b=>!b||b.size>MAXB))throw new Error('תמונת העמוד גדולה מדי');
- const id=rid(),n=pages.length,s=await stn();JB={id,n,name:String(name||'דף אכיל').slice(0,40),st:'up',pg:0,hint:s&&s.hp===false?'עוזר ההדפסה במחשב לא ענה לאחרונה – כדאי לבדוק שהמחשב פועל':''};
- dlg(`<h3>שליחה למחשב – ${esc(name||'דף אכיל')}</h3><div id="edbJs">${jHtml()}</div>`);
+ const id=rid(),n=pages.length,s=await stn();jOpen(name,s,{id,n,st:'up',pg:0});
  try{await fsx('/edbq?documentId='+id,{method:'POST',body:JSON.stringify({fields:fld({by:SY.uid,at:Date.now(),st:'up',n})})})}
- catch(e){JB.st='err';JB.msg=e.offline?'אין חיבור לאינטרנט':'לא נשמר ('+(e.message||e)+')';jShow();return}
- try{const t=await tok();for(let i=0;i<n;i++){if(!JB||JB.id!==id||JB.st!=='up')return;JB.pg=i+1;jShow();let r;
+ catch(e){JB.st='err';JB.msg=e.offline?'אין חיבור לאינטרנט':'לא נשמר ('+(e.message||e)+')';jShow();return false}
+ try{const t=await tok();for(let i=0;i<n;i++){if(!JB||JB.id!==id||JB.st!=='up')return false;JB.pg=i+1;jShow();let r;
    try{r=await fetch(STB()+'?uploadType=media&name='+encodeURIComponent(fp(id,i)),{method:'POST',headers:{Authorization:'Firebase '+t,'Content-Type':'image/png'},body:pages[i]})}catch(e){throw new Error('אין חיבור לאינטרנט')}
    if(!r.ok)throw new Error(r.status===403?'אין הרשאה להעלות':'ההעלאה נכשלה ('+r.status+')')}
+  if(cxd(id))return false;
   await jSet(id,'new');mineUp({id,n,name:JB?JB.name:'',st:'new'});if(JB&&JB.id===id){JB.st='new';jShow()}}
- catch(e){const m=e&&e.message||String(e);try{await jSet(id,'err',m)}catch(e2){}stDel(id,n);if(JB&&JB.id===id){JB.st='err';JB.msg=m;jShow()}return}
- MT=setTimeout(mineTick,3000)}
-// ביטול בידי השולח: אין צורך באישור – העבודה יוצאת מהרשימה
-ACT.edbQx=async()=>{const j=JB;if(!j||(j.st!=='up'&&j.st!=='new'))return;const was=j.st;j.st='err';j.msg='בוטל';jShow();
- if(was==='new'){try{await jSet(j.id,'err','בוטל');stDel(j.id,j.n);mineW(mine().filter(x=>x.id!==j.id));bn()}catch(e){toast('הביטול נכשל – אולי המחשב כבר התחיל להדפיס');j.st='new';jShow()}}
- else{try{await jSet(j.id,'err','בוטל')}catch(e){}stDel(j.id,j.n)}};
+ catch(e){if(cxd(id))return false;const m=e&&e.message||String(e);try{await jSet(id,'err',m)}catch(e2){}stDel(id,n);if(JB&&JB.id===id){JB.st='err';JB.msg=m;jShow()}return false}
+ clearTimeout(MT);MT=setTimeout(mineTick,3000);return true}
+// סבב 5: הדפסה מהאלבום – עבודה עם alb (מזהה הדף באלבום), ישר במצב 'new', בלי העלאה. התחנה מורידה את הדף מהאלבום
+async function sendAlb(alb,name){if(!ok())throw new Error('אין הרשאה');if(!/^[A-Za-z0-9_-]{8,40}$/.test(String(alb||'')))throw new Error('דף לא תקין');
+ const id=rid(),s=await stn();jOpen(name,s,{id,n:1,alb:1,st:'new'});
+ try{await fsx('/edbq?documentId='+id,{method:'POST',body:JSON.stringify({fields:fld({by:SY.uid,at:Date.now(),st:'new',n:1,alb})})})}
+ catch(e){JB.st='err';JB.msg=e.offline?'אין חיבור לאינטרנט':'לא נשמר ('+(e.message||e)+')';jShow();return false}
+ mineUp({id,n:1,alb:1,name:JB.name,st:'new'});jShow();clearTimeout(MT);MT=setTimeout(mineTick,3000);return true}
+// סבב 5: ביטול בידי השולח – בכל מצב שאינו סופי (up / new / taken), אחרי לחיצה שנייה. "ההדפסה בוטלה" נשאר עד "אישור".
+//   כשהמחשב כבר מדפיס (taken) – התחנה רואה את הביטול תוך 15 שניות ומוחקת את העבודה מתור ההדפסה של Windows
+ACT.edbQx=async el=>{const id=el&&el.dataset.v||(JB&&JB.id);if(!id)return;const m=mine().find(x=>x.id===id),j=JB&&JB.id===id?JB:m;if(!j||fin_(j.st))return;
+ if(!arm('edbQx',id,()=>jShow()))return;
+ const was={st:j.st,code:j.code||'',msg:j.msg||''},cx={st:'err',code:'canceled',msg:'ההדפסה בוטלה'};
+ Object.assign(j,cx);if(m&&m!==j)Object.assign(m,cx);jShow();
+ try{await jSet(id,'err','ההדפסה בוטלה','canceled')}
+ catch(e){if(was.st!=='up'){Object.assign(j,was);toast('הביטול נכשל – ייתכן שההדפסה כבר הסתיימה. בודק שוב…');jShow();clearTimeout(MT);MT=setTimeout(mineTick,500);return}}
+ mineUp(Object.assign({id,n:j.n||1,name:j.name||''},j.alb?{alb:1}:{},cx));if(!j.alb)stDel(id,j.n||1);jShow()};
 
 /* ---------- התחנה במחשב: לולאה ברקע ---------- */
 const W={busy:0,hp:null,hb:0,hbOn:null,err:'',pr:'',last:'',t:null};
@@ -174,34 +204,56 @@ function ov(){const L=ovL().sort((a,b)=>(b.t||0)-(a.t||0)),j=L[0];
  if(!j||!cfg().on){box('edbOv','');return}
  const sig=j.k+'|'+j.st+'|'+j.code;if(OVH===sig&&!fin_(j.st)&&!WAITC.includes(j.code)){box('edbOv','');return}
  const v=view(j),more=L.length-1;
- box('edbOv',boxHtml(v,(j.id?'נשלח מטלפון':'מהמחשב הזה')+(j.nm?' · '+j.nm:''),(fin_(j.st)?`<button class="btn grow" data-a="edbAckS" data-v="${esc(j.k)}" style="min-height:52px;font-size:1.15rem">אישור</button>`:WAITC.includes(j.code)?'':`<button class="btn g grow" data-a="edbOvH" data-v="${esc(sig)}">הסתרה</button>`)+(more>0?`<span class="note" style="align-self:center">ועוד ${more}</span>`:'')),'top:12px;width:min(600px,94vw);border:4px solid '+LVC[v.lv]+';')}
+ box('edbOv',boxHtml(v,(j.id?'נשלח מטלפון':'מהמחשב הזה')+(j.nm?' · '+j.nm:''),(fin_(j.st)?`<button class="btn grow" data-a="edbAckS" data-v="${esc(j.k)}" style="min-height:52px;font-size:1.15rem">אישור</button>`:(WAITC.includes(j.code)?'':`<button class="btn g grow" data-a="edbOvH" data-v="${esc(sig)}">הסתרה</button>`)+cxBtn('edbCxS',j.k))+(more>0?`<span class="note" style="align-self:center">ועוד ${more}</span>`:'')),'top:12px;width:min(600px,94vw);border:4px solid '+LVC[v.lv]+';')}
 ACT.edbAckS=async el=>{const k=el&&el.dataset.v,j=ovL().find(x=>x.k===k);lsW(OVK,ovL().filter(x=>x.k!==k));ov();if(j&&j.id){try{await jAck(j.id,'ackS')}catch(e){}}};
 ACT.edbOvH=el=>{OVH=el&&el.dataset.v||'';ov()};
+// סבב 5: "ביטול הדפסה" בתחנה (אחרי לחיצה שנייה) – העבודה שבמעקב (CURJ), או פריט שנשאר בחלון בלי מעקב
+ACT.edbCxS=async el=>{const k=el&&el.dataset.v,it=ovL().find(x=>x.k===k);if(!it||fin_(it.st))return;
+ if(!arm('edbCxS',k,()=>{OVH='';ov()}))return;
+ await cxJob(CURJ&&CURJ.k===k?CURJ:{k,id:it.id||'',n:1,hid:''},'ההדפסה בוטלה במחשב',true)};
 
 /* ---------- מעקב אחרי עבודה אצל העוזר (GET /job/<id>), עד done / err ----------
-   J: {k, id (מסמך בענן או ריק), n, hid, nm}. דיווח לענן רק כשהמצב משתנה. העוזר לא עונה ~2 דקות / לא מכיר את העבודה – err (lost) */
-async function follow(c,J){let last='',fails=0;
- for(;;){await sleep(3000);const r=await hJob(c,J.hid);
+   J: {k, id (מסמך בענן או ריק), n, hid, nm, alb, end}. דיווח לענן רק כשהמצב משתנה. העוזר לא עונה ~2 דקות / לא מכיר את העבודה – err (lost).
+   סבב 5: J.end – העבודה הסתיימה / בוטלה (פעם אחת בלבד). כל 5 סבבים (15 שניות) – בדיקה אם השולח ביטל בענן */
+let CURJ=null;
+// ביטול: אצל העוזר (מחיקה מתור ההדפסה של Windows), בענן (cloud – כשהביטול התחיל כאן), והודעה עד "אישור"
+async function cxJob(J,msg,cloud){if(J.end)return;J.end=1;const c=cfg();let m=String(msg||'ההדפסה בוטלה');
+ if(J.hid){const r=await hCancel(c,J.hid);
+  if(!r.ok)m+=' – עוזר ההדפסה לא אישר שהעבודה נמחקה מתור ההדפסה של Windows. אם הדף עדיין עלול לצאת: פתחו את תור ההדפסה במחשב ובטלו שם.';
+  else if(r.j.state==='done')m+=' – אבל הדף כבר הודפס לפני הביטול.';
+  else if(/could not remove/.test(String(r.j.raw||'')))m+=' – לא הצלחנו למחוק מתור ההדפסה של Windows. פתחו את תור ההדפסה במחשב ובטלו שם.'}
+ m=m.slice(0,200);
+ if(J.id&&cloud){try{await jSet(J.id,'err',m,'canceled')}catch(e){}}
+ if(J.id&&!J.alb)stDel(J.id,J.n||1);
+ ovUp({k:J.k,st:'err',code:'canceled',msg:m});lsW(CURK,null);if(CURJ===J)CURJ=null;W.busy=0;W.err='';dot()}
+async function follow(c,J){let last='',fails=0,k=0,lc='';CURJ=J;
+ for(;;){await sleep(3000);if(J.end)return;
+  if(J.id&&++k%5===0){let j=null;try{const d=await fsx('/edbq/'+J.id);j=d&&d.fields?dec(d):null}catch(e){}if(J.end)return;
+   if(j&&j.st==='err'&&j.code==='canceled')return cxJob(J,'ההדפסה בוטלה בטלפון',false)}
+  const r=await hJob(c,J.hid);if(J.end)return;
   if(!r.ok){if(r.st===404||++fails>=40)return fin(J,'err','lost',PS.lost.t);continue}
-  fails=0;const x=r.j,code=PS[x.code]?x.code:'error';
+  fails=0;const x=r.j,code=PS[x.code]?x.code:'error';if(x.state==='waiting'&&WAITC.includes(code))lc=code;
   if(x.state==='done')return fin(J,'done','done','הודפס בהצלחה'+(x.printer?' ב-'+String(x.printer).slice(0,60):''));
-  if(x.state==='err')return fin(J,'err',code,mtxt(code,x.raw));
+  if(x.state==='err')return fin(J,'err',code,code==='timeout'?toMsg(String(x.why||'')||lc):code==='canceled'?'ההדפסה בוטלה':mtxt(code,x.raw));
   const msg=x.state==='waiting'?mtxt(code,x.raw):(PS[code]||PS.printing).t;
   if(code+'|'+msg!==last){last=code+'|'+msg;ovUp({k:J.k,st:'taken',code,msg});W.err=x.state==='waiting'?msg:'';dot();
    if(J.id){try{await fsx('/edbq/'+J.id+'?'+mask(['msg','code','ts'])+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:fld({msg,code,ts:Date.now()})})})}catch(e){}}}
   beat()}}
-async function fin(J,st,code,msg){if(J.id){try{await jSet(J.id,st,msg,code)}catch(e){}stDel(J.id,J.n)}
+async function fin(J,st,code,msg){if(J.end)return;J.end=1;if(CURJ===J)CURJ=null;if(J.id){try{await jSet(J.id,st,msg,code)}catch(e){}if(!J.alb)stDel(J.id,J.n)}
  ovUp({k:J.k,st,code,msg});lsW(CURK,null);W.busy=0;W.err='';
  if(st==='done')W.last='הודפס '+new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});dot()}
-async function one(c,d){const j=dec(d.document),id=j.id,n=Math.max(1,Math.min(10,+j.n||1));
+async function one(c,d){const j=dec(d.document),id=j.id,alb=typeof j.alb==='string'&&/^[A-Za-z0-9_-]{8,40}$/.test(j.alb)?j.alb:'',n=alb?1:Math.max(1,Math.min(10,+j.n||1));
  if(!(+j.at>Date.now()-DAY)){try{await jSet(id,'err','פג תוקף – לא הודפס תוך 24 שעות')}catch(e){}return}
  // תפיסה אטומית: רק אם המסמך לא השתנה מאז הקריאה (ובחוקים: רק מ-'new')
  try{await fsx('/edbq/'+id+'?'+mask(['st','tk','msg'])+'&currentDocument.updateTime='+encodeURIComponent(d.document.updateTime),{method:'PATCH',body:JSON.stringify({fields:fld({st:'taken',tk:SY.uid,msg:'המחשב מדפיס'})})})}catch(e){return}
- const J={k:id,id,n,hid:'',nm:''};W.busy=1;dot();lsW(CURK,J);ovUp({k:id,id,st:'taken',code:'spool',msg:PS.spool.t});let res;
+ const J={k:id,id,n,hid:'',nm:'',alb:!!alb};CURJ=J;W.busy=1;dot();lsW(CURK,J);ovUp({k:id,id,st:'taken',code:'spool',msg:PS.spool.t});let res;
  try{const t=await tok(),pages=[];
-  for(let i=0;i<n;i++){const r=await fetch(STB()+'/'+encodeURIComponent(fp(id,i))+'?alt=media',{headers:{Authorization:'Firebase '+t}});if(!r.ok)throw new Error('הורדת העמוד נכשלה ('+r.status+')');pages.push(await r.blob())}
+  // סבב 5: עבודה מהאלבום – הדף מ-edb_album (לא נמחק אחרי ההדפסה)
+  for(let i=0;i<n;i++){const r=await fetch(STB()+'/'+encodeURIComponent(alb?pre()+'edb_album/'+alb+'/page.png':fp(id,i))+'?alt=media',{headers:{Authorization:'Firebase '+t}});if(!r.ok)throw new Error((alb?'הדף לא נמצא באלבום':'הורדת העמוד נכשלה')+' ('+r.status+')');pages.push(await r.blob())}
+  if(J.end)return; // בוטל בזמן ההורדה
   res=await hPrint(c,pages,'edible-'+id.slice(0,6))}
  catch(e){res={ok:false,msg:e&&e.message||String(e)}}
+ if(J.end){if(res.ok)hCancel(c,res.job);return} // בוטל בזמן השליחה לעוזר – מבטלים גם אצלו
  if(!res.ok)return fin(J,'err','print-failed',res.msg);
  J.hid=res.job;lsW(CURK,J);ovUp({k:id,code:'printing',msg:PS.printing.t});
  try{await fsx('/edbq/'+id+'?'+mask(['msg','code','ts'])+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:fld({msg:PS.printing.t,code:'printing',ts:Date.now()})})})}catch(e){}
@@ -210,7 +262,7 @@ async function one(c,d){const j=dec(d.document),id=j.id,n=Math.max(1,Math.min(10
 async function local(pages,name){const c=cfg();if(W.busy)throw new Error('המדפסת עסוקה בהדפסה אחרת – נסו שוב בעוד רגע');
  W.busy=1;dot();let r;try{r=await hPrint(c,pages,name)}catch(e){r={ok:false,msg:e&&e.message||String(e)}}
  if(!r.ok){W.busy=0;dot();throw new Error(r.msg)}
- const J={k:'L'+r.job,id:'',n:pages.length,hid:r.job,nm:''};lsW(CURK,J);ovUp({k:J.k,st:'taken',code:'printing',msg:PS.printing.t});
+ const J={k:'L'+r.job,id:'',n:pages.length,hid:r.job,nm:''};CURJ=J;lsW(CURK,J);ovUp({k:J.k,st:'taken',code:'printing',msg:PS.printing.t});
  follow(c,J).catch(()=>{W.busy=0});return r}
 // אחרי רענון / כיבוי באמצע הדפסה: ממשיכים לעקוב (או מסמנים כישלון אם העמודים עוד לא נשלחו לעוזר)
 let RES=0;
@@ -233,5 +285,5 @@ async function tick(){let wait=15000;
 setTimeout(tick,8000);
 function setCfg(o){const was=cfg().on;cfgSet(Object.assign({},o,{port:DEF.port}));dot();ov();if(o.on!==was||o.on){W.hbOn=null;beat(true)}clearTimeout(W.t);W.t=setTimeout(tick,1000)}
 
-root.EdbSt={cfg,setCfg,ok,stn,stnOn,stnTxt,send,local,hStatus,hPrint,hJob,HE,PS,view,mtxt,W,DEF};
+root.EdbSt={cfg,setCfg,ok,stn,stnOn,stnTxt,send,sendAlb,local,hStatus,hPrint,hJob,hCancel,HE,PS,view,mtxt,toMsg,W,DEF};
 })(typeof window!=='undefined'?window:globalThis);
