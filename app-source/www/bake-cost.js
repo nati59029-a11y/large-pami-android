@@ -15,7 +15,8 @@ const feat=()=>{try{return !!(bzF('bake')&&bzB()&&!SY.mg)}catch(e){return false}
 const mgr=()=>{try{return isA()||!!(SY&&SY.sa)}catch(e){return false}};
 const on=()=>{try{return feat()&&(isA()||!!SY.sa||(isW()&&!!SY.perms&&SY.perms.bake===true))}catch(e){return false}};
 const bid=()=>String(SY&&SY.bizId||'');
-const CK=()=>'lp-bake-'+bid(),QK=()=>'lp-bakeq-'+bid();
+/* התור לכל עסק ולכל משתמש: משתמש אחר באותו טלפון לא ישלח שינויים של מישהו אחר בשמו (by) */
+const CK=()=>'lp-bake-'+bid(),QK=()=>'lp-bakeq-'+bid()+'-'+String(SY&&SY.uid||'');
 const rd=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const wr=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}};
 const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'k'+[...a].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,20)};
@@ -58,9 +59,13 @@ const cacheSave=()=>{if(!D.R)return;wr(CK(),{at:D.at,L:[...D.R.values()]})};
 function cacheLoad(){const c=rd(CK(),null);if(c&&Array.isArray(c.L)){D.R=new Map(c.L.filter(x=>x&&ID.test(x.id)).map(x=>[x.id,x]));D.at=+c.at||0;return true}return false}
 const decDoc=d=>{const f=d.fields||{};return{id:idOf(d),t:fvj(f.t),j:fvj(f.j),at:+fvj(f.at)||0,by:String(fvj(f.by)||''),u:d.updateTime||''}};
 const docOk=x=>x&&ID.test(x.id)&&['i','c','p'].includes(x.t)&&typeof x.j==='string';
+/* כל הרשומות, עמוד אחרי עמוד (pageToken) – בלי חיתוך שקט */
+const LP={ps:300};
+async function listAll(){const out=[];let tk='';
+ for(let i=0;i<1000;i++){const j=await fsx('/bake?pageSize='+LP.ps+(tk?'&pageToken='+encodeURIComponent(tk):''));((j&&j.documents)||[]).forEach(d=>out.push(d));tk=j&&j.nextPageToken;if(!tk)break}
+ return out}
 async function load(force){chk();if(D.b||!on())return;if(!force&&D.R&&Date.now()-D.at<30e3)return;D.b=1;D.err='';
- try{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'bake'}],limit:3000}})});
-  const L=(r||[]).filter(x=>x&&x.document).map(x=>decDoc(x.document)).filter(docOk);
+ try{const L=(await listAll()).map(decDoc).filter(docOk);
   D.R=new Map(L.map(x=>[x.id,x]));D.at=Date.now();D.off=0;cacheSave()}
  catch(e){if(e&&e.code===403)D.err='no';else{D.off=e&&e.offline?1:0;D.err=D.off?'':'הטעינה נכשלה';}if(!D.R&&!cacheLoad()&&D.off)D.R=new Map()}
  finally{D.b=0;redraw()}
@@ -69,8 +74,8 @@ async function load(force){chk();if(D.b||!on())return;if(!force&&D.R&&Date.now()
 const PC=new Map();
 function dec(t,j){const k=t+j;if(PC.has(k))return PC.get(k);if(PC.size>6000)PC.clear();const o=B.parse(t,j);PC.set(k,o);return o}
 /* כל הרשומות לתצוגה: מהענן / מהמכשיר, ועליהן התור (שינויים שעוד לא נשלחו) */
-function recs(){const M=new Map(D.R||[]);for(const q of qGet())M.set(q.id,{id:q.id,t:q.t,j:q.j,at:q.at,pend:1});
- const I=[],C=[],P=[];for(const r of M.values()){const o=dec(r.t,r.j);if(!o)continue;const x={id:r.id,o,at:r.at,pend:!!r.pend};(r.t==='i'?I:r.t==='c'?C:P).push(x)}
+function recs(){const M=new Map(D.R||[]);for(const q of qGet())M.set(q.id,{id:q.id,t:q.t,j:q.j,at:q.at,pend:1,fail:!!q.fail});
+ const I=[],C=[],P=[];for(const r of M.values()){const o=dec(r.t,r.j);if(!o)continue;const x={id:r.id,o,at:r.at,pend:!!r.pend,fail:!!r.fail};(r.t==='i'?I:r.t==='c'?C:P).push(x)}
  const hc=(a,b)=>String(a.o.n).localeCompare(String(b.o.n),'he');I.sort(hc);C.sort(hc);P.sort(hc);
  return{I,C,P,cm:new Map(C.map(x=>[x.id,x.o]))}}
 const find=(L,id)=>L.find(x=>x.id===id)||null;
@@ -79,7 +84,7 @@ const find=(L,id)=>L.find(x=>x.id===id)||null;
 function put(t,id,o,po){const j=JSON.stringify(o);if(j.length>16000){toast('הרשומה גדולה מדי');return false}
  const L=qGet(),k=L.findIndex(x=>x.id===id),r=D.R&&D.R.get(id);
  const at=Math.max(Date.now(),k>=0?L[k].at+1:0);
- if(k>=0)Object.assign(L[k],{j,at,po:!!(L[k].po&&po)});else L.push({id,t,j,at,base:r&&r.u||'',nw:!r,po:!!po,n:0});
+ if(k>=0){Object.assign(L[k],{j,at,po:!!(L[k].po&&po)});delete L[k].fail;delete L[k].why;delete L[k].r403}else L.push({id,t,j,at,base:r&&r.u||'',nw:!r,po:!!po,n:0});
  if(!qSet(L)){toast('אין מקום בזיכרון המכשיר – השמירה נכשלה');return false}
  if(navigator.onLine===false){D.off=1;toast('נשמר במכשיר – יישלח כשיחזור החיבור')}
  flush();return true}
@@ -90,15 +95,20 @@ function done(q,x){setRec(x);const L=qGet(),k=L.findIndex(y=>y.id===q.id);if(k<0
 function drop(q){const L=qGet().filter(y=>!(y.id===q.id&&y.at===q.at));qSet(L)}
 const nmOf=q=>{const o=dec(q.t,q.j);return o?o.n:'הרשומה'};
 let FL=0,T403=0;
-async function flush(){if(FL||!on()||!qGet().length)return;FL=1;let ch=0;
- try{for(let g=0;g<300;g++){const L=qGet();if(!L.length)break;const r=await send(L[0]);if(r==='stop')break;ch=1}}
+const live=()=>qGet().filter(x=>!x.fail);
+async function flush(){if(FL||!on()||!live().length)return;FL=1;let ch=0;
+ try{for(let g=0;g<300;g++){const q=live()[0];if(!q)break;const r=await send(q);if(r==='stop')break;ch=1}}
  finally{FL=0;if(ch)redraw()}}
 async function send(q){const me=SY.uid;if(!q.nw&&!q.base)return clash(q);
  const body=JSON.stringify({fields:{t:{stringValue:q.t},j:{stringValue:q.j},at:{integerValue:String(q.at)},by:{stringValue:me}}});
  const pre=q.nw?'currentDocument.exists=false':'currentDocument.updateTime='+encodeURIComponent(q.base);
  try{const d=await fsx('/bake/'+q.id+'?'+pre,{method:'PATCH',body});D.off=0;done(q,{id:q.id,t:q.t,j:q.j,at:q.at,by:me,u:d&&d.updateTime||''});return'ok'}
  catch(e){if(e&&e.offline){D.off=1;return'stop'}
-  if(e&&e.code===403){if(Date.now()-T403>60e3){T403=Date.now();toast('השמירה בענן נדחתה (אין הרשאה, או שהתוספת עוד לא הופעלה). השינוי נשמר במכשיר.')}return'stop'}
+  /* 403: ניסיון אחד נוסף עם at=עכשיו (למשל שעון הטלפון לא מדויק); נדחה שוב – מסומן "לא נשמר" (נשאר במכשיר) וממשיכים לשאר */
+  if(e&&e.code===403){const L=qGet(),k=L.findIndex(y=>y.id===q.id&&y.at===q.at);if(k<0)return'ok';
+   if(!L[k].r403){L[k].r403=1;L[k].at=Date.now();qSet(L);return'ok'}
+   L[k].fail=1;L[k].why='השרת דחה את השמירה (אין הרשאה, או שהתוספת עוד לא הופעלה)';qSet(L);
+   if(Date.now()-T403>60e3){T403=Date.now();toast('"'+nmOf(q)+'" לא נשמר בענן – השרת דחה את השמירה. השינוי נשאר במכשיר.')}return'ok'}
   if(e&&[400,404,409,412].includes(e.code))return clash(q);
   return'stop'}}
 /* התנגשות: קוראים את הגרסה בענן ומחילים את הכלל */
@@ -118,11 +128,11 @@ async function clash(q){let doc=null;
  const n=(L[k].n||0)+1;if(n>5){drop(q);toast('"'+nmOf(q)+'" לא נשמר – נסו שוב');return'drop'}
  Object.assign(L[k],{j:JSON.stringify(r.o),at:Math.min(r.at,Date.now()),base:x.u,nw:false,n});qSet(L);return'ok'}
 window.addEventListener('online',()=>{try{D.off=0;flush()}catch(e){}});
-setInterval(()=>{try{if(on()&&qGet().length)flush()}catch(e){}},60e3);
+setInterval(()=>{try{if(on()&&live().length)flush()}catch(e){}},60e3);
 async function hardDel(id){if(!mgr())return;
  try{await fsx('/bake/'+id,{method:'DELETE'});if(D.R){D.R.delete(id);cacheSave()}qSet(qGet().filter(q=>q.id!==id));toast('נמחק');NAV.pop();render(-1)}
  catch(e){toast(e&&e.offline?'מחיקה אפשרית רק עם חיבור לאינטרנט':tkErr(e))}}
-const BK={load,flush,recs,put,on,q:qGet,st:()=>D,reset:()=>{D=fresh()}};window.BK=BK;
+const BK={load,flush,recs,put,on,q:qGet,st:()=>D,lp:LP,reset:()=>{D=fresh()}};window.BK=BK;
 
 /* ---------- ספקים ---------- */
 function sups(){const o=[];try{
@@ -133,15 +143,16 @@ function sups(){const o=[];try{
 /* ---------- חישוב לתצוגה ---------- */
 const costOf=(p,R)=>B.prodCost(p.o,R.cm,R.I);
 const srcS=x=>x.src?esc([x.src.sn,x.src.n,x.src.d?dfmt(x.src.d):''].filter(Boolean).join(' · '))+(x.pinned?' · <b>נקבע</b>':''):'';
-const sumH=c=>{const cl=v=>v==null?'':v<0?' class="neg"':' class="pos"';
- return`<div class="bk-sum"><div><small>עלות מוצר</small><b>${m2(c.prod)}</b></div><div><small>אריזה</small><b>${m2(c.pack)}</b></div><div><small>סה״כ עלות</small><b>${m2(c.total)}</b></div>`
- +`<div><small>מחיר מכירה</small><b>${m2(c.sp)}</b></div><div><small>רווח</small><b${cl(c.profit)}>${m2(c.profit)}</b></div><div><small>שולי רווח</small><b${cl(c.margin)}>${pct(c.margin)}</b></div></div>`};
-const pendT=x=>x.pend?' <span class="tag t1">ממתין לשליחה</span>':'';
+const sumH=c=>{const cl=v=>v==null?'':v<0?' class="neg"':' class="pos"',ic=c.miss?' <small class="tag t1">חלקי</small>':'';
+ return(c.miss?`<div class="card" style="border-color:var(--warn)"><b class="tag t1">חסר מחיר</b> ב-${c.miss} ${c.miss===1?'שורה':'שורות'} – העלות, הרווח ושולי הרווח לא כוללים אותן (לא מלאים).</div>`:'')+`<div class="bk-sum"><div><small>עלות מוצר</small><b>${m2(c.prod)}</b></div><div><small>אריזה</small><b>${m2(c.pack)}</b></div><div><small>סה״כ עלות</small><b>${m2(c.total)}</b></div>`
+ +`<div><small>מחיר מכירה</small><b>${m2(c.sp)}</b></div><div><small>רווח</small><b${c.miss?'':cl(c.profit)}>${m2(c.profit)}${ic}</b></div><div><small>שולי רווח</small><b${c.miss?'':cl(c.margin)}>${pct(c.margin)}${ic}</b></div></div>`};
+const pendT=x=>x.fail?' <span class="tag t4">לא נשמר בענן</span>':x.pend?' <span class="tag t1">ממתין לשליחה</span>':'';
 const offT=x=>x.o.off?' <span class="tag t4">מוסתר</span>':'';
 const vis=x=>D.hid||!x.o.off;
 
 /* ---------- מסך ראשי ---------- */
-function head(){const n=qGet().length;let h='';
+function head(){const Q=qGet(),fl=Q.filter(x=>x.fail),n=Q.length-fl.length;let h='';
+ if(fl.length)h+=`<div class="card"><p><b>${fl.length} שינויים לא נשמרו בענן.</b> ${esc(fl[0].why||'השרת דחה את השמירה')}. השינויים נשארו במכשיר הזה בלבד.</p><div class="bk-acts"><button class="btn g" data-a="bkRetry">נסה שוב</button><button class="btn r" data-a="bkDrop">בטל את השינויים האלה</button></div></div>`;
  if(D.err==='no')h+='<div class="card"><p>אין גישה לנתוני האפייה בענן (המתג כבוי, או שהתוספת עוד לא הופעלה בשרת).</p></div>';
  else if(D.err)h+=`<div class="card"><p>${esc(D.err)}</p><button class="btn g" data-a="bkRe">נסה שוב</button></div>`;
  if(D.off||n)h+=`<p class="note">${D.off?'אין חיבור – מוצגים הנתונים האחרונים מהמכשיר. ':''}${n?n+' שינויים ממתינים לשליחה.':''}${n&&!D.off?' <button class="chip" data-a="bkSend">שלח עכשיו</button>':''}</p>`;
@@ -153,7 +164,7 @@ V.bake=()=>{const T='עלות מוצרי אפייה';if(!on())return{t:T,h:'<div
  const chip=(k,t,n)=>`<button class="chip${tb===k?' on':''}" data-a="bkTab" data-k="${k}" aria-pressed="${tb===k}">${t} (${n})</button>`;
  const cnt=a=>a.filter(x=>!x.o.off).length;
  let rows='';
- if(tb==='p')rows=sh.map(p=>{const c=costOf(p,R);return`<button class="li bk-li" data-a="go" data-v="bakeP" data-arg="${esc(p.id)}"><div class="m"><b>${esc(p.o.n)}${offT(p)}${pendT(p)}</b><small>עלות ${m2(c.total)} · מכירה ${m2(c.sp)}${c.miss?' · <span class="tag t1">חסר מחיר ב-'+c.miss+'</span>':''}</small></div><div class="v">${m2(c.profit)}<small>${pct(c.margin)}</small></div></button>`}).join('');
+ if(tb==='p')rows=sh.map(p=>{const c=costOf(p,R);return`<button class="li bk-li" data-a="go" data-v="bakeP" data-arg="${esc(p.id)}"><div class="m"><b>${esc(p.o.n)}${offT(p)}${pendT(p)}</b><small>עלות ${m2(c.total)} · מכירה ${m2(c.sp)}${c.miss?' · <span class="tag t1">חסר מחיר ב-'+c.miss+'</span>':''}</small></div><div class="v">${m2(c.profit)}${c.miss?'?':''}<small>${pct(c.margin)}${c.miss?' (חלקי)':''}</small></div></button>`}).join('');
  else if(tb==='c')rows=sh.map(c=>{const r=B.compCost(c.id,c.o,R.I),ni=R.I.filter(i=>i.o.c===c.id&&!i.o.off).length,np=R.P.filter(p=>!p.o.off&&(p.o.L.concat(p.o.K)).some(l=>l.c===c.id)).length;
   return`<button class="li bk-li" data-a="go" data-v="bakeC" data-arg="${esc(c.id)}"><div class="m"><b>${esc(c.o.n)}${offT(c)}${pendT(c)}</b><small>${r.it?esc([r.it.o.sn,r.it.o.d?dfmt(r.it.o.d):''].filter(Boolean).join(' · '))+' · ':''}${ni} פריטים · ${np} מוצרים</small></div><div class="v">${ucF(r.uc)}<small>ל${UN(c.o.u)}</small></div></button>`}).join('');
  else rows=sh.map(i=>`<button class="li bk-li" data-a="go" data-v="bakeI" data-arg="${esc(i.id)}"><div class="m"><b>${esc(i.o.n)}${offT(i)}${pendT(i)}</b><small>${esc([i.o.sn,KN[i.o.k],i.o.pq+' '+UN(i.o.u)+(i.o.yq!==i.o.pq?' (בפועל '+i.o.yq+')':''),i.o.d?dfmt(i.o.d):''].filter(Boolean).join(' · '))}</small></div><div class="v">${m2(i.o.p)}<small>${ucF(B.unitCost(i.o))}/${UN(i.o.u)}</small></div></button>`).join('');
@@ -166,6 +177,8 @@ ACT.bkTab=el=>{D.tab=['p','c','i'].includes(el.dataset.k)?el.dataset.k:'p';reren
 ACT.bkHid=()=>{D.hid=D.hid?0:1;rerender()};
 ACT.bkRe=()=>{D.err='';load(1);rerender()};
 ACT.bkSend=()=>{flush()};
+ACT.bkRetry=()=>{const L=qGet();L.forEach(x=>{delete x.fail;delete x.why;delete x.r403});qSet(L);flush().then(redraw);rerender()};
+ACT.bkDrop=()=>ask('לבטל את השינויים שלא נשמרו? הם יימחקו מהמכשיר.',()=>{qSet(qGet().filter(x=>!x.fail));closeDlg();rerender()},'בטל שינויים');
 
 /* ---------- פריט קנייה ---------- */
 const optS=(v,L)=>L.map(([k,t])=>`<option value="${esc(k)}"${k===v?' selected':''}>${esc(t)}</option>`).join('');
@@ -306,13 +319,27 @@ const opt=()=>`<button class="opt" data-a="go" data-v="bake"><span>עלות מו
 
 /* ---------- סוג ספק בכרטיס הספק (מנהל, רק כשהתוספת דלוקה) ---------- */
 {const o=ACT.subMenu;if(typeof o==='function')ACT.subMenu=el=>{o(el);try{if(!feat()||!isA())return;const s=subById(el.dataset.id);if(!s||(cat(s.cat)||{}).beh!=='sup')return;const b=$('#dlg form[data-f=subsave] button.btn');if(!b)return;const T=B.supTypes(s);
- b.insertAdjacentHTML('beforebegin',`<div class="f" data-bkbt="1"><span>סוג ספק</span><div class="bk-bt">${B.BT.map(k=>`<label><input type="checkbox" name="bt_${k}" value="1"${T.includes(k)?' checked':''}> ${k==='reg'?'רגיל (נכנס לתמחור חשבוניות)':KN[k]}</label>`).join('')}</div><p class="note" style="margin:2px 0 0">ספק אפייה / אריזה בלי "רגיל" לא נכנס ל"חשבוניות לתמחור". ספק מעורב (עם "רגיל") – כן.</p></div>`)}catch(e){}}}
-{const o=FRM.subsave;if(typeof o==='function')FRM.subsave=form=>{let ch=false;try{const E=form.elements,s=subById(E.id&&E.id.value);
- if(s&&E.bt_reg&&feat()){const n=B.BT.filter(k=>E['bt_'+k]&&E['bt_'+k].checked),v=n.length?n:['reg'];if(JSON.stringify(v)!==JSON.stringify(s.bt||null)){s.bt=v;ch=true}}}catch(e){}
- const r=o(form);if(ch&&isA()&&typeof pubCfg==='function')pubCfg().catch(()=>{});return r}}
+ b.insertAdjacentHTML('beforebegin',`<div class="f" data-bkbt="1"><span>סוג ספק</span><div class="bk-bt">${B.BT.map(k=>`<label><input type="checkbox" name="bt_${k}" value="1" data-c="bkBt"${T.includes(k)?' checked':''}> ${k==='reg'?'רגיל (נכנס לתמחור חשבוניות)':KN[k]}</label>`).join('')}</div><p class="note" style="margin:2px 0 0">ספק אפייה / אריזה בלי "רגיל" לא נכנס ל"חשבוניות לתמחור". ספק מעורב (עם "רגיל") – כן.</p></div>`);
+ prSync(b.form)}catch(e){}}}
+/* מתג "נכנס לתמחור" (prOn, index.html): כשהספק לא נכנס בגלל הסוג (אפייה/אריזה בלי "רגיל") – מוצג כבוי וחסום, עם הסבר.
+   הערך השמור (prOff) לא משתנה: בשמירה המתג החסום מוחזר לערך השמור לפני שהעטיפה של prOn קוראת אותו */
+const btSel=form=>{const E=form.elements,n=B.BT.filter(k=>E['bt_'+k]&&E['bt_'+k].checked);return n.length?n:['reg']};
+function prSync(form){try{const E=form&&form.elements,el=E&&E.prOn,s=E&&subById(E.id&&E.id.value);if(!el||!s||!E.bt_reg)return;
+ const nb=!btSel(form).includes('reg'),lb=el.closest('label');let nt=form.querySelector('[data-bkpr]');
+ if(nb){el.checked=false;el.disabled=true;if(lb)lb.style.opacity='.6';if(!nt&&lb){lb.insertAdjacentHTML('afterend','<p class="note" data-bkpr="1" style="margin:2px 0 8px">לא נכנס לתמחור כי הספק מסומן אפייה/אריזה בלבד</p>')}}
+ else{el.disabled=false;el.checked=!s.prOff;if(lb)lb.style.opacity='';if(nt)nt.remove()}}catch(e){}}
+CHG.bkBt=el=>prSync(el.form);
+/* שמירה: הסוג נשמר ומתפרסם רק אחרי שהשמירה המקורית הצליחה (החלון נסגר); בדיקת שדה שנכשלה – לא משנים כלום */
+{const o=FRM.subsave;if(typeof o==='function')FRM.subsave=form=>{let s=null,v=null;try{const E=form.elements;s=subById(E.id&&E.id.value);
+ if(s&&E.bt_reg&&feat()){v=btSel(form);if(E.prOn&&E.prOn.disabled)E.prOn.checked=!s.prOff}}catch(e){}
+ const r=o(form);
+ try{if(s&&v&&!document.querySelector('#dlg[open]')&&JSON.stringify(v)!==JSON.stringify(s.bt||null)){s.bt=v;save();if(isA()&&typeof pubCfg==='function')pubCfg().catch(()=>{});try{rerender()}catch(e){}}}catch(e){}
+ return r}}
 
 /* ---------- סימון חד־פעמי (4ג, החלטה ה1): ספקי e_bak בלי bt → ['bake']. רק מוסיף שדה; דגל S.bkM ---------- */
-function mig(){try{if(!isA()||!feat()||S.bkM)return 0;let n=0;(S.subs||[]).forEach(s=>{if(s&&s.cat==='e_bak'&&!('bt'in s)){s.bt=['bake'];n++}});
+/* רק כשהקטגוריה e_bak היא עדיין "ספקים אפייה" (לארג' פעמי). בעסקים אחרים היא שונתה ל"ספקים 2" (gnMig/catFix) – קטגוריה כללית, לא מסמנים; הדגל נקבע בכל מקרה */
+function mig(){try{if(!isA()||!feat()||S.bkM)return 0;let n=0;const c=(S.cats||[]).find(x=>x&&x.id==='e_bak');
+ if(c&&String(c.name||'').trim()==='ספקים אפייה')(S.subs||[]).forEach(s=>{if(s&&s.cat==='e_bak'&&!('bt'in s)){s.bt=['bake'];n++}});
  S.bkM=1;save();if(n){if(typeof pubCfg==='function')pubCfg().catch(()=>{});toast(n+' ספקי אפייה סומנו כאפייה – אפשר לשנות בכרטיס הספק')}return n}catch(e){return 0}}
 BK.mig=mig;
 {const o=V.home;if(typeof o==='function')V.home=function(){const r=o.apply(this,arguments);try{if(isA()&&feat()&&!S.bkM)setTimeout(mig,1500)}catch(e){}return r}}
@@ -321,8 +348,8 @@ BK.mig=mig;
 const bxOk=x=>!!(x&&typeof x==='object'&&!Array.isArray(x)&&Array.isArray(x.docs));
 let RST=null;
 window.BKBK={
- collect:async()=>{if(!mgr()||!feat())return undefined;const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'bake'}],limit:3000}})});
-  return{v:1,at:Date.now(),docs:(r||[]).filter(x=>x&&x.document).map(x=>({id:idOf(x.document),f:x.document.fields||{}})).filter(d=>ID.test(d.id))}},
+ collect:async()=>{if(!mgr()||!feat())return undefined;const L=await listAll();
+  return{v:1,at:Date.now(),docs:L.map(d=>({id:idOf(d),f:d.fields||{}})).filter(d=>ID.test(d.id))}},
  pick:o=>o&&bxOk(o.bkx)?o.bkx:null,
  ok:bxOk,
  note:r=>{const x=r&&r.bkx;if(!bxOk(x)){RST=null;return''}RST=x;
@@ -331,7 +358,7 @@ window.BKBK={
   for(const d of x.docs){const f=d&&d.f||{},t=fvj(f.t),j=fvj(f.j);if(!d||!ID.test(String(d.id||''))||!['i','c','p'].includes(t)||typeof j!=='string'||j.length<2||j.length>16000){res.bad++;continue}
    let at=+fvj(f.at)||0;if(!(at>=1700000000000&&at<=Date.now()))at=Date.now();
    try{await fsx('/bake/'+d.id+'?currentDocument.exists=false',{method:'PATCH',body:JSON.stringify({fields:{t:{stringValue:t},j:{stringValue:j},at:{integerValue:String(at)},by:{stringValue:SY.uid}}})});res.ok++}
-   catch(e){if(e&&e.offline)throw e;if(e&&(e.code===409||e.code===400))res.dup++;else res.bad++}}
+   catch(e){if(e&&e.offline)throw e;if(e&&(e.code===409||/ALREADY_EXISTS/.test(String(e.message||''))))res.dup++;else res.bad++}}
   D.at=0;return res}};
 ACT.bakeRst=async el=>{if(!RST)return;if(el)el.disabled=true;
  try{const r=await BKBK.restore(RST);toast('נתוני אפייה: נוצרו '+r.ok+(r.dup?', '+r.dup+' כבר קיימים (לא שונו)':'')+(r.bad?', '+r.bad+' נכשלו':''))}

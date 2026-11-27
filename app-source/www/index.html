@@ -4572,7 +4572,7 @@ async function bkCloud(manual){if(!isA()){if(manual)toast('גיבוי לענן �
    let all=true;for(let k=0;k<np;k++)if(!have.has(dn+'_'+k)){all=false;break}
    if(!all){for(let k=0;k<np;k++)await bkPut(dn+'_'+k,f.slice(k*BKC,(k+1)*BKC));up++}
    bkSet('מעלה קבצים '+(++i)+' מתוך '+ids.length)}
-  const body=bkAscii(JSON.stringify({app:'large-pami',schema:4,date:new Date().toISOString(),data:col.data,fb:col.fb,shelf:col.shelf,st3:col.st3})),np=Math.max(1,Math.ceil(body.length/BKC));
+  const body=bkAscii(JSON.stringify({app:'large-pami',schema:4,date:new Date().toISOString(),data:col.data,fb:col.fb,shelf:col.shelf,st3:col.st3,bkx:col.bkx})),np=Math.max(1,Math.ceil(body.length/BKC));
   for(let k=0;k<np;k++){await bkPut('d'+gen+'_'+k,body.slice(k*BKC,(k+1)*BKC));bkSet('שומר נתונים '+(k+1)+' מתוך '+np)}
   const counts={tx:S.tx.length,files:ids.length,fb:(col.fb.cache||[]).length};
   await bkPut('meta',JSON.stringify({date:new Date().toISOString(),gen,np,files:fm,counts}));
