@@ -414,6 +414,7 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen, catN0)
         if (!p.sku) upd.sku = x.c;
         if (!p.barcode && it.bc) upd.barcode = it.bc;
         if (!p.sup && it.sup) upd.sup = it.sup;
+        if (p.cxv && p.cx === x.c) upd.cxv = FV().delete(); // 27.11: הקוד של המוצר עצמו נקלט ומקושר – כבר לא וריאנט (גם var של cxItem נמחק למטה)
         // 26.11.2026: שם / ברקוד ראשי / קטגוריה. שדה שהשתנה באפליקציה מאז התצוגה – לא נוגעים בו (יופיע בסנכרון הבא)
         let pend = false;
         // 26.11.2026: ספק (מהאפליקציה לכספית בלבד, cxExport upd). sp.ab = הספק באפליקציה שמוסכם עם כספית, sp.pd = נשלח וטרם נקלט.
@@ -449,7 +450,7 @@ async function applyPart(db, w, run, ref, k, rows, take, skip, cats, gen, catN0)
         if (!('pd' in pr)) pr.pd = FV().delete();
         if (!('pd' in co)) co.pd = FV().delete();
       }
-      xi(x.c, Object.assign({ pid, n: it.n, pr, co }, fxs, it.nv ? { nv: true } : {}));
+      xi(x.c, Object.assign({ pid, n: it.n, pr, co, var: FV().delete() }, fxs, it.nv ? { nv: true } : {}));
       for (const m of x.m || []) xi(m, Object.assign({ pid, n: it.n, m: x.c, pr, co }, fxs));
       res.link++;
     });
@@ -596,8 +597,30 @@ async function cxExport(w, input) {
   const cand = [...S.P].filter(([id, p]) => !linked.has(id) && !p.cx && !p.cxv && p.on !== false && !dupOf(id, p)).map(([id]) => id);
   // פריט שנשלח וטרם נקלט: הברקוד בכספית תחת הקוד שלו עצמו – כבר נקלט (הקישור יגיע בסנכרון הקטלוג), לא שולחים שוב ולא "כפול"
   // 26.11.2026 (cxCode): פריט חדש בקוד חדש של מוצר קיים – הברקוד עדיין בכספית תחת הקוד הקודם (from), וזה לא "כפול"
-  const pendOk = (c, x) => { if (!x.nw || !S.P.has(x.pid)) return false; const h = bcHit(BC, S.P.get(x.pid)); return !h || (!!x.from && h.cx === x.from); };
-  for (const [c, x] of S.X) { if (!x.nw || !S.P.has(x.pid)) continue; const h = bcHit(BC, S.P.get(x.pid)); if (h && h.cx !== c && h.cx !== x.from) dupOf(x.pid, S.P.get(x.pid), c); }
+  // 27.11.2026: וריאנט גם למוצר שכבר קיבל קוד ממתין (nw) לפני הגנת seenBc – הקוד הממתין לא הופיע מעולם בקטלוג (seen), המוצר מצביע עליו (p.cx),
+  // והברקוד שלו בכספית תחת קוד אחר X → p.cxv = X וב-cxItem של הקוד הממתין var = X (רק הוספת שדות; בלי מחיקה, בלי מחיר / שם / כמות).
+  // הקוד הממתין לא נשלח ולא "כפול". מחושב מחדש בכל ריצה (כמו mkV): X השתנה → מתעדכן; הברקוד כבר לא בכספית תחת קוד אחר → var ו-cxv נמחקים.
+  // "לא וריאנט" (cxDnOk v:true, cxvNo) מנקה את שניהם, ומאז – לא מסומן שוב. בלי מפת ברקודים – לא נוגעים
+  // סבב בדיקה 1: קוד שכבר לא עומד בתנאים (נקלט בקטלוג / כבר לא nw / from / old / p.cx אחר / מוצר כבוי או שנמחק) – var נמחק, ו-cxv של המוצר נמחק אם בא ממנו
+  const seenC = new Set(((await db.doc(SEEN).get()).get('codes')) || []), pv = [];
+  for (const [c, x] of S.X) {
+    const p = S.P.get(x.pid);
+    const ok = !!(x.nw && !x.from && !x.old && !x.m && p && !seenC.has(c) && p.cx === c && p.on !== false); // from = קוד חדש שהמנהל בחר (cxCode)
+    if (!ok && !x.var) continue;
+    if (ok && !BC.size) continue; // בלי מפת ברקודים – לא נוגעים
+    const h = ok && !p.cxvNo ? bcHit(BC, p) : null, want = h && h.cx !== c ? h.cx : null;
+    const pc = p ? (want ? want : p.cxv && p.cxv === x.var ? null : p.cxv || null) : null; // cxv שלא בא מהסימון הזה – לא נוגעים
+    if (want === (x.var || null) && (!p || pc === (p.cxv || null))) continue;
+    pv.push([c, p ? x.pid : null, want, pc]);
+  }
+  for (const [c, pid, want, pc] of pv) {
+    const b = db.batch();
+    b.update(db.doc('cxItem/' + c), { var: want || FV().delete() });
+    if (pid && pc !== (S.P.get(pid).cxv || null)) b.update(db.doc('prod/' + pid), { cxv: pc || FV().delete() });
+    try { await b.commit(); S.X.get(c).var = want || undefined; if (pid) { const p = S.P.get(pid), was = p.cxv; p.cxv = pc || undefined; if (want && want !== was) mkV.push([pid, want]); else if (!pc && was) rmV.push([pid, null]); } } catch (e) { /* נמחק בינתיים – מדלגים */ }
+  }
+  const pendOk = (c, x) => { if (!x.nw || x.var || !S.P.has(x.pid)) return false; const h = bcHit(BC, S.P.get(x.pid)); return !h || (!!x.from && h.cx === x.from); };
+  for (const [c, x] of S.X) { if (!x.nw || x.var || !S.P.has(x.pid)) continue; const h = bcHit(BC, S.P.get(x.pid)); if (h && h.cx !== c && h.cx !== x.from) dupOf(x.pid, S.P.get(x.pid), c); }
   if (max !== Infinity) { const pend = [...S.X].filter(([c, x]) => pendOk(c, x)).length; if (cand.length + pend > max) throw over(cand.length + pend); }
   let added = 0, made = [];
   if (cand.length) {
@@ -632,7 +655,8 @@ async function cxExport(w, input) {
     rows.push({ c, bc: p.barcode || '', n: p.name, p: typeof p.price === 'number' ? p.price : 0, cost: S.cost.has(x.pid) ? S.cost.get(x.pid) : null, c1: p.cat ? catN.get(p.cat) || '' : '', c2: p.sub ? catN.get(p.sub) || '' : '', sup: p.sup || '' });
   }
   O.ixDrop(w);
-  const vars = [...S.P].filter(([id, p]) => p.cxv && p.on !== false && !linked.has(id)).map(([id, p]) => ({ pid: id, n: String(p.name || '').slice(0, 80), cx: p.cxv }));
+  const varP = new Set([...S.X.values()].filter((x) => x.nw && x.var && !x.old && !x.from).map((x) => x.pid));
+  const vars = [...S.P].filter(([id, p]) => p.cxv && p.on !== false && (!linked.has(id) || varP.has(id))).map(([id, p]) => ({ pid: id, n: String(p.name || '').slice(0, 80), cx: p.cxv }));
   return { csv: CC.csvNew(rows, vat), n: rows.length, added, rows: rows.map((x) => ({ c: x.c, n: x.n, p: x.p, cost: x.cost })), dupN: dup.length, dup: dup.slice(0, 200), varN: vars.length, varNew: mkV.length, varDel: rmV.length, vars: vars.slice(0, 200) };
 }
 
@@ -670,9 +694,9 @@ async function cxCode(w, input) {
     const ac = cst.exists && typeof cst.get('cost') === 'number' ? cst.get('cost') : null;
     if (inCx) tx.set(tref, { c: code, pid, st: 'link', n: p.name || '', run: 'code', at: now, src: 'code' }); // בלי pr/co/nm/bc/ct – בסנכרון הבא: הבדל ראשון / רישום בסיס
     else tx.set(tref, { c: code, pid, st: 'link', nw: true, src: 'app', from: cur.id, n: p.name || '', pr: { fb: null, ab: ap, pd: ap }, co: { fb: null, ab: ac, pd: ac }, at: now });
-    tx.update(cur.ref, { old: true, to: code, at: now, 'pr.pd': FV().delete(), 'co.pd': FV().delete() });
+    tx.update(cur.ref, { old: true, to: code, at: now, 'pr.pd': FV().delete(), 'co.pd': FV().delete(), var: FV().delete() }); // 27.11: גם סימון וריאנט של הקוד הממתין
     for (const d of xs.docs) if (d.get('m') === cur.id) tx.update(d.ref, { old: true, to: code, at: now });
-    tx.update(pref, Object.assign({ cx: code, upd: now }, !p.sku || p.sku === cur.id ? { sku: code } : {}));
+    tx.update(pref, Object.assign({ cx: code, upd: now }, !p.sku || p.sku === cur.id ? { sku: code } : {}, p.cxv ? { cxv: FV().delete() } : {})); // מוצר מקושר: cxv רק מסימון וריאנט של קוד ממתין
     tx.set(O.priceRef(db), { prod: pid, k: 'x', old: cur.id, new: code, src: 'code', code, run: 'code', by: w.uid, at: now });
     tx.set(db.doc(CFG), { gen: cfgOf(cs).gen + 1 }, { merge: true }); // תצוגה מקדימה שנעשתה לפני – מיושנת
     return { code, old: cur.id, mode: inCx ? 'link' : 'new' };
@@ -691,7 +715,13 @@ async function cxDnOk(w, input) {
   if (input.v !== undefined && input.v !== true) throw bad('bad-v', 'ערך לא תקין');
   const ref = T.tdb().doc('prod/' + pid);
   if (!(await ref.get()).exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
-  if (input.v) { await ref.update({ cxv: FV().delete(), cxvNo: true, upd: Date.now(), dnBy: w.uid }); return { ok: true }; }
+  if (input.v) {
+    await ref.update({ cxv: FV().delete(), cxvNo: true, upd: Date.now(), dnBy: w.uid });
+    // 27.11.2026: גם הסימון בקוד הממתין (cxItem var) – הקוד חוזר להיות ממתין רגיל (והברקוד ב"כפולים")
+    const xs = await T.tdb().collection('cxItem').where('pid', '==', pid).limit(20).get();
+    await Promise.all(xs.docs.filter((d) => d.get('var') !== undefined).map((d) => d.ref.update({ var: FV().delete() })));
+    return { ok: true };
+  }
   await ref.update({ dn: FV().delete(), upd: Date.now(), dnBy: w.uid });
   return { ok: true };
 }

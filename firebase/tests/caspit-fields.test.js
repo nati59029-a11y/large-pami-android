@@ -288,4 +288,73 @@ describe('כספית: שם / ברקוד / קטגוריה, ושינוי קוד (2
     assert.equal(v2.cxv, undefined); assert.ok(/^9\d{5}$/.test(v2.cx), 'חזר להיות מועמד רגיל וקיבל קוד: ' + v2.cx);
     assert.ok(e2.csv.includes('מחק זהב'));
   });
+  it('וריאנט (27.11): מוצר שכבר קיבל קוד ממתין (nw) לפני הגנת הברקוד, והברקוד שלו בכספית תחת קוד אחר → cxv + cxItem.var, לא נשלח ולא "כפול"; קוד ממתין שהופיע בקטלוג – לא; "לא וריאנט" מנקה את שניהם', async () => {
+    // הקטלוג האחרון (סבב קודם): 7100000000999 תחת 300031
+    const XI = (c, pid) => adm().doc(`b/${A}/cxItem/${c}`).set({ c, pid, st: 'link', nw: true, src: 'app', n: 'x', pr: { fb: null, ab: 7, pd: 7 }, co: { fb: null, ab: null, pd: null }, at: 1 });
+    await P('pz').set({ name: 'בליסטר ירוק', price: 7, barcode: '7100000000999', on: true, q: { _: 2 }, cx: '900777', sku: '900777', at: 1 });
+    await XI('900777', 'pz');
+    await P('py').set({ name: 'בליסטר כחול', price: 7, barcode: '', bcx: ['7100000000999'], on: true, q: {}, cx: '900778', at: 1 });
+    await XI('900778', 'py');
+    const seenRef = adm().doc(`b/${A}/cxcfg/seen`), codes0 = (await seenRef.get()).get('codes');
+    await seenRef.set({ codes: codes0.concat(['900778']) }); // 900778 כבר הופיע בקטלוג – לא נוגעים
+    const e = await ok('cxExport', MGR, { kind: 'new' });
+    const z = (await P('pz').get()).data();
+    assert.deepEqual([z.cxv, z.cx, z.price, z.name, z.q._], ['300031', '900777', 7, 'בליסטר ירוק', 2], 'רק cxv');
+    assert.equal((await X('900777')).var, '300031'); assert.equal((await X('900777')).nw, true, 'לא נמחק');
+    assert.ok(!e.csv.includes('900777'), 'לא נשלח');
+    assert.ok(!e.dup.some((d) => d.pid === 'pz'), 'לא "כפול"');
+    assert.ok(e.vars.some((v) => v.pid === 'pz' && v.cx === '300031'));
+    assert.ok(e.dup.some((d) => d.pid === 'py' && d.c === '900778'), 'קוד ממתין שהופיע בקטלוג – נשאר "כפול"');
+    assert.equal((await P('py').get()).get('cxv'), undefined);
+    assert.equal((await X('900778')).var, undefined);
+    const e2 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.ok(!e2.dup.some((d) => d.pid === 'pz') && !e2.csv.includes('900777'), 'יציב בריצה נוספת');
+    // "לא וריאנט" – מנקה את cxv ואת var; מאז – "כפול", לא נשלח, לא מסומן שוב
+    await ok('cxDnOk', MGR, { pid: 'pz', v: true });
+    assert.deepEqual([(await P('pz').get()).get('cxv'), (await P('pz').get()).get('cxvNo'), (await X('900777')).var], [undefined, true, undefined]);
+    const e3 = await ok('cxExport', MGR, { kind: 'new' });
+    assert.ok(e3.dup.some((d) => d.pid === 'pz' && d.c === '900777')); assert.ok(!e3.csv.includes('900777'));
+    assert.equal((await P('pz').get()).get('cxv'), undefined, 'לא סומן שוב');
+    await seenRef.set({ codes: codes0 });
+  });
+  it('וריאנט לקוד ממתין – סבב בדיקה 1: הקוד נקלט בקטלוג → cxv ו-var נמחקים ועדכון שם יוצא; cxCode → נמחקים והמוצר לא ברשימת הווריאנטים; כבר לא עומד בתנאים (כבוי) → נמחקים', async () => {
+    const XI = (c, pid) => adm().doc(`b/${A}/cxItem/${c}`).set({ c, pid, st: 'link', nw: true, src: 'app', n: 'x', pr: { fb: null, ab: 7, pd: 7 }, co: { fb: null, ab: null, pd: null }, at: 1 });
+    const nw = () => ok('cxExport', MGR, { kind: 'new' });
+    // (א) הקוד הממתין נקלט בכספית
+    await P('pq').set({ name: 'בליסטר צהוב', price: 7, barcode: '7100000000999', on: true, q: { _: 4 }, cx: '900779', sku: '900779', at: 1 });
+    await XI('900779', 'pq');
+    await nw();
+    assert.equal((await P('pq').get()).get('cxv'), '300031'); assert.equal((await X('900779')).var, '300031');
+    await sync([r('300031', 'דבר אחר', '7100000000999', 3), r('900779', 'בליסטר צהוב', '', 7)]);
+    const q1 = (await P('pq').get()).data(), x1 = await X('900779');
+    assert.deepEqual([q1.cxv, x1.var, x1.nw, x1.pid], [undefined, undefined, undefined, 'pq'], 'נקלט ומקושר – כבר לא וריאנט');
+    assert.deepEqual([q1.price, q1.name, q1.q._], [7, 'בליסטר צהוב', 4]);
+    const e1 = await nw();
+    assert.ok(!e1.vars.some((v) => v.pid === 'pq')); assert.equal((await P('pq').get()).get('cxv'), undefined);
+    await P('pq').update({ name: 'בליסטר צהוב גדול' });
+    assert.deepEqual((await ok('cxExport', MGR, { kind: 'upd' })).rows.map((x) => x.c), ['900779'], 'עדכון השם יוצא');
+    // (ב) המנהל החליף את הקוד של וריאנט ממתין (cxCode)
+    await P('pr2').set({ name: 'בליסטר סגול', price: 7, barcode: '7100000000999', on: true, q: {}, cx: '900780', at: 1 });
+    await XI('900780', 'pr2');
+    await nw();
+    assert.equal((await P('pr2').get()).get('cxv'), '300031');
+    assert.equal((await ok('cxCode', MGR, { pid: 'pr2', code: '900790' })).mode, 'new');
+    const r2 = (await P('pr2').get()).data(), x2 = await X('900780');
+    assert.deepEqual([r2.cxv, r2.cx, x2.old, x2.var], [undefined, '900790', true, undefined]);
+    const e2 = await nw();
+    assert.ok(!e2.vars.some((v) => v.pid === 'pr2'), 'לא ברשימת הווריאנטים');
+    assert.equal((await P('pr2').get()).get('cxv'), undefined, 'קוד שהמנהל בחר (from) – לא מסומן שוב');
+    // נתונים ישנים: var על קוד ישן (old) – נמחק בריצה, ולא נספר בווריאנטים
+    await adm().doc(`b/${A}/cxItem/900780`).update({ var: '300031' }); await P('pr2').update({ cxv: '300031' });
+    const e3 = await nw();
+    assert.equal((await X('900780')).var, undefined); assert.equal((await P('pr2').get()).get('cxv'), undefined);
+    assert.ok(!e3.vars.some((v) => v.pid === 'pr2'));
+    // מוצר כבוי – הסימון נמחק
+    await P('py').update({ on: true });
+    await nw();
+    assert.equal((await P('py').get()).get('cxv'), '300031', 'py (900778, כבר לא ב-seen) – וריאנט');
+    await P('py').update({ on: false });
+    await nw();
+    assert.deepEqual([(await P('py').get()).get('cxv'), (await X('900778')).var], [undefined, undefined]);
+  });
 });

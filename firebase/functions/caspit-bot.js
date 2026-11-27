@@ -115,6 +115,29 @@ function scrOut(v) {
   };
 }
 
+// 27.11.2026: "פירוט פקד הסניף" – האבחון שהתוסף (0.1.23+) שולח בכישלון מעבר סניף (info.flags.br.brd / flags.back.brd, selectors.js branchDiag).
+// לאפליקציה (מנהל, "הריצות האחרונות") רק השדות הצפויים, מקוצרים: סוג הפקד, מצב, הסניף המוצג (שם מתוך רשימת הסניפים), מספר אפשרויות,
+// חלונות (רק "מזכיר סניף/חנות" ומילות כפתורים), שמות מפתחות אחסון (בלי ערכים), האירועים שנשלחו, האם השם הופיע ומי טען מחדש. כל השאר נזרק
+const BRD_EV = ['select', 'focus', 'click', 'confirm', 'err'];
+function brdDiag(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = (x) => (x && typeof x === 'object' ? x : {});
+  return { found: v.found === true, tag: str(v.tag, 20), sel: v.sel === true, ms: v.ms === true, act: v.act === true, open: v.open === true, cur: str(v.cur, 40), nOpt: sNum(v.nOpt),
+    dlg: sArr(v.dlg, 3, (d) => ({ kw: o(d).kw === true, btns: sArr(o(d).btns, 6, (x) => str(x, 20)) })), keys: sArr(v.keys, 10, (x) => str(x, 42)) };
+}
+function brdOne(v, src) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = (x) => (x && typeof x === 'object' ? x : {});
+  const tr = (t) => ({ pre: brdDiag(o(t).pre), post: brdDiag(o(t).post), after: brdDiag(o(t).after), ev: sArr(o(t).ev, 8, (x) => str(x, 10)).filter((x) => BRD_EV.includes(x)), shown: o(t).shown === true, rel: ['cx', 'own'].includes(o(t).rel) ? o(t).rel : '' });
+  return { src, want: str(v.want, 40), big: v.big === true, n: sNum(v.n), tries: v.big ? (v.last ? [tr(v.last)] : []) : sArr(v.tries, 3, tr) };
+}
+function brdOf(info) {
+  const f = info && typeof info === 'object' && info.flags && typeof info.flags === 'object' ? info.flags : null;
+  if (!f) return null;
+  const L = [f.br && f.br.brd ? brdOne(f.br.brd, 'br') : null, f.back && f.back.brd ? brdOne(f.back.brd, 'back') : null].filter(Boolean);
+  return L.length ? L : null;
+}
+
 // ---------- ימים ושעות בישראל ----------
 const ilDay = (t) => TK.dayStr(TK.ymdOf(t));
 const ilHour = (t) => TK.wall(t).hh;
@@ -182,7 +205,7 @@ async function cxBotTok(w, input) {
       tp: d.h && d.tp && d.tp.d === ilDay(Date.now()) ? d.tp : null, // מכירות היום – רק של היום (שעון ישראל)
       tf: d.h && d.tf && typeof d.tf.s === 'string' && d.tf.s.slice(0, 10) === ilDay(Date.now()) ? d.tf : null, // 0.1.19: עדכון שעתי שנכשל היום
       hrl: d.h ? d.hrl || null : null, // 0.1.14: העלאת השעות האחרונה (מספרים בלבד)
-      runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null, scr: r.st !== 'ok' && r.info ? scrOut(r.info.scr) : null }; }),
+      runs: runs.docs.map((x) => { const r = x.data(); return { id: x.id, at: r.at, end: r.end || null, st: r.st, manual: !!r.manual, req: !!r.req, days: r.days || [], err: r.err || null, imp: r.imp || null, scr: r.st !== 'ok' && r.info ? scrOut(r.info.scr) : null, brd: brdOf(r.info) }; }),
     };
     if (w.superadmin) out.disc = (await db.collection('cxBotDisc').orderBy('at', 'desc').limit(5).get()).docs.map((x) => ({ id: x.id, at: x.get('at'), size: x.get('size') }));
     return out;
@@ -807,4 +830,4 @@ exports.cxBotWatch = onSchedule({ region: LEGACY_REGION, schedule: 'every 60 min
   if (Object.values(r).some((x) => x && (x.length || x.error))) logger.info('cxBotWatch', r);
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, logMsg, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, logMsg, verify, scrOut, clientIp, FAIL_BUCKETS, REQ_MS, RUN_MS, PL_MS, NOW_VER, UPD_VER, CAPS, cxBotTok, cxBotDisc, runWatch, watchBiz, alertBiz, daysFor, cmpVer, updOf, ilDay, addDays, EXT_ORIGIN, MIN_VER, LIM, OPS, MSG, brdOf } });
