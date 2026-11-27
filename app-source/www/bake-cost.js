@@ -327,7 +327,7 @@ const btSel=form=>{const E=form.elements,n=B.BT.filter(k=>E['bt_'+k]&&E['bt_'+k]
 function prSync(form){try{const E=form&&form.elements,el=E&&E.prOn,s=E&&subById(E.id&&E.id.value);if(!el||!s||!E.bt_reg)return;
  const nb=!btSel(form).includes('reg'),lb=el.closest('label');let nt=form.querySelector('[data-bkpr]');
  if(nb){el.checked=false;el.disabled=true;if(lb)lb.style.opacity='.6';if(!nt&&lb){lb.insertAdjacentHTML('afterend','<p class="note" data-bkpr="1" style="margin:2px 0 8px">לא נכנס לתמחור כי הספק מסומן אפייה/אריזה בלבד</p>')}}
- else{el.disabled=false;el.checked=!s.prOff;if(lb)lb.style.opacity='';if(nt)nt.remove()}}catch(e){}}
+ else if(el.disabled){el.disabled=false;el.checked=!s.prOff;if(lb)lb.style.opacity='';if(nt)nt.remove()}}catch(e){}}
 CHG.bkBt=el=>prSync(el.form);
 /* שמירה: הסוג נשמר ומתפרסם רק אחרי שהשמירה המקורית הצליחה (החלון נסגר); בדיקת שדה שנכשלה – לא משנים כלום */
 {const o=FRM.subsave;if(typeof o==='function')FRM.subsave=form=>{let s=null,v=null;try{const E=form.elements;s=subById(E.id&&E.id.value);
