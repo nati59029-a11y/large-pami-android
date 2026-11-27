@@ -330,6 +330,17 @@ describe('רובוט כספית – cxBotTok ו-cxBot', () => {
     await okb(TOK, { op: 'report', run: h.runId, kind: 'run', st: 'fail', err: { code: 'branch-switch', msg: 'x', step: 'sales' }, steps: [], info: { prod: true, flags: { back: { code: 'branch-back', br: 'נחל לכיש', msg: 'לא חזר' } } } });
     const d2 = await dev();
     assert.ok(d2.pok >= d1.pok); assert.deepEqual([d2.bw.br, d2.bw.msg], ['נחל לכיש', 'לא חזר']); assert.equal(d2.lr.code, 'branch-switch');
+    // 27.11.2026: "פירוט פקד הסניף" – brd מדיווח ריצה שנכשל (flags.br.brd) מגיע ל"הריצות האחרונות" מסונן: שדות לא צפויים / אירוע לא מוכר נזרקים
+    const DG = { found: true, tag: 'div', sel: false, ms: true, act: false, open: true, cur: 'יהודה הנשיא', nOpt: 2, dlg: [{ kw: true, btns: ['אישור'], el: 'x' }], keys: ['l:store'], html: '<b>owner@x.co.il</b>' };
+    const h3 = await okb(TOK, { op: 'hello', mode: 'sync' });
+    await okb(TOK, { op: 'report', run: h3.runId, kind: 'run', st: 'fail', err: { code: 'branch-switch', msg: 'x', step: 'sales' }, steps: [], info: { flags: { br: { code: 'branch-switch', msg: 'x', brd: { want: 'נחל לכיש', tries: [{ pre: DG, post: DG, ev: ['focus', 'click', 'evil'], shown: false, rel: 'zz', pw: '1' }] } } } } });
+    const rb = (await ok('cxBotTok', MGR, { op: 'info' })).runs.find((x) => x.id === h3.runId);
+    assert.equal(rb.brd.length, 1);
+    const b0 = rb.brd[0], t0 = b0.tries[0];
+    assert.deepEqual([b0.src, b0.want, t0.shown, t0.rel, t0.ev], ['br', 'נחל לכיש', false, '', ['focus', 'click']]);
+    assert.deepEqual(t0.pre, { found: true, tag: 'div', sel: false, ms: true, act: false, open: true, cur: 'יהודה הנשיא', nOpt: 2, dlg: [{ kw: true, btns: ['אישור'] }], keys: ['l:store'] });
+    assert.equal(t0.after, null); assert.ok(!JSON.stringify(rb.brd).includes('owner@') && !('pw' in t0));
+    assert.equal((await ok('cxBotTok', MGR, { op: 'info' })).runs.find((x) => x.id === h.runId).brd, null, 'בלי brd – null');
     const h2 = await okb(TOK, { op: 'hello', mode: 'sync' });
     await okb(TOK, { op: 'report', run: h2.runId, kind: 'run', st: 'ok', steps: [], info: { prod: true, flags: {} } });
     assert.equal((await dev()).bw, null, 'ריצה תקינה מנקה את האזהרה');
