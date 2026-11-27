@@ -118,8 +118,9 @@ body.grc .bar,body.grc .wbar{display:none!important}body.grc main{padding-bottom
 .gr-pr{display:flex;gap:8px;overflow-x:auto;margin-bottom:8px;padding-bottom:2px;-webkit-overflow-scrolling:touch}.gr-pr:empty{display:none}
 .gr-pc{flex:none;display:inline-flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:3px 10px;font-size:.78rem;white-space:nowrap;color:var(--ink)}.gr-pc small{color:var(--mut);font-size:.7rem}
 .gr-pc i{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none}.gr-pc i.on{background:#2ecc71}
-.gr-emp{position:fixed;z-index:60;display:flex;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.45)}
-.gr-emp button{min-height:0;min-width:0;width:38px;height:38px;font-size:1.4rem;background:none;border:0;padding:0;cursor:pointer;border-radius:50%}
+.gr-emp{position:fixed;z-index:60;display:flex;flex-direction:column;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.45)}
+.gr-emp .er,.gr-emp .ec{display:flex;gap:2px;justify-content:center}.gr-emp .ec{gap:6px;padding-bottom:2px}.gr-emp .ec button{width:auto;height:36px;font-size:.9rem;font-weight:700;padding:0 10px;border-radius:18px;background:var(--bg);border:1px solid var(--line);color:var(--ink)}
+.gr-emp .er button{min-height:0;min-width:0;width:38px;height:38px;font-size:1.4rem;background:none;border:0;padding:0;cursor:pointer;border-radius:50%}
 .gr-b.pk{outline:3px solid var(--acc);outline-offset:2px}.gr-b.pk::after{content:'✓';position:absolute;top:-8px;inset-inline-start:-8px;width:24px;height:24px;border-radius:50%;background:var(--acc);color:var(--onacc);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:.85rem}
 .gr-b.no{opacity:.45}
 .gr-selbar{display:flex;align-items:center;gap:6px;position:sticky;top:calc(64px + env(safe-area-inset-top));z-index:6;background:var(--bg);padding:6px 0;margin-bottom:8px;border-bottom:1px solid var(--line)}.gr-selbar b{flex:1}
@@ -211,7 +212,7 @@ const fIco=t=>{t=String(t||'');return t==='application/pdf'?'📄':/^image\//.te
 function fxH(m){const I=`data-id="${esc(m.id)}"`;
  if(m.k==='aud'){if(fGone(m))return '<div class="gr-file"><span class="ic">🎤</span><div class="t"><span>ההודעה הקולית נמחקה אחרי 90 יום</span></div></div>';return `<button class="gr-aud" data-a="grAud" ${I} aria-label="השמעת הודעה קולית">${audIn(m)}</button>`}
  const f=`<div class="gr-file"><span class="ic">${fIco(m.fm)}</span><div class="t"><b dir="auto">${esc(m.fn)}</b><span>${fGone(m)?'הקובץ נמחק אחרי 90 יום':esc(fsz(m.fs))}</span></div></div>`;
- return fGone(m)?f:f+`<div class="gr-cta"><button data-a="grFOpen" ${I}>📤 פתיחה / שיתוף</button><button data-a="grFSave" ${I}>⬇ שמירה</button></div>`}
+ return fGone(m)?f:f+`<div class="gr-cta">${m.k==='file'?`<button data-a="grFView" ${I}>📂 פתיחה</button>`:''}<button data-a="grFOpen" ${I}>📤 שיתוף</button><button data-a="grFSave" ${I}>⬇ שמירה</button></div>`}
 const AP={a:null,id:'',u:'',busy:''};
 function audIn(m){const on=AP.id===m.id&&AP.a,pl=on&&!AP.a.paused,t=on?dur(AP.a.currentTime)+' / ':'';return `<span class="pb">${AP.busy===m.id?'…':pl?'⏸':'▶'}</span><span>🎤 הודעה קולית</span><span class="ad" data-apt="${esc(m.id)}">${t}${dur(m.dur)}</span>`}
 /* "מתמלל…" – רק בדקות הראשונות אחרי השליחה (או כל עוד הבקשה שלי לשרת פתוחה); אחר כך בלי תמלול */
@@ -386,9 +387,9 @@ ACT.grImg=el=>{const c=GR.c;if(!c)return;const k=c.gid+'/'+el.dataset.id;if(GR.i
 ACT.grVid=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||!m.vp)return;
  if(Date.now()-m.t>90*DAY){m.gone=1;return grPaint()}
  toast('טוען את הסרטון…');
- try{const t=await tok(),r=await fetch(STB()+'/'+encodeURIComponent(m.vp)+'?alt=media',{headers:{Authorization:'Firebase '+t}});
-  if(r.status===404){m.gone=1;grPaint();return}if(!r.ok)throw new Error('HTTP '+r.status);
-  const bl=await r.blob();if(GR.vu)URL.revokeObjectURL(GR.vu);GR.vu=URL.createObjectURL(bl);
+ try{const r=await stGet(m.vp,'video/mp4');
+  if(r.status===404){m.gone=1;grPaint();return}if(!r.blob)throw new Error('HTTP '+r.status);
+  const bl=r.blob;if(GR.vu)URL.revokeObjectURL(GR.vu);GR.vu=URL.createObjectURL(bl);
   const o=document.getElementById('viewer');if(o)o.remove();const v=document.createElement('div');v.id='viewer';
   v.innerHTML=`<div class="vbar"><button class="btn" data-a="grVidX">חזרה</button></div><div class="vimg"><video controls autoplay playsinline src="${esc(GR.vu)}" style="max-width:100%;max-height:80vh"></video></div>`;document.body.append(v)}
  catch(e){toast(e&&e.offline?e.message:'לא הצלחנו לפתוח את הסרטון')}};
@@ -497,8 +498,16 @@ ACT.grMenu=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x
  const r=c.rx&&c.rx.get(id),mine=r&&r.get(SY.uid)?r.get(SY.uid).e:'',I=`data-id="${esc(id)}"`,B=(a,t,cl)=>`<button class="btn ${cl||'g'} w" data-a="${a}" ${I} style="margin-bottom:8px">${t}</button>`;
  const media=m.k==='img'||(m.k==='vid'&&!m.gone&&Date.now()-m.t<=90*DAY);
  dlg(`<h3>אפשרויות הודעה</h3>${c.xoff?'':`<div class="gr-emo">${EMO.map(e=>`<button class="${e===mine?'on':''}" data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`}`
-  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+B('grShare','📤 שיתוף')+(media?B('grSelOn','☑ בחירת כמה תמונות וסרטונים'):'')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):(m.k==='file'||m.k==='aud')&&!fGone(m)?B('grGal','⬇ שמור במכשיר'):'')
+  +(canSend(c.g)?B('grRe','↩ השב'):'')+(mineId(m)||adm?B('grInfo','ℹ פרטי הודעה'):'')+(mTxt(m)?B('grCopy','📋 העתקת טקסט'):'')+B('grShare','📤 שיתוף')+(media?B('grSelOn','☑ בחירת כמה תמונות וסרטונים'):'')+B('grFwd','↪ העבר לקבוצה אחרת')+(media?B('grGal',m.k==='img'?'⬇ שמור תמונה בגלריה':'⬇ שמור סרטון בגלריה'):(m.k==='file'||m.k==='aud')&&!fGone(m)?B('grGal','⬇ שמור במכשיר'):'')
   +(adm?B('grPin',pd?'בטל הצמדה':'📌 הצמד')+B('grDel','🗑 מחק הודעה','r'):'')+'<button class="btn g w" data-a="closeDlg">ביטול</button>')};
+/* העתקת טקסט: חלון עם הטקסט שאפשר לסמן בו חלק (לחיצה ארוכה), וכפתור "העתק הכל" */
+const mTxt=m=>String(m.k==='aud'?(m.tr||''):(m.txt||''));
+async function cpTxt(t){try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(t);return true}}catch(e){}
+ const a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.cssText='position:fixed;top:0;left:0;opacity:0';(document.getElementById('dlg')||document.body).append(a);a.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}a.remove();return ok}
+ACT.grCopy=el=>{const c=GR.c;if(!c)return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id),t=m?mTxt(m):'';if(!t)return toast('אין טקסט להעתקה');
+ dlg(`<h3>העתקת טקסט</h3><p style="color:var(--mut);font-size:.85rem;margin:0 0 6px">להעתקת חלק: לחיצה ארוכה על מילה, גוררים את הסימון ובוחרים "העתק". להעתקת הכל: הכפתור למטה.</p><div dir="auto" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;background:var(--bg);-webkit-user-select:text;user-select:text;-webkit-touch-callout:default">${esc(t)}</div><button class="btn w" data-a="grCopyAll" data-id="${esc(id)}" style="margin-bottom:8px">📋 העתק הכל</button><button class="btn g w" data-a="closeDlg">סגירה</button>`)};
+ACT.grCopyAll=async el=>{const c=GR.c,m=c&&c.msgs.find(x=>x.id===el.dataset.id),t=m?mTxt(m):'';if(!t)return;
+ if(await cpTxt(t)){closeDlg();toast('הטקסט הועתק')}else toast('ההעתקה לא הצליחה. סמנו את הטקסט בלחיצה ארוכה ובחרו "העתק"')};
 /* הצמדה: עדכון חלקי של השדה pin בלבד; שרת ישן (403) = הודעה ברורה */
 ACT.grPin=async el=>{const c=GR.c;if(!c||!fbAdmin())return;closeDlg();const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
  const un=c.g.pin&&c.g.pin.mid===id,q='/grp/'+c.gid+'?updateMask.fieldPaths=pin';
@@ -554,15 +563,24 @@ ACT.grReX=()=>{const c=GR.c;if(!c)return;const t=$('#grtx');if(t)c.draft=t.value
 /* ---- קבצים של הודעה: תמונה מהזיכרון (או מהשרת), סרטון מהשרת (עד 30MB, רק בלחיצה) ---- */
 async function imgDu(c,m){const k=c.gid+'/'+m.id;if(GR.img[k])return GR.img[k];
  const d=await fsx('/grp/'+c.gid+'/m/'+m.id+'/p/1'),du=gv(d,'img');if(!imgOk(du))throw new Error('התמונה לא נטענה');GR.img[k]=du;return du}
-async function vidBlob(m){if(!m.vp||m.gone||Date.now()-m.t>90*DAY)throw new Error('הסרטון נמחק אחרי 90 יום');const t=await tok();let r;
- try{r=await fetch(STB()+'/'+encodeURIComponent(m.vp)+'?alt=media',{headers:{Authorization:'Firebase '+t}})}catch(e){throw new Error('אין חיבור לאינטרנט')}
- if(r.status===404){m.gone=1;throw new Error('הסרטון כבר לא קיים')}if(!r.ok)throw new Error('הסרטון לא נטען ('+r.status+')');return r.blob()}
+/* הורדה מ-Storage. 27.11.2026: באנדרואיד ה-WebView חוסם לפעמים את התשובה (Failed to fetch) למרות שיש אינטרנט –
+   ניסיון שני דרך הרכיב המובנה של Capacitor (CapacitorHttp), כמו ב-store3d-view.js. פרטי הכניסה נשלחים רק לכתובת שרת הקבצים (STB).
+   מחזיר {status,blob}; זורק offline רק אם גם הניסיון השני נכשל ברשת */
+async function stGet(p,mime){const u=STB()+'/'+encodeURIComponent(p)+'?alt=media',t=await tok();
+ try{const r=await fetch(u,{headers:{Authorization:'Firebase '+t}});return{status:r.status,blob:r.ok?await r.blob():null}}catch(e){}
+ const C=window.Capacitor,H=isNat()&&C.Plugins&&C.Plugins.CapacitorHttp;if(!H)throw Object.assign(new Error('אין חיבור לאינטרנט'),{offline:true});
+ let r;try{r=await H.request({url:u,method:'GET',headers:{Authorization:'Firebase '+t},responseType:'blob'})}catch(e){throw Object.assign(new Error('אין חיבור לאינטרנט'),{offline:true})}
+ if(!r||r.status!==200)return{status:r&&r.status||0,blob:null};
+ const h=r.headers||{},ct=String(h['Content-Type']||h['content-type']||mime||'application/octet-stream').split(';')[0];
+ const bin=atob(String(r.data||'').replace(/^data:[^,]*,/,'')),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
+ return{status:200,blob:new Blob([a],{type:ct})}}
+async function vidBlob(m){if(!m.vp||m.gone||Date.now()-m.t>90*DAY)throw new Error('הסרטון נמחק אחרי 90 יום');const r=await stGet(m.vp,'video/mp4');
+ if(r.status===404){m.gone=1;throw new Error('הסרטון כבר לא קיים')}if(!r.blob)throw new Error('הסרטון לא נטען ('+r.status+')');return r.blob}
 const vType=b=>{const t=String(b&&b.type||'').split(';')[0];return /^video\/(mp4|webm|3gpp)$/.test(t)?t:'video/mp4'};
 const vExt=t=>t==='video/webm'?'.webm':t==='video/3gpp'?'.3gp':'.mp4';
 const fnm=()=>'LargePami_'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
-async function fBlob(m){if(fGone(m))throw new Error(m.k==='aud'?'ההודעה הקולית נמחקה אחרי 90 יום':'הקובץ נמחק אחרי 90 יום');const t=await tok();let r;
- try{r=await fetch(STB()+'/'+encodeURIComponent(m.fp)+'?alt=media',{headers:{Authorization:'Firebase '+t}})}catch(e){throw new Error('אין חיבור לאינטרנט')}
- if(r.status===404){m.gone=1;throw new Error('הקובץ כבר לא קיים')}if(!r.ok)throw new Error('הקובץ לא נטען ('+r.status+')');return r.blob()}
+async function fBlob(m){if(fGone(m))throw new Error(m.k==='aud'?'ההודעה הקולית נמחקה אחרי 90 יום':'הקובץ נמחק אחרי 90 יום');const r=await stGet(m.fp,m.fm);
+ if(r.status===404){m.gone=1;throw new Error('הקובץ כבר לא קיים')}if(!r.blob)throw new Error('הקובץ לא נטען ('+r.status+')');return r.blob}
 const AEXT={'audio/webm':'.webm','audio/mp4':'.m4a','audio/ogg':'.ogg','audio/mpeg':'.mp3','audio/aac':'.aac','audio/wav':'.wav','audio/x-wav':'.wav','audio/3gpp':'.3gp','audio/amr':'.amr'};
 /* שם לשמירה / שיתוף: בלי תווים שאסורים בשם קובץ */
 const safeFn=n=>String(n||'').replace(/[\\/:*?"<>|\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,'_').trim().slice(0,120)||fnm();
@@ -743,7 +761,15 @@ ACT.grAud=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.
  catch(e){if(m.gone)grPaint();toast(e&&e.message&&!/play\(\)|NotAllowed|NotSupported/.test(e.message)?e.message:'לא הצלחנו להשמיע את ההודעה')}
  finally{AP.busy='';apPaint()}};
 ACT.grFOpen=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k!=='file')return;
- try{toast('מוריד את הקובץ…');await shareFile(await mFile(c,m),'')}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'הפתיחה נכשלה')}};
+ try{toast('מכין את הקובץ לשיתוף…');await shareFile(await mFile(c,m),'')}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'הפתיחה נכשלה')}};
+/* 27.11.2026: פתיחה = הקובץ נפתח באפליקציה שמתאימה לו (אקסל, קורא PDF…) דרך SaveFile.open.
+   APK ישן בלי open (עדכון חי של הקוד בלי APK חדש) – חוזרים לחלון השיתוף, שגם בו אפשר לבחור אפליקציה לפתיחה */
+ACT.grFView=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k!=='file')return;const C=window.Capacitor;
+ try{toast('פותח את הקובץ…');const o=await mFile(c,m),P=isNat()&&C.Plugins.SaveFile&&C.Plugins.Filesystem?C.Plugins.SaveFile:null;
+  if(P&&typeof P.open==='function'){const w=await C.Plugins.Filesystem.writeFile({path:o.name,data:u8b64(new Uint8Array(await o.b.arrayBuffer())),directory:'CACHE'});
+   try{await P.open({uri:w.uri,mime:o.mime});return}catch(e){const s=String(e&&(e.message||e));if(/no_app/.test(s))return toast('אין בטלפון אפליקציה שפותחת קובץ כזה. אפשר לשתף אותו או לשמור');if(!/not implemented|unimplemented/i.test(s))throw e}}
+  if(!isNat()){const u=URL.createObjectURL(o.b);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000);return}
+  await shareFile(o,'')}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'הפתיחה נכשלה')}};
 ACT.grFSave=async el=>{const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===el.dataset.id);if(!m||m.k!=='file')return;
  try{toast('מוריד את הקובץ…');const o=await mFile(c,m);await saveFile(o.name,o.b,o.mime)}catch(e){if(m.gone)grPaint();toast(e&&e.message?e.message:'השמירה נכשלה')}};
 
@@ -858,9 +884,11 @@ try{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.
 /* ---- החלקה ימינה = תשובה; לחיצה ארוכה = שורת אימוג'י. החלקה שמאלה (חזרה, index.html) לא מושפעת ---- */
 (function(){let g=null,sup=0,pop=null;
  const emoOff=()=>{if(pop){pop.remove();pop=null}};
- const emoOn=(b,mid)=>{emoOff();const c=GR.c;if(!c||c.xoff)return;const r=b.getBoundingClientRect(),w=EMO.length*40+16;
-  pop=document.createElement('div');pop.className='gr-emp';pop.innerHTML=EMO.map(e=>`<button data-a="grReact" data-id="${esc(mid)}" data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('');
-  pop.style.top=Math.max(70,r.top-48)+'px';pop.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';document.body.append(pop)};
+ const emoOn=(b,mid)=>{emoOff();const c=GR.c;if(!c)return;const m=c.msgs.find(x=>x.id===mid),tx=m&&!m.pend&&mTxt(m);if(c.xoff&&!tx)return;/* 27.11.2026: בלחיצה ארוכה – גם העתקה (כשיש טקסט) */
+  const r=b.getBoundingClientRect(),w=Math.max(c.xoff?0:EMO.length*40+16,tx?236:0),I=`data-id="${esc(mid)}"`;
+  pop=document.createElement('div');pop.className='gr-emp';pop.innerHTML=(c.xoff?'':`<div class="er">${EMO.map(e=>`<button data-a="grReact" ${I} data-e="${e}" aria-label="סמן ${e}">${e}</button>`).join('')}</div>`)
+   +(tx?`<div class="ec"><button data-a="grCopyAll" ${I}>📋 העתק הכל</button><button data-a="grCopy" ${I}>✂ בחירת חלק</button></div>`:'');
+  pop.style.top=Math.max(70,r.top-(c.xoff||!tx?48:94))+'px';pop.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';document.body.append(pop)};
  const ok=e=>{const b=e.target.closest&&e.target.closest('#grmsgs .gr-b');return b&&!e.target.closest('.gr-emp')?b:null};
  document.addEventListener('touchstart',e=>{if(!e.target.closest||!e.target.closest('.gr-emp'))emoOff();
   const b=GR.c&&!GR.c.sel&&cur().v==='grc'&&e.touches.length===1?ok(e):null;if(g){clearTimeout(g.tm);if(g.b)g.b.style.transform=''}g=null;if(!b)return;const t=e.touches[0];

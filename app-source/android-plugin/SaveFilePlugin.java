@@ -19,6 +19,9 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import androidx.core.content.FileProvider;
+
+import java.io.File;
 import java.io.OutputStream;
 
 /**
@@ -131,6 +134,43 @@ public class SaveFilePlugin extends Plugin {
                 try { cr.delete(uri, null, null); } catch (Exception ignored) { }
             }
             call.reject("write failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * open (27.11.2026): opens a file that the app already wrote to its cache folder in the app that handles its type
+     * (Excel, a PDF reader...), through the system "Open with" chooser. Only files inside the app's cache folder are allowed.
+     * Rejects with "no_app" only if the system cannot show the chooser.
+     */
+    @PluginMethod
+    public void open(PluginCall call) {
+        String u = call.getString("uri");
+        String mime = call.getString("mime", "application/octet-stream");
+        if (u == null) {
+            call.reject("no uri");
+            return;
+        }
+        try {
+            String path = Uri.parse(u).getPath();
+            File f = path == null ? null : new File(path).getCanonicalFile();
+            File cache = getContext().getCacheDir().getCanonicalFile();
+            if (f == null || !f.isFile() || !f.getPath().startsWith(cache.getPath() + File.separator)) {
+                call.reject("bad path");
+                return;
+            }
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uri, mime == null || mime.isEmpty() ? "application/octet-stream" : mime);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            // no resolveActivity() check: on Android 11+ it returns null without a <queries> entry; the chooser itself says when no app fits
+            Intent ch = Intent.createChooser(i, "\u05e4\u05ea\u05d9\u05d7\u05d4 \u05d1\u05d0\u05de\u05e6\u05e2\u05d5\u05ea");
+            ch.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getActivity().startActivity(ch);
+            call.resolve();
+        } catch (android.content.ActivityNotFoundException e) {
+            call.reject("no_app");
+        } catch (Exception e) {
+            call.reject("open failed: " + e.getMessage());
         }
     }
 }
