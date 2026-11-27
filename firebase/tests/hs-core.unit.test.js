@@ -279,3 +279,39 @@ describe('חוסרים – שלב 2: matchInv', () => {
     assert.match(t, /• חלב – כמות 2/); assert.match(t, /• שקיות/); assert.ok(!/קוטג|במבה/.test(t), t);
   });
 });
+
+describe('חוסרים – אישור מנהל (27.11.2026)', () => {
+  it('orOf: בלי שינוי בשם/ספקים/כמות/מטרה – null (גם כשרק הלקוח השתנה)', () => {
+    const old = it_('a', { n: 'ניילון נצמד', sups: ['s1'], supN: ['תנובה'], q: 2 });
+    assert.equal(C.orOf(old, { n: 'ניילון נצמד', gen: false, sups: ['s1'], supN: ['תנובה'], why: 'store', q: 2, cust: { nm: 'x', ph: '' } }), null);
+    assert.equal(C.orOf(old, { n: ' ניילון  נצמד ', gen: false, sups: ['s1'], supN: ['תנובה'], why: 'store', q: 2 }), null, 'רווחים בלבד');
+  });
+  it('orOf: שינוי שם – הערכים המקוריים בלבד, בלי q כשלא הייתה', () => {
+    const old = it_('a', { n: 'ניילון נצמד', sups: ['s1'], supN: ['תנובה'] });
+    assert.deepEqual(J(C.orOf(old, { n: 'ניילון נצמד 100 מטר', gen: false, sups: ['s1'], supN: ['תנובה'], why: 'store' })),
+      { n: 'ניילון נצמד', supN: ['תנובה'], gen: false, why: 'store' });
+  });
+  it('orOf: ספקים / כללי / כמות / מטרה נחשבים שינוי; סדר ספקים לא', () => {
+    const old = it_('a', { sups: ['s1', 's2'], supN: ['תנובה', 'שטראוס'], q: 3 });
+    const d = (o) => Object.assign({ n: old.n, gen: false, sups: ['s2', 's1'], supN: ['שטראוס', 'תנובה'], why: 'store', q: 3 }, o);
+    assert.equal(C.orOf(old, d({})), null);
+    assert.equal(C.orOf(old, d({ sups: ['s1'], supN: ['תנובה'] })).q, 3);
+    assert.ok(C.orOf(old, d({ gen: true, sups: [], supN: [] })));
+    assert.ok(C.orOf(old, d({ q: undefined })));
+    assert.ok(C.orOf(old, d({ why: 'order' })));
+  });
+  it('orDiff: רק מה שהשתנה, עם טקסט קריא', () => {
+    const x = it_('a', { n: 'ניילון נצמד 100 מטר', sups: ['s1'], supN: ['תנובה'], q: 6, or: { n: 'ניילון נצמד', supN: [], gen: true, why: 'store' } });
+    assert.deepEqual(J(C.orDiff(x)), [
+      { k: 'n', l: 'שם', a: 'ניילון נצמד', b: 'ניילון נצמד 100 מטר' },
+      { k: 'sup', l: 'ספקים', a: 'כללי', b: 'תנובה' },
+      { k: 'q', l: 'כמות', a: '—', b: '6' }]);
+    assert.deepEqual(J(C.orDiff(it_('b'))), []);
+  });
+  it('prevIndex: פריט שנדחה לא מוצע; ממתין כן', () => {
+    const items = [it_('a', { n: 'קוטג עיזים', st: 'rej' }), it_('b', { n: 'חלב סויה', st: 'pend' })];
+    assert.equal(J(C.picks('קוטג עיזים טרי', { prev: C.prevIndex(items, PM, '') }, PM)).length, 0);
+    assert.equal(J(C.picks('קוטג עיזים טרי', { prev: C.prevIndex([it_('a', { n: 'קוטג עיזים' })], PM, '') }, PM)).length, 1, 'אותו פריט פתוח – מוצע');
+    assert.equal(J(C.picks('חלב סויה טבעי', { prev: C.prevIndex(items, PM, '') }, PM))[0].n, 'חלב סויה');
+  });
+});

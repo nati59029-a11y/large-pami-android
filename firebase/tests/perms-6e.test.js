@@ -14,7 +14,7 @@ const GM = require('./gemini-mock');
 const A = 'biz-a';
 const ALL = { scan: true, shelf: true, feedback: true, tasks: true, suppliers: true, requests: true, cashClose: true, yemot: true, orders: true };
 const MGR = 'p_mgr', OLD = 'p_old', NOEXP = 'p_noexp', TRF = 'p_trf', SUPER = 'p_super';
-const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false, bake: false }; // bake – עלות מוצרי אפייה (26.11.2026); // edb – הדפסת דף אכיל (26.11.2026); lbl – הדפסת מדבקות (22.11.2026); pos, posMgr – קופה שלב 0 (17.11.2026); shf – משמרות (main, 18.11.2026); yl – שלוחות הקו (19.11.2026)
+const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false, bake: false, hsA: false, hsD: false }; // hsA / hsD – אישור חוסרים (27.11.2026); // bake – עלות מוצרי אפייה (26.11.2026); // edb – הדפסת דף אכיל (26.11.2026); lbl – הדפסת מדבקות (22.11.2026); pos, posMgr – קופה שלב 0 (17.11.2026); shf – משמרות (main, 18.11.2026); yl – שלוחות הקו (19.11.2026)
 
 const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 const fnUrl = (name) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${name}`;

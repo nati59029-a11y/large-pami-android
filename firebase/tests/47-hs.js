@@ -3,6 +3,7 @@
 // לכל תא: "מותר" ו"נחסם".
 
 const { describe, it, before, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
@@ -11,8 +12,8 @@ let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
 
 const ENVS = [
-  { name: 'שורש', P: '', mgr: 'u_mgr', e1: 'u_emp', e2: H.OTHER, off: 'u_off', out: 'u_out', prc: null, foreign: null, offBiz: null },
-  { name: 'עסק b/bt', P: 'b/bt/', mgr: 'bt_mgr', e1: 'bt_e1', e2: 'bt_e2', off: 'bt_off', out: 'u_out', prc: 'bt_prc', foreign: 'bx_mgr', offBiz: 'bo_mgr' },
+  { name: 'שורש', P: '', mgr: 'u_mgr', e1: 'u_emp', e2: H.OTHER, off: 'u_off', out: 'u_out', prc: null, foreign: null, offBiz: null, hsa: 'u_hsa', hsd: 'u_hsd' },
+  { name: 'עסק b/bt', P: 'b/bt/', mgr: 'bt_mgr', e1: 'bt_e1', e2: 'bt_e2', off: 'bt_off', out: 'u_out', prc: 'bt_prc', foreign: 'bx_mgr', offBiz: 'bo_mgr', hsa: 'bt_hsa', hsd: 'bt_hsd' },
 ];
 
 function seedBiz(d, b) {
@@ -45,6 +46,8 @@ for (const E of ENVS) {
       await prep(async (d) => {
         const b = d.batch();
         if (E.P) seedBiz(d, b);
+        // אישור חוסרים (27.11.2026): עובד מאשר (hsA) ועובד שמכניס ישירות (hsD)
+        for (const [u, k] of [[E.hsa, 'hsA'], [E.hsd, 'hsD']]) b.set(d.doc(R('staff/' + u)), { name: u, role: 'employee', active: true, perms: { [k]: true } });
         b.set(d.doc(R('hsr/h1')), item(E.e1, { t: 1 }));
         b.set(d.doc(R('hsr/h1/p/1')), { img: IMG, t: 1, uid: E.e1 });
         b.set(d.doc(R('hsph/s1')), { ph: '0501234567', n: 'תנובה', byN: E.mgr, t: 1 });
@@ -63,10 +66,11 @@ for (const E of ENVS) {
       await assertFails(env.unauthenticatedContext().firestore().doc(R('hsr/h1')).get());
     });
 
-    it('hsr: יצירה – מנהל ועובד, בשמם, st=open, זמן אמת; שדות וערכים נבדקים', async () => {
+    it('hsr: יצירה – מנהל (open) ועובד (pend, 27.11.2026), בשמם, זמן אמת; שדות וערכים נבדקים', async () => {
       for (const u of [E.mgr, E.e1]) {
-        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u)));
-        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u, { gen: true, sups: [], supN: [], why: 'both', q: 2.5, cust: { nm: 'דני', ph: '0501234567', cid: 'c1' }, ord: { id: 'o1', no: 7 }, np: 1 })));
+        const st = u === E.mgr ? 'open' : 'pend';
+        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u, { st })));
+        await assertSucceeds(fs(u).doc(R('hsr/' + fresh('n'))).set(item(u, { st, gen: true, sups: [], supN: [], why: 'both', q: 2.5, cust: { nm: 'דני', ph: '0501234567', cid: 'c1' }, ord: { id: 'o1', no: 7 }, np: 1 })));
       }
       const e = fs(E.e1), N = () => R('hsr/' + fresh('n'));
       await assertFails(e.doc(N()).set(item(E.e1, { x: 1 })), 'שדה לא מוכר');
@@ -96,8 +100,8 @@ for (const E of ENVS) {
       await assertFails(e.doc(N()).set(item(E.e1, { supN: ['x'.repeat(61)] })), 'שם ספק ארוך');
       await assertFails(e.doc(N()).set(item(E.e1, { supN: [5] })), 'שם ספק לא מחרוזת');
       await assertFails(e.doc(N()).set(item(E.e1, { sups: ['s1', 's2'], supN: ['תנובה'] })), 'sups ו-supN באותו אורך');
-      await assertSucceeds(e.doc(N()).set(item(E.e1, { sups: ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's_0'], supN: Array(10).fill('x'.repeat(60)) })));
-      for (const u of [E.off, E.out]) await assertFails(fs(u).doc(N()).set(item(u)));
+      await assertSucceeds(e.doc(N()).set(item(E.e1, { st: 'pend', sups: ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's_0'], supN: Array(10).fill('x'.repeat(60)) })));
+      for (const u of [E.off, E.out]) await assertFails(fs(u).doc(N()).set(item(u, { st: 'pend' })));
       if (E.foreign) await assertFails(fs(E.foreign).doc(N()).set(item(E.foreign)));
     });
 
@@ -107,7 +111,13 @@ for (const E of ENVS) {
         await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'arr', 'man')));
         await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'open', 'undo')));
         await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'del', 'del')));
-        await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'open', 'res')));
+        // 27.11.2026: שחזור מ"נמחקו" ל-open – רק מאשר; עובד רגיל משחזר ל-pend (חוזר לאישור)
+        if (u === E.mgr) await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'open', 'res')));
+        else {
+          await assertFails(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'open', 'res')), 'עובד רגיל: שחזור ישר לפתוח');
+          await assertSucceeds(fs(u).doc(R('hsr/h1')).update(await stUpd(u, 'pend', 'res')));
+          await prep((d) => d.doc(R('hsr/h1')).update({ st: 'open' }));
+        }
       }
       const e = fs(E.e2);
       await assertFails(e.doc(R('hsr/h1')).update({ st: 'arr' }), 'בלי ub/ut');
@@ -235,6 +245,113 @@ for (const E of ENVS) {
       await assertSucceeds(fs(E.e1).doc(R('hsr/h1')).update(Object.assign(upd(E.e1, { n: 'חלב 1%' }), { ut: nu() })), 'עריכה רגילה – od נשאר');
       await assertFails(fs(E.e1).collection(R('hsr')).doc(fresh('h')).set(item(E.e1, { t: Date.now(), od: od(E.e1, 1) })), 'יצירה עם od');
       await assertFails(fs(E.out).doc(R('hsr/h1')).update({ od: del, ub: E.out, ut: nu() }), 'מחובר בלי תפקיד');
+    });
+
+    // ---------- אישור חוסרים (27.11.2026): pend / rej, rj, or, מתגים hsA (מאשר) ו-hsD (מכניס ישירות) ----------
+    describe('אישור חוסרים', () => {
+      let last = 0;
+      const nu = () => { last = Math.max(Date.now(), last + 1); return last; };
+      const P1 = () => R('hsr/p1');
+      const get1 = async () => { let v; await prep(async (d) => { v = (await d.doc(P1()).get()).data(); }); return v; };
+      const setP = (o) => prep((d) => d.doc(P1()).set(item(E.e1, Object.assign({ st: 'pend', t: 1 }, o))));
+      // מעבר מצב כמו האפליקציה: רשומת h אחת בסוף, t = ut
+      const mv = async (u, st, k, x) => { const o = await get1(), ut = nu(); return fs(u).doc(P1()).update(Object.assign({ st, ub: u, ut, h: (o.h || []).concat([{ k, t: ut, byN: u, u }]) }, x || {})); };
+      const ed = (u, x) => fs(u).doc(P1()).update(Object.assign({ ub: u, ut: nu() }, x));
+      const OR = { n: 'חלב 3%', supN: ['תנובה'], gen: false, why: 'store' }; // מה שהעובד רשם (item)
+      beforeEach(() => setP());
+
+      it('יצירה: מאשר / hsD / מנהל – open; עובד רגיל – רק pend; rj / or / rej ביצירה – נחסמים', async () => {
+        const N = () => R('hsr/' + fresh('n'));
+        for (const u of [E.mgr, E.hsa, E.hsd]) await assertSucceeds(fs(u).doc(N()).set(item(u)), 'open – ' + u);
+        for (const u of [E.e1, E.e2, E.mgr, E.hsd]) await assertSucceeds(fs(u).doc(N()).set(item(u, { st: 'pend' })), 'pend – ' + u);
+        for (const u of [E.e1, E.e2]) await assertFails(fs(u).doc(N()).set(item(u)), 'עובד רגיל – open');
+        if (E.prc) await assertFails(fs(E.prc).doc(N()).set(item(E.prc)), 'עובד עם מתג אחר (prc) – open');
+        await assertFails(fs(E.e1).doc(N()).set(item(E.e1, { st: 'rej' })), 'יצירה כנדחה');
+        await assertFails(fs(E.e1).doc(N()).set(item(E.e1, { st: 'pend', rj: 'x' })), 'rj ביצירה');
+        await assertFails(fs(E.mgr).doc(N()).set(item(E.mgr, { or: OR })), 'or ביצירה');
+        for (const u of [E.off, E.out]) await assertFails(fs(u).doc(N()).set(item(u, { st: 'pend' })));
+        if (E.foreign) await assertFails(fs(E.foreign).doc(N()).set(item(E.foreign, { st: 'pend' })));
+      });
+
+      it('ממתין: עריכה – היוצר / מאשר / מנהל; עובד אחר ו-hsD – נחסמים. ביטול (pend→del) – היוצר או מאשר', async () => {
+        for (const u of [E.e1, E.hsa, E.mgr]) await assertSucceeds(ed(u, { n: 'חלב ' + u }), 'עריכה – ' + u);
+        for (const u of [E.e2, E.hsd]) await assertFails(ed(u, { n: 'x' }), 'עריכה – ' + u);
+        if (E.prc) await assertFails(ed(E.prc, { n: 'x' }), 'prc אינו מאשר');
+        if (E.foreign) await assertFails(ed(E.foreign, { n: 'x' }));
+        for (const u of [E.e2, E.hsd]) await assertFails(mv(u, 'del', 'del'), 'ביטול – ' + u);
+        await assertSucceeds(mv(E.e1, 'del', 'del'), 'היוצר מבטל');
+        await setP();
+        await assertSucceeds(mv(E.hsa, 'del', 'del'), 'מאשר מוחק');
+      });
+
+      it('אישור (pend→open, k ok): רק מאשר / מנהל; עם עריכה באותה כתיבה; or (מה שהעובד רשם) – רק בכתיבת האישור בלי עריכה, ואחר כך לא משתנה', async () => {
+        for (const u of [E.e1, E.e2, E.hsd]) await assertFails(mv(u, 'open', 'ok'), 'אישור – ' + u);
+        if (E.prc) await assertFails(mv(E.prc, 'open', 'ok'));
+        if (E.foreign) await assertFails(mv(E.foreign, 'open', 'ok'));
+        await assertFails(mv(E.hsa, 'open', 'undo'), 'k לא מתאים');
+        await assertSucceeds(mv(E.hsa, 'open', 'ok'), 'מאשר');
+        await setP();
+        const fix = { n: 'חלב 3% 1 ליטר', sups: ['s1', 's2'], supN: ['תנובה', 'טרה'], q: 6 };
+        await assertSucceeds(mv(E.mgr, 'open', 'ok', fix), 'אישור + תיקון בכתיבה אחת (בלי or)');
+        await setP();
+        await assertFails(mv(E.mgr, 'open', 'ok', Object.assign({ or: OR }, fix)), 'or יחד עם תיקון – בשתי כתיבות');
+        await assertFails(mv(E.mgr, 'open', 'ok', { or: Object.assign({}, OR, { n: 'א'.repeat(81) }) }), 'or: שם ארוך');
+        await assertFails(mv(E.mgr, 'open', 'ok', { or: Object.assign({}, OR, { x: 1 }) }), 'or: שדה זר');
+        await assertFails(mv(E.mgr, 'open', 'ok', { or: Object.assign({}, OR, { why: 'x' }) }), 'or: why לא תקין');
+        await assertFails(mv(E.mgr, 'open', 'ok', { or: Object.assign({}, OR, { supN: Array(11).fill('x') }) }), 'or: 11 ספקים');
+        await assertFails(mv(E.mgr, 'open', 'ok', { or: 'x' }), 'or לא מפה');
+        await assertFails(ed(E.e1, { or: OR }), 'or בלי אישור (עריכה של ממתין)');
+        await assertFails(mv(E.e1, 'del', 'del', { or: OR }), 'or בביטול');
+        // עריכה של המאשר (ממתין) ואז אישור עם or – שתי כתיבות
+        await assertSucceeds(ed(E.mgr, fix), 'מאשר מתקן ממתין');
+        await assertSucceeds(mv(E.mgr, 'open', 'ok', { or: Object.assign({}, OR, { q: 2 }) }), 'אישור + or');
+        const a = await get1();
+        assert.equal(a.st, 'open'); assert.deepEqual(a.or, Object.assign({}, OR, { q: 2 })); assert.equal(a.n, fix.n);
+        await assertFails(ed(E.e2, { n: 'y', or: OR }), 'שינוי or אחרי האישור (עריכה)');
+        await assertFails(mv(E.mgr, 'arr', 'man', { or: OR }), 'שינוי or אחרי האישור (מצב)');
+        await assertFails(ed(E.mgr, { or: require('firebase/compat/app').default.firestore.FieldValue.delete() }), 'מחיקת or');
+        await assertSucceeds(ed(E.e2, { n: 'חלב אחר' }), 'עריכה רגילה – or נשאר');
+        await assertSucceeds(mv(E.e2, 'arr', 'man'), 'הגיע – or נשאר');
+        assert.deepEqual((await get1()).or, Object.assign({}, OR, { q: 2 }));
+      });
+
+      it('דחייה (pend→rej, k rej, rj עד 200): רק מאשר; נדחה – רק "החזר לאישור" (rej→pend, k res) ע"י מאשר', async () => {
+        for (const u of [E.e1, E.e2, E.hsd]) await assertFails(mv(u, 'rej', 'rej', { rj: 'לא צריך' }), 'דחייה – ' + u);
+        await assertFails(mv(E.hsa, 'rej', 'rej', { rj: 'x'.repeat(201) }), 'סיבה ארוכה');
+        await assertFails(mv(E.hsa, 'rej', 'rej', { rj: 5 }), 'סיבה לא מחרוזת');
+        await assertFails(mv(E.hsa, 'rej', 'del'), 'k לא מתאים');
+        await assertSucceeds(mv(E.hsa, 'rej', 'rej', { rj: 'יש במלאי' }));
+        await assertSucceeds(fs(E.e1).doc(P1()).get(), 'היוצר רואה את הנדחה');
+        await assertFails(ed(E.e1, { n: 'x' }), 'עריכת נדחה – היוצר');
+        for (const u of [E.e1, E.e2, E.hsd]) await assertFails(mv(u, 'pend', 'res'), 'החזרה – ' + u);
+        await assertFails(mv(E.mgr, 'open', 'ok'), 'נדחה → פתוח ישר');
+        await assertFails(mv(E.mgr, 'del', 'del'), 'נדחה → נמחק');
+        await assertFails(mv(E.mgr, 'arr', 'man'), 'נדחה → הגיע');
+        const del = require('firebase/compat/app').default.firestore.FieldValue.delete();
+        await assertSucceeds(mv(E.hsa, 'pend', 'res', { rj: del }), 'מאשר מחזיר לממתינים');
+        await assertSucceeds(mv(E.mgr, 'rej', 'rej'), 'דחייה בלי סיבה');
+        await assertSucceeds(mv(E.mgr, 'pend', 'res'), 'מנהל מחזיר');
+      });
+
+      it('ממתין: אסור "הגיע" (man), "הוזמן" (od) וחלקי – גם למנהל', async () => {
+        await assertFails(mv(E.mgr, 'arr', 'man'), 'הגיע');
+        const ut = nu();
+        await assertFails(fs(E.mgr).doc(P1()).update({ od: { u: E.mgr, byN: E.mgr, t: ut, sup: 'תנובה', eta: '' }, ub: E.mgr, ut }), 'הוזמן');
+        const o = await get1(), t2 = nu();
+        await assertFails(fs(E.mgr).doc(P1()).update({ q: 1, ub: E.mgr, ut: t2, h: (o.h || []).concat([{ k: 'unp', t: t2, byN: E.mgr, u: E.mgr }]) }), 'שינוי כמות עם רשומה');
+      });
+
+      it('שחזור מ"נמחקו": עובד רגיל ו-hsD – רק ל-pend; מאשר – גם ל-open', async () => {
+        await setP({ st: 'del' });
+        for (const u of [E.e2, E.hsd]) await assertFails(mv(u, 'open', 'res'), 'ל-open – ' + u);
+        await assertFails(mv(E.e2, 'pend', 'undo'), 'k לא מתאים');
+        await assertSucceeds(mv(E.e2, 'pend', 'res'), 'עובד רגיל – ל-pend');
+        await setP({ st: 'del' });
+        await assertSucceeds(mv(E.hsa, 'open', 'res'), 'מאשר – ל-open');
+        await setP({ st: 'open' });
+        await assertFails(mv(E.mgr, 'pend', 'res'), 'פתוח → ממתין');
+        await assertFails(mv(E.mgr, 'rej', 'rej'), 'פתוח → נדחה');
+      });
     });
 
     it('hsr: מחיקה אמיתית – מנהל בלבד', async () => {

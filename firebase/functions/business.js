@@ -492,11 +492,11 @@ async function setStaffPerms(request) {
 
 // setStaffPrc({uid, on, key?}) – 12.11.2026, תמחור חשבונית (החלטה 8); הורחב 19.11.2026 (הכרעת בעל העסק): מנהל העסק (או מנהל־על)
 // מדליק/מכבה לעובד מתג אחד: key = 'prc' ("עדכון מחירים ומלאי", תוספת מדף או הזמנות), 'yl' ("שלוחות הקו", תוספת yemot)
-// או 'bake' ("עלות מוצרי אפייה", תוספת bake – 26.11.2026).
+// או 'bake' ("עלות מוצרי אפייה", תוספת bake – 26.11.2026), 'hsA' ("אישור חוסרים") / 'hsD' ("מכניס חוסרים ישירות") – תוספת suppliers, 27.11.2026.
 // בלי key = 'prc' (גרסאות ישנות של האפליקציה). בכל עסק – legacy ומבנה b. תוספת כבויה בעסק – נדחה (feature-off).
 // שאר ההרשאות לא משתנות: עובד שכבר יש לו perms – משתנה רק perms.<key>. עובד ישן בלי perms – נכתבת מפה מלאה של ברירות המחדל
 // (R.DEFAULT_PERMS, בדיוק מה שיש לו היום בשרת ובחוקים: hasPerm / rOrdPerm / dflt) ועליה המתג. כיבוי לעובד בלי perms – אין מה לשנות.
-const STAFF_KEY_FEAT = Object.freeze({ prc: ['shelf', 'orders'], yl: ['yemot'], bake: ['bake'] });
+const STAFF_KEY_FEAT = Object.freeze({ prc: ['shelf', 'orders'], yl: ['yemot'], bake: ['bake'], hsA: ['suppliers'], hsD: ['suppliers'] });
 const MGR_KEYS = Object.freeze(Object.keys(STAFF_KEY_FEAT));
 async function setStaffPrc(request) {
   const who = await requireStaff(request);

@@ -20,6 +20,7 @@ require('./44-groups'); // קבוצות התכתבות (סבב 3, 17.11.2026)
 require('./45-templates'); // תבניות משימה בענן (סבב 4, 18.11.2026)
 require('./46-tasks-push'); // התראות משימות (tkPush / ptkPush, 18.11.2026)
 require('./47-hs'); // חוסרים (hsr, hsph, hsx – 18.11.2026, שלב 1)
+require('./47b-hs-push'); // התראה על חוסר שממתין לאישור (hsPush / hsPushB, 27.11.2026)
 require('./40-storage-matrix');
 require('./50-functions');
 require('./60-yemot');

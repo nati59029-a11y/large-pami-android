@@ -11,9 +11,14 @@ const C=window.HsCore;
 const PM=()=>window.ProdMatch||null;
 const on=()=>{try{return !!((isA()||isW()||!!(SY&&SY.sa))&&!SY.mg&&bzF('suppliers'))}catch(e){return false}};
 const mgr=()=>{try{return isA()||!!(SY&&SY.sa)}catch(e){return false}};
+/* 27.11.2026 – אישור חוסרים: "מאשר" = מנהל / מנהל־על / עובד עם המתג hsA. בדיקה מפורשת (לא wp – הוא מחזיר true לעובד בעסק legacy) */
+const wpX=k=>{try{return isW()&&!!(SY&&SY.perms&&typeof SY.perms==='object'&&SY.perms[k]===true)}catch(e){return false}};
+const apr=()=>{try{return mgr()||wpX('hsA')}catch(e){return false}};
+/* מי שיוצר חוסר ישר כ"פתוח": מאשר, או עובד עם המתג hsD ("מכניס חוסרים ישירות") – שאינו מאשר של אחרים */
+const dir=()=>apr()||wpX('hsD');
 const ordOn=()=>{try{return bzF('orders')&&wp('ord')}catch(e){return false}};
 const who=()=>(SY&&SY.uid||'')+'|'+(SY&&SY.bizId||'');
-const fresh=()=>({who:who(),L:null,at:0,busy:0,off:0,err:'',tab:'open',arr:null,arrAt:0,del:null,delAt:0,lb:0,sel:'',f:null,img:{},ph:{},x:null,xat:0,xi:null,xb:0,cP:null,ci:null,ask:null,G:{},mv:{}});
+const fresh=()=>({who:who(),L:null,at:0,busy:0,off:0,err:'',tab:'open',pend:null,arr:null,arrAt:0,del:null,delAt:0,rej:null,rejAt:0,lb:0,sel:'',f:null,img:{},ph:{},x:null,xat:0,xi:null,xb:0,cP:null,ci:null,ask:null,G:{},mv:{}});
 let HS=fresh();
 const chk=()=>{if(HS.who!==who())HS=fresh()};
 const DEC=d=>Object.assign({id:idOf(d)},fvj({mapValue:d})||{});
@@ -24,13 +29,13 @@ const qrun=async sq=>{const r=await fsx(':runQuery',{method:'POST',body:JSON.str
 const stQ=(st,lim)=>({from:[{collectionId:'hsr'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:st}}},limit:lim});
 const err=e=>toast(e&&e.code===403?'החוסרים יופעלו בקרוב':tkErr(e));
 /* שינוי מצב שנדחה (403) כשהרשימה כבר נטענה = כנראה הפריט השתנה במכשיר אחר (h כבר לא ההמשך): מרעננים ומודיעים במקום שגיאה */
-const stErr=e=>{if(e&&e.code===403&&HS.L&&!HS.off){toast('הפריט עודכן במכשיר אחר. הרשימה רועננה – נסו שוב.');HS.at=0;HS.arr=null;HS.del=null;hsLoad()}else err(e)};
+const stErr=e=>{if(e&&e.code===403&&HS.L&&!HS.off){toast('הפריט עודכן במכשיר אחר. הרשימה רועננה – נסו שוב.');HS.at=0;HS.arr=null;HS.del=null;HS.rej=null;hsLoad()}else err(e)};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const dOpen=()=>!!document.querySelector('#dlg[open]');
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 const digits=p=>String(p||'').replace(/\D/g,'');
 const nextUt=x=>Math.max(Date.now(),(x&&+x.ut||0)+1);
-const all=()=>(HS.L||[]).concat(HS.arr||[],HS.del||[]);
+const all=()=>(HS.L||[]).concat(HS.pend||[],HS.arr||[],HS.del||[],HS.rej||[]);
 const find=id=>all().find(x=>x.id===id)||HS.mv[id];
 const valid=x=>x&&idOk(x.id)&&typeof x.n==='string';
 
@@ -73,7 +78,7 @@ const nmOf=b=>{const k=String(b||'').toLowerCase();if(!k)return '';return (windo
 
 /* ---------- טעינה ---------- */
 async function hsLoad(){if(HS.busy||!on())return;HS.busy=1;HS.err='';const h=HS;
- try{const L=await qrun(stQ('open',500));h.L=L.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.off=0;/* סנכרון ספקים: ספק שנרשם בחוסר בלי כרטיס – לכרטסת (מנהל, sup-sync.js) */if(mgr()&&window.supSyncNames)window.supSyncNames(h.L.flatMap(x=>(x.supN||[]).concat(x.od&&x.od.sup?[x.od.sup]:[])))}
+ try{/* ממתינים לאישור נטענים יחד עם הפתוחים (למונים). כשל בשאילתת הממתינים לבד – רשימה ריקה */const[L,P]=await Promise.all([qrun(stQ('open',500)),qrun(stQ('pend',300)).catch(()=>[])]);h.L=L.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.pend=P.filter(valid).sort((a,b)=>(b.t||0)-(a.t||0));h.off=0;/* סנכרון ספקים: ספק שנרשם בחוסר בלי כרטיס – לכרטסת (מנהל, sup-sync.js) */if(mgr()&&window.supSyncNames)window.supSyncNames(h.L.flatMap(x=>(x.supN||[]).concat(x.od&&x.od.sup?[x.od.sup]:[])))}
  catch(e){if(e&&e.code===403)h.off=1;else h.err=tkErr(e)}
  finally{h.busy=0;h.at=Date.now()}
  paint()}
@@ -105,32 +110,42 @@ function paint(){try{tilePaint();if(cur().v==='hs'&&!typing()&&!dOpen())rerender
 
 /* ---------- משבצת ---------- */
 const tileN=()=>HS.L&&!HS.off?HS.L.length:0;
+const pendN=()=>HS.pend&&!HS.off?HS.pend.length:0;
 const tag=n=>n?`<span class="tag t1">${n}</span>`:'';
-function tilePaint(){document.querySelectorAll('[data-hsn]').forEach(e=>{e.innerHTML=tag(tileN())})}
+/* מאשר רואה גם כמה ממתינים לאישור */
+const tileT=()=>tag(tileN())+(apr()&&pendN()?` <span class="tag">${pendN()} לאישור</span>`:'');
+function tilePaint(){document.querySelectorAll('[data-hsn]').forEach(e=>{e.innerHTML=tileT()})}
 /* k='go' – משבצת במסך הבית של העובד; אחרת – משבצת במסך ה-+ (סוגרת את החלון) */
 window.hsTile=k=>{if(!on())return '';chk();if(!HS.busy&&Date.now()-HS.at>60000)hsLoad();
- return k==='go'?`<button class="tile" data-a="go" data-v="hs" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">${ico('doc')}חוסרים<span data-hsn>${tag(tileN())}</span></button>` // מסך הבית: כתום כמו שאר המשבצות שם
- :`<button class="tile" data-a="addGo" data-v="hs" style="font-size:1rem">${ico('doc')}חוסרים<span data-hsn>${tag(tileN())}</span></button>`};
+ return k==='go'?`<button class="tile" data-a="go" data-v="hs" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">${ico('doc')}חוסרים<span data-hsn>${tileT()}</span></button>` // מסך הבית: כתום כמו שאר המשבצות שם
+ :`<button class="tile" data-a="addGo" data-v="hs" style="font-size:1rem">${ico('doc')}חוסרים<span data-hsn>${tileT()}</span></button>`};
 
 /* ---------- רשימה ---------- */
 const WHYT=w=>C.WHY_L[w]||'';
 const supTags=x=>x.gen?'<span class="tag t1">כללי – מופיע לכל הספקים</span>':(x.supN||[]).map((n,i)=>`<span class="tag">${esc(n||supName((x.sups||[])[i])||'ספק')}</span>`).join('');
+const orOf=(o,d)=>C.orOf(o,d);
+/* "נרשם ← תוקן" (27.11.2026): מה שהעובד רשם מול מה שהמאשר תיקן, לכולם ובכל הלשוניות */
+const orH=x=>{const D=C.orDiff(x);if(!D.length)return '';const hO=lastH(x,['ok']);
+ return `<small>נרשם: ${D.map(d=>esc(d.l)+' '+esc(d.a)).join(' · ')}</small><small>תוקן${hO?' ע"י '+esc(nmOf(hO.byN)):''}: ${D.map(d=>esc(d.l)+' <span style="color:var(--acc);font-weight:700">'+esc(d.b)+'</span>').join(' · ')}</small>`};
 const lastH=(x,ks)=>{const h=Array.isArray(x.h)?x.h:[];for(let i=h.length-1;i>=0;i--)if(h[i]&&ks.includes(h[i].k))return h[i];return null};
 function itemH(x,mode){
  const c=x.cust&&(x.cust.nm||x.cust.ph)?x.cust:null;
  const det=[x.q?'כמות '+C.fmtQ(x.q):'',c?'לקוח: '+[c.nm,c.ph].filter(Boolean).join(' '):''].filter(Boolean).join(' · ');
- const meta='נוסף ע"י '+nmOf(x.byN)+' · '+tm(x.t)+(x.ub&&mode==='open'?' · עודכן ע"י '+nmOf(x.ub)+' · '+tm(x.ut):'');
- const hA=mode==='arr'?lastH(x,['man','inv']):null,hD=mode==='del'?lastH(x,['del']):null,hP=mode==='open'&&C.unpartQ(x)!=null?x.h[x.h.length-1]:null;
+ const meta='נוסף ע"י '+nmOf(x.byN)+' · '+tm(x.t)+(x.ub&&(mode==='open'||mode==='pend')?' · עודכן ע"י '+nmOf(x.ub)+' · '+tm(x.ut):'');
+ const hA=mode==='arr'?lastH(x,['man','inv']):null,hD=mode==='del'?lastH(x,['del']):null,hP=mode==='open'&&C.unpartQ(x)!=null?x.h[x.h.length-1]:null,hR=mode==='rej'?lastH(x,['rej']):null;
  const b=(a,t,cl)=>`<button type="button" class="btn ${cl||'g'} s" data-a="${a}" data-id="${esc(x.id)}">${t}</button>`;
  let acts='';
  if(mode==='open')acts=b('hsArr','✓ הגיע','')+b('hsOd',x.od?'📦 עדכון הזמנה':'📦 הוזמן')+b('hsEdit','עריכה')+b('hsDel','מחיקה')+(hP?b('hsUnp','בטל הגעה חלקית'):'');
  else if(mode==='arr')acts=b('hsUndo','החזר לחוסרים')+(c&&c.ph?b('hsCustWa','הודעה ללקוח בוואטסאפ',''):'');
- else acts=b('hsRes','שחזור');
+ /* 27.11.2026: ממתין לאישור – מאשר: אשר / עריכה (שמירה = אישור) / דחייה; מי שפתח (ואינו מאשר): עריכה / ביטול. נדחה – מאשר: החזר לאישור */
+ else if(mode==='pend')acts=apr()?b('hsOk','אשר ✓','')+b('hsEdit','עריכה')+b('hsRej','דחייה'):x.by===SY.uid?b('hsEdit','עריכה')+b('hsDel','ביטול'):'';
+ else if(mode==='rej')acts=apr()?b('hsBack','החזר לאישור'):'';
+ else acts=b('hsRes',apr()?'שחזור':'שחזור לאישור');
  if(x.np)acts+=b('hsImg','📷 תמונה');
  if(x.ord&&x.ord.id&&ordOn())acts+=`<button type="button" class="btn g s" data-a="go" data-v="oxOrd" data-arg="${esc(x.ord.id)}">להזמנה #${esc(x.ord.no||'')}</button>`;
  return `<div class="card hs-it" data-hs="${esc(x.id)}" style="padding:10px 12px"><div class="m"><b>${esc(x.n)}</b>
- <div class="hs-tg">${supTags(x)}<span class="tag">${esc(WHYT(x.why))}</span>${x.ord&&x.ord.id?`<span class="tag">הזמנה #${esc(x.ord.no||'')}</span>`:''}${odTag(x,mode)}</div>
- ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${odLine(x)}${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t))+' · '+esc(nmOf(hA.byN)):`הגיע · ${esc(tm(hA.t))} · ${esc(nmOf(hA.byN))}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · ${esc(nmOf(hP.byN))} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))} (לפי יחידות החשבונית)</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(nmOf(hD.byN))}</small>`:''}</div>
+ <div class="hs-tg">${supTags(x)}<span class="tag">${esc(WHYT(x.why))}</span>${x.ord&&x.ord.id?`<span class="tag">הזמנה #${esc(x.ord.no||'')}</span>`:''}${odTag(x,mode)}${mode==='pend'?'<span class="tag t1">ממתין לאישור</span>':mode==='rej'?'<span class="tag">נדחה</span>':''}</div>
+ ${det?`<small>${esc(det)}</small>`:''}<small>${esc(meta)}</small>${orH(x)}${odLine(x)}${hA?`<small>${hA.k==='inv'?'ירד אוטומטית מחשבונית'+(hA.inv?' #'+esc(hA.inv):'')+(hA.sup?' של '+esc(hA.sup):'')+' · '+esc(tm(hA.t))+' · '+esc(nmOf(hA.byN)):`הגיע · ${esc(tm(hA.t))} · ${esc(nmOf(hA.byN))}`}</small>`:''}${hP?`<small>הגיע חלקית בחשבונית${hP.inv?' #'+esc(hP.inv):''} · ${esc(tm(hP.t))} · ${esc(nmOf(hP.byN))} · נשארו ${esc(C.fmtQ(hP.q))} מתוך ${esc(C.fmtQ(hP.q0))} (לפי יחידות החשבונית)</small>`:''}${hD?`<small>נמחק · ${esc(tm(hD.t))} · ${esc(nmOf(hD.byN))}</small>`:''}${mode==='rej'?`<small>נדחה${hR?' ע"י '+esc(nmOf(hR.byN))+' · '+esc(tm(hR.t)):''}${x.rj?' · סיבה: '+esc(x.rj):''}</small>`:''}</div>
  <div class="hs-acts">${acts}</div></div>`}
 /* ---------- הוזמן (19.11.2026) ----------
    od = { u, byN, t, sup, eta }: מי סימן "הוזמן" (u / byN – בשם המבצע, נאכף בכללים), מתי (t = ut), מאיזה ספק (sup, עד 60), צפי הגעה (eta, YYYY-MM-DD או ריק).
@@ -140,7 +155,7 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 const odLate=x=>!!(x.od&&x.st==='open'&&x.od.eta&&x.od.eta<today());
 const odTag=(x,mode)=>x.od&&mode==='open'?`<span class="tag${odLate(x)?' t1':''}">${odLate(x)?'הוזמן – באיחור':'הוזמן'}</span>`:'';
 const odLine=x=>{const o=x.od;if(!o)return '';return `<small>הוזמן ע"י ${esc(nmOf(o.byN))}${o.sup?' מ'+esc(o.sup):''} · ${esc(tm(o.t))}${o.eta?' · צפי הגעה '+esc(dmy(o.eta)):' · אין צפי הגעה'}</small>`};
-ACT.hsOd=el=>{const x=find(el.dataset.id);if(!x)return;HS.od={id:x.id};
+ACT.hsOd=el=>{const x=find(el.dataset.id);if(!x||x.st!=='open')return;HS.od={id:x.id};
  const own=(x.supN||[]).map((n,i)=>n||supName((x.sups||[])[i])).filter(Boolean),L=[...new Set(own.concat(supList().map(s=>s.name)))];
  const cur=x.od&&x.od.sup||own[0]||'';
  dlg(`<h3>הוזמן: ${esc(x.n)}</h3><form data-f="hsOdSave" autocomplete="off">
@@ -184,30 +199,48 @@ V.hs=()=>{const T='חוסרים';if(!on())return{t:T,h:'<div class="empty">המ�
  if(HS.off)return{t:T,h:'<div class="card"><p class="note" style="margin:0">החוסרים יופעלו בקרוב.</p></div>'};
  if(HS.L===null)return{t:T,h:HS.err?`<div class="card"><p class="note" style="margin:0">${esc(HS.err)}</p><button class="btn g w" data-a="hsRe" style="margin-top:10px">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'};
  xBuild();nmLoad();
- const k=HS.tab;if((k==='arr'||k==='del')&&!HS.lb&&(HS[k]===null||Date.now()-HS[k+'At']>20000))stLoad(k);
+ const k=HS.tab;if((k==='arr'||k==='del'||k==='rej')&&!HS.lb&&(HS[k]===null||Date.now()-HS[k+'At']>20000))stLoad(k);
  const t=(v,l)=>`<button type="button" class="chip${k===v?' on':''}" data-a="hsTab" data-v="${v}" aria-pressed="${k===v}">${l}</button>`;
- const body=k==='sup'?supTab():k==='arr'?listH(HS.arr,'arr','עוד לא הגיע שום פריט'):k==='del'?listH(HS.del,'del','אין פריטים מחוקים'):listH(HS.L,'open','אין חוסרים פתוחים 🎉');
+ const body=k==='sup'?supTab():k==='arr'?listH(HS.arr,'arr','עוד לא הגיע שום פריט'):k==='del'?listH(HS.del,'del','אין פריטים מחוקים'):k==='pend'?listH(HS.pend||[],'pend','אין חוסרים שממתינים לאישור'):k==='rej'?listH(HS.rej,'rej','אין חוסרים שנדחו'):listH(HS.L,'open','אין חוסרים פתוחים 🎉');
+ /* 27.11.2026: מאשר – "לאישור (N)" ראשונה, מודגשת כשיש; אחרים – "ממתינים (N)" אחרי הפתוחים */
+ const pn=(HS.pend||[]).length,a=apr(),tp=a?`<button type="button" class="chip${k==='pend'?' on':''}" data-a="hsTab" data-v="pend" aria-pressed="${k==='pend'}"${pn?' style="font-weight:700;border-color:var(--acc)"':''}>לאישור (${pn})</button>`:t('pend','ממתינים ('+pn+')');
  return{t:T,s:HS.L.length?HS.L.length+' פתוחים':'',h:`<button type="button" class="btn w" data-a="hsNew" style="margin-bottom:10px">＋ הוספת חוסר</button>
- <div class="hs-tabs">${t('open','פתוחים ('+HS.L.length+')')}${t('sup','לפי ספק')}${t('arr','הגיעו')}${t('del','נמחקו')}</div>${body}
+ <div class="hs-tabs">${a?tp:''}${t('open','פתוחים ('+HS.L.length+')')}${a?'':tp}${t('sup','לפי ספק')}${t('arr','הגיעו')}${t('del','נמחקו')}${t('rej','נדחו')}</div>${body}
  <button type="button" class="btn g s w" data-a="hsRe" style="margin-top:8px">רענן</button>`}};
-ACT.hsTab=el=>{HS.tab=['open','sup','arr','del'].includes(el.dataset.v)?el.dataset.v:'open';rerender()};
-ACT.hsRe=()=>{HS.at=0;HS.err='';HS.arr=null;HS.del=null;HS.off=0;hsLoad();rerender()};
+ACT.hsTab=el=>{HS.tab=['open','pend','sup','arr','del','rej'].includes(el.dataset.v)?el.dataset.v:'open';rerender()};
+ACT.hsRe=()=>{HS.at=0;HS.err='';HS.arr=null;HS.del=null;HS.rej=null;HS.off=0;hsLoad();rerender()};
+/* הקשה על התראה "חוסר חדש ממתין לאישור" (data.k='hs', secretary.js) – מסך החוסרים; מאשר – בלשונית "לאישור" */
+window.hsPush=()=>{try{if(!on())return;chk();if(apr())HS.tab='pend';HS.at=0;if(cur().v!=='hs')go('hs');else rerender()}catch(e){}};
 ACT.hsSel=el=>{const id=String(el.dataset.id||'');HS.sel=idOk(id)?id:'';rerender()};
 
 /* ---------- מצב: הגיע / החזר / מחיקה רכה / שחזור ---------- */
-async function setSt(id,stN,k){const x=find(id);if(!x)return false;const ut=nextUt(x),ub=fbBy().slice(0,100),h=C.hAdd(x.h,{k,t:ut,byN:ub,u:SY.uid});/* הכללים: רשומה אחת בסוף, בשם המבצע, t = ut */
- try{await fsx('/hsr/'+id+'?'+mask(['st','h','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds({st:stN,h,ub,ut})})})}catch(e){stErr(e);return false}
- const from=x.st;Object.assign(x,{st:stN,h,ub,ut});HS.mv[id]=x;/* נשאר זמין לפעולות (למשל הודעה ללקוח) גם כשרשימת היעד עוד לא נטענה */
+/* ex – שדות נוספים באותה כתיבה (דחייה: rj; undefined = מחיקת השדה) */
+async function setSt(id,stN,k,ex){const x=find(id);if(!x)return false;const ut=nextUt(x),ub=fbBy().slice(0,100),h=C.hAdd(x.h,{k,t:ut,byN:ub,u:SY.uid});/* הכללים: רשומה אחת בסוף, בשם המבצע, t = ut */
+ ex=ex||{};const F=Object.assign({},ex,{st:stN,h,ub,ut});
+ try{await fsx('/hsr/'+id+'?'+mask(Object.keys(ex).concat(['st','h','ub','ut'])),{method:'PATCH',body:JSON.stringify({fields:flds(F)})})}catch(e){stErr(e);return false}
+ const from=x.st;Object.keys(ex).forEach(f=>{if(ex[f]===undefined)delete x[f]});Object.keys(ex).forEach(f=>{if(ex[f]!==undefined)x[f]=ex[f]});Object.assign(x,{st:stN,h,ub,ut});HS.mv[id]=x;/* נשאר זמין לפעולות (למשל הודעה ללקוח) גם כשרשימת היעד עוד לא נטענה */
  const lk=s=>s==='open'?'L':s;if(HS[lk(from)])HS[lk(from)]=HS[lk(from)].filter(y=>y.id!==id);if(HS[lk(stN)])HS[lk(stN)]=[x].concat(HS[lk(stN)].filter(y=>y.id!==id));
  tilePaint();return true}
-ACT.hsArr=async el=>{const id=el.dataset.id,x=find(id);if(!x||el.disabled)return;el.disabled=true;
+ACT.hsArr=async el=>{const id=el.dataset.id,x=find(id);if(!x||x.st!=='open'||el.disabled)return;el.disabled=true;
  if(!await setSt(id,'arr','man')){el.disabled=false;return}
  rerender();const c=x.cust;
  if(c&&c.ph)dlg(`<h3>סומן: הגיע</h3><p>${esc(c.nm||'הלקוח')} ביקש את "${esc(x.n)}".</p><div class="row"><button class="btn grow" data-a="hsCustWa" data-id="${esc(id)}">הודעה ללקוח בוואטסאפ</button><button class="btn g grow" data-a="closeDlg">סגור</button></div>`);
  else toast('סומן: הגיע')};
 ACT.hsUndo=async el=>{if(el.disabled)return;el.disabled=true;if(await setSt(el.dataset.id,'open','undo')){toast('הוחזר לחוסרים');rerender()}else el.disabled=false};
-ACT.hsRes=async el=>{if(el.disabled)return;el.disabled=true;if(await setSt(el.dataset.id,'open','res')){toast('שוחזר');rerender()}else el.disabled=false};
-ACT.hsDel=el=>{const id=el.dataset.id,x=find(id);if(!x)return;ask('למחוק את "'+x.n+'" מהחוסרים? אפשר לשחזר אחר כך ב"נמחקו".',async()=>{if(await setSt(id,'del','del')){toast('נמחק');rerender()}},'מחק')};
+/* שחזור מ"נמחקו": מאשר – לפתוחים; מי שאינו מאשר – חוזר לממתינים (צריך אישור מחדש) */
+ACT.hsRes=async el=>{if(el.disabled)return;el.disabled=true;const a=apr();if(await setSt(el.dataset.id,a?'open':'pend','res')){toast(a?'שוחזר':'שוחזר – נשלח לאישור המנהל');rerender()}else el.disabled=false};
+ACT.hsDel=el=>{const id=el.dataset.id,x=find(id);if(!x||x.st==='rej')return;const p=x.st==='pend';ask((p?'לבטל את הבקשה "'+x.n+'"?':'למחוק את "'+x.n+'" מהחוסרים?')+' אפשר לשחזר אחר כך ב"נמחקו".',async()=>{if(await setSt(id,'del','del')){toast(p?'בוטל':'נמחק');rerender()}},p?'כן, לבטל':'מחק')};
+/* ---------- 27.11.2026: אישור / דחייה / החזרה לאישור (מאשר בלבד – גם בכללים) ---------- */
+ACT.hsOk=async el=>{const x=find(el.dataset.id);if(!x||x.st!=='pend'||!apr()||el.disabled)return;el.disabled=true;if(await setSt(x.id,'open','ok')){toast('אושר – נוסף לחוסרים');rerender()}else el.disabled=false};
+ACT.hsRej=el=>{const x=find(el.dataset.id);if(!x||x.st!=='pend'||!apr())return;HS.rj=x.id;
+ dlg(`<h3>דחיית חוסר: ${esc(x.n)}</h3><form data-f="hsRejSave" autocomplete="off">
+ <label class="f"><span>סיבה (רשות)</span><textarea name="rj" maxlength="200" rows="3" placeholder="למשל: יש במלאי"></textarea></label>
+ <p class="note" style="margin:0">${esc(nmOf(x.byN))} יראה את הסיבה בלשונית "נדחו".</p>
+ <div class="row" style="margin-top:10px"><button class="btn grow">דחייה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.hsRejSave=async f=>{const id=HS.rj,x=id&&find(id);if(!x||x.st!=='pend')return closeDlg();const rj=String(f.rj.value||'').replace(/\s+/g,' ').trim().slice(0,200);
+ const bt=f.querySelector('button:not([type])');if(bt)bt.disabled=true;
+ if(await setSt(id,'rej','rej',{rj:rj||undefined})){HS.rj=null;closeDlg();toast('נדחה');rerender()}else if(bt)bt.disabled=false};
+ACT.hsBack=async el=>{const x=find(el.dataset.id);if(!x||x.st!=='rej'||!apr()||el.disabled)return;el.disabled=true;if(await setSt(x.id,'pend','res')){toast('הוחזר לאישור');rerender()}else el.disabled=false};
 ACT.hsCustWa=el=>{const x=find(el.dataset.id);closeDlg();if(!x||!x.cust||!C.phOk(x.cust.ph))return toast('אין טלפון תקין ללקוח');
  window.open('https://wa.me/'+C.intl(x.cust.ph)+'?text='+encodeURIComponent(C.custText(x,'')),'_system')};
 
@@ -227,9 +260,9 @@ ACT.hsImgShare=()=>{if(HS.big)dxShareDU(HS.big,'LargePami_item')};
 /* ---------- הוספה ועריכה ---------- */
 const blank=()=>({id:'',n:'',sups:[],gen:false,why:'store',q:'',custOn:false,cust:{nm:'',ph:''},ord:null,img:null,imgDel:false,np:0,busy:0,touched:false,auto:false});
 ACT.hsNew=()=>{if(!on())return;HS.f=blank();xLoad();catLoad();go('hsEd','')};
-ACT.hsEdit=el=>{const x=find(el.dataset.id);if(!x)return;
+ACT.hsEdit=el=>{const x=find(el.dataset.id);if(!x||x.st==='rej'||(x.st==='pend'&&!apr()&&x.by!==SY.uid))return;
  HS.f=Object.assign(blank(),{id:x.id,n:x.n,sups:(Array.isArray(x.sups)?x.sups:[]).map((id,i)=>({id,name:String((x.supN||[])[i]||supName(id)||id)})).filter(s=>typeof s.id==='string'&&idOk(s.id)),gen:!!x.gen,why:x.why||'store',q:x.q?String(x.q):'',
-  custOn:!!(x.cust&&(x.cust.nm||x.cust.ph)),cust:Object.assign({nm:'',ph:''},x.cust||{}),ord:x.ord&&x.ord.id?{id:x.ord.id,no:x.ord.no||0}:null,np:x.np?1:0,touched:true});
+  custOn:!!(x.cust&&(x.cust.nm||x.cust.ph)),cust:Object.assign({nm:'',ph:''},x.cust||{}),ord:x.ord&&x.ord.id?{id:x.ord.id,no:x.ord.no||0}:null,np:x.np?1:0,touched:true,pend:x.st==='pend'});
  xLoad();catLoad();if(x.np)imgGet(x.id).then(imgPaint);go('hsEd',x.id)};
 /* זיהוי המוצר מהמלאי (19.11.2026): חיפוש בכל מוצרי הקטלוג (שם, כינוי, ברקוד, קוד פריט). הספק של המוצר (prod.sup) מוצע ראשון ונבחר אוטומטית בחוסר חדש */
 const pIdx=()=>{try{const P=window.__ox&&!window.__ox.sc&&Array.isArray(window.__ox.P)?window.__ox.P:null;if(!P||!PM())return null;if(HS.pP!==P){HS.pP=P;HS.pi=PM().index(P)}return HS.pi}catch(e){return null}};
@@ -290,7 +323,8 @@ V.hsEd=id=>{const T=id?'עריכת חוסר':'חוסר חדש';const f=HS.f;if(!
  <label class="opt" style="margin:8px 0"><span>לקוח ביקש</span><input type="checkbox" data-c="hsCustOn"${f.custOn?' checked':''}></label>${cust}${ord}
  <div class="sec" style="margin-top:8px"><b>תמונה (רשות)</b></div><div id="hsImgP"></div>
  <div class="row"><label class="btn g grow" style="cursor:pointer">צילום<input type="file" accept="image/*" capture="environment" data-c="hsFile" hidden></label><label class="btn g grow" style="cursor:pointer">מהגלריה<input type="file" accept="image/*" data-c="hsFile" hidden></label></div>
- <button class="btn w" style="margin-top:12px"${f.busy?' disabled':''}>${f.busy?'שומר…':'שמירה'}</button></form>`}};
+ ${!f.id&&!dir()?'<p class="note" style="margin:10px 0 0">החוסר יישלח לאישור המנהל.</p>':''}
+ <button class="btn w" style="margin-top:12px"${f.busy?' disabled':''}>${f.busy?'שומר…':f.pend&&apr()?'שמירה ואישור':'שמירה'}</button></form>`}};
 INP.hsN=el=>{const f=HS.f;if(!f)return;f.n=el.value;clearTimeout(HS.st);HS.st=setTimeout(sugPaint,250)};
 INP.hsQ=el=>{if(HS.f)HS.f.q=el.value};
 INP.hsCN=el=>{if(HS.f){HS.f.cust.nm=el.value;delete HS.f.cust.cid}};
@@ -329,24 +363,34 @@ ACT.hsOrdSel=el=>{const f=HS.f,o=((window.__ox&&window.__ox.L)||[]).find(x=>x.id
  if(!f.custOn&&o.cust&&(o.cust.name||o.cust.phone)){f.cust={nm:String(o.cust.name||'').slice(0,60),ph:digits(o.cust.phone).slice(0,15)};if(idOk(String(o.custId||'')))f.cust.cid=o.custId;f.custOn=true}
  closeDlg();rerender()};
 /* שמירה. mk – יצירת פריט חדש מתוצאת C.build (גם מהחלון שאחרי הליקוט) */
-async function mk(d,np){const id='h'+uid(),x=Object.assign({},d,{np:np?1:0,st:'open',by:SY.uid,byN:fbBy().slice(0,100),t:Date.now()});
+/* 27.11.2026: מי שאינו מאשר / מכניס ישירות – נוצר כ"ממתין לאישור" (pend) */
+async function mk(d,np){const id='h'+uid(),x=Object.assign({},d,{np:np?1:0,st:dir()?'open':'pend',by:SY.uid,byN:fbBy().slice(0,100),t:Date.now()});
  await fsx('/hsr?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields:flds(x)})});x.id=id;return x}
 FRM.hsSave=async()=>{const f=HS.f;if(!f||f.busy||!on())return;
  const r=C.build({n:f.n,sups:f.sups,gen:f.gen,why:f.why,q:f.q,cust:f.custOn?f.cust:null,ord:f.why!=='store'?f.ord:null},PM());if(!r.ok)return toast(r.err);
  const me=fbBy().slice(0,100),old=f.id?find(f.id):null,np=f.img?1:f.imgDel?0:(old&&old.np?1:0);
- f.busy=1;rerender();let id=f.id,x;
+ f.busy=1;rerender();let id=f.id,x,ok=0;
  try{if(!id){x=await mk(r.d,np);id=x.id}
   else{if(!old)throw new Error('הפריט לא נמצא. רעננו את הרשימה.');const d=Object.assign({},r.d,{np,ub:me,ut:nextUt(old)});
-   await fsx('/hsr/'+id+'?'+mask(['n','nk','gen','sups','supN','why','q','cust','ord','np','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds(d)})});
-   ['q','cust','ord'].forEach(k=>{if(!(k in d))delete old[k]});x=Object.assign(old,d)}}
+   const M=['n','nk','gen','sups','supN','why','q','cust','ord','np','ub','ut'];
+   /* 27.11.2026: מאשר ששומר פריט ממתין = אישור. הכללים: or רק בכתיבת אישור שמשנה st/h/ub/ut/or בלבד – לכן שתי כתיבות:
+      (1) התיקון כשהפריט עדיין ממתין (כמו עריכה רגילה; בלי שינוי – מדלגים); (2) st 'open' + רשומת 'ok' + or (מה שהעובד רשם, אם השם/ספקים/כמות/מטרה השתנו) */
+   const ap=old.st==='pend'&&apr(),pre=ap?JSON.parse(JSON.stringify(old)):null,J=v=>JSON.stringify(v===undefined?null:v);
+   if(!ap||M.some(k=>k!=='ub'&&k!=='ut'&&J(d[k])!==J(old[k]))){
+    await fsx('/hsr/'+id+'?'+mask(M),{method:'PATCH',body:JSON.stringify({fields:flds(d)})});
+    ['q','cust','ord'].forEach(k=>{if(!(k in d))delete old[k]});Object.assign(old,d)}
+   x=old;
+   if(ap){const o=orOf(pre,r.d),ut=nextUt(x),h=C.hAdd(x.h,{k:'ok',t:ut,byN:me,u:SY.uid}),F={st:'open',h,ub:me,ut};if(o)F.or=o;
+    try{await fsx('/hsr/'+id+'?'+mask(Object.keys(F)),{method:'PATCH',body:JSON.stringify({fields:flds(F)})});Object.assign(x,F);ok=1}catch(e2){ok=2}
+    upLocal(x)}}}
  catch(e){f.busy=0;rerender();return err(e)}
  /* תמונה: החלפה = מחיקה + יצירה. כשל – הפריט נשמר, מסמנים שאין תמונה */
  let imgErr=false;
  try{if(old&&old.np&&(f.img||f.imgDel)){try{await fsx('/hsr/'+id+'/p/1',{method:'DELETE'})}catch(e){if(e.code!==404)throw e}delete HS.img[id]}
   if(f.img){await fsx('/hsr/'+id+'/p/1',{method:'PATCH',body:JSON.stringify({fields:{img:sv(f.img),t:iv(Date.now()),uid:sv(SY.uid)}})});HS.img[id]=f.img}}
  catch(e){imgErr=true;try{const ut=nextUt(x);await fsx('/hsr/'+id+'?'+mask(['np','ub','ut']),{method:'PATCH',body:JSON.stringify({fields:flds({np:0,ub:me,ut})})});x.np=0;x.ub=me;x.ut=ut}catch(e2){}}
- if(!f.id&&HS.L)HS.L=[x].concat(HS.L);
- HS.f=null;tilePaint();toast(imgErr?'הפריט נשמר, אבל התמונה לא עלתה':'נשמר');goBack()};
+ if(!f.id)upLocal(x);
+ const pd=x.st==='pend';HS.f=null;tilePaint();toast(ok===2?'התיקון נשמר, האישור נכשל – נסו לאשר שוב':imgErr?'הפריט נשמר, אבל התמונה לא עלתה':ok?'אושר – נוסף לחוסרים':pd?'נשלח לאישור המנהל':'נשמר');goBack()};
 
 /* ---------- שליחה לספק: וואטסאפ (טלפון נשמר בפעם הראשונה), קובץ להדפסה ושיתוף ---------- */
 async function phGet(id){if(!idOk(id))return '';if(id in HS.ph)return HS.ph[id];try{const d=DEC(await fsx('/hsph/'+id));HS.ph[id]=typeof d.ph==='string'?d.ph:''}catch(e){HS.ph[id]=''}return HS.ph[id]}
@@ -391,7 +435,7 @@ ACT.hsPdf=async el=>{const g=HS.G[el.dataset.id],k=el.dataset.k;if(!g||!idOk(g.i
 let IQ=Promise.resolve();
 const invQ=L=>{IQ=IQ.then(()=>invRun(L)).catch(()=>{});return IQ};
 const qrunU=async sq=>{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>({x:DEC(x.document),u:x.document.updateTime||''}))};
-function upLocal(x){HS.mv[x.id]=x;const t=x.st==='open'?'L':x.st;['L','arr','del'].forEach(k=>{const a=HS[k];if(!a)return;const i=a.findIndex(y=>y.id===x.id);if(k===t){if(i>=0)a[i]=x;else HS[k]=[x].concat(a)}else if(i>=0)a.splice(i,1)})}
+function upLocal(x){HS.mv[x.id]=x;const t=x.st==='open'?'L':x.st;['L','pend','arr','del','rej'].forEach(k=>{const a=HS[k];if(!a)return;const i=a.findIndex(y=>y.id===x.id);if(k===t){if(i>=0)a[i]=x;else HS[k]=[x].concat(a)}else if(i>=0)a.splice(i,1)})}
 async function invApply(r,m,d,again){const x=r.x,ut=nextUt(x),ub=fbBy().slice(0,100);
  const h=C.hAdd(x.h,C.invEntry(m,d,ut,ub,SY.uid)),f=m.k==='part'?{q:m.q,h,ub,ut}:{st:'arr',h,ub,ut};
  try{const j=await fsx('/hsr/'+x.id+'?'+mask(Object.keys(f))+(r.u?'&currentDocument.updateTime='+encodeURIComponent(r.u):''),{method:'PATCH',body:JSON.stringify({fields:flds(f)})});
@@ -429,12 +473,12 @@ window.hsOnInv=d=>{try{if(!d||!idOk(String(d.id||''))||!on())return;const v={id:
    תוספת כבויה / 403 / כשל בטעינה – בלי חלון. פריט פתוח שכבר מקושר לאותה הזמנה ולאותו מוצר (nk) – לא מוצע שוב. הפריטים נבנים ב-C.build ונשמרים ב-mk (כמו "הוספת חוסר"). */
 window.hsAskSo=async(o,rows)=>{try{
  if(!on()||!o||!idOk(String(o.id||''))||!Array.isArray(rows)||!rows.length)return;chk();
- let L;try{L=(await qrun(stQ('open',500))).filter(valid)}catch(e){if(e&&e.code===403)HS.off=1;return}
- HS.L=L.sort((a,b)=>(b.t||0)-(a.t||0));HS.at=Date.now();HS.off=0;tilePaint();
+ let L,Pn;try{[L,Pn]=await Promise.all([qrun(stQ('open',500)),qrun(stQ('pend',300)).catch(()=>[])]);L=L.filter(valid);Pn=Pn.filter(valid)}catch(e){if(e&&e.code===403)HS.off=1;return}
+ HS.L=L.sort((a,b)=>(b.t||0)-(a.t||0));HS.pend=Pn.sort((a,b)=>(b.t||0)-(a.t||0));HS.at=Date.now();HS.off=0;tilePaint();
  const c=o.cust&&typeof o.cust==='object'?o.cust:{},ph=digits(c.phone),pOk=C.phOk(ph);
  const cust=String(c.name||'').trim()||pOk?{nm:String(c.name||'').slice(0,60),ph:pOk?ph.slice(0,15):''}:null;if(cust&&idOk(String(o.custId||'')))cust.cid=o.custId;
  const ord={id:o.id,no:Number.isInteger(+o.no)?+o.no:0},sups=supList(),k=v=>C.keyOf(String(v||'').trim(),PM());
- const seen=new Set(L.filter(x=>x.ord&&x.ord.id===o.id).map(x=>x.nk)),A=[];
+ const seen=new Set(L.concat(Pn).filter(x=>x.ord&&x.ord.id===o.id).map(x=>x.nk)),A=[];
  rows.forEach(r=>{if(!r)return;const sp=String(r.sup||'').trim(),sv0=sp?sups.find(x=>k(x.name)===k(sp)):null;
   const b=C.build({n:r.n,sups:sv0?[sv0]:[],gen:!sv0,why:'order',q:typeof r.qty==='number'&&r.qty>0&&r.qty<=1e5?r.qty:'',cust,ord},PM());
   if(!b.ok||seen.has(b.d.nk))return;seen.add(b.d.nk);A.push({d:b.d,sup:sv0?sv0.name:''})});
@@ -447,6 +491,6 @@ ACT.hsSoAdd=async el=>{const a=HS.ask;if(!a||el.disabled)return;
  const P=[...document.querySelectorAll('#dlg input[data-hso]')].filter(i=>i.checked).map(i=>a.A[+i.dataset.hso]).filter(Boolean);
  if(!P.length){HS.ask=null;closeDlg();return}
  el.disabled=true;HS.ask=null;let n=0;
- for(const p of P){try{const x=await mk(p.d,0);if(HS.L)HS.L=[x].concat(HS.L.filter(y=>y.id!==x.id));n++}catch(e){}}
- closeDlg();tilePaint();toast(n===P.length?(n===1?'נוסף לחוסרים':'נוספו '+n+' פריטים לחוסרים'):n?'נוספו '+n+' מתוך '+P.length+' לחוסרים':'לא נוסף לחוסרים (ההזמנה עצמה נשמרה)');paint()};
+ let pd=0;for(const p of P){try{const x=await mk(p.d,0);upLocal(x);if(x.st==='pend')pd=1;n++}catch(e){}}
+ closeDlg();tilePaint();toast(pd&&n===P.length?'נשלח לאישור המנהל':n===P.length?(n===1?'נוסף לחוסרים':'נוספו '+n+' פריטים לחוסרים'):n?'נוספו '+n+' מתוך '+P.length+' לחוסרים':'לא נוסף לחוסרים (ההזמנה עצמה נשמרה)');paint()};
 })();

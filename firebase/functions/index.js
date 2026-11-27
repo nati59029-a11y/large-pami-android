@@ -359,6 +359,8 @@ Object.assign(exports, require('./grp-notify'));
 Object.assign(exports, require('./grp-tr'));
 // התראות משימות (18.11.2026): tkPush / tkPushB – משימה חדשה, הוחזרה, ממתינה לאישור, בוצעה ותגובה; ptkPush / ptkPushB – משימה פרטית חדשה של עובד. בלי שליחה בשבת ובחג (tasks-push.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./tasks-push'));
+// אישור חוסרים (27.11.2026): hsPush / hsPushB – התראה למנהלים ולעובדים עם hsA על חוסר חדש שממתין לאישור (st 'pend'). בלי שליחה בשבת ובחג (hs-push.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./hs-push'));
 // דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./daily-rep'));
 // קופה (POS) שלב 0 (17.11.2026): posCfg, posCfgSet (מנהל / מנהל־על), posDev (קופות: הוספה, רישום מכשיר, פרישה, השבתה), posSale (שלד מכירה עם reqId).

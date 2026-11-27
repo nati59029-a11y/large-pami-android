@@ -2,6 +2,8 @@
 // חוזה הנתונים (hsr/{id}): n שם (1..80), nk מפתח מנורמל, gen פריט כללי, sups/supN מזהי ושמות ספקים (עד 10), why store|order|both,
 //   q כמות (רשות, >0 עד 100000), cust {nm, ph, cid?} (רשות), ord {id, no} (רשות), np 0/1 (יש תמונה), st open|arr|del,
 //   by/byN/t – מי הוסיף ומתי, ub/ut – עדכון אחרון, h – היסטוריה (עד 30).
+// 27.11.2026 (אישור חוסרים): st גם pend (ממתין לאישור) | rej (נדחה), rj סיבת דחייה (עד 200), h[].k גם ok|rej|res,
+//   or {n, supN, gen, q?, why} – מה שהעובד רשם, כשהמאשר תיקן באישור (נקבע פעם אחת, לא משתנה אחר כך).
 (function (root) {
 'use strict';
 const WHY = ['store', 'order', 'both'];
@@ -111,11 +113,11 @@ function suggest(name, ctx, PM) {
 }
 
 // ---------- מוצרים מתאימים בזמן הקלדת שם (20.11.2026) ----------
-// prevIndex(items, PM, skipId) → אינדקס של שמות חוסרים קודמים (פתוחים / הגיעו; לא נמחקו, לא skipId). שם אחד לכל מפתח – החדש ביותר.
+// prevIndex(items, PM, skipId) → אינדקס של שמות חוסרים קודמים (פתוחים / ממתינים / הגיעו; לא נמחקו, לא נדחו, לא skipId). שם אחד לכל מפתח – החדש ביותר.
 //   כל רשומה: { id, name, sups: [{ id, name }] } (ספקי החוסר, מ-sups/supN; פריט כללי – בלי ספקים)
 function prevIndex(items, PM, skipId) {
   if (!PM) return null;
-  const L = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.n === 'string' && clean(x.n) && x.st !== 'del' && x.id !== skipId && ID.test(String(x.id || '')))
+  const L = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.n === 'string' && clean(x.n) && x.st !== 'del' && x.st !== 'rej' && x.id !== skipId && ID.test(String(x.id || '')))
     .sort((a, b) => (+b.ut || +b.t || 0) - (+a.ut || +a.t || 0));
   const seen = new Set(), P = [];
   L.forEach((x) => { const k = keyOf(x.n, PM); if (!k || seen.has(k)) return; seen.add(k);
@@ -265,6 +267,32 @@ function unpartQ(x) {
   return x && x.st === 'open' && e && e.k === 'part' && typeof e.q0 === 'number' && e.q === x.q ? e.q0 : null;
 }
 
-const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, prevIndex, picks, PICK_MIN, PICK_PREV, split, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ };
+// ---------- 27.11.2026: "מה נרשם ומה תוקן" ----------
+const supT = (gen, supN) => (gen ? 'כללי' : (Array.isArray(supN) ? supN : []).map((n) => clean(n, 60)).filter(Boolean).join(', ') || '—');
+const qOf = (v) => (typeof v === 'number' && isFinite(v) && v > 0 ? v : null);
+const sameSet = (a, b) => { const A = (Array.isArray(a) ? a : []).map(String), B = (Array.isArray(b) ? b : []).map(String); return A.length === B.length && A.every((x) => B.includes(x)); };
+// orOf(old, d) → הערכים המקוריים של הפריט (old) אם המאשר שינה שם / ספקים / כמות / מטרה בעריכה (d – תוצאת build); אחרת null
+function orOf(old, d) {
+  if (!old || !d) return null;
+  const supCh = !!old.gen !== !!d.gen || (!d.gen && !sameSet(old.sups, d.sups));
+  const ch = clean(old.n, MAXN) !== clean(d.n, MAXN) || supCh || qOf(old.q) !== qOf(d.q) || String(old.why || '') !== String(d.why || '');
+  if (!ch) return null;
+  // בדיוק הערכים שבפריט (הכללים בודקים ש-or זהה לפריט לפני האישור)
+  const o = { n: String(old.n == null ? '' : old.n), supN: Array.isArray(old.supN) ? old.supN.slice() : [], gen: !!old.gen, why: String(old.why || '') };
+  if (typeof old.q === 'number') o.q = old.q;
+  return o;
+}
+// orDiff(x) → [{ k: 'n'|'sup'|'q'|'why', l: תווית, a: מה נרשם, b: מה עכשיו }] – רק מה שהשתנה בין x.or לפריט
+function orDiff(x) {
+  const o = x && x.or && typeof x.or === 'object' ? x.or : null; if (!o) return [];
+  const out = [], add = (k, l, a, b) => { if (a !== b) out.push({ k, l, a, b }); };
+  add('n', 'שם', clean(o.n, MAXN), clean(x.n, MAXN));
+  add('sup', 'ספקים', supT(o.gen, o.supN), supT(x.gen, x.supN));
+  add('q', 'כמות', qOf(o.q) !== null ? fmtQ(o.q) : '—', qOf(x.q) !== null ? fmtQ(x.q) : '—');
+  add('why', 'מטרה', WHY_L[o.why] || '—', WHY_L[x.why] || '—');
+  return out;
+}
+
+const api = { ID, WHY, WHY_L, MAXN, MAXS, MAXH, build, hAdd, forSup, groups, xIndex, catIndex, suggest, prevIndex, picks, PICK_MIN, PICK_PREV, split, waText, custText, intl, phOk, nameId, keyOf, fmtQ, matchInv, invEntry, unpartQ, orOf, orDiff };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.HsCore = api;
 })(typeof self !== 'undefined' ? self : this);

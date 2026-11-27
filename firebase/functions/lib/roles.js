@@ -69,8 +69,9 @@ function inputObject(request) {
 // lbl (22.11.2026, lbl-print.js + חוקי prod / lblp): "הדפסת מדבקות" – עובד שמדפיס מדבקות מחיר וקורא את המלאי לשם כך; כבוי כברירת מחדל, גם לעובד ישן בלי perms.
 // edb (26.11.2026, edb-print.js): "הדפסת דף אכיל" – עובד שמדפיס דפים אכילים (הכול נשמר במכשיר, אין אוסף בענן); כבוי כברירת מחדל, גם לעובד ישן בלי perms.
 // bake (26.11.2026, חוקי b/{bizId}/bk): "עלות מוצרי אפייה" – עובד שרואה ועורך פריטי קנייה, רכיבים ומוצרים (כולל עלויות קנייה); מחיקה רק למנהל. כבוי כברירת מחדל, גם לעובד ישן בלי perms.
-const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf', 'yl', 'tkS', 'lbl', 'edb', 'bake']);
-const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false, bake: false });
+// hsA / hsD (27.11.2026, חוקי hsr): "אישור חוסרים" – עובד שמאשר, עורך ודוחה חוסרים של עובדים; "מכניס חוסרים ישירות" – יוצר חוסר פתוח בלי אישור. כבויים כברירת מחדל, גם לעובד ישן בלי perms.
+const PERM_KEYS = Object.freeze(['incR', 'incW', 'expR', 'expW', 'sup', 'sal', 'rep', 'ord', 'trf', 'bal', 'ordP', 'prc', 's3m', 'pos', 'posMgr', 'shf', 'yl', 'tkS', 'lbl', 'edb', 'bake', 'hsA', 'hsD']);
+const DEFAULT_PERMS = Object.freeze({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false, bake: false, hsA: false, hsD: false });
 // 18.11.2026 (הכרעת בעל העסק): קופה – רק מנהל־על מחליט מי מקבל, גם מנהלים. pos / posMgr של מנהל עסק = admins/{uid}.perms
 // (רק השרת כותב: setStaffPerms, מנהל־על בלבד). מנהל־על (גם כשהוא מנהל בעסק) = הכול, כמו היום. שאר ההרשאות של מנהל לא השתנו.
 // אותה הגדרה בדיוק כמו perm() בכללי Firestore של b/{bizId}.
