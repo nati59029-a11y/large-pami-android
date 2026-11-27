@@ -514,12 +514,18 @@ ACT.tkwRqW=el=>{const id=el.dataset.id,x=rqGet(id);if(!x||!rqOk())return;el.disa
 ACT.tkwRqTk=el=>{const id=el.dataset.id,x=rqGet(id);if(!x||!rqOk())return;const S=TKST.L;
  if(!S){if(typeof tkStaffLoad==='function'&&!TKST.busy)tkStaffLoad();return toast('טוען את רשימת העובדים… נסה שוב בעוד רגע')}
  const s=S.find(z=>z.uid===x.owner);if(S.length&&!s)return toast('העובד ששלח את הבקשה אינו פעיל ברשימת העובדים, ולכן אי אפשר לשלוח לו משימה');
- closeDlg();W.rqc={id,txt:String(x.txt||'').slice(0,500),n:s?s.name:(rnm('',x.by)||'עובד')};if(S.length)TKN.sel=new Set([x.owner]);TKN.np=0;TKN.imgs=[];FX=FX0();
+ closeDlg();W.rqc={id,txt:String(x.txt||'').slice(0,500),n:s?s.name:(rnm('',x.by)||'עובד'),ims:[],iml:x.np&&typeof rqImGet==='function'?1:0};if(S.length)TKN.sel=new Set([x.owner]);TKN.np=0;TKN.imgs=[];FX=FX0();
  TKT='open';W.fo=1;W.d0=1;if(cur().v!=='tk')go('tk');else rerender();
- setTimeout(()=>{const f=tkForm();if(!f||!W.rqc)return;if(f.elements.prv&&f.elements.prv.checked){f.elements.prv.checked=false;tkPrvSync()}const ta=f.elements.txt;if(ta&&!ta.value.trim())ta.value=W.rqc.txt;f.scrollIntoView({block:'start'});if(ta)ta.focus()},80)};
+ setTimeout(()=>{const f=tkForm();if(!f||!W.rqc)return;if(f.elements.prv&&f.elements.prv.checked){f.elements.prv.checked=false;tkPrvSync()}const ta=f.elements.txt;if(ta&&!ta.value.trim())ta.value=W.rqc.txt;f.scrollIntoView({block:'start'});if(ta)ta.focus()},80);
+ /* 27.11.2026: התמונות שהעובד צירף לבקשה מצורפות לטופס המשימה (אפשר להסיר כל אחת ב-✕). כישלון – המשימה נשלחת בלי, עם הודעה */
+ if(W.rqc.iml){const c=W.rqc;rqImGet('/rq/'+id).then(L=>{if(W.rqc!==c)return;let skip=0;
+   L.forEach(u=>{if(TKN.imgs.includes(u))return;if(TKN.imgs.length>=5||u.length>880000){skip++;return}TKN.imgs.push(u);c.ims.push(u)});
+   if(skip)toast('חלק מהתמונות של הבקשה לא צורפו (עד 5 תמונות במשימה)')},()=>{if(W.rqc===c)toast('לא הצלחתי לטעון את התמונות של הבקשה. אפשר לשלוח את המשימה בלי, או לצרף אותן ידנית')})
+  .finally(()=>{c.iml=0;if(W.rqc===c){tkMiPaint();const b=$('#rqcIm');if(b)b.outerHTML=rqcImH(c)}})}};
 function rqcBan(){const c=W.rqc;if(!c)return '';
- return `<div class="card" style="margin:6px 0;padding:8px 10px;border-color:var(--acc)"><b>${icd('chat')} משימה מבקשה של ${esc(c.n)}</b><p class="note" style="margin:4px 0 6px">הנמען: ${esc(c.n)}. אחרי יצירת המשימה הבקשה תסומן "בטיפול".</p><button type="button" class="btn g s" data-a="tkwRqX">ביטול</button></div>`}
-ACT.tkwRqX=()=>{const c=W.rqc;W.rqc=null;TKN.sel=null;const f=tkForm();if(f&&c&&f.elements.txt.value===c.txt)f.elements.txt.value='';tkRe()};
+ return `<div class="card" style="margin:6px 0;padding:8px 10px;border-color:var(--acc)"><b>${icd('chat')} משימה מבקשה של ${esc(c.n)}</b><p class="note" style="margin:4px 0 6px">הנמען: ${esc(c.n)}. אחרי יצירת המשימה הבקשה תסומן "בטיפול".</p>${rqcImH(c)}<button type="button" class="btn g s" data-a="tkwRqX">ביטול</button></div>`}
+const rqcImH=c=>c.iml?'<p class="note" id="rqcIm" style="margin:0 0 6px">טוען את התמונות מהבקשה…</p>':c.ims&&c.ims.length?`<p class="note" id="rqcIm" style="margin:0 0 6px">${icd('img')} ${c.ims.length===1?'התמונה מהבקשה צורפה':c.ims.length+' התמונות מהבקשה צורפו'} למשימה (אפשר להסיר ב-✕ בטופס)</p>`:'<span id="rqcIm"></span>';
+ACT.tkwRqX=()=>{const c=W.rqc;W.rqc=null;TKN.sel=null;if(c&&c.ims)TKN.imgs=TKN.imgs.filter(u=>!c.ims.includes(u));const f=tkForm();if(f&&c&&f.elements.txt.value===c.txt)f.elements.txt.value='';tkRe()};
 /* ---- חיבורים (22.11.2026): "📋 צור משימה" ממסכים אחרים (חשבונית לתשלום, חוסרים לפי ספק) – טופס "משימה חדשה" הקיים, ממולא מראש
    (טקסט + יעד מוצע: td היום / tm מחר / at תאריך ושעה). המנהל בוחר עובד ושומר דרך FRM.tkAdd – אין כאן כתיבה. מנהל בלבד, כשתוספת המשימות פעילה ---- */
 W.pfOk=()=>{try{return on()&&fbAdmin()}catch(e){return false}};
