@@ -169,3 +169,46 @@ describe('edb-print – צבע וכיתוב', () => {
     assert.deepEqual(EC.newD(0), { img: 0, x: 0, y: 0, z: 1, rot: 0, fl: false, auto: false, br: 0, ct: 0, sat: 0, tx: [] });
   });
 });
+
+// סבב 5 (27.11.2026): אלבום דפים מוכנים – פענוח מסמך edba, חיפוש לפי שם, כיול ברירת מחדל, חיתוך השוליים ב"פתח לעריכה"
+describe('דף אכיל – סבב 5: אלבום', () => {
+  it('albNorm: מסמך תקין נשמר; מזהה לא תקין – null; שדות חסרים / חריגים – ברירות מחדל בטווח', () => {
+    const a = EC.albNorm({ id: 'Abc_def-123456', nm: 'עוגת יום הולדת', k: 'c12', by: 'u1', at: 5, w: 2480, h: 3508, st: 'ok' });
+    assert.deepEqual(a, { id: 'Abc_def-123456', nm: 'עוגת יום הולדת', k: 'c12', by: 'u1', at: 5, w: 2480, h: 3508, st: 'ok' });
+    for (const id of ['', 'short', 'a/b/c/d/e/f', 'x'.repeat(41), '<script>12', undefined]) assert.equal(EC.albNorm({ id, nm: 'x' }), null, String(id));
+    assert.equal(EC.albNorm(null), null);
+    const b = EC.albNorm({ id: 'abcdefgh', nm: 'x'.repeat(80), k: 'zz', w: 99999, h: -3, st: 'weird', at: 'x' });
+    assert.equal(b.nm.length, 60); assert.equal(b.k, 'cu'); assert.equal(b.w, 0); assert.equal(b.h, 0); assert.equal(b.st, 'up'); assert.equal(b.at, 0);
+    assert.equal(EC.albNorm({ id: 'abcdefgh' }).nm, 'דף', 'בלי שם – "דף"');
+    for (const k of ['full', 'a5', 'c6', 'c36', 's24', 'cu']) assert.equal(EC.albNorm({ id: 'abcdefgh', k }).k, k);
+  });
+  it('albFind: חיפוש לפי חלק מהשם, בלי הבדל אותיות גדולות ורווחים כפולים; ריק – הכול', () => {
+    const L = ['עוגת  יום הולדת', 'Happy Birthday', 'מגן דוד', 'עוגה כחולה'].map((nm, i) => EC.albNorm({ id: 'id_' + i + '_xxxxx', nm }));
+    assert.equal(EC.albFind(L, '').length, 4);
+    assert.equal(EC.albFind(L, '   ').length, 4);
+    assert.deepEqual(EC.albFind(L, 'עוג').map((a) => a.nm), ['עוגת  יום הולדת', 'עוגה כחולה']);
+    assert.deepEqual(EC.albFind(L, 'יום  הולדת').map((a) => a.id), ['id_0_xxxxx']);
+    assert.deepEqual(EC.albFind(L, 'birth').map((a) => a.id), ['id_1_xxxxx']);
+    assert.equal(EC.albFind(L, 'לא קיים').length, 0);
+    assert.deepEqual(EC.albFind(null, 'x'), []);
+  });
+  it('albLay: טקסט הפריסה; גודל חופשי כשאין פריסה קבועה', () => {
+    assert.equal(EC.albLay({ k: 'c12' }), EC.layTxt(EC.layout('c12')));
+    assert.equal(EC.albLay({ k: 'cu' }), 'גודל חופשי');
+    assert.equal(EC.albLay(null), 'גודל חופשי');
+  });
+  it('calId: רק כיול ברירת מחדל = הדפסת התמונה כמו שהיא (ולתחנה – הפניה לאלבום בלי העלאה)', () => {
+    assert.equal(EC.calId(EC.CAL0), true);
+    assert.equal(EC.calId(null), true);
+    assert.equal(EC.calId({ sx: 1.01 }), false);
+    assert.equal(EC.calId({ oy: -0.5 }), false);
+    assert.equal(EC.calId({ sx: 'x', ox: 'y' }), true, 'ערכים לא תקינים – ברירת מחדל');
+  });
+  it('albCrop: החלק שבתוך השוליים (5 מ"מ) של עמוד 300 DPI – בדיוק אזור "A4 מלא"', () => {
+    const W = Math.round(210 / 25.4 * 300), H = Math.round(297 / 25.4 * 300), r = EC.albCrop(W, H), L = EC.layout('full');
+    assert.equal(r.x, Math.round(W * 5 / 210)); assert.equal(r.y, Math.round(H * 5 / 297));
+    near(r.w / r.h, L.w / L.h, 0.002, 'יחס רוחב/גובה כמו המשבצת של A4 מלא');
+    near(r.w / W * 210, L.w, 0.2, 'רוחב במ"מ'); near(r.h / H * 297, L.h, 0.2, 'גובה במ"מ');
+    const t = EC.albCrop(1, 1); assert.ok(t.w >= 1 && t.h >= 1);
+  });
+});
