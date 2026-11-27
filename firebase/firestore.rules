@@ -55,7 +55,7 @@ service cloud.firestore {
     function ngOk() {
       let s0 = od().st;
       let st = nw().st;
-      return s0 == 'pend' ? (od().by == request.auth.uid && st in ['pend', 'del']) : s0 != 'rej' && (st == 'pend' ? s0 == 'del' : st != 'rej' && (st != 'open' || s0 != 'del'));
+      return nw().get('rj', '') == od().get('rj', '') && (s0 == 'pend' ? (od().by == request.auth.uid && st in ['pend', 'del']) : s0 != 'rej' && (s0 == 'del' ? st in ['pend', 'del'] : !(st in ['pend', 'rej'])));
     }
     function orOk(v) {
       return od().st == 'pend' && nw().st == 'open' && v is map && v.keys().hasOnly(['n', 'supN', 'gen', 'q', 'why']) && v.get('n', '') is string && v.get('n', '').size() <= 80

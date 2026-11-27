@@ -348,6 +348,10 @@ for (const E of ENVS) {
         await assertSucceeds(mv(E.e2, 'pend', 'res'), 'עובד רגיל – ל-pend');
         await setP({ st: 'del' });
         await assertSucceeds(mv(E.hsa, 'open', 'res'), 'מאשר – ל-open');
+        await setP({ st: 'del' });
+        for (const u of [E.e2, E.hsd]) await assertFails(mv(u, 'arr', 'man'), 'נמחק → הגיע (עקיפת אישור) – ' + u);
+        await setP({ st: 'open' });
+        await assertFails(mv(E.e2, 'del', 'del', { rj: 'x' }), 'rj – רק מאשר');
         await setP({ st: 'open' });
         await assertFails(mv(E.mgr, 'pend', 'res'), 'פתוח → ממתין');
         await assertFails(mv(E.mgr, 'rej', 'rej'), 'פתוח → נדחה');
