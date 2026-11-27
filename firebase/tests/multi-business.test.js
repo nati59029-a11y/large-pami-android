@@ -688,8 +688,9 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     const block = src.slice(src.indexOf('// ---------- ריבוי עסקים'), src.indexOf('// הכלל האחרון'));
     const paths = [...block.matchAll(/firestore\.(?:get|exists)\(\/databases\/\(default\)\/documents\/([a-z_]+)\//g)].map((m) => m[1]);
     /* סבב 3 (17.11.2026): סרטוני קבוצות (grpv) קוראים גם את מסמך הקבוצה – grp/{gid} ב-legacy ו-b/{bizId}/grp/{gid} בעסק – עדיין לכל היותר 2 קריאות (users + grp) */
-    assert.deepEqual([...new Set(paths)].sort(), ['b', 'grp', 'superadmins', 'users']);
-    assert.ok(!/documents\/b\/(?!\$\(bizId\)\/grp\/\$\(gid\)\))/.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק (רק b/{bizId}/grp/{gid} של סרטוני הקבוצות)');
+    /* הדפסת דף אכיל (26.11.2026): תמונות העמוד (edb_tmp) קוראות את מסמך העבודה – edbq/{jobId} ב-legacy ו-b/{bizId}/edbq/{jobId} בעסק – עדיין 2 קריאות (users + edbq) */
+    assert.deepEqual([...new Set(paths)].sort(), ['b', 'edbq', 'grp', 'superadmins', 'users']);
+    assert.ok(!/documents\/b\/(?!\$\(bizId\)\/(?:grp\/\$\(gid\)|edbq\/\$\(jobId\))\))/.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק (רק b/{bizId}/grp/{gid} של סרטוני הקבוצות ו-b/{bizId}/edbq/{jobId} של הדף האכיל)');
   });
 });
 

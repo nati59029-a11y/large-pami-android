@@ -38,7 +38,7 @@ const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|
    כשסרגל הבחירה המרובה פתוח, במסך הסריקה האחידה, בעסק מושהה ובהדפסה. ריווח תחתון נוסף לתוכן, כדי שאפשר יהיה לגלול אותו אל מעל הכפתור.
    תיקון סבב 1: בלי בורר has (לא נתמך ב-WebView ישן) – מחלקות על body שה-JS מעדכן: sec-kb (שדה בפוקוס = מקלדת), sec-cover (סרגל בחירה מרובה / מסך הוספה פתוח). */
 const css=document.createElement('style');
-css.textContent='.secfab{position:fixed;left:max(12px,env(safe-area-inset-left));bottom:calc(84px + env(safe-area-inset-bottom));z-index:29;width:52px;height:52px;border-radius:50%;border:1.5px solid var(--acc);background:var(--card);color:var(--acc);box-shadow:0 8px 20px -8px rgba(0,0,0,.55);display:grid;place-items:center;cursor:pointer;padding:0}'
+css.textContent='.secfab{position:fixed;left:max(12px,env(safe-area-inset-left));bottom:calc(84px + env(safe-area-inset-bottom));z-index:29;height:56px;min-height:56px;border-radius:28px;border:2px solid var(--acc);background:var(--acc);color:var(--onacc);box-shadow:0 10px 24px -8px rgba(0,0,0,.6);display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:.95rem;white-space:nowrap;cursor:pointer;padding:0 18px 0 14px;touch-action:none}'
 +'.secfab svg{width:26px;height:26px}.secfab:active{transform:scale(.94)}.secfab:focus-visible{outline:3px solid var(--acc);outline-offset:3px}'
 +'body.secfab-on main{padding-bottom:76px}'
 +'body.sec-kb .secfab,body.sec-cover .secfab,body.us-on .secfab,body.susp .secfab{display:none}'
@@ -53,8 +53,8 @@ function fabSync(){
  const show=elig()&&ready()&&cur().v!=='sec';/* במסך הצ'אט עצמו – בלי כפתור צף (לא מסתיר את כפתור השליחה) */
  document.body.classList.toggle('secfab-on',!!show);
  if(!show){if(b)b.remove();return}
- if(!b){b=document.createElement('button');b.id='secfab';b.type='button';b.className='secfab';b.dataset.a='secOpen';b.innerHTML=SVG;document.body.appendChild(b)}
- const nm=X.st.name||'המזכירה';b.setAttribute('aria-label',nm);b.title=nm;
+ if(!b){b=document.createElement('button');b.id='secfab';b.type='button';b.className='secfab';b.dataset.a='secOpen';b.innerHTML=SVG+'<span></span>';document.body.appendChild(b);if(typeof fabDrag==='function')fabDrag(b,'sec')}
+ const nm=X.st.name||'המזכירה';b.setAttribute('aria-label',nm);b.title=nm;const sp=b.querySelector('span');if(sp&&sp.textContent!==nm){sp.textContent=nm;if(typeof fabPut==='function')fabPut(b,fabGet('sec'))}
 }
 window.secFabSync=fabSync;
 /* מקלדת: שדה קלט בתוך המסך בפוקוס */

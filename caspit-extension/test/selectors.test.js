@@ -166,7 +166,7 @@ test('selectors.json: דפי ההיכרות – זרימות קיימות; עו�
   assert.ok(F.find((x) => x.op === 'waitFor' && JSON.stringify(x.t).includes('הוספת כניסה ויציאה')).stop);
   // פרטיות: לא מחכים על הכותרת עם שם העובד
   assert.ok(!JSON.stringify(F).includes('דוח שעות עובד'));
-  assert.equal(SEL.v, 10); // 0.1.21: hkSnap
+  assert.equal(SEL.v, 11); // 0.1.21: hkSnap; 0.1.24: importUpd
 });
 
 test('selectors.json v9 (0.1.14): זרימות השעות – רק קריאה; לא לוחצים "עריכה" / "עובד חדש" / "הוספת כניסה ויציאה" / "הצג רק מנהלים" / יצוא של הרשימה', () => {
@@ -501,4 +501,16 @@ test('selectors.json v10 (0.1.21): hkSnap – רק #/hakafa-customers, לוחץ 
   assert.ok(c.capture && c.safe && !c.submit);
   assert.ok(c.t.textAny.every((x) => /^(ייצוא|יצוא) לאקסל$/.test(x)), JSON.stringify(c.t));
   for (const t of c.t.textAny) assert.ok(!SEL_DENY.some((w) => t.includes(w)), t);
+});
+
+test('selectors.json v11 (0.1.24): importUpd – אותם צעדים כמו importNew, רק סוג הייבוא "עדכון פריטים" (בבחירה ובתור); שאר הזרימות לא השתנו', () => {
+  const U = SEL.flows.importUpd, N = SEL.flows.importNew;
+  assert.ok(Array.isArray(U));
+  assert.deepEqual(U.map((x) => x.op), N.map((x) => x.op));
+  assert.equal(U.find((x) => x.op === 'select').option, 'עדכון פריטים');
+  assert.equal(U.find((x) => x.op === 'queue').type, 'עדכון פריטים');
+  const strip = (F) => JSON.stringify(F.map((x) => Object.assign({}, x, { option: undefined, type: undefined })));
+  assert.equal(strip(U), strip(N), 'כל השאר זהה (מסך, תור, קובץ, "העלה קבצים והרץ טעינה")');
+  assert.equal(N.find((x) => x.op === 'select').option, 'טעינת פריטים חדשים');
+  assert.equal(SEL.flows.importPrice.find((x) => x.op === 'select').option, 'עדכון מחיר לצרכן ו/או מחיר עלות לפריטים');
 });

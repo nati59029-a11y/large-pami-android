@@ -1489,6 +1489,57 @@ service cloud.firestore {
       allow create, update: if lpW() && rLbl() && id == 'main' && lblsOk(request.resource.data);
       allow delete: if lpW() && rMgr() && id == 'main';
     }
+    // פירוט (הדפסת דף אכיל, סבב 2): הטלפון יוצר עבודה במצב 'up' (מעלה את תמונות העמודים ל-Storage: edb_tmp/{id}/p{i}.png),
+    //   ואז מעביר ל-'new'. התחנה (מחשב המדבקות) תופסת עבודה 'new' → 'taken' (tk = המשתמש שלה; אטומי: הכלל דורש st == 'new'),
+    //   מדפיסה דרך עוזר ההדפסה המקומי, ומסמנת 'done' או 'err' (רק מי שתפס). השולח יכול לבטל: up → err, new → err.
+    //   עבודה 'new' ישנה מ-24 שעות – כל מורשה יכול לסמן err (ניקוי). שדות: by, at, st, n (1..10 עמודים), msg (עד 200), tk.
+    //   edbs/main: התחנה כותבת on (תחנה פעילה), pr (שם המדפסת), hp (העוזר עונה), at. הטלפון קורא כדי לדעת אם יש תחנה.
+    //   סבב 3: at חייב להיות השעה הנוכחית (nowOk – עד 2 דקות הפרש) כבר ביצירה. בגלל זה הכלל ב-Storage (עבודה 'up' טרייה – פחות משעה)
+    //   מגביל גם עובד שהמתג edb שלו בוטל: אחרי שעה הוא לא יכול להעלות יותר לעבודה ישנה, ועבודה חדשה הוא לא יכול ליצור.
+    //   בזמן ההדפסה התחנה (רק מי שתפס) מדווחת מצב: taken → taken, רק msg / code / ts (למשל code = 'paper-out' – חסר נייר).
+    //   אחרי done / err כל צד מאשר שראה את ההודעה: השולח – ackA, התחנה – ackS (רק true, כל צד רק את השדה שלו, בלי שינוי אחר).
+    // הדפסת דף אכיל (26.11.2026, סבב 2): edbq/{id} – תור לתחנת ההדפסה במחשב; edbs/main – התחנה. מנהל או עובד עם edb; מחיקה – מנהל.
+    function rEdb() {
+      return rMgr() || (isActiveEmployee()
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('edb', false) == true);
+    }
+    function edbMsg(d) { return !('msg' in d) || (d.msg is string && d.msg.size() <= 200); }
+    function edbqNew(id, d) {
+      return id.matches('^[A-Za-z0-9_-]{8,40}$') && d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg']) && d.keys().hasAll(['by', 'at', 'st', 'n'])
+        && d.by == request.auth.uid && d.st == 'up' && d.n is int && d.n >= 1 && d.n <= 10 && nowOk(d.at) && edbMsg(d);
+    }
+    // סבב 3: code (קוד מצב המדפסת, למשל paper-out), ts (זמן הדיווח) – רק התחנה שתפסה, taken→taken / done / err.
+    //   ackA (השולח אישר) / ackS (התחנה אישרה) – true בלבד, אחרי done/err, כל צד רק את השדה שלו.
+    function edbX(d) {
+      return (!('code' in d) || (d.code is string && d.code.matches('^[a-z-]{1,24}$'))) && (!('ts' in d) || (d.ts is int && d.ts > 0))
+        && (!('ackA' in d) || d.ackA == true) && (!('ackS' in d) || d.ackS == true);
+    }
+    function edbqUpd(o, d) {
+      return d.keys().hasOnly(['by', 'at', 'st', 'n', 'msg', 'tk', 'code', 'ts', 'ackA', 'ackS']) && edbMsg(d) && edbX(d) && (
+        (d.diff(o).affectedKeys().hasOnly(['st', 'msg']) && (
+          (o.st == 'up' && o.by == request.auth.uid && d.st in ['new', 'err'])
+          || (o.st == 'new' && d.st == 'err' && (o.by == request.auth.uid || o.at < request.time.toMillis() - 86400000))))
+        || (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'code', 'ts']) && o.st == 'taken' && o.get('tk', '') == request.auth.uid && d.st in ['taken', 'done', 'err'])
+        || (d.diff(o).affectedKeys().hasOnly(['st', 'msg', 'tk']) && o.st == 'new' && d.st == 'taken' && d.get('tk', '') == request.auth.uid)
+        || (o.st in ['done', 'err'] && d.diff(o).affectedKeys().hasOnly(['ackA']) && o.by == request.auth.uid)
+        || (o.st in ['done', 'err'] && d.diff(o).affectedKeys().hasOnly(['ackS']) && o.get('tk', '') == request.auth.uid));
+    }
+    function edbsOk(d) {
+      return d.keys().hasOnly(['by', 'at', 'on', 'pr', 'hp']) && d.keys().hasAll(['by', 'at', 'on'])
+        && d.by == request.auth.uid && d.at is int && d.at > 0 && d.on is bool
+        && (!('pr' in d) || (d.pr is string && d.pr.size() <= 80)) && (!('hp' in d) || d.hp is bool);
+    }
+    match /edbq/{id} {
+      allow read: if rEdb();
+      allow create: if lpW() && rEdb() && edbqNew(id, request.resource.data);
+      allow update: if lpW() && rEdb() && edbqUpd(resource.data, request.resource.data);
+      allow delete: if lpW() && rMgr();
+    }
+    match /edbs/{id} {
+      allow read: if rEdb() && id == 'main';
+      allow create, update: if lpW() && rEdb() && id == 'main' && edbsOk(request.resource.data);
+      allow delete: if lpW() && rMgr() && id == 'main';
+    }
     match /prod/{id} {
       allow read: if rOrd() || rLbl();
       allow create, update, delete: if false;
