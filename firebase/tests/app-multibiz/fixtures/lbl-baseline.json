@@ -1,6 +1,7 @@
 {
- "about": "SHA-256 של PDF מ-6 סלים קבועים × 3 מצבי לוגו (ui-lbl-tpl.js, z). נבדק רק כשגרסת הדפדפן זהה.",
+ "about": "SHA-256 של PDF מ-6 סלים קבועים × 3 מצבי לוגו (ui-lbl-tpl.js, z). נבדק רק כשגרסת הדפדפן וטביעת סביבת הציור (env) זהות.",
  "chrome": "158.0.8127.36",
+ "env": "Linux x86_64:09f021d46c788fdd",
  "h": {
   "none1": "56dac354bc3c409a1d5a66f526c83d78cda128d396185efbcb81b2ce32f0d940",
   "none2": "f5dfbf1d62eebd8be3ac206b7b60505d44ab8b70803eae5d2647db6d405de8ed",
