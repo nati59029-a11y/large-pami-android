@@ -31,6 +31,8 @@ const rqOf=fid=>{let s=('pi'+String(fid||'')).replace(/[^A-Za-z0-9_-]/g,'').slic
 PI.rqOf=rqOf;
 const ID_OK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(v);
 const DATE_OK=v=>typeof v==='string'&&/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v);
+/* 26.11.2026: supNoPr (index.html) – prOff, או ספק עם סוג בלי 'רגיל' כשתוספת האפייה דלוקה. בלי הפונקציה (גרסה ישנה של index.html) – רק prOff */
+const noPr=s=>{try{return typeof supNoPr==='function'?supNoPr(s):!!(s&&s.prOff)}catch(e){return !!(s&&s.prOff)}};
 function on(){try{return(isA()||isW())&&(bzF('shelf')||bzF('orders'))&&typeof PricingLines!=='undefined'}catch(e){return false}}
 PI.on=on;
 const fnc=(n,d)=>{if(SY&&SY.sa&&SY.bizId)d=Object.assign({bizId:SY.bizId},d);return fnCall(n,d)};
@@ -44,7 +46,7 @@ PI.img=id=>{const m=rd(IK)||{};return m[id]||''};
 /* הוצאה של המנהל שנשמרה עם קובץ סרוק */
 function fromTx(t,fid){try{if(!t||!fid||t.noStock)return;const c=cat(t.cat);if(!c||c.beh!=='sup')return;
  if((t.kind||'inv')!=='inv'||!(num(t.amt)>0))return;
- const s=t.sub?subById(t.sub):null;if(s&&s.prOff)return;/* ספק שכבוי לתמחור */
+ const s=t.sub?subById(t.sub):null;if(noPr(s))return;/* ספק שכבוי לתמחור, או ספק אפייה/אריזה בלי 'רגיל' (supNoPr, 26.11.2026) */
  add({t:'c',rq:rqOf(fid),fid,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||'')||(t.dn?String(t.note||'').replace(/^ת\. משלוח\s*/,''):''),date:DATE_OK(t.date)?t.date:''})}catch(e){}}
 const fromNew=(n0,fid)=>{try{if(!fid)return;for(const t of S.tx.slice(n0))if(t&&t.file===fid)fromTx(t,fid)}catch(e){}};
 
@@ -83,11 +85,11 @@ PI.send=id=>{try{const t=S.tx.find(x=>x.id===id);if(!t||!t.file)return toast('א
    אם החשבונית כבר בתמחור השרת מחזיר dup ולא נוצרת כפילות, ואם נוצרה בלי שורות (rf) – היא מתמלאת */
  const L=qGet(),q=L.find(x=>x.rq===rq&&x.t==='c');if(q){q.nx=0;qSet(L);later(300);closeDlg();return toast('ההוצאה כבר בתור לתמחור – מנסה שוב עכשיו')}
  if(done().includes(rq))wr(DK,done().filter(x=>x!==rq))}
- const s=t.sub?subById(t.sub):null;if(s&&s.prOff)return toast('הספק מסומן "לא נכנס לתמחור" בכרטיס הספק');
+ const s=t.sub?subById(t.sub):null;if(noPr(s))return toast(s.prOff?'הספק מסומן "לא נכנס לתמחור" בכרטיס הספק':'ספק אפייה / אריזה (בלי "רגיל") – לא נכנס לתמחור. אפשר לשנות בכרטיס הספק');
  add({t:'c',rq,fid:t.file,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||''),date:DATE_OK(t.date)?t.date:''});closeDlg();toast('נשלח לתמחור – יופיע ברשימה בעוד דקה-שתיים')}catch(e){toast('השליחה נכשלה')}};
 ACT.piSend=el=>PI.send(el.dataset.id);
 if(typeof txDlg==='function'){const o=txDlg;txDlg=function(id){const r=o.apply(this,arguments);try{const t=S.tx.find(x=>x.id===id),c=t&&cat(t.cat);
- if(isA()&&on()&&t&&t.file&&c&&c.beh==='sup'){const d=$('#dlg');if(d&&!d.querySelector('[data-a=piSend]'))d.insertAdjacentHTML('beforeend',`<button type="button" class="btn g w" style="margin-top:8px" data-a="piSend" data-id="${esc(id)}">שלח לתמחור</button>`)}}catch(e){}return r}}
+ if(isA()&&on()&&t&&t.file&&c&&c.beh==='sup'&&!noPr(t.sub?subById(t.sub):null)){const d=$('#dlg');if(d&&!d.querySelector('[data-a=piSend]'))d.insertAdjacentHTML('beforeend',`<button type="button" class="btn g w" style="margin-top:8px" data-a="piSend" data-id="${esc(id)}">שלח לתמחור</button>`)}}catch(e){}return r}}
 
 /* ---------- ביצוע (אחד בכל פעם) ---------- */
 const PERM_RS=['feature-off','no-perm','manager-only','bad-req','bad-lines','bad-field','bad-date','bad-id','bad-barcode','bad-unit','closed','img-big','bad-img','bad-part','not-owner'];

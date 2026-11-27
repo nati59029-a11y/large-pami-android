@@ -11,7 +11,8 @@
 (function(){'use strict';
 const DBN='lp-cache',ST='k',SZ='z',MAXB=3*1024*1024,MAXN=400,MAXT=40*1024*1024;
 /* 24.11 (בדיקה עצמאית): נוספו ardoc/arcfg (arInc כותב ליומן לפיהם), bk (שחזור גיבוי), admins/superadmins (הרשאות – לא מקבלים הרשאה ממידע ישן) */
-const NO_C='inbox|chunks|deposits|closings|supinv|site_income_daily|cashout|ordpay|wv|shelf|fb|grp|pres|pos[A-Za-z_]*|ardoc|arcfg|bk|admins|superadmins';
+/* 26.11.2026: bake (עלות מוצרי אפייה) – ל-bake-cost.js עותק ותור משלו (lp-bake-/lp-bakeq-); תשובה ישנה מהמטמון הייתה דורסת עותק חדש יותר ומטעה בהתנגשות */
+const NO_C='inbox|chunks|deposits|closings|supinv|site_income_daily|cashout|ordpay|wv|shelf|fb|grp|pres|pos[A-Za-z_]*|ardoc|arcfg|bk|bake|admins|superadmins';
 const NO=new RegExp('(^|/)('+NO_C+')(/|\\?|:|$)|"collectionId":"('+NO_C+')"');
 /* פונקציות שרת לקריאה בלבד: true = כל הקריאה; מערך = רק ה-op האלה */
 const FNR={getCosts:1,ordProfit:1,arImpList:1,cxHist:1,cxCfg:1,tkStaffNames:1,secChatLoad:1,secState:1,secAdminGet:1,

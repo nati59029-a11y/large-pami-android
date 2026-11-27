@@ -3,6 +3,7 @@
 // רשת מדומה (בלי אמולטור): scanDocument (invoice / invlines), piCreate ו-piVoid נענים כאן. מסך 360px.
 // בודק: שמירה (גם לחיצה כפולה) = בקשה אחת; S.tx זהה למצב בלי pricing.js; עסק בלי מדף ובלי הזמנות – כלום; בלי רשת – ההוצאה נשמרת
 // והבקשה נשלחת כשהרשת חוזרת (בלי זיהוי נוסף); תור הסריקה המרובה; מנהל שדוחה → piVoid.
+// 26.11.2026: סעיף 10 – ספק אפייה/אריזה בלי "רגיל" (bt, תוספת bake) לא נכנס לתמחור; ספק מעורב ותוספת כבויה – כמו היום.
 // 22.11.2026 (שלב 2): עובד ששולח הוצאה – הטלפון כבר לא מזהה ולא שולח piCreate (השרת, piInbox, עושה את זה); בקשה ישנה שכבר בתור של העובד – מסתיימת.
 // שימוש: node ui-pi-hook.js <www-dir> [out.json]
 const fs = require('fs'); const H = require('./harness');
@@ -198,6 +199,30 @@ const waitQ = async (page, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('6 עסק בלי מדף ובלי הזמנות: ההוצאה נשמרה, אין זיהוי שורות ואין piCreate', sN.tx === nn + 1 && !sN.on && sN.q === 0 && N.M.lines === 0 && N.M.create.length === 0, { sN, lines: N.M.lines, create: N.M.create.length });
   check('7 אין שגיאות JavaScript בדף (חוץ מאלה שבבסיס)', N.page.__errors.every((e) => errB.includes(e)), N.page.__errors);
   await N.ctx.close();
+
+  // ---- 10. עלות מוצרי אפייה (26.11.2026): ספק אפייה/אריזה בלי "רגיל" לא נכנס לתמחור (supNoPr) – רק כשתוספת bake דלוקה (מבנה b) ----
+  const cfgK = { mode: 'new', users: { m: 'biz-k' }, biz: { 'biz-k': { dataRoot: 'b', features: Object.assign({}, ALL, { bake: true }), name: 'מאפייה' } }, admins: { 'b/biz-k/|m': 1 } };
+  const K = await open(browser, www, cfgK, 'm@x.co');
+  const kc = await K.page.evaluate(() => { const c = S.cats.find((x) => x.beh === 'sup' && !x.hid && !x.off); S.subs.push({ id: 's1', cat: c.id, name: 'ספק בדיקה', bt: ['bake'] }); S.bkM = 1; save(); return c.id; });
+  const nk = K.M.create.length; await scanSave(K.page, 'DOC BAKE'); await sleep(1200); await waitQ(K.page);
+  const tk = await K.page.evaluate(() => S.tx[S.tx.length - 1]);
+  check('10 ספק אפייה בלבד (bt:["bake"]): ההוצאה נשמרה, אין זיהוי שורות ואין piCreate', !!tk.file && K.M.create.length === nk && K.M.lt === 0, { create: K.M.create.length - nk, lt: K.M.lt });
+  await K.page.evaluate((id) => txDlg(id), tk.id); await sleep(300);
+  const k10 = await K.page.evaluate((id) => { const b = !!document.querySelector('#dlg [data-a=piSend]'), bk = !!document.querySelector('#dlg [data-a=bakeTx]'); closeDlg(); window.__t = []; const o = window.toast; window.toast = (m) => { window.__t.push(m); }; try { PI.send(id); } finally { window.toast = o; } return { b, bk, t: window.__t }; }, tk.id);
+  await sleep(800);
+  check('10א בהוצאה: אין "שלח לתמחור", יש "עדכון מחירי פריטים"; PI.send → הודעה ובלי piCreate', !k10.b && k10.bk && /ספק אפייה/.test(k10.t[0] || '') && K.M.create.length === nk, k10);
+  await K.page.evaluate(() => { S.subs.find((s) => s.id === 's1').bt = ['bake', 'reg']; save(); });
+  await scanSave(K.page, 'DOC MIX'); await waitQ(K.page);
+  check('10ב ספק מעורב (אפייה + רגיל) – נכנס לתמחור כרגיל (piCreate אחד)', K.M.create.length === nk + 1, { create: K.M.create.length - nk });
+  check('10ג אין שגיאות JavaScript חדשות (אפייה)', K.page.__errors.every((e) => errB.includes(e)), K.page.__errors);
+  await K.ctx.close();
+  // אותו ספק בעסק שהתוספת כבויה בו – כמו היום (נכנס לתמחור)
+  const cfgK0 = { mode: 'new', users: { m: 'biz-k0' }, biz: { 'biz-k0': { dataRoot: 'b', features: ALL, name: 'מאפייה' } }, admins: { 'b/biz-k0/|m': 1 } };
+  const K0 = await open(browser, www, cfgK0, 'm@x.co');
+  await K0.page.evaluate(() => { const c = S.cats.find((x) => x.beh === 'sup' && !x.hid && !x.off); S.subs.push({ id: 's1', cat: c.id, name: 'ספק בדיקה', bt: ['bake'] }); save(); });
+  await scanSave(K0.page, 'DOC K0'); await waitQ(K0.page);
+  check('10ד תוספת bake כבויה: ספק עם bt:["bake"] נכנס לתמחור כמו היום', K0.M.create.length === 1, { create: K0.M.create.length });
+  await K0.ctx.close();
 
   await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
