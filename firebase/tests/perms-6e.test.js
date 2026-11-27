@@ -14,7 +14,7 @@ const GM = require('./gemini-mock');
 const A = 'biz-a';
 const ALL = { scan: true, shelf: true, feedback: true, tasks: true, suppliers: true, requests: true, cashClose: true, yemot: true, orders: true };
 const MGR = 'p_mgr', OLD = 'p_old', NOEXP = 'p_noexp', TRF = 'p_trf', SUPER = 'p_super';
-const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false }; // edb – הדפסת דף אכיל (26.11.2026); lbl – הדפסת מדבקות (22.11.2026); pos, posMgr – קופה שלב 0 (17.11.2026); shf – משמרות (main, 18.11.2026); yl – שלוחות הקו (19.11.2026)
+const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false, pos: false, posMgr: false, shf: false, yl: false, tkS: false, lbl: false, edb: false, bake: false }; // bake – עלות מוצרי אפייה (26.11.2026); // edb – הדפסת דף אכיל (26.11.2026); lbl – הדפסת מדבקות (22.11.2026); pos, posMgr – קופה שלב 0 (17.11.2026); shf – משמרות (main, 18.11.2026); yl – שלוחות הקו (19.11.2026)
 
 const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 const fnUrl = (name) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${name}`;
@@ -141,6 +141,30 @@ describe('6ה – פונקציות: הוספת עובד, דרגות ומתגים
     assert.equal(ns.rank, 'cash'); assert.equal(ns.perms.incW, true); assert.equal(ns.perms.sup, false);
     let acts = []; await prep(async (d) => { acts = (await d.collection(`b/${A}/audit`).get()).docs.map((x) => x.get('act')); });
     for (const a of ['setBusinessRanks', 'setStaffPerms', 'addStaff']) assert.ok(acts.includes(a), a);
+  });
+  // עלות מוצרי אפייה (26.11.2026, שלב א'): התוספת bake (רק מנהל־על) והמתג bake (מנהל העסק דרך setStaffPrc)
+  it('bake: תוספת כבויה – feature-off; מנהל־על מדליק; מנהל העסק מדליק לעובד ישן; דרגה שומרת את bake; מנהל / עובד נדחים', async () => {
+    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: true, key: 'bake' })).reason, 'feature-off');
+    assert.equal((await getDoc(`b/${A}/staff/${OLD}`)).perms, undefined, 'לא נכתב כלום');
+    assert.equal((await call('setBusinessFeatures', MGR, { bizId: A, features: { bake: true } })).status, 'PERMISSION_DENIED');
+    const f = await call('setBusinessFeatures', SUPER, { bizId: A, features: { bake: true } });
+    assert.equal(f.status, 'OK', f.text);
+    assert.equal(f.result.features.bake, true);
+    const on = await call('setStaffPrc', MGR, { uid: OLD, on: true, key: 'bake' });
+    assert.equal(on.status, 'OK', on.text);
+    const o1 = (await getDoc(`b/${A}/staff/${OLD}`)).perms;
+    assert.deepEqual(o1, Object.assign({}, require('../functions/lib/roles.js').DEFAULT_PERMS, { bake: true }), 'עובד ישן: ברירות המחדל ועליהן bake');
+    assert.equal((await call('setBusinessRanks', SUPER, { bizId: A, ranks: [{ id: 'cash', name: 'קופאי', perms: { incW: true, expW: true } }] })).status, 'OK');
+    const r = await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, rank: 'cash' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await getDoc(`b/${A}/staff/${OLD}`)).perms.bake, true, 'bake נשמר אחרי החלת דרגה');
+    assert.equal((await call('setStaffPrc', MGR, { uid: MGR, on: true, key: 'bake' })).reason, 'is-admin');
+    assert.equal((await call('setStaffPrc', OLD, { uid: NOEXP, on: true, key: 'bake' })).reason, 'manager-only');
+    const p = await call('setStaffPerms', SUPER, { bizId: A, uid: NOEXP, perms: Object.assign({}, NONE, { incW: true, bake: true }) });
+    assert.equal(p.status, 'OK', p.text);
+    assert.equal((await getDoc(`b/${A}/staff/${NOEXP}`)).perms.bake, true);
+    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: false, key: 'bake' })).status, 'OK');
+    assert.equal((await getDoc(`b/${A}/staff/${OLD}`)).perms.bake, false);
   });
   it('קלט לא תקין: מתג לא מוכר, דרגה שלא קיימת, מנהל, legacy', async () => {
     assert.equal((await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: { admin: true } })).reason, 'bad-perms');

@@ -1238,6 +1238,13 @@ service cloud.firestore {
         && (!('del' in d) || d.del is bool)
         && d.at is int && d.at > 0 && d.by == request.auth.uid;
     }
+    // bake/{id} – עלות מוצרי אפייה (26.11.2026), רק בתוך b/{bizId} (לא bk – זה אוסף הגיבוי לענן): t = 'i' פריט קנייה / 'c' רכיב / 'p' מוצר; j = JSON של הרשומה (התוכן לא נבדק כאן).
+    // at = זמן העריכה בטלפון (מילישניות). עריכה בלי חיבור נשלחת מאוחר יותר (תור במכשיר), לכן at יכול להיות בעבר; לא לפני 11.2023 ולא יותר מ-10 דקות קדימה.
+    function bakeOk(d) {
+      return d.keys().hasOnly(['t', 'j', 'at', 'by']) && d.keys().hasAll(['t', 'j', 'at', 'by'])
+        && d.t in ['i', 'c', 'p'] && d.j is string && d.j.size() >= 2 && d.j.size() <= 16000
+        && d.at is int && d.at >= 1700000000000 && d.at <= request.time.toMillis() + 600000 && d.by == request.auth.uid;
+    }
     // גודל מדבקה ב-lbls.sz: { w, h } במ"מ. כל פריט נבדק לפי מיקום (0..9 – בכללים אין לולאות).
     function szOk(x) {
       return x is map && x.keys().hasOnly(['w', 'h']) && x.keys().hasAll(['w', 'h'])
@@ -2632,6 +2639,13 @@ service cloud.firestore {
         allow read: if perm('lbl');
         allow create, update: if perm('lbl') && id.matches('^[A-Za-z0-9_-]{1,40}$') && lbltOk(request.resource.data);
         allow delete: if bMgr();
+      }
+      // עלות מוצרי אפייה (26.11.2026): מנהל או עובד עם bake, רק כשהתוספת bake פעילה. סוג הרשומה (t) לא משתנה בעדכון. מחיקה – מנהל (בממשק רק הסתרה, off:1 בתוך j).
+      match /bake/{id} {
+        allow read: if feat('bake') && perm('bake');
+        allow create: if feat('bake') && perm('bake') && id.matches('^[A-Za-z0-9_-]{1,40}$') && bakeOk(request.resource.data);
+        allow update: if feat('bake') && perm('bake') && bakeOk(request.resource.data) && request.resource.data.t == resource.data.t;
+        allow delete: if feat('bake') && bMgr();
       }
       match /lbls/{id} {
         allow read: if perm('lbl') && id == 'main';
